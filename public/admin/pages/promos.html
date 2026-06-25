@@ -1,0 +1,110 @@
+<div class="page-title">Promo Vouchers</div>
+<div class="page-subtitle">Create and manage special promo codes for customers.</div>
+
+<div class="card">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Promo Codes</div>
+      <div class="card-subtitle">For bulk packages like weekly or monthly plans</div>
+    </div>
+    <button class="btn btn-primary" onclick="openCreatePromo()">
+      <i class="fas fa-plus"></i> Create Promo
+    </button>
+  </div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Duration</th>
+          <th>Price</th>
+          <th>Status</th>
+          <th>Used By</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="promosTable">
+        <tr>
+          <td colspan="6">
+            <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- CREATE PROMO MODAL -->
+<div class="modal-overlay" id="promoModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Create Promo Voucher</div>
+      <button class="modal-close" onclick="closeModal('promoModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Duration</label>
+        <div style="display:flex;gap:8px;">
+          <input type="number" id="promoDuration" class="form-control"
+                 placeholder="e.g. 30" min="1" style="flex:1;">
+          <select id="promoDurationUnit" class="form-control" style="width:110px;flex-shrink:0;">
+            <option value="minutes">Minutes</option>
+            <option value="hours">Hours</option>
+            <option value="days" selected>Days</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Price (₱)</label>
+        <input type="number" id="promoPrice" class="form-control"
+               placeholder="e.g. 300" min="1">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+      <button class="btn btn-sm btn-secondary" onclick="setPromo(30,'minutes',5)">30 mins / ₱5</button>
+      <button class="btn btn-sm btn-secondary" onclick="setPromo(2,'hours',10)">2 hrs / ₱10</button>
+      <button class="btn btn-sm btn-secondary" onclick="setPromo(3,'days',100)">3 days / ₱100</button>
+      <button class="btn btn-sm btn-secondary" onclick="setPromo(7,'days',150)">7 days / ₱150</button>
+      <button class="btn btn-sm btn-secondary" onclick="setPromo(30,'days',300)">30 days / ₱300</button>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeModal('promoModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="createPromo()">
+        <i class="fas fa-ticket-alt"></i> Generate Code
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- SHOW CODE MODAL -->
+<div class="modal-overlay" id="showCodeModal">
+  <div class="modal" style="text-align:center;">
+    <div class="modal-header">
+      <div class="modal-title">Promo Code Generated!</div>
+      <button class="modal-close" onclick="closeModal('showCodeModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <i class="fas fa-ticket-alt" style="font-size:40px;color:var(--accent-orange);margin-bottom:16px;"></i>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Share this code with your customer:</p>
+    <div style="
+      font-family:monospace;
+      font-size:28px;
+      font-weight:900;
+      color:var(--accent-red);
+      letter-spacing:4px;
+      background:var(--bg-primary);
+      padding:16px;
+      border-radius:10px;
+      margin-bottom:16px;
+      border:2px dashed var(--border-color);
+    " id="generatedCode">--</div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;" id="generatedDetails"></p>
+    <button class="btn btn-primary" style="width:100%" onclick="copyCode()">
+      <i class="fas fa-copy"></i> Copy Code
+    </button>
+  </div>
+</div>

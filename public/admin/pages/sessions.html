@@ -1,0 +1,56 @@
+<div class="page-title">Active Sessions</div>
+<div class="page-subtitle">Manage currently connected clients.</div>
+
+<div class="card">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Connected Clients</div>
+      <div class="card-subtitle" id="sessionSummary">Loading...</div>
+    </div>
+    <button class="btn btn-primary" onclick="loadSessions()">
+      <i class="fas fa-sync-alt"></i> Refresh
+    </button>
+  </div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Voucher ID</th>
+          <th>MAC Address</th>
+          <th>Time Remaining</th>
+          <th>Hard Expiry</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="sessionsTable">
+        <tr>
+          <td colspan="6">
+            <div class="loading">
+              <i class="fas fa-spinner fa-spin"></i> Loading sessions...
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ADD TIME MODAL -->
+<div class="modal-overlay" id="addTimeModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">
+        <i class="fas fa-clock" style="color:var(--accent-green);margin-right:8px;"></i>
+        Add Time
+      </div>
+      <button class="modal-close" onclick="closeModal('addTimeModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
+      Adding time to: <strong id="addTimeVoucher" style="color:var(--accent-red);font-family:monospace;"></strong>
+    </p>
+    <div class="form-group">
+      <label

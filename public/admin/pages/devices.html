@@ -1,0 +1,93 @@
+<div class="page-title">Devices</div>
+<div class="page-subtitle">Manage connected vendo devices.</div>
+
+<!-- CONNECTED DEVICES -->
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-microchip" style="margin-right:8px;color:var(--accent-green);"></i>Connected Devices
+    </div>
+    <button class="btn btn-sm btn-secondary" onclick="loadDevices()">
+      <i class="fas fa-sync-alt"></i> Refresh
+    </button>
+  </div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>MAC Address</th>
+          <th>IP Address</th>
+          <th>Firmware</th>
+          <th>Status</th>
+          <th>Last Seen</th>
+        </tr>
+      </thead>
+      <tbody id="devicesTable">
+        <tr>
+          <td colspan="6">
+            <div class="loading">
+              <i class="fas fa-spinner fa-spin"></i> Loading...
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- DEVICE STATS -->
+<div class="grid-2" style="margin-top:20px;">
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <i class="fas fa-info-circle" style="margin-right:8px;color:var(--accent-blue);"></i>Device Summary
+      </div>
+    </div>
+    <div class="sysinfo-table">
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">Total Devices</span>
+        <span class="sysinfo-value" id="totalDevices">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">Online</span>
+        <span class="sysinfo-value" style="color:var(--accent-green);" id="onlineDevices">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">Offline</span>
+        <span class="sysinfo-value" style="color:var(--accent-red);" id="offlineDevices">—</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <i class="fas fa-question-circle" style="margin-right:8px;color:var(--accent-yellow);"></i>How to Add a Device
+      </div>
+    </div>
+    <div style="font-size:13px;color:var(--text-muted);line-height:1.8;">
+      <p style="margin-bottom:8px;">
+        <i class="fas fa-circle" style="font-size:6px;margin-right:8px;color:var(--accent-green);"></i>
+        Power on the ESP32 vendo device.
+      </p>
+      <p style="margin-bottom:8px;">
+        <i class="fas fa-circle" style="font-size:6px;margin-right:8px;color:var(--accent-green);"></i>
+        Connect to <strong>RJ-Vendo-Setup</strong> WiFi.
+      </p>
+      <p style="margin-bottom:8px;">
+        <i class="fas fa-circle" style="font-size:6px;margin-right:8px;color:var(--accent-green);"></i>
+        Open <strong>192.168.4.1</strong> in browser.
+      </p>
+      <p style="margin-bottom:8px;">
+        <i class="fas fa-circle" style="font-size:6px;margin-right:8px;color:var(--accent-green);"></i>
+        Enter WiFi credentials and server IP.
+      </p>
+      <p>
+        <i class="fas fa-circle" style="font-size:6px;margin-right:8px;color:var(--accent-green);"></i>
+        Device will appear here automatically.
+      </p>
+    </div>
+  </div>
+</div>

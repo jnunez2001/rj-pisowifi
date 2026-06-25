@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>R&J PisoWifi</title>
+  <link rel="stylesheet" href="/portal/assets/css/all.min.css">
+  <link rel="stylesheet" href="/portal/assets/css/portal.css">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- SOUND TOGGLE -->
+  <button class="sound-btn" onclick="toggleSound()" id="soundBtn">
+    <i class="fas fa-volume-up"></i>
+  </button>
+
+  <!-- AUDIO -->
+  <audio id="soundInsert" preload="auto" loop>
+    <source src="/portal/assets/sounds/insert.mp3" type="audio/mpeg">
+  </audio>
+  <audio id="soundSuccess" preload="auto">
+    <source src="/portal/assets/sounds/success.mp3" type="audio/mpeg">
+  </audio>
+  <audio id="soundCoin" preload="auto">
+    <source src="/portal/assets/sounds/coin.mp3" type="audio/mpeg">
+  </audio>
+
+  <!-- BANNER -->
+  <div class="banner">
+    <img id="bannerBg" class="banner-bg" src="" style="display:none">
+    <div class="banner-content">
+      <img id="bannerLogo" class="banner-logo" src="" style="display:none">
+      <div class="wifi-signal"><i class="fas fa-wifi"></i></div>
+      <h1 id="cafeName">R&J PISOWIFI</h1>
+      <div class="tagline" id="bannerText">HIGH SPEED CONNECTION!</div>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <!-- STATUS -->
+    <div class="status-badge disconnected" id="statusBadge">
+      <i class="fas fa-times-circle"></i>
+      <span id="statusText">Disconnected</span>
+    </div>
+
+    <!-- TIME -->
+    <div class="time-box">
+      <div class="label"><i class="far fa-clock"></i>&nbsp; TIME REMAINING</div>
+      <div class="time empty" id="timeDisplay">--:--:--</div>
+    </div>
+
+    <!-- INFO ROW -->
+    <div class="info-row">
+      <div class="info-card">
+        <div class="info-label">CREDITS</div>
+        <div class="info-value" id="creditsDisplay">₱0</div>
+      </div>
+      <div class="info-card">
+        <div class="info-label">SESSION</div>
+        <div class="info-value" id="sessionDisplay" style="font-size:12px;">--</div>
+      </div>
+      <div class="info-card">
+        <div class="info-label">EXPIRY</div>
+        <div class="info-value warning" id="expiryDisplay">--</div>
+      </div>
+    </div>
+
+    <!-- VOUCHER -->
+    <div class="voucher-box" id="voucherBox">
+      <div class="v-label"><i class="fas fa-ticket-alt"></i>&nbsp; YOUR SESSION ID</div>
+      <div class="v-code" id="voucherCode">--</div>
+    </div>
+
+    <!-- SPAM BLOCK -->
+    <div class="spam-block" id="spamBlock">
+      <i class="fas fa-ban"></i>
+      <div class="block-title">TOO MANY ATTEMPTS</div>
+      <div class="block-timer" id="blockTimer">00:00</div>
+      <div class="block-msg">Please wait before inserting coin again.</div>
+    </div>
+
+    <!-- EXPIRY WARNING -->
+    <div class="expiry-warning" id="expiryWarning">
+      <i class="fas fa-exclamation-triangle"></i>&nbsp;
+      Session expires soon! Insert coin to extend.
+    </div>
+
+    <!-- DISCONNECTED -->
+    <div id="sectionDisconnected">
+      <div id="welcomeMsg" style="text-align:center;padding:10px 0 14px;font-size:15px;font-weight:600;display:none;"></div>
+      <button class="btn btn-insert" id="insertBtn" onclick="handleInsertCoin()">
+        <span class="coin-spin">🪙</span>&nbsp; INSERT COIN
+      </button>
+      <button class="btn btn-free" id="freeClaimBtn" onclick="claimFreeMinutes()" style="display:none;">
+        <i class="fas fa-gift"></i>&nbsp; CLAIM FREE 5 MINS
+      </button>
+      <div class="btn-grid">
+        <button class="btn btn-outline" onclick="showRates()">
+          <i class="fas fa-list"></i>&nbsp; WiFi Rates
+        </button>
+        <button class="btn btn-outline" onclick="showVoucherInput()">
+          <i class="fas fa-ticket-alt"></i>&nbsp; Vouchers
+        </button>
+      </div>
+      <div class="voucher-input-row" id="voucherInputRow">
+        <input type="text" id="voucherInput"
+               placeholder="Enter voucher code..."
+               style="text-transform:uppercase">
+        <button onclick="redeemVoucher()">
+          <i class="fas fa-arrow-right"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- CONNECTED -->
+    <div id="sectionConnected" style="display:none">
+      <button class="btn btn-insert" onclick="handleInsertCoin()">
+        <span class="coin-spin">🪙</span>&nbsp; INSERT COIN TO ADD TIME
+      </button>
+      <div class="btn-grid">
+        <button class="btn btn-pause" id="pauseBtn" onclick="pauseSession()">
+          <i class="fas fa-pause"></i>&nbsp; PAUSE
+        </button>
+        <button class="btn btn-disconnect" onclick="confirmDisconnect()">
+          <i class="fas fa-times"></i>&nbsp; DISCONNECT
+        </button>
+      </div>
+      <div class="btn-grid">
+        <button class="btn btn-outline" onclick="showRates()">
+          <i class="fas fa-list"></i>&nbsp; WiFi Rates
+        </button>
+        <button class="btn btn-outline" onclick="showSessions()">
+          <i class="fas fa-info-circle"></i>&nbsp; Session Info
+        </button>
+      </div>
+    </div>
+
+    <!-- PAUSED -->
+    <div id="sectionPaused" style="display:none">
+      <div class="paused-info">
+        <i class="fas fa-pause-circle" style="font-size:50px;color:#ffa000;"></i>
+        <p style="color:#888;font-size:16px;font-weight:700;margin-top:10px;letter-spacing:1px;">
+          YOUR SESSION IS PAUSED<br>
+          <span style="font-size:13px;color:#aaa;font-weight:600;">Resume anytime before expiry.</span>
+        </p>
+      </div>
+      <button class="btn btn-resume" onclick="resumeSession()">
+        <i class="fas fa-play"></i>&nbsp; RESUME SESSION
+      </button>
+      <button class="btn btn-disconnect" onclick="confirmDisconnect()">
+        <i class="fas fa-times"></i>&nbsp; CANCEL SESSION
+      </button>
+    </div>
+
+    <div class="footer">POWERED BY R&J PISOWIFI SYSTEM</div>
+  </div>
+
+  <!-- RATES MODAL -->
+  <div class="modal-overlay" id="ratesModal">
+    <div class="modal-box">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h3><i class="fas fa-list"></i>&nbsp; WIFI RATES</h3>
+        <button class="modal-close" onclick="closeModal('ratesModal')">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div id="ratesList"></div>
+    </div>
+  </div>
+
+  <!-- INSERT COIN MODAL -->
+    <div class="modal-overlay" id="coinModal">
+      <div class="modal-box">
+        <div class="modal-handle"></div>
+        <div class="modal-header">
+          <h3><i class="fas fa-coins"></i>&nbsp; INSERT COIN</h3>
+          <button class="modal-close" onclick="closeCoinModal()">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+
+        <!-- CIRCULAR COUNTDOWN TIMER -->
+        <div class="coin-timer-wrap">
+          <svg class="coin-timer-svg" viewBox="0 0 120 120">
+            <circle class="timer-track" cx="60" cy="60" r="50"/>
+            <circle class="timer-arc" id="timerArc" cx="60" cy="60" r="50"/>
+          </svg>
+          <div class="coin-timer-inner">
+            <span class="coin-timer-number" id="coinTimerNum">30</span>
+            <span class="coin-timer-label">SEC</span>
+          </div>
+        </div>
+
+        <p class="coin-timer-msg">
+          Insert coin into the vendo machine.<br>
+          Internet starts <strong style="color:#00a844;">automatically!</strong>
+        </p>
+
+        <button class="btn btn-activate" onclick="closeCoinModal()">
+          <i class="fas fa-plug"></i>&nbsp; ALREADY INSERTED? CONNECT
+        </button>
+
+        <div id="coinRatesList"></div>
+
+      </div>
+    </div>
+
+  <!-- SESSION INFO MODAL -->
+  <div class="modal-overlay" id="sessionsModal">
+    <div class="modal-box">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h3><i class="fas fa-info-circle"></i>&nbsp; SESSION INFO</h3>
+        <button class="modal-close" onclick="closeModal('sessionsModal')">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <div id="sessionInfo"></div>
+    </div>
+  </div>
+
+  <script src="/portal/assets/js/portal.js"></script>
+</body>
+</html>

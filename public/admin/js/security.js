@@ -1,0 +1,51 @@
+async function loadSecurity() {
+  try {
+    const data = await apiCall('GET', '/api/admin/spam-settings');
+    if (!data.success) return;
+    document.getElementById('maxAttempts').value = data.spam_max_attempts || 3;
+    document.getElementById('blockMinutes').value = data.spam_block_minutes || 1;
+    document.getElementById('maxMbps').value = data.max_mbps || 5;
+  } catch(e) {
+    console.error('Security error:', e);
+  }
+}
+
+async function saveSpamSettings() {
+  const maxAttempts = parseInt(document.getElementById('maxAttempts').value);
+  const blockMinutes = parseInt(document.getElementById('blockMinutes').value);
+
+  if (!maxAttempts || !blockMinutes) {
+    showToast('Please fill all fields', 'error');
+    return;
+  }
+
+  try {
+    const data = await apiCall('POST', '/api/admin/spam-settings', {
+      spam_max_attempts: maxAttempts,
+      spam_block_minutes: blockMinutes
+    });
+    if (data.success) showToast('Spam settings saved!', 'success');
+    else showToast('Failed to save', 'error');
+  } catch(e) {
+    showToast('Server error', 'error');
+  }
+}
+
+function setMbps(val) {
+  document.getElementById('maxMbps').value = val;
+}
+
+async function saveBandwidthSettings() {
+  const maxMbps = parseInt(document.getElementById('maxMbps').value);
+  if (!maxMbps) {
+    showToast('Please enter valid Mbps', 'error');
+    return;
+  }
+  try {
+    const data = await apiCall('POST', '/api/admin/spam-settings', { max_mbps: maxMbps });
+    if (data.success) showToast('Bandwidth settings saved!', 'success');
+    else showToast('Failed to save', 'error');
+  } catch(e) {
+    showToast('Server error', 'error');
+  }
+}

@@ -1,0 +1,92 @@
+<div class="page-title">Sales Report</div>
+<div class="page-subtitle">Track your revenue and transaction history.</div>
+
+<!-- SUMMARY CARDS -->
+<div class="stat-grid" style="margin-bottom:16px;">
+  <div class="stat-card green">
+    <div class="stat-icon"><i class="fas fa-coins"></i></div>
+    <div class="stat-label">Today</div>
+    <div class="stat-value" id="salesTodayTotal">₱0</div>
+    <div class="stat-desc" id="salesTodayCount">0 transactions</div>
+  </div>
+  <div class="stat-card blue">
+    <div class="stat-icon"><i class="fas fa-calendar-week"></i></div>
+    <div class="stat-label">This Week</div>
+    <div class="stat-value" id="salesWeekTotal">₱0</div>
+    <div class="stat-desc">Last 7 days</div>
+  </div>
+  <div class="stat-card orange">
+    <div class="stat-icon"><i class="fas fa-calendar-alt"></i></div>
+    <div class="stat-label">This Month</div>
+    <div class="stat-value" id="salesMonthTotal">₱0</div>
+    <div class="stat-desc">Estimated</div>
+  </div>
+  <div class="stat-card red">
+    <div class="stat-icon"><i class="fas fa-clock"></i></div>
+    <div class="stat-label">Minutes Sold</div>
+    <div class="stat-value" id="salesMinutes">0</div>
+    <div class="stat-desc">Today</div>
+  </div>
+  <div class="stat-card purple">
+    <div class="stat-icon"><i class="fas fa-gift"></i></div>
+    <div class="stat-label">Free Claims</div>
+    <div class="stat-value" id="salesFreeClaims">0 claims</div>
+    <div class="stat-desc" id="salesFreeMinutes">0 mins given</div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+
+  <!-- WEEKLY CHART -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Weekly Revenue</div>
+        <div class="card-subtitle">Last 7 days</div>
+      </div>
+    </div>
+    <canvas id="salesChart" height="180"></canvas>
+  </div>
+
+  <!-- DAILY BREAKDOWN -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Daily Breakdown</div>
+    </div>
+    <div id="dailyBreakdown" style="display:flex;flex-direction:column;gap:8px;"></div>
+  </div>
+
+</div>
+
+<!-- TRANSACTION HISTORY -->
+<div class="card">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Transaction History</div>
+      <div class="card-subtitle">All coin insertions, promo redemptions and free claims</div>
+    </div>
+    <button class="btn btn-sm btn-secondary" onclick="loadSales()">
+      <i class="fas fa-sync-alt"></i> Refresh
+    </button>
+  </div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Session ID</th>
+          <th>Amount</th>
+          <th>Time Added</th>
+          <th>Type</th>
+          <th>Date & Time</th>
+        </tr>
+      </thead>
+      <tbody id="salesTable">
+        <tr>
+          <td colspan="5">
+            <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>

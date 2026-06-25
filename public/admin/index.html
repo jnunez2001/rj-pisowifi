@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>R&J PisoWifi — Admin</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="css/themes.css">
+  <link rel="stylesheet" href="css/admin.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- LOGIN SCREEN -->
+<div id="loginScreen" style="display:none">
+  <div style="
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-primary);
+  ">
+    <div style="
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 20px;
+      padding: 40px;
+      width: 100%;
+      max-width: 380px;
+      box-shadow: var(--shadow-md);
+      text-align: center;
+    ">
+      <div style="
+        width: 60px; height: 60px;
+        background: linear-gradient(135deg, #e94560, #c62a47);
+        border-radius: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 16px;
+        font-family: 'Orbitron', sans-serif;
+        font-size: 22px;
+        color: #fff;
+        font-weight: 700;
+      ">R</div>
+
+      <h2 style="
+        font-family: 'Orbitron', sans-serif;
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--text-primary);
+        letter-spacing: 2px;
+        margin-bottom: 4px;
+      ">R&J PISOWIFI</h2>
+
+      <p style="
+        font-size: 13px;
+        color: var(--text-muted);
+        margin-bottom: 28px;
+      ">Admin Panel</p>
+
+      <div id="loginError" class="alert alert-error" style="display:none">
+        <i class="fas fa-exclamation-circle"></i>
+        <span id="loginErrorMsg">Invalid password</span>
+      </div>
+
+     <div class="form-group" style="text-align:left">
+  <label class="form-label">Username</label>
+  <input
+    type="text"
+    id="loginUsername"
+    class="form-control"
+    placeholder="Enter username..."
+    onkeypress="if(event.key==='Enter') doLogin()"
+  >
+</div>
+
+<div class="form-group" style="text-align:left">
+  <label class="form-label">Password</label>
+  <div style="position:relative">
+    <input
+      type="password"
+      id="loginPassword"
+      class="form-control"
+      placeholder="Enter password..."
+      onkeypress="if(event.key==='Enter') doLogin()"
+      style="padding-right: 44px;"
+    >
+    <button onclick="togglePasswordView()" style="
+      position: absolute;
+      right: 12px; top: 50%;
+      transform: translateY(-50%);
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+    "><i class="fas fa-eye" id="eyeIcon"></i></button>
+  </div>
+</div>
+
+      <button class="btn btn-primary" onclick="doLogin()" style="width:100%; justify-content:center; padding:12px;">
+        <i class="fas fa-sign-in-alt"></i> Login
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ADMIN LAYOUT -->
+<div id="adminLayout" class="admin-layout" style="display:none">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-logo">
+        <div class="brand-icon">R</div>
+        <div>
+          <div class="brand-name">R&J PISOWIFI</div>
+        </div>
+      </div>
+      <div class="brand-sub">ADMIN PANEL</div>
+    </div>
+
+    <nav class="sidebar-nav">
+
+      <div class="nav-section">
+        <div class="nav-section-title">Main</div>
+        <div class="nav-item active" onclick="navigateTo('dashboard')">
+          <span class="nav-icon"><i class="fas fa-chart-pie"></i></span>
+          Dashboard
+        </div>
+        <div class="nav-item" onclick="navigateTo('sales')">
+          <span class="nav-icon"><i class="fas fa-coins"></i></span>
+          Sales Report
+        </div>
+        <div class="nav-item" onclick="navigateTo('sessions')">
+          <span class="nav-icon"><i class="fas fa-users"></i></span>
+          Active Sessions
+          <span id="sessionCount" style="
+            margin-left: auto;
+            background: var(--accent-green);
+            color: #fff;
+            font-size: 11px;
+            font-weight: 700;
+            padding: 2px 8px;
+            border-radius: 10px;
+          ">0</span>
+        </div>
+        <div class="nav-item" onclick="navigateTo('promos')">
+          <span class="nav-icon"><i class="fas fa-ticket-alt"></i></span>
+          Promo Vouchers
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Configuration</div>
+        <div class="nav-item" onclick="navigateTo('rates')">
+          <span class="nav-icon"><i class="fas fa-peso-sign"></i></span>
+          Rates Manager
+        </div>
+        <div class="nav-item" onclick="navigateTo('settings')">
+          <span class="nav-icon"><i class="fas fa-cog"></i></span>
+          Settings
+        </div>
+        <div class="nav-item" onclick="navigateTo('security')">
+          <span class="nav-icon"><i class="fas fa-shield-alt"></i></span>
+          Security
+        </div>
+        <div class="nav-item" onclick="navigateTo('branding')">
+          <span class="nav-icon"><i class="fas fa-palette"></i></span>
+          Branding
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">System</div>
+        <div class="nav-item" onclick="navigateTo('devices')">
+          <span class="nav-icon"><i class="fas fa-microchip"></i></span>
+          Devices
+        </div>
+        <div class="nav-item" onclick="navigateTo('update')">
+          <span class="nav-icon"><i class="fas fa-sync-alt"></i></span>
+          System Update
+        </div>
+        <div class="nav-item" onclick="navigateTo('about')">
+          <span class="nav-icon"><i class="fas fa-info-circle"></i></span>
+          About
+        </div>
+      </div>
+
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="admin-avatar">A</div>
+      <div class="admin-info">
+        <div class="admin-name">Administrator</div>
+        <div class="admin-role">
+          <span class="status-dot online"></span>Online
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <div class="main-content">
+
+    <!-- TOP HEADER -->
+    <header class="top-header">
+      <div class="header-left">
+        <button class="menu-toggle" onclick="toggleSidebar()">
+          <i class="fas fa-bars"></i>
+        </button>
+        <div class="header-breadcrumb">
+          Admin Panel &rsaquo; <span id="currentPageTitle">Dashboard</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn">
+            <i class="fas fa-moon"></i> <span class="theme-label">Dark Mode</span>
+        </button>
+        <button class="logout-btn" onclick="doLogout()">
+            <i class="fas fa-sign-out-alt"></i> <span class="logout-label">Logout</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- PAGE CONTENT AREA -->
+    <div class="page-content" id="pageContent">
+      <div class="loading">
+        <i class="fas fa-spinner fa-spin"></i> Loading...
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Mobile sidebar overlay -->
+<div id="sidebarOverlay" onclick="toggleSidebar()" style="
+  display: none;
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5);
+  z-index: 99;
+"></div>
+
+<script src="js/app.js"></script>
+<script src="js/dashboard.js"></script>
+<script src="js/sessions.js"></script>
+<script src="js/sales.js"></script>
+<script src="js/rates.js"></script>
+<script src="js/promos.js"></script>
+<script src="js/settings.js"></script>
+<script src="js/security.js"></script>
+<script src="js/branding.js"></script>
+<script src="js/devices.js"></script>
+<script src="js/update.js"></script>
+<script src="js/about.js"></script>
+</body>
+</html>

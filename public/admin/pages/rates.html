@@ -1,0 +1,79 @@
+<div class="page-title">Rates Manager</div>
+<div class="page-subtitle">Configure coin values and time allocations.</div>
+
+<div class="card">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Current Rates</div>
+      <div class="card-subtitle">Click edit to modify any rate</div>
+    </div>
+    <button class="btn btn-primary" onclick="openAddRate()">
+      <i class="fas fa-plus"></i> Add Rate
+    </button>
+  </div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Coin Value</th>
+          <th>Access Time</th>
+          <th>Expiration</th>
+          <th>Label</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="ratesTable">
+        <tr>
+          <td colspan="5">
+            <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading rates...</div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ADD/EDIT RATE MODAL -->
+<div class="modal-overlay" id="rateModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="rateModalTitle">Add New Rate</div>
+      <button class="modal-close" onclick="closeModal('rateModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <input type="hidden" id="editRateId">
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Coin Value (₱)</label>
+        <input type="number" id="rateCoinValue" class="form-control"
+               placeholder="e.g. 5" min="1">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Access Time (minutes)</label>
+        <input type="number" id="rateMinutes" class="form-control"
+               placeholder="e.g. 60" min="1">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Expiration (minutes)</label>
+      <input type="number" id="rateExpiration" class="form-control"
+             placeholder="e.g. 120" min="1">
+      <small style="color:var(--text-muted);font-size:12px;">
+        How long before the voucher hard-expires (must be ≥ access time)
+      </small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Label</label>
+      <input type="text" id="rateLabel" class="form-control"
+             placeholder="e.g. ₱5 = 1 hour">
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeModal('rateModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveRate()">
+        <i class="fas fa-save"></i> Save Rate
+      </button>
+    </div>
+  </div>
+</div>

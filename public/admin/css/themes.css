@@ -1,0 +1,70 @@
+/* ===== LIGHT THEME (default) ===== */
+:root {
+  --bg-primary: #f8f9fa;
+  --bg-secondary: #ffffff;
+  --bg-sidebar: #1a1a2e;
+  --bg-card: #ffffff;
+  --bg-hover: #f0f0f0;
+  --bg-active: #e8f5e9;
+
+  --text-primary: #1a1a1a;
+  --text-secondary: #666666;
+  --text-muted: #999999;
+  --text-sidebar: #ffffff;
+  --text-sidebar-muted: #aaaaaa;
+
+  --border-color: #e0e0e0;
+  --border-light: #f0f0f0;
+
+  --accent-green: #00c853;
+  --accent-red: #e94560;
+  --accent-blue: #2196f3;
+  --accent-orange: #ffa000;
+  --accent-purple: #9c27b0;
+
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.1);
+
+  --sidebar-width: 260px;
+  --header-height: 60px;
+
+  --card-green-bg: #e8f5e9;
+  --card-green-text: #00a844;
+  --card-red-bg: #ffe8ec;
+  --card-red-text: #e94560;
+  --card-blue-bg: #e3f2fd;
+  --card-blue-text: #1565c0;
+  --card-orange-bg: #fff8e1;
+  --card-orange-text: #e65100;
+}
+
+/* ===== DARK THEME ===== */
+[data-theme="dark"] {
+  --bg-primary: #0f0f0f;
+  --bg-secondary: #1a1a1a;
+  --bg-sidebar: #111111;
+  --bg-card: #1e1e1e;
+  --bg-hover: #252525;
+  --bg-active: #1a2a1a;
+
+  --text-primary: #ffffff;
+  --text-secondary: #aaaaaa;
+  --text-muted: #666666;
+  --text-sidebar: #ffffff;
+  --text-sidebar-muted: #888888;
+
+  --border-color: #2a2a2a;
+  --border-light: #222222;
+
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.4);
+
+  --card-green-bg: #0a2a0a;
+  --card-green-text: #00c853;
+  --card-red-bg: #2a0a0a;
+  --card-red-text: #e94560;
+  --card-blue-bg: #0a1a2a;
+  --card-blue-text: #2196f3;
+  --card-orange-bg: #2a1a00;
+  --card-orange-text: #ffa000;
+}

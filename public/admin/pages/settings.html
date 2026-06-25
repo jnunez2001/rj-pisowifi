@@ -1,0 +1,302 @@
+<div class="page-title">Settings</div>
+<div class="page-subtitle">Configure your cafe and system preferences.</div>
+
+<div class="grid-2">
+
+  <!-- CAFE INFORMATION -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <i class="fas fa-store" style="margin-right:8px;color:var(--accent-green);"></i>Cafe Information
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Cafe Name</label>
+      <input type="text" id="cafeName" class="form-control" placeholder="R&J PisoWifi">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Tagline</label>
+      <input type="text" id="bannerText" class="form-control" placeholder="HIGH SPEED CONNECTION!">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Currency Symbol</label>
+      <input type="text" id="currency" class="form-control" placeholder="₱" maxlength="3">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Address <span style="color:var(--text-muted);font-size:11px;">(optional)</span></label>
+      <input type="text" id="cafeAddress" class="form-control" placeholder="123 Main St, Brgy. Example">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Contact Number <span style="color:var(--text-muted);font-size:11px;">(optional)</span></label>
+      <input type="text" id="cafeContact" class="form-control" placeholder="09XX-XXX-XXXX">
+    </div>
+    <button class="btn btn-primary" onclick="saveCafeSettings()">
+      <i class="fas fa-save"></i> Save Cafe Info
+    </button>
+  </div>
+
+  <!-- ADMIN CREDENTIALS -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <i class="fas fa-user-shield" style="margin-right:8px;color:var(--accent-blue);"></i>Admin Credentials
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Admin Username</label>
+      <input type="text" id="adminUsername" class="form-control" placeholder="admin">
+    </div>
+    <div class="form-group">
+      <label class="form-label">New Password</label>
+      <input type="password" id="newPassword" class="form-control" placeholder="Leave blank to keep current">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Confirm Password</label>
+      <input type="password" id="confirmPassword" class="form-control" placeholder="Confirm new password">
+    </div>
+    <div class="form-group">
+      <div style="background:var(--bg-primary);padding:10px 12px;border-radius:6px;font-size:12px;color:var(--text-muted);">
+        <i class="fas fa-info-circle"></i> After changing credentials, you will be logged out automatically.
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="saveAdminSettings()">
+      <i class="fas fa-save"></i> Save Credentials
+    </button>
+  </div>
+
+</div>
+
+<!-- PORTAL SETTINGS -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-wifi" style="margin-right:8px;color:var(--accent-green);"></i>Portal Settings
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">What customers see on the portal</span>
+  </div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label class="form-label">Welcome Message</label>
+      <input type="text" id="welcomeMessage" class="form-control" placeholder="Welcome! Insert a coin to get started.">
+      <small style="color:var(--text-muted);">Shown on the portal when disconnected.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Disconnect Message</label>
+      <input type="text" id="disconnectMessage" class="form-control" placeholder="Your session has ended. Thank you!">
+      <small style="color:var(--text-muted);">Shown when session expires.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Auto-Redirect URL <span style="color:var(--text-muted);font-size:11px;">(optional)</span></label>
+      <input type="text" id="redirectUrl" class="form-control" placeholder="http://192.168.1.1">
+      <small style="color:var(--text-muted);">Redirect customer to this URL after connecting.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Show Voucher Code on Portal</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
+        <label class="toggle-switch">
+          <input type="checkbox" id="showVoucher" onchange="updateToggleLabel('showVoucher','showVoucherLabel')">
+          <span class="toggle-slider"></span>
+        </label>
+        <span id="showVoucherLabel" style="font-size:13px;color:var(--text-muted);">Disabled</span>
+      </div>
+      <small style="color:var(--text-muted);">Display the RJ-XXXXXX code to the customer.</small>
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="savePortalSettings()">
+    <i class="fas fa-save"></i> Save Portal Settings
+  </button>
+</div>
+
+<!-- SESSION SETTINGS -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-clock" style="margin-right:8px;color:var(--accent-yellow);"></i>Session Settings
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label class="form-label">Allow Session Pause</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
+        <label class="toggle-switch">
+          <input type="checkbox" id="allowPause" onchange="updateToggleLabel('allowPause','allowPauseLabel')">
+          <span class="toggle-slider"></span>
+        </label>
+        <span id="allowPauseLabel" style="font-size:13px;color:var(--text-muted);">Disabled</span>
+      </div>
+      <small style="color:var(--text-muted);">Let customers pause their session timer.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Max Pause Duration (minutes)</label>
+      <input type="number" id="maxPauseMinutes" class="form-control" placeholder="30" min="1" max="1440">
+      <small style="color:var(--text-muted);">Auto-resume after this many minutes while paused.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Grace Period After Expiry (minutes)</label>
+      <input type="number" id="gracePeriodMinutes" class="form-control" placeholder="0" min="0" max="60">
+      <small style="color:var(--text-muted);">Extra time before disconnecting after session ends.</small>
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="saveSessionSettings()">
+    <i class="fas fa-save"></i> Save Session Settings
+  </button>
+</div>
+
+<!-- COIN SLOT SETTINGS -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-coins" style="margin-right:8px;color:var(--accent-yellow);"></i>Coin Slot Settings
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label class="form-label">Coin Insert Wait Time (ms)</label>
+      <input type="number" id="coinWaitMs" class="form-control" placeholder="1500" min="500" max="10000">
+      <small style="color:var(--text-muted);">How long to wait after first pulse before processing. Default: 1500ms.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Minimum Coins to Start Session</label>
+      <input type="number" id="minCoins" class="form-control" placeholder="1" min="1" max="10">
+      <small style="color:var(--text-muted);">Require this many coins before creating a session.</small>
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="saveCoinSettings()">
+    <i class="fas fa-save"></i> Save Coin Settings
+  </button>
+</div>
+
+
+
+<!-- NETWORK MODE -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-network-wired" style="margin-right:8px;color:var(--accent-blue);"></i>Network Mode
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">How customers get internet access</span>
+  </div>
+
+  <div class="form-group">
+    <label class="form-label">Select Mode</label>
+    <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px;">
+
+      <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:var(--bg-primary);padding:14px;border-radius:10px;border:2px solid var(--border-color);" id="modeNodogsplashCard">
+        <input type="radio" name="networkMode" id="modeNodogsplash" value="nodogsplash" onchange="onNetworkModeChange()" style="margin-top:3px;accent-color:var(--accent-green);">
+        <div>
+          <div style="font-weight:700;font-size:14px;">Nodogsplash</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Open-source captive portal solution. Runs directly on the server and manages 
+client authentication via a dedicated network interface. Ideal for standalone 
+deployments without additional routing hardware.</div>
+        </div>
+      </label>
+
+      <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:var(--bg-primary);padding:14px;border-radius:10px;border:2px solid var(--border-color);" id="modeMikrotikCard">
+        <input type="radio" name="networkMode" id="modeMikrotik" value="mikrotik" onchange="onNetworkModeChange()" style="margin-top:3px;accent-color:var(--accent-blue);">
+        <div>
+          <div style="font-weight:700;font-size:14px;">MikroTik</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Enterprise-grade network management via MikroTik RouterOS API. Offloads 
+client authentication and bandwidth control to the router. Recommended for 
+scalable deployments with full traffic management capabilities.</div>
+        </div>
+      </label>
+
+    </div>
+  </div>
+
+  <!-- MIKROTIK SETTINGS (shown only when MikroTik selected) -->
+  <div id="mikrotikFields" style="display:none;margin-top:16px;">
+    <div class="grid-2">
+      <div class="form-group">
+        <label class="form-label">MikroTik IP Address</label>
+        <input type="text" id="mikrotikIp" class="form-control" placeholder="192.168.0.1">
+      </div>
+      <div class="form-group">
+        <label class="form-label">MikroTik Username</label>
+        <input type="text" id="mikrotikUser" class="form-control" placeholder="admin">
+      </div>
+      <div class="form-group">
+        <label class="form-label">MikroTik Password</label>
+        <input type="password" id="mikrotikPass" class="form-control" placeholder="Leave blank if none">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Hotspot Interface</label>
+        <input type="text" id="mikrotikInterface" class="form-control" placeholder="ether1">
+        <small style="color:var(--text-muted);">The interface EAP225 is connected to on MikroTik.</small>
+      </div>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" onclick="saveNetworkSettings()">
+    <i class="fas fa-save"></i> Save Network Settings
+  </button>
+</div>
+
+<!-- BACKUP & RESTORE -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-database" style="margin-right:8px;color:var(--accent-blue);"></i>Backup & Restore
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Export or restore your system data</span>
+  </div>
+  <div class="grid-2">
+
+    <!-- BACKUP -->
+    <div class="form-group">
+      <label class="form-label">Export Backup</label>
+      <p style="font-size:13px;color:var(--text-muted);margin:4px 0 12px;">
+        Downloads a JSON file containing all your settings, rates, promo vouchers, and transaction history.
+      </p>
+      <button class="btn btn-primary" onclick="backupSystem()">
+        <i class="fas fa-download"></i> Download Backup
+      </button>
+    </div>
+
+    <!-- RESTORE -->
+    <div class="form-group">
+      <label class="form-label">Restore from Backup</label>
+      <p style="font-size:13px;color:var(--text-muted);margin:4px 0 12px;">
+        Upload a previously exported backup file to restore your data. This will overwrite current settings.
+      </p>
+      <input type="file" id="restoreFile" accept=".json" style="margin-bottom:10px;">
+      <button class="btn btn-danger" onclick="restoreSystem()">
+        <i class="fas fa-upload"></i> Restore Backup
+      </button>
+    </div>
+
+  </div>
+
+  <!-- RESTORE STATUS -->
+  <div id="restoreStatus" style="display:none;margin-top:16px;padding:12px;border-radius:6px;font-size:13px;"></div>
+</div>
+<!-- FREE MINUTES -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-gift" style="margin-right:8px;color:#7c3aed;"></i>Free Minutes
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Daily free time for new customers</span>
+  </div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label class="form-label">Enable Free Minutes</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
+        <label class="toggle-switch">
+          <input type="checkbox" id="freeMinutesEnabled" onchange="updateToggleLabel('freeMinutesEnabled','freeMinutesEnabledLabel')">
+          <span class="toggle-slider"></span>
+        </label>
+        <span id="freeMinutesEnabledLabel" style="font-size:13px;color:var(--text-muted);">Disabled</span>
+      </div>
+      <small style="color:var(--text-muted);">Show free claim button on portal for new customers.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Free Minutes Amount</label>
+      <input type="number" id="freeMinutesAmount" class="form-control" placeholder="5" min="1" max="60">
+      <small style="color:var(--text-muted);">How many free minutes per customer per day.</small>
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="saveFreeMinutesSettings()">
+    <i class="fas fa-save"></i> Save Free Minutes Settings
+  </button>
+</div>

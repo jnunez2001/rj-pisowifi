@@ -1,0 +1,120 @@
+<div class="page-title">About</div>
+<div class="page-subtitle">System information and status.</div>
+
+<!-- SYSTEM INFO + STATS ROW -->
+<div class="grid-2">
+
+  <!-- LEFT: STATIC SYSTEM INFO -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <i class="fas fa-server" style="margin-right:8px;color:var(--accent-green);"></i>System Info
+      </div>
+      <span id="sysinfoUptime" style="font-size:12px;color:var(--text-muted);">Loading...</span>
+    </div>
+
+    <div class="sysinfo-table">
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">Version</span>
+        <span class="sysinfo-value" id="siVersion">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">Platform</span>
+        <span class="sysinfo-value" id="siPlatform">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">Processor</span>
+        <span class="sysinfo-value" id="siProcessor">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">CPU Cores</span>
+        <span class="sysinfo-value" id="siCores">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">IP Address</span>
+        <span class="sysinfo-value" id="siIp">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">Gateway</span>
+        <span class="sysinfo-value" id="siGateway">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">Machine ID</span>
+        <span class="sysinfo-value" id="siMachineId" style="font-size:11px;word-break:break-all;">—</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">License</span>
+        <span class="sysinfo-value" id="siLicense">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: RAM + STORAGE -->
+  <div style="display:flex;flex-direction:column;gap:16px;">
+
+    <!-- RAM -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <i class="fas fa-memory" style="margin-right:8px;color:var(--accent-blue);"></i>RAM Usage
+        </div>
+        <span id="ramPercent" style="font-size:13px;font-weight:700;color:var(--accent-blue);">—%</span>
+      </div>
+      <div style="margin-bottom:8px;">
+        <div class="stat-bar-track">
+          <div class="stat-bar-fill blue" id="ramBar" style="width:0%"></div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);">
+        <span>Used: <strong id="ramUsed">—</strong></span>
+        <span>Free: <strong id="ramFree">—</strong></span>
+        <span>Total: <strong id="ramTotal">—</strong></span>
+      </div>
+    </div>
+
+    <!-- STORAGE -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">
+          <i class="fas fa-hdd" style="margin-right:8px;color:var(--accent-green);"></i>Storage
+        </div>
+        <span id="storagePercent" style="font-size:13px;font-weight:700;color:var(--accent-green);">—%</span>
+      </div>
+      <div style="margin-bottom:8px;">
+        <div class="stat-bar-track">
+          <div class="stat-bar-fill green" id="storageBar" style="width:0%"></div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);">
+        <span>Used: <strong id="storageUsed">—</strong></span>
+        <span>Free: <strong id="storageFree">—</strong></span>
+        <span>Total: <strong id="storageTotal">—</strong></span>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- CPU CORES ROW -->
+<div id="cpuCoresRow" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;margin-top:16px;">
+  <!-- Filled dynamically -->
+</div>
+
+<!-- APP INFO -->
+<div class="card" style="margin-top:16px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-info-circle" style="margin-right:8px;color:var(--accent-blue);"></i>Application
+    </div>
+  </div>
+  <div class="sysinfo-table">
+    <div class="sysinfo-row">
+      <span class="sysinfo-label">App Name</span>
+      <span class="sysinfo-value">R&J PisoWifi</span>
+    </div>
+    <div class="sysinfo-row">
+      <span class="sysinfo-label">Developer</span>
+      <span class="sysinfo-value">Joshua Nunez</span>
+    </div>
+  </div>
+</div>
