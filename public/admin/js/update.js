@@ -1,7 +1,13 @@
 // ===== SYSTEM UPDATE PAGE =====
 
 async function loadUpdate() {
-  // nothing to auto-load
+  try {
+    const data = await apiCall('GET', '/api/admin/check-update');
+    if (data.success) {
+      const v = `v${data.current_version}`;
+      document.getElementById('currentVersionDisplay').textContent = v;
+    }
+  } catch(e) {}
 }
 
 async function checkForUpdates() {
