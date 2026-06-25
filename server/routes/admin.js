@@ -683,4 +683,82 @@ router.get('/version', adminAuth, (req, res) => {
   res.json({ success: true, version: pkg.version });
 });
 
+// POST /api/admin/network
+router.post('/network', adminAuth, (req, res) => {
+  try {
+    const { type, ip, gateway, dns, subnet } = req.body;
+
+    let netplanConfig = '';
+
+    if (type === 'dhcp') {
+      netplanConfig = `network:
+  ethernets:
+    enp0s3:
+      dhcp4: true
+  version: 2
+`;
+    } else {
+      netplanConfig = `network:
+  ethernets:
+    enp0s3:
+      dhcp4: false
+      addresses:
+        - ${ip}/${subnet || '24'}
+      routes:
+        - to: default
+          via: ${gateway}
+      nameservers:
+        addresses:
+          - ${dns || '8.8.8.8'}
+          - 8.8.4.4
+  version: 2
+`;
+    }
+
+    // Write netplan config
+    const fs = require('fs');
+    fs.writeFileSync('/tmp/rj-network.yaml', netplanConfig);
+
+    // Apply using shell
+    const { execSync } = require('child_process');
+    execSync('sudo cp /tmp/rj-network.yaml /etc/netplan/50-cloud-init.yaml');
+    execSync('sudo netplan apply');
+
+    // Save to settings for reference
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    upsert.run('network_type', type);
+    upsert.run('static_ip', ip || '');
+    upsert.run('static_gateway', gateway || '');
+    upsert.run('static_dns', dns || '8.8.8.8');
+    upsert.run('static_subnet', subnet || '24');
+
+    console.log(`🌐 Network changed to: ${type}`);
+    return res.json({ success: true, message: `Network set to ${type}` });
+
+  } catch(err) {
+    console.error('Network error:', err);
+    res.status(500).json({ success: false, message: 'Failed to apply network settings' });
+  }
+});
+
+// GET /api/admin/network
+router.get('/network', adminAuth, (req, res) => {
+  try {
+    const getSetting = (key, def) => {
+      const s = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+      return s ? s.value : def;
+    };
+    return res.json({
+      success: true,
+      type: getSetting('network_type', 'dhcp'),
+      ip: getSetting('static_ip', ''),
+      gateway: getSetting('static_gateway', ''),
+      dns: getSetting('static_dns', '8.8.8.8'),
+      subnet: getSetting('static_subnet', '24')
+    });
+  } catch(err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 module.exports = router;

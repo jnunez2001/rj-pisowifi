@@ -27,6 +27,10 @@ async function loadSettings() {
     document.getElementById('cafeAddress').value = s.cafe_address || '';
     document.getElementById('cafeContact').value = s.cafe_contact || '';
 
+    // Network config
+    await loadNetworkConfig();
+    await loadCurrentIp();
+
     // Admin Credentials
     document.getElementById('adminUsername').value = s.admin_username || 'admin';
 
@@ -267,3 +271,89 @@ async function saveNetworkSettings() {
     showToast('Server error.', 'error');
   }
 }
+
+// ===== NETWORK CONFIGURATION =====
+
+async function loadNetworkConfig() {
+  try {
+    // Get network settings from server
+    const data = await apiCall('GET', '/api/admin/network');
+    if (!data.success) return;
+
+    // Set dropdown
+    document.getElementById('networkType').value = data.type || 'dhcp';
+
+    // Set static fields
+    document.getElementById('staticIp').value = data.ip || '';
+    document.getElementById('staticGateway').value = data.gateway || '';
+    document.getElementById('staticDns').value = data.dns || '8.8.8.8';
+    const subnetEl = document.getElementById('staticSubnet');
+    if (subnetEl) subnetEl.value = data.subnet || '24';
+
+    // Show/hide static fields
+    onNetworkTypeChange();
+
+  } catch(e) {
+    console.error('Network config load error:', e);
+  }
+}
+
+async function loadCurrentIp() {
+  try {
+    const data = await apiCall('GET', '/api/admin/sysinfo');
+    if (!data.success) return;
+
+    const ip = data.sysinfo.ip_address || 'Unknown';
+    const gateway = data.sysinfo.gateway || '';
+
+    // Show current IP in badge and field
+    document.getElementById('currentIpDisplay').textContent = ip;
+    document.getElementById('currentIpField').value = ip;
+
+    // Auto-fill gateway (read-only)
+    document.getElementById('staticGateway').value = gateway;
+
+    // Pre-fill static IP with current IP as suggestion
+    if (!document.getElementById('staticIp').value) {
+      document.getElementById('staticIp').value = ip;
+    }
+
+  } catch(e) {
+    console.error('IP load error:', e);
+  }
+}
+
+function onNetworkTypeChange() {
+  const type = document.getElementById('networkType').value;
+  const staticFields = document.getElementById('staticIpFields');
+  if (staticFields) {
+    staticFields.style.display = type === 'static' ? 'block' : 'none';
+  }
+}
+
+async function saveNetworkConfig() {
+  const type = document.getElementById('networkType').value;
+  const btn = document.getElementById('saveNetworkBtn');
+  const status = document.getElementById('networkStatus');
+
+  if (type === 'static') {
+    const ip = document.getElementById('staticIp').value.trim();
+    const gateway = document.getElementById('staticGateway').value.trim();
+
+    if (!ip) { showToast('Please enter a static IP address.', 'error'); return; }
+    if (!gateway) { showToast('Gateway not detected. Please check your network.', 'error'); return; }
+
+    // Basic IP validation
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (!ipRegex.test(ip)) { showToast('Invalid IP address format.', 'error'); return; }
+  }
+
+  const confirmed = confirm(
+    type === 'static'
+      ? 'Apply static IP? Make sure the IP is not in your router\'s DHCP range.'
+      : 'Switch to DHCP? The server will get a new IP from your router.'
+  );
+  if (!confirmed) return;
+
+  btn.disabled = true;
+  btn.innerHTML
