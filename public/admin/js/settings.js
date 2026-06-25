@@ -27,10 +27,6 @@ async function loadSettings() {
     document.getElementById('cafeAddress').value = s.cafe_address || '';
     document.getElementById('cafeContact').value = s.cafe_contact || '';
 
-    // Network config
-    await loadNetworkConfig();
-    await loadCurrentIp();
-
     // Admin Credentials
     document.getElementById('adminUsername').value = s.admin_username || 'admin';
 
@@ -63,6 +59,10 @@ async function loadSettings() {
     document.getElementById('mikrotikInterface').value = s.mikrotik_interface || 'ether1';
     document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
     updateNetworkModeCards(mode);
+
+    // Network config
+    await loadNetworkConfig();
+    setTimeout(loadCurrentIp, 500);
 
   } catch(e) {
     console.error('Settings load error:', e);
