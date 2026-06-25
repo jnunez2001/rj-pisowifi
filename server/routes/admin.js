@@ -677,4 +677,10 @@ router.post('/install-update', adminAuth, (req, res) => {
   }, 500);
 });
 
+// GET /api/admin/version
+router.get('/version', adminAuth, (req, res) => {
+  const pkg = require('../../package.json');
+  res.json({ success: true, version: pkg.version });
+});
+
 module.exports = router;
