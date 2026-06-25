@@ -597,4 +597,84 @@ router.get('/vendos', adminAuth, (req, res) => {
   }
 });
 
+// GET /api/admin/check-update
+const { exec } = require('child_process');
+
+router.get('/check-update', adminAuth, async (req, res) => {
+  try {
+    // Get current version from package.json
+    const pkg = require('../../package.json');
+    const currentVersion = pkg.version;
+
+    // Check GitHub for latest release
+    const https = require('https');
+    const options = {
+      hostname: 'api.github.com',
+      path: '/repos/jnunez2001/rj-pisowifi/releases/latest',
+      headers: { 'User-Agent': 'RJ-PisoWifi' }
+    };
+
+    https.get(options, (response) => {
+      let data = '';
+      response.on('data', chunk => data += chunk);
+      response.on('end', () => {
+        try {
+          const release = JSON.parse(data);
+          const latestVersion = release.tag_name?.replace('v', '') || currentVersion;
+          const hasUpdate = latestVersion !== currentVersion;
+
+          return res.json({
+            success: true,
+            current_version: currentVersion,
+            latest_version: latestVersion,
+            has_update: hasUpdate,
+            release_notes: release.body || '',
+            release_name: release.name || `v${latestVersion}`
+          });
+        } catch(e) {
+          return res.json({
+            success: true,
+            current_version: currentVersion,
+            latest_version: currentVersion,
+            has_update: false,
+            release_notes: ''
+          });
+        }
+      });
+    }).on('error', () => {
+      return res.json({
+        success: true,
+        current_version: currentVersion,
+        latest_version: currentVersion,
+        has_update: false,
+        release_notes: ''
+      });
+    });
+
+  } catch(err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/install-update
+router.post('/install-update', adminAuth, (req, res) => {
+  const appDir = process.cwd();
+
+  res.json({ success: true, message: 'Update started! Server will restart shortly.' });
+
+  setTimeout(() => {
+    exec(`cd ${appDir} && git pull`, (err, stdout) => {
+      if (err) {
+        console.error('Git pull error:', err);
+        return;
+      }
+      console.log('Git pull:', stdout);
+      exec('sudo systemctl restart rj-pisowifi', (err) => {
+        if (err) console.error('Restart error:', err);
+        else console.log('✅ Updated and restarted!');
+      });
+    });
+  }, 500);
+});
+
 module.exports = router;
