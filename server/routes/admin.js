@@ -537,10 +537,10 @@ router.get('/sysinfo', adminAuth, (req, res) => {
         gateway,
         machine_id: machineId,
         storage,
-        version: 'v1.0.0',
+        version: 'v' + require('../../package.json').version,
         license
       }
-    });
+    });dashboard.js
 
   } catch (err) {
     console.error('Sysinfo error:', err);

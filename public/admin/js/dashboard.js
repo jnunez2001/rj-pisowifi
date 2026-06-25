@@ -5,8 +5,19 @@ async function loadDashboard() {
   await loadSalesStats();
   await loadRecentTransactions();
   await loadActiveSessionsCount();
+  await loadSystemVersion();
   initChart();
   startUptimeCounter();
+}
+
+async function loadSystemVersion() {
+  try {
+    const data = await apiCall('GET', '/api/admin/check-update');
+    if (data.success) {
+      const el = document.getElementById('systemVersion');
+      if (el) el.textContent = `v${data.current_version}`;
+    }
+  } catch(e) {}
 }
 
 async function loadSalesStats() {
