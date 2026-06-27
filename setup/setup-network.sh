@@ -31,7 +31,27 @@ if [ -z "$LAN_IF" ]; then
     exit 0
 fi
 
-# Configure LAN
+# ── FULL IPTABLES CLEANUP ─────────────────────────────────────
+# Remove jump rules FIRST, then flush, then delete chains
+iptables -D INPUT -j ndsRTR 2>/dev/null || true
+iptables -D FORWARD -j ndsNET 2>/dev/null || true
+iptables -t nat -D PREROUTING -j ndsOUT 2>/dev/null || true
+
+# Flush chains
+iptables -F ndsRTR 2>/dev/null || true
+iptables -F ndsNET 2>/dev/null || true
+iptables -F ndsAUT 2>/dev/null || true
+iptables -t nat -F ndsOUT 2>/dev/null || true
+
+# Delete chains
+iptables -X ndsRTR 2>/dev/null || true
+iptables -X ndsNET 2>/dev/null || true
+iptables -X ndsAUT 2>/dev/null || true
+iptables -t nat -X ndsOUT 2>/dev/null || true
+
+echo "iptables cleaned" >> $LOG
+
+# ── CONFIGURE LAN ─────────────────────────────────────────────
 ip addr flush dev $LAN_IF 2>/dev/null
 ip addr add ${GATEWAY_IP}/24 dev $LAN_IF
 ip link set $LAN_IF up
@@ -53,7 +73,7 @@ iptables -t nat -F PREROUTING 2>/dev/null
 iptables -t nat -A PREROUTING -i $LAN_IF -p tcp --dport 80 \
     -j REDIRECT --to-port 3000
 
-# Step 1: Start dnsmasq FIRST
+# ── START DNSMASQ ─────────────────────────────────────────────
 pkill dnsmasq 2>/dev/null
 sleep 1
 rm -f /var/lib/misc/dnsmasq.leases
@@ -72,7 +92,7 @@ EOF
 dnsmasq --conf-file=/etc/dnsmasq.d/rj-pisowifi.conf >> $LOG 2>&1
 echo "dnsmasq started" >> $LOG
 
-# Step 2: Setup nodogsplash splash page redirect to our portal
+# ── SPLASH PAGE ───────────────────────────────────────────────
 mkdir -p /etc/nodogsplash/htdocs
 cat > /etc/nodogsplash/htdocs/splash.html << EOF
 <!DOCTYPE html>
@@ -81,29 +101,14 @@ cat > /etc/nodogsplash/htdocs/splash.html << EOF
 <meta http-equiv="refresh" content="0;url=http://$GATEWAY_IP:3000/portal">
 <script>window.location.href = "http://$GATEWAY_IP:3000/portal";</script>
 </head>
-<body>
-<p>Redirecting...</p>
-</body>
+<body><p>Redirecting...</p></body>
 </html>
 EOF
 
-# Step 3: Start nodogsplash
+# ── NODOGSPLASH ───────────────────────────────────────────────
 if [ "$NETWORK_MODE" = "nodogsplash" ]; then
     pkill nodogsplash 2>/dev/null
-    sleep 1
-
-    # Clean up old nodogsplash chains if they exist
-    iptables -F ndsRTR 2>/dev/null || true
-    iptables -F ndsNET 2>/dev/null || true
-    iptables -F ndsAUT 2>/dev/null || true
-    iptables -X ndsRTR 2>/dev/null || true
-    iptables -X ndsNET 2>/dev/null || true
-    iptables -X ndsAUT 2>/dev/null || true
-    iptables -t nat -F ndsOUT 2>/dev/null || true
-    iptables -t nat -X ndsOUT 2>/dev/null || true
-    iptables -D INPUT -j ndsRTR 2>/dev/null || true
-    iptables -D FORWARD -j ndsNET 2>/dev/null || true
-    iptables -t nat -D PREROUTING -j ndsOUT 2>/dev/null || true
+    sleep 2
 
     cat > /etc/nodogsplash/nodogsplash.conf << EOF
 GatewayInterface $LAN_IF
@@ -127,18 +132,18 @@ EOF
     nodogsplash >> $LOG 2>&1
     echo "nodogsplash started" >> $LOG
 
-    # Step 4: Wait for nodogsplash web server to be FULLY ready
-    echo "Waiting for nodogsplash web server..." >> $LOG
+    # Wait for nodogsplash web server to be fully ready
+    echo "Waiting for nodogsplash..." >> $LOG
     for i in {1..20}; do
         if curl -s http://$GATEWAY_IP:2050 > /dev/null 2>&1; then
-            echo "nodogsplash fully ready after ${i}s" >> $LOG
+            echo "nodogsplash ready after ${i}s" >> $LOG
             break
         fi
         sleep 1
     done
     sleep 1
 
-    # Step 5: Add rules AFTER nodogsplash fully initializes
+    # Add DHCP/DNS rules AFTER nodogsplash fully initializes
     iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 67 -j ACCEPT
     iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 68 -j ACCEPT
     iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 53 -j ACCEPT
@@ -148,7 +153,7 @@ EOF
 
 elif [ "$NETWORK_MODE" = "mikrotik" ]; then
     pkill nodogsplash 2>/dev/null
-    echo "MikroTik mode — nodogsplash skipped" >> $LOG
+    echo "MikroTik mode" >> $LOG
 fi
 
 echo "=== Setup complete ===" >> $LOG
