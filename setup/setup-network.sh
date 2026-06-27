@@ -87,7 +87,7 @@ cat > /etc/nodogsplash/htdocs/splash.html << EOF
 </html>
 EOF
 
-# Step 3: Start nodogsplash or MikroTik mode
+# Step 3: Start nodogsplash
 if [ "$NETWORK_MODE" = "nodogsplash" ]; then
     pkill nodogsplash 2>/dev/null
     sleep 1
@@ -114,17 +114,18 @@ EOF
     nodogsplash >> $LOG 2>&1
     echo "nodogsplash started" >> $LOG
 
-    # Step 4: Wait for ndsRTR chain to be created by nodogsplash
-    echo "Waiting for ndsRTR chain..." >> $LOG
-    for i in {1..15}; do
-        if iptables -L ndsRTR -n > /dev/null 2>&1; then
-            echo "ndsRTR ready after ${i}s" >> $LOG
+    # Step 4: Wait for nodogsplash web server to be FULLY ready
+    echo "Waiting for nodogsplash web server..." >> $LOG
+    for i in {1..20}; do
+        if curl -s http://$GATEWAY_IP:2050 > /dev/null 2>&1; then
+            echo "nodogsplash fully ready after ${i}s" >> $LOG
             break
         fi
         sleep 1
     done
+    sleep 1
 
-    # Step 5: Add DHCP/DNS rules to ndsRTR so phones can get IPs
+    # Step 5: Add rules AFTER nodogsplash fully initializes
     iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 67 -j ACCEPT
     iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 68 -j ACCEPT
     iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 53 -j ACCEPT
