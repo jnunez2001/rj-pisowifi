@@ -72,7 +72,8 @@ EOF
 dnsmasq --conf-file=/etc/dnsmasq.d/rj-pisowifi.conf >> $LOG 2>&1
 echo "dnsmasq started" >> $LOG
 
-# Step 2: Setup nodogsplash splash page redirect
+# Step 2: Setup nodogsplash splash page redirect to our portal
+mkdir -p /etc/nodogsplash/htdocs
 cat > /etc/nodogsplash/htdocs/splash.html << EOF
 <!DOCTYPE html>
 <html>
@@ -86,7 +87,7 @@ cat > /etc/nodogsplash/htdocs/splash.html << EOF
 </html>
 EOF
 
-# Step 3: Start nodogsplash
+# Step 3: Start nodogsplash or MikroTik mode
 if [ "$NETWORK_MODE" = "nodogsplash" ]; then
     pkill nodogsplash 2>/dev/null
     sleep 1
@@ -111,19 +112,29 @@ FirewallRuleSet preauthenticated-users {
 EOF
 
     nodogsplash >> $LOG 2>&1
-    sleep 2
+    echo "nodogsplash started" >> $LOG
 
-    # Step 4: Add rules to ndsRTR AFTER nodogsplash starts
+    # Step 4: Wait for ndsRTR chain to be created by nodogsplash
+    echo "Waiting for ndsRTR chain..." >> $LOG
+    for i in {1..15}; do
+        if iptables -L ndsRTR -n > /dev/null 2>&1; then
+            echo "ndsRTR ready after ${i}s" >> $LOG
+            break
+        fi
+        sleep 1
+    done
+
+    # Step 5: Add DHCP/DNS rules to ndsRTR so phones can get IPs
     iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 67 -j ACCEPT
     iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 68 -j ACCEPT
     iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 53 -j ACCEPT
     iptables -I ndsRTR 1 -i $LAN_IF -p tcp --dport 3000 -j ACCEPT
     iptables -I ndsRTR 1 -i $LAN_IF -p tcp --dport 2050 -j ACCEPT
-    echo "nodogsplash started" >> $LOG
+    echo "iptables rules added to ndsRTR" >> $LOG
 
 elif [ "$NETWORK_MODE" = "mikrotik" ]; then
     pkill nodogsplash 2>/dev/null
-    echo "MikroTik mode" >> $LOG
+    echo "MikroTik mode — nodogsplash skipped" >> $LOG
 fi
 
 echo "=== Setup complete ===" >> $LOG
