@@ -72,7 +72,21 @@ EOF
 dnsmasq --conf-file=/etc/dnsmasq.d/rj-pisowifi.conf >> $LOG 2>&1
 echo "dnsmasq started" >> $LOG
 
-# Step 2: Start nodogsplash
+# Step 2: Setup nodogsplash splash page redirect
+cat > /etc/nodogsplash/htdocs/splash.html << EOF
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="refresh" content="0;url=http://$GATEWAY_IP:3000/portal">
+<script>window.location.href = "http://$GATEWAY_IP:3000/portal";</script>
+</head>
+<body>
+<p>Redirecting...</p>
+</body>
+</html>
+EOF
+
+# Step 3: Start nodogsplash
 if [ "$NETWORK_MODE" = "nodogsplash" ]; then
     pkill nodogsplash 2>/dev/null
     sleep 1
@@ -83,7 +97,7 @@ GatewayAddress $GATEWAY_IP
 GatewayPort 2050
 MaxClients 50
 AuthIdleTimeout 120
-RedirectURL http://$GATEWAY_IP/
+WebRoot /etc/nodogsplash/htdocs
 FirewallRuleSet authenticated-users {
     FirewallRule allow all
 }
@@ -91,20 +105,20 @@ FirewallRuleSet preauthenticated-users {
     FirewallRule allow udp port 53
     FirewallRule allow udp port 67
     FirewallRule allow udp port 68
-    FirewallRule allow tcp port 80
-    FirewallRule allow tcp port 443
     FirewallRule allow tcp port 3000
+    FirewallRule allow tcp port 2050
 }
 EOF
 
     nodogsplash >> $LOG 2>&1
     sleep 2
 
-    # Step 3: Add DHCP/DNS rules AFTER nodogsplash
-    # so they appear after ndsRTR in iptables
-    iptables -I INPUT 2 -i $LAN_IF -p udp --dport 53 -j ACCEPT
-    iptables -I INPUT 2 -i $LAN_IF -p udp --dport 67 -j ACCEPT
-    iptables -I INPUT 2 -i $LAN_IF -p udp --dport 68 -j ACCEPT
+    # Step 4: Add rules to ndsRTR AFTER nodogsplash starts
+    iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 67 -j ACCEPT
+    iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 68 -j ACCEPT
+    iptables -I ndsRTR 1 -i $LAN_IF -p udp --dport 53 -j ACCEPT
+    iptables -I ndsRTR 1 -i $LAN_IF -p tcp --dport 3000 -j ACCEPT
+    iptables -I ndsRTR 1 -i $LAN_IF -p tcp --dport 2050 -j ACCEPT
     echo "nodogsplash started" >> $LOG
 
 elif [ "$NETWORK_MODE" = "mikrotik" ]; then
