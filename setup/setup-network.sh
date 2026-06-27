@@ -92,6 +92,19 @@ if [ "$NETWORK_MODE" = "nodogsplash" ]; then
     pkill nodogsplash 2>/dev/null
     sleep 1
 
+    # Clean up old nodogsplash chains if they exist
+    iptables -F ndsRTR 2>/dev/null || true
+    iptables -F ndsNET 2>/dev/null || true
+    iptables -F ndsAUT 2>/dev/null || true
+    iptables -X ndsRTR 2>/dev/null || true
+    iptables -X ndsNET 2>/dev/null || true
+    iptables -X ndsAUT 2>/dev/null || true
+    iptables -t nat -F ndsOUT 2>/dev/null || true
+    iptables -t nat -X ndsOUT 2>/dev/null || true
+    iptables -D INPUT -j ndsRTR 2>/dev/null || true
+    iptables -D FORWARD -j ndsNET 2>/dev/null || true
+    iptables -t nat -D PREROUTING -j ndsOUT 2>/dev/null || true
+
     cat > /etc/nodogsplash/nodogsplash.conf << EOF
 GatewayInterface $LAN_IF
 GatewayAddress $GATEWAY_IP
