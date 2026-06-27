@@ -68,8 +68,9 @@ iptables -A FORWARD -i $LAN_IF -o $WAN_IF -j ACCEPT
 iptables -A FORWARD -i $WAN_IF -o $LAN_IF -m state \
     --state RELATED,ESTABLISHED -j ACCEPT
 
-# Port 80 → 3000
-iptables -t nat -F PREROUTING 2>/dev/null
+# Port 80 → 3000 for both WAN (admin) and LAN (customers)
+iptables -t nat -A PREROUTING -i $WAN_IF -p tcp --dport 80 \
+    -j REDIRECT --to-port 3000
 iptables -t nat -A PREROUTING -i $LAN_IF -p tcp --dport 80 \
     -j REDIRECT --to-port 3000
 
