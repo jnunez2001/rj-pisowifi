@@ -5,6 +5,7 @@ let pollInterval = null;
 let soundEnabled = true;
 let blockCountdown = null;
 let isBlocked = false;
+let detectedMac = '';
 
 // ===== PORTAL SETTINGS =====
 let portalSettings = {
@@ -94,10 +95,35 @@ function toggleSound() {
   if (!soundEnabled) stopSound('insert');
 }
 
+// ===== MAC DETECTION =====
+async function detectDevice() {
+  // First check URL params (legacy/nodogsplash support)
+  const params = new URLSearchParams(window.location.search);
+  const urlMac = params.get('mac');
+  if (urlMac) {
+    detectedMac = urlMac;
+    return urlMac;
+  }
+
+  // Auto-detect MAC from server using client IP
+  try {
+    const res = await fetch('/api/portal/detect');
+    const data = await res.json();
+    if (data.success && data.mac) {
+      detectedMac = data.mac;
+      return data.mac;
+    }
+  } catch(e) {
+    console.error('MAC detection failed:', e);
+  }
+
+  return null;
+}
+
 // ===== HELPERS =====
 function getMac() {
   const params = new URLSearchParams(window.location.search);
-  return params.get('mac') || '';
+  return params.get('mac') || detectedMac || '';
 }
 
 function formatTime(minutes) {
@@ -189,13 +215,10 @@ function closeCoinModal() {
 
 // ===== APPLY PORTAL SETTINGS TO UI =====
 function applyPortalSettings() {
-  // Show/hide voucher box based on setting
   const voucherBox = document.getElementById('voucherBox');
   if (currentSession && currentSession.active) {
     voucherBox.style.display = portalSettings.show_voucher === '1' ? 'block' : 'none';
   }
-
-  // Show/hide pause button based on allow_pause setting
   const pauseBtn = document.getElementById('pauseBtn');
   if (pauseBtn) {
     pauseBtn.style.display = portalSettings.allow_pause === '1' ? 'block' : 'none';
@@ -232,14 +255,11 @@ function updateUI(session) {
     document.getElementById('sectionConnected').style.display = 'none';
     document.getElementById('sectionPaused').style.display = 'none';
 
-    // Show welcome or disconnect message
     if (welcomeMsg) {
       if (prev && prev.active) {
-        // Session just ended
         welcomeMsg.textContent = portalSettings.disconnect_message;
         welcomeMsg.style.color = '#e94560';
       } else {
-        // Fresh load disconnected
         welcomeMsg.textContent = portalSettings.welcome_message;
         welcomeMsg.style.color = '#888';
       }
@@ -251,29 +271,22 @@ function updateUI(session) {
     badge.innerHTML = '<i class="fas fa-pause-circle"></i><span>PAUSED</span>';
     timeDisplay.className = 'time paused';
     timeDisplay.textContent = formatTime(session.minutes_remaining);
-
-    // Voucher visibility
     voucherBox.style.display = portalSettings.show_voucher === '1' ? 'block' : 'none';
     voucherCode.textContent = session.voucher_code;
     expiryDisplay.textContent = formatExpiry(session.hard_expires_at);
     sessionDisplay.textContent = session.voucher_code.replace('RJ-','');
-
     if (welcomeMsg) welcomeMsg.style.display = 'none';
-
     document.getElementById('sectionDisconnected').style.display = 'none';
     document.getElementById('sectionConnected').style.display = 'none';
     document.getElementById('sectionPaused').style.display = 'block';
 
   } else {
-    // Detect new session or coin added
     if (!prev || !prev.active) {
       playSound('success');
       if (document.getElementById('coinModal').classList.contains('show')) {
         closeCoinModal();
       }
       deactivateVendoRelay();
-
-      // Redirect after connecting if set
       if (portalSettings.redirect_url) {
         setTimeout(() => {
           window.location.href = portalSettings.redirect_url;
@@ -290,16 +303,12 @@ function updateUI(session) {
     badge.className = 'status-badge connected';
     badge.innerHTML = '<i class="fas fa-check-circle"></i><span>CONNECTED</span>';
     timeDisplay.className = 'time';
-
-    // Voucher visibility
     voucherBox.style.display = portalSettings.show_voucher === '1' ? 'block' : 'none';
     voucherCode.textContent = session.voucher_code;
     expiryDisplay.textContent = formatExpiry(session.hard_expires_at);
     sessionDisplay.textContent = session.voucher_code.replace('RJ-','');
-
     if (welcomeMsg) welcomeMsg.style.display = 'none';
 
-    // Show/hide pause button
     const pauseBtn = document.getElementById('pauseBtn');
     if (pauseBtn) {
       pauseBtn.style.display = portalSettings.allow_pause === '1' ? 'block' : 'none';
@@ -352,7 +361,6 @@ async function loadSettings() {
     const data = await res.json();
     if (!data.success) return;
 
-    // Store portal settings globally
     portalSettings.welcome_message = data.welcome_message || portalSettings.welcome_message;
     portalSettings.disconnect_message = data.disconnect_message || portalSettings.disconnect_message;
     portalSettings.show_voucher = data.show_voucher || '0';
@@ -362,7 +370,6 @@ async function loadSettings() {
     portalSettings.grace_period_minutes = data.grace_period_minutes || '0';
     portalSettings.vendo_ip = data.vendo_ip || '';
 
-    // Apply cafe branding
     document.getElementById('cafeName').textContent = data.cafe_name.toUpperCase();
     document.title = data.cafe_name;
 
@@ -380,7 +387,6 @@ async function loadSettings() {
       bg.style.display = 'block';
     }
 
-    // Show welcome message initially
     const welcomeMsg = document.getElementById('welcomeMsg');
     if (welcomeMsg) {
       welcomeMsg.textContent = portalSettings.welcome_message;
@@ -506,7 +512,10 @@ async function confirmDisconnect() {
 }
 
 async function redeemVoucher() {
-  const code = document.getElementById('voucherInput').value.trim().toUpperCase();
+  // Normalize: uppercase, remove spaces and dashes for flexible input
+  const raw = document.getElementById('voucherInput').value.trim().toUpperCase();
+  // Accept with or without dash: PROMO9XV8OC or PROMO-9XV8OC
+  const code = raw.includes('-') ? raw : raw.replace(/^(PROMO|RJ)/, '$1-');
   if (!code) { alert('Enter a voucher code'); return; }
   const mac = getMac();
   if (!mac) { alert('Cannot detect device.'); return; }
@@ -544,13 +553,6 @@ function startPolling() {
   pollInterval = setInterval(checkSession, 8000);
 }
 
-// ===== INIT =====
-async function init() {
-  await loadSettings();
-  await checkSession();
-  await checkFreeClaimEligibility();
-  startPolling();
-}
 // ===== FREE CLAIM =====
 async function checkFreeClaimEligibility() {
   const mac = getMac();
@@ -562,7 +564,6 @@ async function checkFreeClaimEligibility() {
   try {
     const res = await fetch(`${SERVER}/api/session/free-claim/status/${encodeURIComponent(mac)}`);
     const data = await res.json();
-
     if (data.success && data.eligible) {
       freeBtn.style.display = 'block';
     } else {
@@ -609,6 +610,15 @@ async function claimFreeMinutes() {
       freeBtn.innerHTML = '<i class="fas fa-gift"></i>&nbsp; CLAIM FREE 5 MINS';
     }
   }
+}
+
+// ===== INIT =====
+async function init() {
+  await loadSettings();
+  await detectDevice();
+  await checkSession();
+  await checkFreeClaimEligibility();
+  startPolling();
 }
 
 init();

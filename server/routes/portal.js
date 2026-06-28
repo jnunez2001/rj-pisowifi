@@ -2,6 +2,49 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { getRates } = require('../services/voucherService');
+const { execSync } = require('child_process');
+
+// Detect client MAC from IP using ARP table
+function getMacFromIp(ip) {
+  try {
+    // Read dnsmasq leases file
+    const leases = require('fs').readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
+    const lines = leases.trim().split('\n');
+    for (const line of lines) {
+      const parts = line.split(' ');
+      // Format: timestamp MAC IP hostname client-id
+      if (parts[2] === ip) {
+        return parts[1].toUpperCase();
+      }
+    }
+  } catch (e) {}
+
+  try {
+    // Fallback: use ARP table
+    const arp = execSync(`arp -n ${ip} 2>/dev/null`).toString();
+    const match = arp.match(/([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2})/i);
+    if (match) return match[1].toUpperCase();
+  } catch (e) {}
+
+  return null;
+}
+
+// GET /api/portal/detect — detect client MAC from IP
+router.get('/detect', (req, res) => {
+  const clientIp = req.headers['x-forwarded-for'] || 
+                   req.connection.remoteAddress ||
+                   req.socket.remoteAddress;
+  
+  // Clean IPv6 prefix
+  const ip = clientIp.replace('::ffff:', '');
+  const mac = getMacFromIp(ip);
+
+  return res.json({
+    success: !!mac,
+    ip,
+    mac: mac || null
+  });
+});
 
 router.get('/rates', (req, res) => {
   try {
