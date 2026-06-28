@@ -23,7 +23,40 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(express.static(path.join(__dirname, '../public')));
 
-// API Routes
+// ── Captive Portal Detection ──────────────────────────────────
+// Redirect root to portal
+app.get('/', (req, res) => {
+  res.redirect('/portal/');
+});
+
+// Android captive portal detection
+app.get('/generate_204', (req, res) => {
+  res.redirect('http://10.0.0.1:3000/portal/');
+});
+app.get('/gen_204', (req, res) => {
+  res.redirect('http://10.0.0.1:3000/portal/');
+});
+
+// iOS/macOS captive portal detection
+app.get('/hotspot-detect.html', (req, res) => {
+  res.redirect('http://10.0.0.1:3000/portal/');
+});
+app.get('/library/test/success.html', (req, res) => {
+  res.redirect('http://10.0.0.1:3000/portal/');
+});
+
+// Windows captive portal detection
+app.get('/ncsi.txt', (req, res) => {
+  res.redirect('http://10.0.0.1:3000/portal/');
+});
+app.get('/connecttest.txt', (req, res) => {
+  res.redirect('http://10.0.0.1:3000/portal/');
+});
+app.get('/redirect', (req, res) => {
+  res.redirect('http://10.0.0.1:3000/portal/');
+});
+
+// ── API Routes ────────────────────────────────────────────────
 app.use('/api/coin', coinRoute);
 app.use('/api/session', sessionRoute);
 app.use('/api/promo', promoRoute);
