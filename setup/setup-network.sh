@@ -82,11 +82,11 @@ cat > /etc/dnsmasq.d/rj-pisowifi.conf << EOF
 interface=$LAN_IF
 dhcp-range=10.0.0.10,10.0.0.200,255.255.255.0,12h
 dhcp-option=3,$GATEWAY_IP
-dhcp-option=6,$GATEWAY_IP
+dhcp-option=6,8.8.8.8
 dhcp-option=114,http://$GATEWAY_IP:3000/portal
-address=/#/$GATEWAY_IP
 no-resolv
 server=8.8.8.8
+server=8.8.4.4
 EOF
 
 dnsmasq --conf-file=/etc/dnsmasq.d/rj-pisowifi.conf >> $LOG 2>&1
@@ -109,8 +109,6 @@ table ip rj_piso {
     chain input {
         type filter hook input priority filter; policy accept;
         iifname "$LAN_IF" udp dport 67 accept
-        iifname "$LAN_IF" udp dport 53 accept
-        iifname "$LAN_IF" tcp dport 53 accept
         iifname "$LAN_IF" tcp dport 3000 accept
         iifname "$LAN_IF" tcp dport 80 accept
     }
@@ -126,7 +124,11 @@ table ip rj_piso {
     }
     chain prerouting {
         type nat hook prerouting priority dstnat; policy accept;
-        iifname "$LAN_IF" tcp dport 80 dnat to $GATEWAY_IP:3000
+        # Redirect DNS to our server for unauthenticated only
+        iifname "$LAN_IF" ether saddr != @allowed_macs udp dport 53 dnat to $GATEWAY_IP:53
+        iifname "$LAN_IF" ether saddr != @allowed_macs tcp dport 53 dnat to $GATEWAY_IP:53
+        # Redirect HTTP to portal for unauthenticated only
+        iifname "$LAN_IF" ether saddr != @allowed_macs tcp dport 80 dnat to $GATEWAY_IP:3000
     }
 }
 NFTEOF
