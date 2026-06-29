@@ -13,7 +13,7 @@
 #define COIN_PIN    4
 #define RELAY_PIN   5
 #define LED_PIN     2
-#define SETUP_BTN   0
+#define SETUP_BTN   13
 
 // ===== LCD =====
 #define LCD_ADDR    0x27
