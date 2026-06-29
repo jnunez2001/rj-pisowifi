@@ -27,7 +27,7 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 // ── Auth cache (avoid calling nft on every request) ───────────
 const authCache = new Map();
-const CACHE_TTL = 10000; // 10 seconds
+const CACHE_TTL = 0; // disabled
 
 // ── Helper: get MAC from IP ───────────────────────────────────
 function getMacFromIp(ip) {
