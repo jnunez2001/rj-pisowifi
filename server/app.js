@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const path = require('path');
+const fs = require('fs');
+const { execSync } = require('child_process');
 
 require('./config/database');
 
@@ -23,7 +25,29 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(express.static(path.join(__dirname, '../public')));
 
+// ── Helper: check if IP is authenticated ─────────────────────
+function isAuthenticated(ip) {
+  try {
+    const leases = fs.readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
+    const line = leases.split('\n').find(l => l.includes(ip));
+    if (!line) return false;
+    const mac = line.split(' ')[1].toLowerCase();
+    const result = execSync('sudo nft list set ip rj_piso allowed_macs 2>/dev/null').toString();
+    return result.includes(mac);
+  } catch(e) {
+    return false;
+  }
+}
+
+function getClientIp(req) {
+  const raw = req.headers['x-forwarded-for'] ||
+              req.connection.remoteAddress ||
+              req.socket.remoteAddress || '';
+  return raw.replace('::ffff:', '').trim();
+}
+
 // ── Captive Portal Detection ──────────────────────────────────
+
 // Redirect root to portal
 app.get('/', (req, res) => {
   res.redirect('/portal/');
@@ -31,27 +55,56 @@ app.get('/', (req, res) => {
 
 // Android captive portal detection
 app.get('/generate_204', (req, res) => {
+  const ip = getClientIp(req);
+  if (isAuthenticated(ip)) {
+    return res.status(204).send();  // No content = authenticated
+  }
   res.redirect('http://10.0.0.1:3000/portal/');
 });
+
 app.get('/gen_204', (req, res) => {
+  const ip = getClientIp(req);
+  if (isAuthenticated(ip)) {
+    return res.status(204).send();
+  }
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
 // iOS/macOS captive portal detection
 app.get('/hotspot-detect.html', (req, res) => {
+  const ip = getClientIp(req);
+  if (isAuthenticated(ip)) {
+    // Tell iOS the network is open — stops captive portal popup
+    return res.send('<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>');
+  }
   res.redirect('http://10.0.0.1:3000/portal/');
 });
+
 app.get('/library/test/success.html', (req, res) => {
+  const ip = getClientIp(req);
+  if (isAuthenticated(ip)) {
+    return res.send('<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>');
+  }
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
 // Windows captive portal detection
 app.get('/ncsi.txt', (req, res) => {
+  const ip = getClientIp(req);
+  if (isAuthenticated(ip)) {
+    return res.send('Microsoft NCSI');
+  }
   res.redirect('http://10.0.0.1:3000/portal/');
 });
+
 app.get('/connecttest.txt', (req, res) => {
+  const ip = getClientIp(req);
+  if (isAuthenticated(ip)) {
+    return res.send('Microsoft Connect Test');
+  }
   res.redirect('http://10.0.0.1:3000/portal/');
 });
+
 app.get('/redirect', (req, res) => {
   res.redirect('http://10.0.0.1:3000/portal/');
 });
