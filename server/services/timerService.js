@@ -1,5 +1,8 @@
 const cron = require('node-cron');
 
+// Track sessions being expired to prevent double expiry
+const expiringNow = new Set();
+
 async function restoreActiveSessions() {
   try {
     const db = require('../config/database');
@@ -49,13 +52,18 @@ function startTimer() {
         AND is_paused = 0
       `).all(now);
 
-      if (expiredSessions.length > 0) {
-        console.log(`⏰ Found ${expiredSessions.length} expired session(s)`);
-      }
-
       for (const session of expiredSessions) {
+        // Skip if already being expired
+        if (expiringNow.has(session.voucher_code)) continue;
+
+        expiringNow.add(session.voucher_code);
         console.log(`⏰ Expiring: ${session.voucher_code} (${session.mac_address})`);
-        await expireSession(session.voucher_code);
+
+        try {
+          await expireSession(session.voucher_code);
+        } finally {
+          expiringNow.delete(session.voucher_code);
+        }
       }
 
       // Update minutes_remaining for active sessions
