@@ -75,10 +75,8 @@ systemctl disable nftables >> $LOG 2>&1 || true
 systemctl disable nodogsplash >> $LOG 2>&1 || true
 systemctl stop nodogsplash >> $LOG 2>&1 || true
 
-# Disable UFW — we use nftables directly
-systemctl disable ufw >> $LOG 2>&1 || true
-systemctl stop ufw >> $LOG 2>&1 || true
-ufw disable >> $LOG 2>&1 || true
+# Remove UFW completely — we use nftables directly
+apt purge ufw -y >> $LOG 2>&1 || true
 
 # ─── 7. CREATE NEEDED FOLDERS ────────────────────────────────
 echo "Creating folders..." | tee -a $LOG

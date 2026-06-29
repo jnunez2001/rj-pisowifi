@@ -36,6 +36,11 @@ pkill nodogsplash 2>/dev/null || true
 systemctl stop nodogsplash 2>/dev/null || true
 systemctl disable nodogsplash 2>/dev/null || true
 
+# ── DISABLE UFW PERMANENTLY ───────────────────────────────────
+systemctl stop ufw 2>/dev/null || true
+systemctl disable ufw 2>/dev/null || true
+iptables -F 2>/dev/null || true
+
 # ── CLEAN ALL OLD NODOGSPLASH IPTABLES CHAINS ─────────────────
 iptables -D INPUT -j ndsRTR 2>/dev/null || true
 iptables -D FORWARD -j ndsNET 2>/dev/null || true
@@ -80,6 +85,7 @@ rm -f /var/lib/misc/dnsmasq.leases
 
 cat > /etc/dnsmasq.d/rj-pisowifi.conf << EOF
 interface=$LAN_IF
+bind-interfaces
 dhcp-range=10.0.0.10,10.0.0.200,255.255.255.0,12h
 dhcp-option=3,$GATEWAY_IP
 dhcp-option=6,8.8.8.8
@@ -95,11 +101,9 @@ echo "dnsmasq started" >> $LOG
 # ── NFTABLES CAPTIVE PORTAL ───────────────────────────────────
 if [ "$NETWORK_MODE" = "nodogsplash" ]; then
 
-    # Clean existing nftables rj_piso table
     nft delete table ip rj_piso 2>/dev/null || true
     sleep 1
 
-    # Create nftables rules
     cat > /tmp/rj-piso.nft << NFTEOF
 table ip rj_piso {
     set allowed_macs {
@@ -124,10 +128,8 @@ table ip rj_piso {
     }
     chain prerouting {
         type nat hook prerouting priority dstnat; policy accept;
-        # Redirect DNS to our server for unauthenticated only
         iifname "$LAN_IF" ether saddr != @allowed_macs udp dport 53 dnat to $GATEWAY_IP:53
         iifname "$LAN_IF" ether saddr != @allowed_macs tcp dport 53 dnat to $GATEWAY_IP:53
-        # Redirect HTTP to portal for unauthenticated only
         iifname "$LAN_IF" ether saddr != @allowed_macs tcp dport 80 dnat to $GATEWAY_IP:3000
     }
 }
@@ -139,5 +141,28 @@ NFTEOF
 elif [ "$NETWORK_MODE" = "mikrotik" ]; then
     echo "MikroTik mode" >> $LOG
 fi
+
+# ── SAVE NFTABLES FOR REBOOT ──────────────────────────────────
+nft list ruleset > /etc/nftables-rj.nft
+echo "nftables rules saved" >> $LOG
+
+# ── INSTALL NFTABLES RESTORE SERVICE ─────────────────────────
+cat > /etc/systemd/system/rj-nftables-restore.service << EOF2
+[Unit]
+Description=R&J PisoWifi nftables restore
+After=network.target
+Before=rj-network-setup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/nft -f /etc/nftables-rj.nft
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF2
+systemctl daemon-reload >> $LOG 2>&1
+systemctl enable rj-nftables-restore >> $LOG 2>&1
+echo "nftables restore service installed" >> $LOG
 
 echo "=== Setup complete ===" >> $LOG
