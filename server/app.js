@@ -25,13 +25,30 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(express.static(path.join(__dirname, '../public')));
 
-// ── Helper: check if IP is authenticated ─────────────────────
-function isAuthenticated(ip) {
+// ── Helper: get MAC from IP ───────────────────────────────────
+function getMacFromIp(ip) {
+  // Try ARP table first (most reliable)
+  try {
+    const arp = execSync(`ip neigh show ${ip} 2>/dev/null`).toString().trim();
+    const match = arp.match(/lladdr\s+([0-9a-f:]{17})/i);
+    if (match) return match[1].toLowerCase();
+  } catch(e) {}
+
+  // Fallback: dnsmasq leases file
   try {
     const leases = fs.readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
     const line = leases.split('\n').find(l => l.includes(ip));
-    if (!line) return false;
-    const mac = line.split(' ')[1].toLowerCase();
+    if (line) return line.split(' ')[1].toLowerCase();
+  } catch(e) {}
+
+  return null;
+}
+
+// ── Helper: check if IP is authenticated ─────────────────────
+function isAuthenticated(ip) {
+  try {
+    const mac = getMacFromIp(ip);
+    if (!mac) return false;
     const result = execSync('sudo nft list set ip rj_piso allowed_macs 2>/dev/null').toString();
     return result.includes(mac);
   } catch(e) {
@@ -57,7 +74,7 @@ app.get('/', (req, res) => {
 app.get('/generate_204', (req, res) => {
   const ip = getClientIp(req);
   if (isAuthenticated(ip)) {
-    return res.status(204).send();  // No content = authenticated
+    return res.status(204).send();
   }
   res.redirect('http://10.0.0.1:3000/portal/');
 });
@@ -74,7 +91,6 @@ app.get('/gen_204', (req, res) => {
 app.get('/hotspot-detect.html', (req, res) => {
   const ip = getClientIp(req);
   if (isAuthenticated(ip)) {
-    // Tell iOS the network is open — stops captive portal popup
     return res.send('<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>');
   }
   res.redirect('http://10.0.0.1:3000/portal/');
