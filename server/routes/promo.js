@@ -7,8 +7,7 @@ const {
 } = require('../services/sessionService');
 
 // POST /api/promo/redeem
-// Customer redeems a promo code
-router.post('/redeem', (req, res) => {
+router.post('/redeem', async (req, res) => {
   try {
     const { mac, code, ip } = req.body;
 
@@ -19,11 +18,15 @@ router.post('/redeem', (req, res) => {
       });
     }
 
+    // Normalize code — accept with or without dash
+    const raw = code.trim().toUpperCase();
+    const normalized = raw.includes('-') ? raw : raw.replace(/^(PROMO|RJ)/, '$1-');
+
     // Find promo voucher
     const promo = db.prepare(`
       SELECT * FROM promo_vouchers 
       WHERE code = ? AND status = 'unused'
-    `).get(code.toUpperCase());
+    `).get(normalized);
 
     if (!promo) {
       return res.status(404).json({
@@ -41,13 +44,14 @@ router.post('/redeem', (req, res) => {
       });
     }
 
-    // Calculate minutes from days
-    const minutes = promo.duration_days * 24 * 60;
+    // duration_days stores fractional days (minutes / 1440)
+    const minutes = Math.round(promo.duration_days * 1440);
+    const expirationMinutes = minutes;
 
     // Create session
-    const session = createSession(mac, ip || '', minutes);
+    const session = await createSession(mac, ip || '', minutes, expirationMinutes);
 
-    // Mark promo as active
+    // Mark promo as used
     const expiresAt = new Date(
       Date.now() + minutes * 60 * 1000
     ).toISOString();
@@ -56,24 +60,22 @@ router.post('/redeem', (req, res) => {
       UPDATE promo_vouchers 
       SET status = 'active', mac_address = ?, expires_at = ?
       WHERE code = ?
-    `).run(mac, expiresAt, code.toUpperCase());
+    `).run(mac, expiresAt, normalized);
 
     // Log transaction
     db.prepare(`
       INSERT INTO transactions 
       (voucher_code, coin_value, minutes_added, type)
       VALUES (?, ?, ?, 'promo')
-    `).run(session.voucher_code, promo.price, minutes);
+    `).run(session.voucher_code, promo.price || 0, minutes);
 
-    console.log(
-      `🎫 Promo redeemed: ${code} for ${mac}`
-    );
+    console.log(`🎫 Promo redeemed: ${normalized} for ${mac}`);
 
     return res.json({
       success: true,
       action: 'promo_redeemed',
       voucher_code: session.voucher_code,
-      duration_days: promo.duration_days,
+      minutes_added: minutes,
       expires_at: expiresAt
     });
 

@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
 
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { mac, coin_value, ip } = req.body;
 
@@ -29,11 +29,8 @@ router.post('/', (req, res) => {
     const { getSessionByMac, createSession, addTimeToSession } = require('../services/sessionService');
 
     // ===== SMART COIN MATCHING =====
-    // Get all rates sorted descending by coin_value
     const allRates = getRates().sort((a, b) => b.coin_value - a.coin_value);
 
-    // Break coin_value into matching rates greedily
-    // e.g. ₱3 → ₱1 x3, ₱7 → ₱5 x1 + ₱1 x2
     let remaining = coin_value;
     const matchedRates = [];
 
@@ -46,7 +43,6 @@ router.post('/', (req, res) => {
       }
     }
 
-    // Nothing matched at all — truly invalid coin
     if (matchedRates.length === 0 || remaining === coin_value) {
       const attempt = recordAttempt(mac);
       return res.status(400).json({
@@ -60,10 +56,8 @@ router.post('/', (req, res) => {
       });
     }
 
-    // Valid coin — clear spam counter
     clearAttempts(mac);
 
-   // Calculate total minutes and sum all expiration windows
     let totalMinutes = 0;
     let totalExpirationMinutes = 0;
 
@@ -72,17 +66,15 @@ router.post('/', (req, res) => {
       totalExpirationMinutes += rate.expiration_minutes * times;
     }
 
-    // Log what we matched
     const matchLog = matchedRates
       .map(({ rate, times }) => `₱${rate.coin_value}x${times}`)
       .join(' + ');
     console.log(`💡 ₱${coin_value} matched as: ${matchLog} = ${totalMinutes} mins`);
 
-    // Process session
     const existingSession = getSessionByMac(mac);
 
     if (existingSession) {
-      const updated = addTimeToSession(mac, totalMinutes, totalExpirationMinutes);
+      const updated = await addTimeToSession(mac, totalMinutes, totalExpirationMinutes);
 
       db.prepare(`
         INSERT INTO transactions 
@@ -104,7 +96,7 @@ router.post('/', (req, res) => {
       });
 
     } else {
-      const session = createSession(mac, ip || '', totalMinutes, totalExpirationMinutes);
+      const session = await createSession(mac, ip || '', totalMinutes, totalExpirationMinutes);
 
       db.prepare(`
         INSERT INTO transactions 
@@ -136,7 +128,6 @@ router.post('/', (req, res) => {
 router.get('/status/:mac', (req, res) => {
   const { mac } = req.params;
   const spamCheck = checkSpam(mac);
-  const { getSessionByMac } = require('../services/sessionService');
 
   const maxAttempts = db.prepare(
     "SELECT value FROM settings WHERE key = 'spam_max_attempts'"

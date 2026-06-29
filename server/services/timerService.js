@@ -1,7 +1,7 @@
 const cron = require('node-cron');
 
 function startTimer() {
-  cron.schedule('*/30 * * * * *', () => {
+  cron.schedule('*/30 * * * * *', async () => {
     try {
       const db = require('../config/database');
       const { expireSession } = require('./sessionService');
@@ -13,10 +13,10 @@ function startTimer() {
         WHERE expires_at <= ? AND status = 'active'
       `).all(now);
 
-      expiredSessions.forEach(session => {
+      for (const session of expiredSessions) {
         console.log(`⏰ Session expired: ${session.voucher_code}`);
-        expireSession(session.voucher_code);
-      });
+        await expireSession(session.voucher_code);
+      }
 
       const activeSessions = db.prepare(`
         SELECT * FROM sessions WHERE status = 'active'

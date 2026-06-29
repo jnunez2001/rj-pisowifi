@@ -9,7 +9,7 @@ const {
 } = require('../services/sessionService');
 
 // GET /api/session/mac/:mac
-router.get('/mac/:mac', (req, res) => {
+router.get('/mac/:mac', async (req, res) => {
   try {
     const { mac } = req.params;
     const session = getSessionByMac(mac);
@@ -25,9 +25,8 @@ router.get('/mac/:mac', (req, res) => {
     const now = new Date();
     const hardExpires = new Date(session.hard_expires_at);
 
-    // Check hard expiration
     if (now >= hardExpires && session.is_paused === 0) {
-      expireSession(session.voucher_code);
+      await expireSession(session.voucher_code);
       return res.json({
         success: false,
         active: false,
@@ -72,10 +71,7 @@ router.get('/voucher/:code', (req, res) => {
 
     const remaining = session.is_paused === 1
       ? session.minutes_remaining
-      : Math.max(
-          0,
-          (new Date(session.expires_at) - new Date()) / 60000
-        );
+      : Math.max(0, (new Date(session.expires_at) - new Date()) / 60000);
 
     return res.json({
       success: true,
@@ -163,7 +159,7 @@ router.post('/resume', (req, res) => {
 });
 
 // POST /api/session/cancel
-router.post('/cancel', (req, res) => {
+router.post('/cancel', async (req, res) => {
   try {
     const { voucher_code } = req.body;
     if (!voucher_code) {
@@ -173,7 +169,7 @@ router.post('/cancel', (req, res) => {
       });
     }
 
-    expireSession(voucher_code);
+    await expireSession(voucher_code);
     console.log(`❌ Cancelled: ${voucher_code}`);
 
     return res.json({
@@ -186,14 +182,13 @@ router.post('/cancel', (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
 // GET /api/session/free-claim/status/:mac
-// Check if MAC already claimed free minutes today
 router.get('/free-claim/status/:mac', (req, res) => {
   try {
     const { mac } = req.params;
     const db = require('../config/database');
 
-    // Check if feature is enabled
     const enabled = db.prepare(
       "SELECT value FROM settings WHERE key = 'free_minutes_enabled'"
     ).get()?.value || '1';
@@ -202,7 +197,6 @@ router.get('/free-claim/status/:mac', (req, res) => {
       return res.json({ success: true, eligible: false, reason: 'disabled' });
     }
 
-    // Check if already claimed today
     const today = new Date().toISOString().split('T')[0];
     const existing = db.prepare(`
       SELECT id FROM free_claims
@@ -223,8 +217,7 @@ router.get('/free-claim/status/:mac', (req, res) => {
 });
 
 // POST /api/session/free-claim
-// Claim free minutes — only for disconnected customers
-router.post('/free-claim', (req, res) => {
+router.post('/free-claim', async (req, res) => {
   try {
     const { mac, ip } = req.body;
     const db = require('../config/database');
@@ -233,7 +226,6 @@ router.post('/free-claim', (req, res) => {
       return res.status(400).json({ success: false, message: 'MAC address required' });
     }
 
-    // Check if feature is enabled
     const enabled = db.prepare(
       "SELECT value FROM settings WHERE key = 'free_minutes_enabled'"
     ).get()?.value || '1';
@@ -242,7 +234,6 @@ router.post('/free-claim', (req, res) => {
       return res.status(403).json({ success: false, message: 'Free minutes not available' });
     }
 
-    // Check if already claimed today
     const today = new Date().toISOString().split('T')[0];
     const existing = db.prepare(`
       SELECT id FROM free_claims
@@ -257,7 +248,6 @@ router.post('/free-claim', (req, res) => {
       });
     }
 
-    // Check if already has active session — only for disconnected
     const { getSessionByMac, createSession } = require('../services/sessionService');
     const existingSession = getSessionByMac(mac);
 
@@ -268,21 +258,14 @@ router.post('/free-claim', (req, res) => {
       });
     }
 
-    // Get free minutes amount from settings
     const freeMinutes = parseInt(
       db.prepare("SELECT value FROM settings WHERE key = 'free_minutes_amount'").get()?.value || '5'
     );
 
-    // Create session with free minutes
-    // Expiration = free minutes (no buffer needed, it's free)
-    const session = createSession(mac, ip || '', freeMinutes, freeMinutes);
+    const session = await createSession(mac, ip || '', freeMinutes, freeMinutes);
 
-    // Record the claim
-    db.prepare(`
-      INSERT INTO free_claims (mac_address) VALUES (?)
-    `).run(mac);
+    db.prepare(`INSERT INTO free_claims (mac_address) VALUES (?)`).run(mac);
 
-    // Record as transaction
     db.prepare(`
       INSERT INTO transactions (voucher_code, coin_value, minutes_added, type)
       VALUES (?, 0, ?, 'free')

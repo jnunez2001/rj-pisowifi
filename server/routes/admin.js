@@ -32,8 +32,10 @@ const upload = multer({
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
-const { getActiveSessions, expireSession } = require('../services/sessionService');
+const { getActiveSessions, expireSession, allowClient } = require('../services/sessionService');
 const { getRates } = require('../services/voucherService');
+const os = require('os');
+const { exec, execSync } = require('child_process');
 
 // Admin auth middleware
 function adminAuth(req, res, next) {
@@ -63,10 +65,10 @@ router.get('/sessions', adminAuth, (req, res) => {
 });
 
 // DELETE /api/admin/session/:code
-router.delete('/session/:code', adminAuth, (req, res) => {
+router.delete('/session/:code', adminAuth, async (req, res) => {
   try {
     const { code } = req.params;
-    expireSession(code);
+    await expireSession(code);
     console.log(`✂️ Admin cut session: ${code}`);
     return res.json({ success: true, message: `Session ${code} terminated` });
   } catch (err) {
@@ -76,7 +78,7 @@ router.delete('/session/:code', adminAuth, (req, res) => {
 });
 
 // POST /api/admin/session/:code/addtime
-router.post('/session/:code/addtime', adminAuth, (req, res) => {
+router.post('/session/:code/addtime', adminAuth, async (req, res) => {
   try {
     const { code } = req.params;
     const { minutes } = req.body;
@@ -94,8 +96,19 @@ router.post('/session/:code/addtime', adminAuth, (req, res) => {
     db.prepare(`
       UPDATE sessions SET minutes_remaining = ?, expires_at = ? WHERE voucher_code = ?
     `).run(newMinutes, newExpiresAt, code);
+
+    // Ensure MAC is unlocked (in case of reboot)
+    try {
+      const { allowClient } = require('../services/networkService');
+      await allowClient(session.mac_address);
+    } catch(e) {}
+
     console.log(`➕ Admin added ${minutes} mins to ${code}`);
-    return res.json({ success: true, message: `Added ${minutes} minutes to ${code}`, minutes_remaining: newMinutes });
+    return res.json({
+      success: true,
+      message: `Added ${minutes} minutes to ${code}`,
+      minutes_remaining: newMinutes
+    });
   } catch (err) {
     console.error('Admin addtime error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -107,25 +120,21 @@ router.get('/sales', adminAuth, (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
 
-    // Coin income
     const todaySales = db.prepare(`
       SELECT COUNT(*) as transaction_count, SUM(coin_value) as total_coins, SUM(minutes_added) as total_minutes
       FROM transactions WHERE date(created_at) = ? AND type = 'coin'
     `).get(today);
 
-    // Promo income
     const todayPromo = db.prepare(`
       SELECT COUNT(*) as promo_count, SUM(coin_value) as promo_income
       FROM transactions WHERE date(created_at) = ? AND type = 'promo'
     `).get(today);
 
-    // Free claims today
     const todayFree = db.prepare(`
       SELECT COUNT(*) as free_count, SUM(minutes_added) as free_minutes
       FROM transactions WHERE date(created_at) = ? AND type = 'free'
     `).get(today);
 
-    // Week sales (coin + promo only, no free)
     const weekSales = db.prepare(`
       SELECT date(created_at) as date,
         SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as total,
@@ -134,7 +143,6 @@ router.get('/sales', adminAuth, (req, res) => {
       GROUP BY date(created_at) ORDER BY date DESC
     `).all();
 
-    // Recent transactions
     const recent = db.prepare(`
       SELECT * FROM transactions ORDER BY created_at DESC LIMIT 20
     `).all();
@@ -181,11 +189,14 @@ router.post('/promos', adminAuth, (req, res) => {
     if (!minutes || !price) {
       return res.status(400).json({ success: false, message: 'Duration and price required' });
     }
+
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let code = 'PROMO-';
     for (let i = 0; i < 6; i++) {
       code += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+
+    // Store as fractional days for backward compat
     const durationDays = minutes / 1440;
     db.prepare('INSERT INTO promo_vouchers (code, duration_days, price) VALUES (?, ?, ?)').run(code, durationDays, price);
     console.log(`🎫 Promo created: ${code} — ${minutes} mins`);
@@ -397,7 +408,6 @@ router.post('/restore', adminAuth, (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid backup file' });
     }
 
-    // Restore settings
     if (backup.settings) {
       const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
       for (const [key, value] of Object.entries(backup.settings)) {
@@ -405,7 +415,6 @@ router.post('/restore', adminAuth, (req, res) => {
       }
     }
 
-    // Restore rates
     if (backup.rates && backup.rates.length > 0) {
       db.prepare('DELETE FROM rates').run();
       const insertRate = db.prepare(
@@ -416,7 +425,6 @@ router.post('/restore', adminAuth, (req, res) => {
       }
     }
 
-    // Restore promo vouchers
     if (backup.promo_vouchers && backup.promo_vouchers.length > 0) {
       db.prepare('DELETE FROM promo_vouchers').run();
       const insertPromo = db.prepare(
@@ -427,7 +435,6 @@ router.post('/restore', adminAuth, (req, res) => {
       }
     }
 
-    // Restore transactions
     if (backup.transactions && backup.transactions.length > 0) {
       db.prepare('DELETE FROM transactions').run();
       const insertTx = db.prepare(
@@ -445,34 +452,28 @@ router.post('/restore', adminAuth, (req, res) => {
     res.status(500).json({ success: false, message: 'Restore failed' });
   }
 });
-// GET /api/admin/sysinfo
-const os = require('os');
-const { execSync } = require('child_process');
 
+// GET /api/admin/sysinfo
 router.get('/sysinfo', adminAuth, (req, res) => {
   try {
     const cpus = os.cpus();
 
-    // CPU usage per core
     const cpuUsage = cpus.map(cpu => {
       const total = Object.values(cpu.times).reduce((a, b) => a + b, 0);
       const idle = cpu.times.idle;
       return Math.round((1 - idle / total) * 100);
     });
 
-    // RAM
     const totalMem = os.totalmem();
     const freeMem = os.freemem();
     const usedMem = totalMem - freeMem;
 
-    // Uptime
     const uptimeSecs = os.uptime();
     const days = Math.floor(uptimeSecs / 86400);
     const hours = Math.floor((uptimeSecs % 86400) / 3600);
     const mins = Math.floor((uptimeSecs % 3600) / 60);
     const uptime = `${days}d ${hours}h ${mins}m`;
 
-    // IP Address
     const nets = os.networkInterfaces();
     let ipAddress = 'N/A';
     for (const name of Object.keys(nets)) {
@@ -485,13 +486,11 @@ router.get('/sysinfo', adminAuth, (req, res) => {
       if (ipAddress !== 'N/A') break;
     }
 
-    // Machine ID
     let machineId = 'N/A';
     try {
       machineId = fs.readFileSync('/etc/machine-id', 'utf8').trim();
     } catch(e) {}
 
-    // Gateway
     let gateway = 'N/A';
     try {
       const route = execSync('ip route show default', { timeout: 2000 }).toString();
@@ -499,7 +498,6 @@ router.get('/sysinfo', adminAuth, (req, res) => {
       if (match) gateway = match[1];
     } catch(e) {}
 
-    // Storage
     let storage = { total: 'N/A', used: 'N/A', free: 'N/A', percent: 0 };
     try {
       const df = execSync('df -h / --output=size,used,avail,pcent', { timeout: 2000 }).toString();
@@ -515,7 +513,6 @@ router.get('/sysinfo', adminAuth, (req, res) => {
       }
     } catch(e) {}
 
-    // License from settings
     const licenseSetting = db.prepare(
       "SELECT value FROM settings WHERE key = 'license'"
     ).get();
@@ -540,7 +537,7 @@ router.get('/sysinfo', adminAuth, (req, res) => {
         version: 'v' + require('../../package.json').version,
         license
       }
-    });dashboard.js
+    });
 
   } catch (err) {
     console.error('Sysinfo error:', err);
@@ -557,7 +554,6 @@ router.post('/vendo/register', (req, res) => {
       return res.status(400).json({ success: false, message: 'MAC and name required' });
     }
 
-    // Upsert vendo
     db.prepare(`
       INSERT INTO vendos (mac_address, name, ip_address, firmware, last_seen)
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -568,14 +564,12 @@ router.post('/vendo/register', (req, res) => {
         last_seen = CURRENT_TIMESTAMP
     `).run(mac, name, ip || '', version || '');
 
-    // Save vendo IP to settings so portal can call relay
     if (ip) {
       db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
         .run('vendo_ip', ip);
     }
 
     console.log(`📡 Vendo registered: ${name} (${mac}) at ${ip}`);
-
     return res.json({ success: true, message: 'Vendo registered' });
 
   } catch (err) {
@@ -587,10 +581,7 @@ router.post('/vendo/register', (req, res) => {
 // GET /api/admin/vendos
 router.get('/vendos', adminAuth, (req, res) => {
   try {
-    const vendos = db.prepare(`
-      SELECT * FROM vendos ORDER BY last_seen DESC
-    `).all();
-
+    const vendos = db.prepare(`SELECT * FROM vendos ORDER BY last_seen DESC`).all();
     return res.json({ success: true, vendos });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -598,15 +589,11 @@ router.get('/vendos', adminAuth, (req, res) => {
 });
 
 // GET /api/admin/check-update
-const { exec } = require('child_process');
-
 router.get('/check-update', adminAuth, async (req, res) => {
   try {
-    // Get current version from package.json
     const pkg = require('../../package.json');
     const currentVersion = pkg.version;
 
-    // Check GitHub for latest release
     const https = require('https');
     const options = {
       hostname: 'api.github.com',
@@ -622,7 +609,6 @@ router.get('/check-update', adminAuth, async (req, res) => {
           const release = JSON.parse(data);
           const latestVersion = release.tag_name?.replace('v', '') || currentVersion;
           const hasUpdate = latestVersion !== currentVersion;
-
           return res.json({
             success: true,
             current_version: currentVersion,
@@ -659,15 +645,10 @@ router.get('/check-update', adminAuth, async (req, res) => {
 // POST /api/admin/install-update
 router.post('/install-update', adminAuth, (req, res) => {
   const appDir = process.cwd();
-
   res.json({ success: true, message: 'Update started! Server will restart shortly.' });
-
   setTimeout(() => {
     exec(`cd ${appDir} && git pull`, (err, stdout) => {
-      if (err) {
-        console.error('Git pull error:', err);
-        return;
-      }
+      if (err) { console.error('Git pull error:', err); return; }
       console.log('Git pull:', stdout);
       exec('sudo systemctl restart rj-pisowifi', (err) => {
         if (err) console.error('Restart error:', err);
@@ -687,44 +668,18 @@ router.get('/version', adminAuth, (req, res) => {
 router.post('/network', adminAuth, (req, res) => {
   try {
     const { type, ip, gateway, dns, subnet } = req.body;
-
     let netplanConfig = '';
 
     if (type === 'dhcp') {
-      netplanConfig = `network:
-  ethernets:
-    enp0s3:
-      dhcp4: true
-  version: 2
-`;
+      netplanConfig = `network:\n  ethernets:\n    enp0s3:\n      dhcp4: true\n  version: 2\n`;
     } else {
-      netplanConfig = `network:
-  ethernets:
-    enp0s3:
-      dhcp4: false
-      addresses:
-        - ${ip}/${subnet || '24'}
-      routes:
-        - to: default
-          via: ${gateway}
-      nameservers:
-        addresses:
-          - ${dns || '8.8.8.8'}
-          - 8.8.4.4
-  version: 2
-`;
+      netplanConfig = `network:\n  ethernets:\n    enp0s3:\n      dhcp4: false\n      addresses:\n        - ${ip}/${subnet || '24'}\n      routes:\n        - to: default\n          via: ${gateway}\n      nameservers:\n        addresses:\n          - ${dns || '8.8.8.8'}\n          - 8.8.4.4\n  version: 2\n`;
     }
 
-    // Write netplan config
-    const fs = require('fs');
     fs.writeFileSync('/tmp/rj-network.yaml', netplanConfig);
-
-    // Apply using shell
-    const { execSync } = require('child_process');
     execSync('sudo cp /tmp/rj-network.yaml /etc/netplan/50-cloud-init.yaml');
     execSync('sudo netplan apply');
 
-    // Save to settings for reference
     const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
     upsert.run('network_type', type);
     upsert.run('static_ip', ip || '');
@@ -734,7 +689,6 @@ router.post('/network', adminAuth, (req, res) => {
 
     console.log(`🌐 Network changed to: ${type}`);
     return res.json({ success: true, message: `Network set to ${type}` });
-
   } catch(err) {
     console.error('Network error:', err);
     res.status(500).json({ success: false, message: 'Failed to apply network settings' });
