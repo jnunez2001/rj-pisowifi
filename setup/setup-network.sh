@@ -39,7 +39,6 @@ systemctl disable nodogsplash 2>/dev/null || true
 # ── DISABLE UFW PERMANENTLY ───────────────────────────────────
 systemctl stop ufw 2>/dev/null || true
 systemctl disable ufw 2>/dev/null || true
-iptables -F 2>/dev/null || true
 
 # ── CLEAN ALL OLD NODOGSPLASH IPTABLES CHAINS ─────────────────
 iptables -D INPUT -j ndsRTR 2>/dev/null || true
