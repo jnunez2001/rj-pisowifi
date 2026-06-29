@@ -25,16 +25,18 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(express.static(path.join(__dirname, '../public')));
 
+// ── Auth cache (avoid calling nft on every request) ───────────
+const authCache = new Map();
+const CACHE_TTL = 10000; // 10 seconds
+
 // ── Helper: get MAC from IP ───────────────────────────────────
 function getMacFromIp(ip) {
-  // Try ARP table first (most reliable)
   try {
     const arp = execSync(`ip neigh show ${ip} 2>/dev/null`).toString().trim();
     const match = arp.match(/lladdr\s+([0-9a-f:]{17})/i);
     if (match) return match[1].toLowerCase();
   } catch(e) {}
 
-  // Fallback: dnsmasq leases file
   try {
     const leases = fs.readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
     const line = leases.split('\n').find(l => l.includes(ip));
@@ -44,13 +46,28 @@ function getMacFromIp(ip) {
   return null;
 }
 
-// ── Helper: check if IP is authenticated ─────────────────────
+// ── Helper: check if IP is authenticated (cached) ────────────
 function isAuthenticated(ip) {
   try {
+    // Check cache first
+    const cached = authCache.get(ip);
+    if (cached && Date.now() - cached.time < CACHE_TTL) {
+      return cached.result;
+    }
+
     const mac = getMacFromIp(ip);
-    if (!mac) return false;
-    const result = execSync('sudo nft list set ip rj_piso allowed_macs 2>/dev/null').toString();
-    return result.includes(mac);
+    if (!mac) {
+      authCache.set(ip, { result: false, time: Date.now() });
+      return false;
+    }
+
+    const result = execSync(
+      'sudo nft list set ip rj_piso allowed_macs 2>/dev/null'
+    ).toString();
+    const isAuth = result.includes(mac);
+
+    authCache.set(ip, { result: isAuth, time: Date.now() });
+    return isAuth;
   } catch(e) {
     return false;
   }
@@ -65,29 +82,22 @@ function getClientIp(req) {
 
 // ── Captive Portal Detection ──────────────────────────────────
 
-// Redirect root to portal
 app.get('/', (req, res) => {
   res.redirect('/portal/');
 });
 
-// Android captive portal detection
 app.get('/generate_204', (req, res) => {
   const ip = getClientIp(req);
-  if (isAuthenticated(ip)) {
-    return res.status(204).send();
-  }
+  if (isAuthenticated(ip)) return res.status(204).send();
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
 app.get('/gen_204', (req, res) => {
   const ip = getClientIp(req);
-  if (isAuthenticated(ip)) {
-    return res.status(204).send();
-  }
+  if (isAuthenticated(ip)) return res.status(204).send();
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
-// iOS/macOS captive portal detection
 app.get('/hotspot-detect.html', (req, res) => {
   const ip = getClientIp(req);
   if (isAuthenticated(ip)) {
@@ -104,20 +114,15 @@ app.get('/library/test/success.html', (req, res) => {
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
-// Windows captive portal detection
 app.get('/ncsi.txt', (req, res) => {
   const ip = getClientIp(req);
-  if (isAuthenticated(ip)) {
-    return res.send('Microsoft NCSI');
-  }
+  if (isAuthenticated(ip)) return res.send('Microsoft NCSI');
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
 app.get('/connecttest.txt', (req, res) => {
   const ip = getClientIp(req);
-  if (isAuthenticated(ip)) {
-    return res.send('Microsoft Connect Test');
-  }
+  if (isAuthenticated(ip)) return res.send('Microsoft Connect Test');
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
