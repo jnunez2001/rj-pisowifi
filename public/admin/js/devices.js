@@ -12,7 +12,7 @@ function timeAgo(dateStr) {
 
 function isOnline(lastSeen) {
   const diff = (new Date() - new Date(lastSeen)) / 1000;
-  return diff < 120; // online if seen within 2 minutes
+  return diff < 180; // online if seen within 3 minutes
 }
 
 async function loadDevices() {
@@ -88,3 +88,6 @@ async function loadDevices() {
     console.error('Devices error:', e);
   }
 }
+
+// Auto refresh every 30 seconds
+setInterval(loadDevices, 30000);

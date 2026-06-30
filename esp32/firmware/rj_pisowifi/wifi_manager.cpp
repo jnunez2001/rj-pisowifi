@@ -2,6 +2,8 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 
+unsigned long lastHeartbeat = 0;
+
 bool connectWiFi() {
   if (config.wifi_ssid.isEmpty()) return false;
 
@@ -53,7 +55,7 @@ void registerVendo() {
   if (config.server_ip.isEmpty()) return;
 
   String url = "http://" + config.server_ip + ":" +
-             String(config.server_port) + "/api/admin/vendo/register";
+               String(config.server_port) + "/api/admin/vendo/register";
 
   HTTPClient http;
   http.begin(url);
@@ -80,6 +82,14 @@ void checkWiFiReconnect() {
     connectWiFi();
     if (WiFi.status() == WL_CONNECTED) {
       registerVendo();
+      lastHeartbeat = millis();
+    }
+  } else {
+    // Send heartbeat every 60 seconds to stay Online in admin panel
+    if (millis() - lastHeartbeat >= 60000) {
+      Serial.println("Sending heartbeat...");
+      registerVendo();
+      lastHeartbeat = millis();
     }
   }
 }
