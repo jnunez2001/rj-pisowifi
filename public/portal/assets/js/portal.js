@@ -199,11 +199,27 @@ async function deactivateVendoRelay() {
   } catch(e) {}
 }
 
+async function registerPendingCoin() {
+  const mac = getMac();
+  if (!mac) return;
+  try {
+    await fetch(`${SERVER}/api/coin/pending`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac })
+    });
+    console.log('Pending coin registered for', mac);
+  } catch(e) {
+    console.log('Failed to register pending coin');
+  }
+}
+
 function handleInsertCoin() {
   if (isBlocked) return;
   playSound('insert');
   document.getElementById('coinModal').classList.add('show');
   startCoinTimer();
+  registerPendingCoin();
   activateVendoRelay();
 }
 

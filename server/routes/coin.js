@@ -3,14 +3,52 @@ const router = express.Router();
 const db = require('../config/database');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
 
+// In-memory store of which MAC is currently "pending" a coin insertion.
+// Single-vendo setup: only one pending slot needed at a time.
+let pendingCoinMac = null;
+let pendingSetAt = 0;
+const PENDING_TIMEOUT_MS = 40000; // must match/slightly exceed portal's 30s coin timer
+
+// POST /api/coin/pending — portal calls this right when INSERT COIN modal opens
+router.post('/pending', (req, res) => {
+  const { mac } = req.body;
+  if (!mac) {
+    return res.status(400).json({ success: false, message: 'MAC required' });
+  }
+  pendingCoinMac = mac;
+  pendingSetAt = Date.now();
+  console.log(`⏳ Pending coin registered for ${mac}`);
+  return res.json({ success: true });
+});
+
+// POST /api/coin — ESP32 calls this when a coin is detected
 router.post('/', async (req, res) => {
   try {
-    const { mac, coin_value, ip } = req.body;
+    const { mac: deviceMac, coin_value, ip } = req.body;
 
-    if (!mac || !coin_value) {
+    if (!coin_value) {
       return res.status(400).json({
         success: false,
-        message: 'MAC address and coin value required'
+        message: 'Coin value required'
+      });
+    }
+
+    // Determine the customer MAC: use pending MAC if still valid,
+    // otherwise fall back to whatever MAC was sent (legacy/manual testing).
+    let mac = deviceMac;
+    const pendingValid = pendingCoinMac && (Date.now() - pendingSetAt < PENDING_TIMEOUT_MS);
+
+    if (pendingValid) {
+      mac = pendingCoinMac;
+    } else if (pendingCoinMac) {
+      // expired pending slot — clear it
+      pendingCoinMac = null;
+    }
+
+    if (!mac) {
+      return res.status(400).json({
+        success: false,
+        message: 'No pending customer MAC and no MAC provided'
       });
     }
 
@@ -69,9 +107,11 @@ router.post('/', async (req, res) => {
     const matchLog = matchedRates
       .map(({ rate, times }) => `₱${rate.coin_value}x${times}`)
       .join(' + ');
-    console.log(`💡 ₱${coin_value} matched as: ${matchLog} = ${totalMinutes} mins`);
+    console.log(`💡 ₱${coin_value} matched as: ${matchLog} = ${totalMinutes} mins (mac: ${mac})`);
 
     const existingSession = getSessionByMac(mac);
+
+    let result;
 
     if (existingSession) {
       const updated = await addTimeToSession(mac, totalMinutes, totalExpirationMinutes);
@@ -84,7 +124,7 @@ router.post('/', async (req, res) => {
 
       console.log(`💰 Added ${totalMinutes} mins to ${existingSession.voucher_code}`);
 
-      return res.json({
+      result = {
         success: true,
         action: 'time_added',
         voucher_code: updated.voucher_code,
@@ -93,7 +133,7 @@ router.post('/', async (req, res) => {
         expires_at: updated.expires_at,
         hard_expires_at: updated.hard_expires_at,
         matched_as: matchLog
-      });
+      };
 
     } else {
       const session = await createSession(mac, ip || '', totalMinutes, totalExpirationMinutes);
@@ -106,7 +146,7 @@ router.post('/', async (req, res) => {
 
       console.log(`🆕 New session: ${session.voucher_code} for ${mac}`);
 
-      return res.json({
+      result = {
         success: true,
         action: 'session_created',
         voucher_code: session.voucher_code,
@@ -115,8 +155,13 @@ router.post('/', async (req, res) => {
         expires_at: session.expires_at,
         hard_expires_at: session.hard_expires_at,
         matched_as: matchLog
-      });
+      };
     }
+
+    // Coin successfully credited — clear the pending slot
+    pendingCoinMac = null;
+
+    return res.json(result);
 
   } catch (err) {
     console.error('Coin error:', err);
