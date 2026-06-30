@@ -3,7 +3,6 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
-#include <LiquidCrystal_I2C.h>
 #include <WebServer.h>
 
 // ===== VERSION =====
@@ -14,11 +13,6 @@
 #define RELAY_PIN   5
 #define LED_PIN     2
 #define SETUP_BTN   13
-
-// ===== LCD =====
-#define LCD_ADDR    0x27
-#define LCD_COLS    20
-#define LCD_ROWS    4
 
 // ===== AP MODE =====
 #define AP_SSID     "RJ-Vendo-Setup"
@@ -47,8 +41,6 @@ struct Config {
 extern Config config;
 extern Preferences prefs;
 extern WebServer server;
-extern LiquidCrystal_I2C lcd;
-extern bool lcdAvailable;
 extern bool setupMode;
 extern bool relayActive;
 extern unsigned long relayActivatedAt;
@@ -66,7 +58,6 @@ void saveConfig();
 void clearConfig();
 
 // lcd_display.cpp
-void lcdInit();
 void lcdPrint(int row, String text);
 void lcdClear();
 void ledBlink(int times, int ms);

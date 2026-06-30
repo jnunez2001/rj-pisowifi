@@ -4,7 +4,7 @@
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("\n🚀 R&J PisoWifi ESP32 " + String(FIRMWARE_VERSION));
+  Serial.println("\nR&J PisoWifi ESP32 " + String(FIRMWARE_VERSION));
 
   // Pin modes
   pinMode(COIN_PIN, INPUT_PULLUP);
@@ -15,13 +15,6 @@ void setup() {
   // Safe defaults
   digitalWrite(RELAY_PIN, LOW);
   digitalWrite(LED_PIN, LOW);
-
-  // Init LCD
-  lcdInit();
-  lcdPrint(0, "R&J PisoWifi");
-  lcdPrint(1, FIRMWARE_VERSION);
-  lcdPrint(2, "Starting...");
-  lcdPrint(3, "");
 
   // Init SPIFFS
   if (!SPIFFS.begin(true)) {
@@ -34,12 +27,12 @@ void setup() {
   // Check setup button held at boot
   delay(100);
   if (digitalRead(SETUP_BTN) == LOW) {
-    Serial.println("Boot button held — entering setup mode");
+    Serial.println("Setup button held — entering setup mode");
     startSetupMode();
     return;
   }
 
-  // No config saved — enter setup mode
+  // No config — enter setup mode
   if (config.wifi_ssid.isEmpty() || config.server_ip.isEmpty()) {
     Serial.println("No config — entering setup mode");
     startSetupMode();
@@ -53,7 +46,6 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(COIN_PIN), onCoinPulse, FALLING);
     setupWebServer();
     server.begin();
-    lcdPrint(3, "Ready!");
     Serial.println("Ready!");
     ledBlink(3, 200);
   }
@@ -77,20 +69,9 @@ void loop() {
     }
   }
 
-  // Coin pulse processing
-  if (!setupMode) {
-    processCoinPulses();
-  }
-
-  // Relay auto timeout
-  if (!setupMode) {
-    checkRelayTimeout();
-  }
-
-  // WiFi reconnect
-  if (!setupMode) {
-    checkWiFiReconnect();
-  }
+  if (!setupMode) processCoinPulses();
+  if (!setupMode) checkRelayTimeout();
+  if (!setupMode) checkWiFiReconnect();
 
   delay(10);
 }

@@ -1,23 +1,14 @@
 #include "config.h"
 
-void lcdInit() {
-  Wire.begin();
-  lcd.init();
-  lcd.backlight();
-  lcdAvailable = true;
-  Serial.println("LCD initialized.");
-}
+// LCD removed — no hardware connected
+// Using Serial output only for debugging
 
 void lcdPrint(int row, String text) {
-  if (!lcdAvailable) return;
-  lcd.setCursor(0, row);
-  while (text.length() < LCD_COLS) text += " ";
-  lcd.print(text.substring(0, LCD_COLS));
+  Serial.println("[LCD Row " + String(row) + "] " + text);
 }
 
 void lcdClear() {
-  if (!lcdAvailable) return;
-  lcd.clear();
+  Serial.println("[LCD] Clear");
 }
 
 void ledBlink(int times, int ms) {

@@ -4,8 +4,6 @@
 Config config;
 Preferences prefs;
 WebServer server(80);
-LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
-bool lcdAvailable = false;
 bool setupMode = false;
 bool relayActive = false;
 unsigned long relayActivatedAt = 0;

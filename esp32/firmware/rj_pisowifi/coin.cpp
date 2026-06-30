@@ -14,7 +14,7 @@ void postCoin(int coinValue) {
                String(config.server_port) + "/api/coin";
 
   Serial.println("Posting coin: P" + String(coinValue));
-  lcdPrint(2, "Coin: P" + String(coinValue) + "        ");
+  lcdPrint(2, "Coin: P" + String(coinValue));
 
   HTTPClient http;
   http.begin(url);
@@ -31,12 +31,12 @@ void postCoin(int coinValue) {
 
   if (code == 200) {
     Serial.println("Coin accepted!");
-    lcdPrint(3, "Accepted!       ");
+    lcdPrint(3, "Accepted!");
     ledBlink(2, 100);
     relayActivatedAt = millis();
   } else {
     Serial.println("Coin rejected: " + String(code));
-    lcdPrint(3, "Error: " + String(code) + "      ");
+    lcdPrint(3, "Error: " + String(code));
     ledBlink(5, 50);
   }
 
