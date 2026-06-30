@@ -2,7 +2,7 @@
 
 function timeAgo(dateStr) {
   const now = new Date();
-  const then = new Date(dateStr);
+  const then = new Date(dateStr.replace(' ', 'T') + 'Z'); // force UTC parsing
   const diff = Math.floor((now - then) / 1000);
   if (diff < 60) return `${diff}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
@@ -11,7 +11,8 @@ function timeAgo(dateStr) {
 }
 
 function isOnline(lastSeen) {
-  const diff = (new Date() - new Date(lastSeen)) / 1000;
+  const then = new Date(lastSeen.replace(' ', 'T') + 'Z'); // force UTC parsing
+  const diff = (new Date() - then) / 1000;
   return diff < 180; // online if seen within 3 minutes
 }
 
