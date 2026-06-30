@@ -53,7 +53,7 @@ void registerVendo() {
   if (config.server_ip.isEmpty()) return;
 
   String url = "http://" + config.server_ip + ":" +
-               String(config.server_port) + "/api/vendo/register";
+             String(config.server_port) + "/api/admin/vendo/register";
 
   HTTPClient http;
   http.begin(url);
