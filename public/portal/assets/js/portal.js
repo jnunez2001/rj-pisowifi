@@ -178,24 +178,59 @@ function showBlockUI(seconds) {
   }, 1000);
 }
 
+function showToast(message, type = 'success') {
+  const existing = document.getElementById('toast');
+  if (existing) existing.remove();
+
+  const colors = {
+    success: '#00a844',
+    error: '#e94560',
+    warning: '#ff9800'
+  };
+  const icons = {
+    success: 'fa-check-circle',
+    error: 'fa-exclamation-circle',
+    warning: 'fa-exclamation-triangle'
+  };
+
+  const toast = document.createElement('div');
+  toast.id = 'toast';
+  toast.style.cssText = `
+    position: fixed;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 9999;
+    max-width: calc(100vw - 32px);
+    padding: 12px 16px;
+    border-radius: 8px;
+    background: ${colors[type] || colors.success};
+    color: #fff;
+    font-size: 14px;
+    font-weight: 700;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+  `;
+  toast.innerHTML = `<i class="fas ${icons[type] || icons.success}"></i> ${message}`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
+}
+
 // ===== COIN MODAL =====
 async function activateVendoRelay() {
-  const ip = portalSettings.vendo_ip;
-  if (!ip) return;
   try {
-    await fetch(`http://${ip}/relay/on`, { method: 'POST' });
-    console.log('Relay activated');
+    const res = await fetch(`${SERVER}/api/portal/relay/on`, { method: 'POST' });
+    const data = await res.json();
+    if (!data.success) {
+      showToast('Vendo offline - coin slot may not respond', 'error');
+    }
   } catch(e) {
-    console.log('Relay call failed — ESP32 may be offline');
+    showToast('Vendo offline - coin slot may not respond', 'error');
   }
 }
 
 async function deactivateVendoRelay() {
-  const ip = portalSettings.vendo_ip;
-  if (!ip) return;
   try {
-    await fetch(`http://${ip}/relay/off`, { method: 'POST' });
-    console.log('Relay deactivated');
+    await fetch(`${SERVER}/api/portal/relay/off`, { method: 'POST' });
   } catch(e) {}
 }
 

@@ -6,7 +6,7 @@ const expiringNow = new Set();
 async function restoreActiveSessions() {
   try {
     const db = require('../config/database');
-    const { allowClient } = require('./networkService');
+    const { allowClient, setClientBandwidth } = require('./networkService');
 
     const activeSessions = db.prepare(`
       SELECT * FROM sessions WHERE status = 'active'
@@ -22,6 +22,8 @@ async function restoreActiveSessions() {
     for (const session of activeSessions) {
       try {
         await allowClient(session.mac_address);
+        const maxMbps = db.prepare("SELECT value FROM settings WHERE key = 'max_mbps'").get()?.value || '5';
+        await setClientBandwidth(session.mac_address, parseInt(maxMbps, 10) || 5);
         console.log(`✅ Restored: ${session.voucher_code} → ${session.mac_address}`);
       } catch(e) {
         console.error(`❌ Failed to restore ${session.mac_address}:`, e.message);

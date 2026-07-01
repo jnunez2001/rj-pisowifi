@@ -30,6 +30,7 @@ echo "[2/8] Installing dependencies..." | tee -a $LOG
 apt install -y \
   curl git sqlite3 \
   dnsmasq \
+  iproute2 \
   nftables \
   iptables iptables-persistent netfilter-persistent \
   avahi-daemon avahi-utils \
@@ -139,8 +140,10 @@ echo "$USER ALL=(ALL) NOPASSWD: /bin/bash $APP_DIR/setup/setup-network.sh" \
   > /etc/sudoers.d/rj-pisowifi
 chmod 440 /etc/sudoers.d/rj-pisowifi
 
-# Allow Node.js to run nft commands without password
+# Allow Node.js to run nft and tc commands without password
 echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/nft" \
+  >> /etc/sudoers.d/rj-pisowifi
+echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/tc" \
   >> /etc/sudoers.d/rj-pisowifi
 
 # avahi mDNS — rjcyberzone.local

@@ -12,8 +12,8 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(SETUP_BTN, INPUT_PULLUP);
 
-  // Safe defaults
-  digitalWrite(RELAY_PIN, LOW);
+  // Safe defaults — relay OFF using correct logic level for this board
+  digitalWrite(RELAY_PIN, RELAY_OFF_STATE);
   digitalWrite(LED_PIN, LOW);
 
   // Init SPIFFS

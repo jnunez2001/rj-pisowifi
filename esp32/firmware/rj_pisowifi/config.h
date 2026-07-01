@@ -14,6 +14,20 @@
 #define LED_PIN     2
 #define SETUP_BTN   13
 
+// ===== RELAY LOGIC =====
+// Set to true if your relay module is ACTIVE-LOW
+// (i.e. LOW = relay ON, HIGH = relay OFF). Most cheap Songle
+// 1-channel boards without an H/L jumper are active-LOW.
+#define RELAY_ACTIVE_LOW  true
+
+#if RELAY_ACTIVE_LOW
+  #define RELAY_ON_STATE   LOW
+  #define RELAY_OFF_STATE  HIGH
+#else
+  #define RELAY_ON_STATE   HIGH
+  #define RELAY_OFF_STATE  LOW
+#endif
+
 // ===== AP MODE =====
 #define AP_SSID     "RJ-Vendo-Setup"
 #define AP_PASS     "rjpisowifi"
@@ -44,6 +58,7 @@ extern WebServer server;
 extern bool setupMode;
 extern bool relayActive;
 extern unsigned long relayActivatedAt;
+extern volatile bool coinSlotActive;
 extern volatile int coinPulseCount;
 extern volatile unsigned long lastPulseTime;
 extern bool processingCoin;

@@ -137,6 +137,12 @@ NFTEOF
     nft -f /tmp/rj-piso.nft >> $LOG 2>&1
     echo "nftables captive portal loaded" >> $LOG
 
+    # ── TC BANDWIDTH SHAPING SETUP ────────────────────────────────
+    tc qdisc del dev $LAN_IF root 2>/dev/null || true
+    tc qdisc add dev $LAN_IF root handle 1: htb default 999
+    tc class add dev $LAN_IF parent 1: classid 1:999 htb rate 100mbit ceil 100mbit
+    echo "tc root qdisc configured on $LAN_IF" >> $LOG
+
 elif [ "$NETWORK_MODE" = "mikrotik" ]; then
     echo "MikroTik mode" >> $LOG
 fi

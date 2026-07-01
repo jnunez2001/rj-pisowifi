@@ -7,6 +7,7 @@ WebServer server(80);
 bool setupMode = false;
 bool relayActive = false;
 unsigned long relayActivatedAt = 0;
+volatile bool coinSlotActive = false;
 volatile int coinPulseCount = 0;
 volatile unsigned long lastPulseTime = 0;
 bool processingCoin = false;

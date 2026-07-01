@@ -3,7 +3,17 @@ const {
   generateVoucherCode,
   getExpirationMinutesForCoin
 } = require('./voucherService');
-const { allowClient, blockClient } = require('./networkService');
+const {
+  allowClient,
+  blockClient,
+  setClientBandwidth,
+  removeClientBandwidth
+} = require('./networkService');
+
+function getMaxMbps() {
+  const value = db.prepare("SELECT value FROM settings WHERE key = 'max_mbps'").get()?.value || '5';
+  return parseInt(value, 10) || 5;
+}
 
 function getSessionByMac(mac) {
   return db.prepare(`
@@ -46,6 +56,7 @@ async function createSession(mac, ip, minutes, expirationMinutes) {
   try {
     await allowClient(mac);
     console.log(`[Network] Internet unlocked for ${mac}`);
+    await setClientBandwidth(mac, getMaxMbps());
   } catch(e) {
     console.error(`[Network] Failed to unlock ${mac}:`, e.message);
   }
@@ -80,6 +91,7 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
   // Ensure internet access is still allowed (in case of reboot)
   try {
     await allowClient(mac);
+    await setClientBandwidth(mac, getMaxMbps());
   } catch(e) {}
 
   return db.prepare(
@@ -148,6 +160,7 @@ async function expireSession(voucherCode) {
   if (session && session.mac_address) {
     try {
       await blockClient(session.mac_address);
+      await removeClientBandwidth(session.mac_address);
       console.log(`[Network] Internet blocked for ${session.mac_address}`);
     } catch(e) {
       console.error(`[Network] Failed to block ${session.mac_address}:`, e.message);

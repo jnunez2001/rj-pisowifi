@@ -1,20 +1,22 @@
 #include "config.h"
 
 void activateRelay() {
-  digitalWrite(RELAY_PIN, HIGH);
+  digitalWrite(RELAY_PIN, RELAY_ON_STATE);
   relayActive = true;
   relayActivatedAt = millis();
+  coinSlotActive = true;
   Serial.println("Relay ON");
-  lcdPrint(2, "Insert coin now ");
-  lcdPrint(3, "                ");
+  lcdPrint(2, "Insert coin now");
+  lcdPrint(3, "");
 }
 
 void deactivateRelay() {
-  digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(RELAY_PIN, RELAY_OFF_STATE);
   relayActive = false;
+  coinSlotActive = false;
   Serial.println("Relay OFF");
-  lcdPrint(2, "                ");
-  lcdPrint(3, "                ");
+  lcdPrint(2, "");
+  lcdPrint(3, "");
 }
 
 void checkRelayTimeout() {

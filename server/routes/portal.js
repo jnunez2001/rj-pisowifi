@@ -77,4 +77,32 @@ router.get('/rates', (req, res) => {
   }
 });
 
+router.post('/relay/:action', async (req, res) => {
+  const { action } = req.params;
+  if (!['on', 'off'].includes(action)) {
+    return res.status(400).json({ success: false, message: 'Invalid action' });
+  }
+
+  const vendoIp = db.prepare("SELECT value FROM settings WHERE key = 'vendo_ip'").get()?.value;
+  if (!vendoIp) {
+    return res.status(400).json({ success: false, message: 'No vendo configured' });
+  }
+
+  try {
+    const relayRes = await fetch(`http://${vendoIp}/relay/${action}`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(3000)
+    });
+
+    if (!relayRes.ok) {
+      return res.status(502).json({ success: false, message: 'ESP32 relay request failed' });
+    }
+
+    return res.json({ success: true });
+  } catch (e) {
+    console.error(`[Vendo] Relay ${action} failed:`, e.message);
+    return res.status(502).json({ success: false, message: 'ESP32 unreachable' });
+  }
+});
+
 module.exports = router;

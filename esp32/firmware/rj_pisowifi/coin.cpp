@@ -2,9 +2,15 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 
+portMUX_TYPE coinMux = portMUX_INITIALIZER_UNLOCKED;
+
 void IRAM_ATTR onCoinPulse() {
+  if (!coinSlotActive) return;
+
+  portENTER_CRITICAL_ISR(&coinMux);
   coinPulseCount++;
   lastPulseTime = millis();
+  portEXIT_CRITICAL_ISR(&coinMux);
 }
 
 void postCoin(int coinValue) {
@@ -49,8 +55,11 @@ void processCoinPulses() {
       processingCoin = true;
     }
     if (millis() - lastPulseTime >= COIN_WAIT_MS) {
-      int total = coinPulseCount;
+      int total;
+      portENTER_CRITICAL(&coinMux);
+      total = coinPulseCount;
       coinPulseCount = 0;
+      portEXIT_CRITICAL(&coinMux);
       processingCoin = false;
       Serial.println("Coin pulses: " + String(total));
       postCoin(total);
