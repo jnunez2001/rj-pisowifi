@@ -77,8 +77,7 @@ iptables -t nat -A PREROUTING -i $WAN_IF -p tcp --dport 80 \
     -j REDIRECT --to-port 3000
 echo "iptables NAT configured" >> $LOG
 
-# ── START DNSMASQ ─────────────────────────────────────────────
-pkill dnsmasq 2>/dev/null
+# ── START DNSMASQ ──────────────
 sleep 1
 rm -f /var/lib/misc/dnsmasq.leases
 
@@ -94,7 +93,7 @@ server=8.8.8.8
 server=8.8.4.4
 EOF
 
-dnsmasq --conf-file=/etc/dnsmasq.d/rj-pisowifi.conf >> $LOG 2>&1
+systemctl restart dnsmasq >> $LOG 2>&1
 echo "dnsmasq started" >> $LOG
 
 # ── NFTABLES CAPTIVE PORTAL ───────────────────────────────────
