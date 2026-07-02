@@ -118,7 +118,7 @@ function setClientBandwidth(mac, mbps) {
     const classId = macToClassId(normalizedMac);
     const lanIf = getLanInterface();
     const cmds = [
-      `sudo tc class replace dev ${lanIf} parent 1: classid 1:${classId} htb rate ${speed}mbit ceil ${speed}mbit burst 15k cburst 15k`,
+      `sudo tc class replace dev ${lanIf} parent 1: classid 1:${classId} htb rate ${speed}mbit ceil ${speed}mbit burst 6k cburst 6k`,
       `sudo tc filter replace dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_mac ${normalizedMac} classid 1:${classId}`
     ];
 

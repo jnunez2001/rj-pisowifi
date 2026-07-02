@@ -77,7 +77,7 @@ iptables -t nat -A PREROUTING -i $WAN_IF -p tcp --dport 80 \
     -j REDIRECT --to-port 3000
 echo "iptables NAT configured" >> $LOG
 
-# ── START DNSMASQ ──────────────
+# ── START DNSMASQ ─────────────────────────────────────────────
 sleep 1
 rm -f /var/lib/misc/dnsmasq.leases
 
