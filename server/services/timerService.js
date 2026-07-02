@@ -19,12 +19,20 @@ async function restoreActiveSessions() {
 
     console.log(`🔄 Restoring ${activeSessions.length} active sessions to nftables...`);
 
+    // Check if bandwidth cap is enabled
+    const capEnabledSetting = db.prepare("SELECT value FROM settings WHERE key = 'enable_bandwidth_cap'").get();
+    const isBandwidthCapEnabled = capEnabledSetting?.value === '1';
+
     for (const session of activeSessions) {
       try {
         await allowClient(session.mac_address);
-        const maxMbps = db.prepare("SELECT value FROM settings WHERE key = 'max_mbps'").get()?.value || '5';
-        await setClientBandwidth(session.mac_address, parseInt(maxMbps, 10) || 5);
-        console.log(`✅ Restored: ${session.voucher_code} → ${session.mac_address}`);
+        if (isBandwidthCapEnabled) {
+          const maxMbps = db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_download_mbps'").get()?.value || '5';
+          await setClientBandwidth(session.mac_address, parseInt(maxMbps, 10) || 5);
+          console.log(`✅ Restored: ${session.voucher_code} → ${session.mac_address} (${maxMbps} Mbps)`);
+        } else {
+          console.log(`✅ Restored: ${session.voucher_code} → ${session.mac_address} (no cap)`);
+        }
       } catch(e) {
         console.error(`❌ Failed to restore ${session.mac_address}:`, e.message);
       }
@@ -35,7 +43,29 @@ async function restoreActiveSessions() {
   }
 }
 
+function checkTcQdisc() {
+  try {
+    const db = require('../config/database');
+    const lanIf = db.prepare("SELECT value FROM settings WHERE key = 'lan_interface'").get()?.value || 'enp0s8';
+    const { execSync } = require('child_process');
+    const result = execSync(`tc qdisc show dev ${lanIf}`).toString();
+    if (result.includes('htb') && result.includes('root')) {
+      console.log(`✅ [TC] Traffic control qdisc exists on ${lanIf}`);
+      return true;
+    }
+    console.warn(`⚠️ [TC] Root qdisc not found on ${lanIf}. Bandwidth shaping may not work.`);
+    console.warn(`⚠️ [TC] Please run: sudo bash setup-network.sh`);
+    return false;
+  } catch(e) {
+    console.warn(`⚠️ [TC] Could not verify traffic control setup:`, e.message);
+    return false;
+  }
+}
+
 function startTimer() {
+  // Check tc qdisc on startup
+  setTimeout(checkTcQdisc, 1000);
+
   // Restore active sessions on startup
   setTimeout(restoreActiveSessions, 3000);
 

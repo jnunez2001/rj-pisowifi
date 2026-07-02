@@ -21,15 +21,20 @@ function allowClient(mac) {
     exec(`sudo nft add element ip rj_piso allowed_macs { ${normalizedMac} }`,
       (error, stdout, stderr) => {
         if (error) {
-          if (stderr && stderr.includes('already')) {
+          if (stderr && stderr.includes('already exists')) {
             console.log(`[Network] Already allowed: ${normalizedMac}`);
             resolve();
+          } else if (stderr && stderr.includes('Error')) {
+            console.error(`[Network] ❌ Failed to allow ${normalizedMac}. Error: ${stderr.trim()}`);
+            console.error(`[Network] ❌ This usually means: nftables set 'allowed_macs' doesn't exist. Run setup-network.sh`);
+            reject(error);
           } else {
             console.error(`[Network] Failed to allow ${normalizedMac}:`, error.message);
+            console.error(`[Network] stderr:`, stderr);
             reject(error);
           }
         } else {
-          console.log(`[Network] Allowed: ${normalizedMac}`);
+          console.log(`[Network] ✅ Allowed: ${normalizedMac}`);
           resolve();
         }
       }

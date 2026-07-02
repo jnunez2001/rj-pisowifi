@@ -133,7 +133,12 @@ if (settingCount.count === 0) {
   insertSetting.run('free_minutes_enabled', '1');
   insertSetting.run('free_minutes_amount', '5');
   insertSetting.run('vendo_ip', '');
-  
+
+  // Bandwidth control (disabled by default to test full speed)
+  insertSetting.run('enable_bandwidth_cap', '0');
+  insertSetting.run('bandwidth_cap_download_mbps', '5');
+  insertSetting.run('bandwidth_cap_upload_mbps', '5');
+
   // Network mode
   insertSetting.run('network_mode', 'nodogsplash');
   insertSetting.run('mikrotik_ip', '');

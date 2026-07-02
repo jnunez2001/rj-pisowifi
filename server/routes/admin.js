@@ -35,7 +35,7 @@ const db = require('../config/database');
 const { getActiveSessions, expireSession, allowClient } = require('../services/sessionService');
 const { getRates } = require('../services/voucherService');
 const os = require('os');
-const { exec, execSync } = require('child_process');
+const { exec, execSync, execFile } = require('child_process');
 
 // Admin auth middleware
 function adminAuth(req, res, next) {
@@ -82,16 +82,20 @@ router.post('/session/:code/addtime', adminAuth, async (req, res) => {
   try {
     const { code } = req.params;
     const { minutes } = req.body;
-    if (!minutes || minutes <= 0) {
-      return res.status(400).json({ success: false, message: 'Minutes required' });
+
+    const m = parseFloat(minutes);
+    if (!Number.isFinite(m) || m === 0) {
+      return res.status(400).json({ success: false, message: 'Minutes must be a non-zero number' });
     }
+
     const session = db.prepare(
-      "SELECT * FROM sessions WHERE voucher_code = ? AND status = 'active'"
+      "SELECT * FROM sessions WHERE voucher_code = ?"
     ).get(code);
     if (!session) {
       return res.status(404).json({ success: false, message: 'Session not found' });
     }
-    const newMinutes = session.minutes_remaining + minutes;
+
+    const newMinutes = Math.max(0, session.minutes_remaining + m);
     const newExpiresAt = new Date(Date.now() + newMinutes * 60 * 1000).toISOString();
     db.prepare(`
       UPDATE sessions SET minutes_remaining = ?, expires_at = ? WHERE voucher_code = ?
@@ -103,10 +107,10 @@ router.post('/session/:code/addtime', adminAuth, async (req, res) => {
       await allowClient(session.mac_address);
     } catch(e) {}
 
-    console.log(`➕ Admin added ${minutes} mins to ${code}`);
+    console.log(`➕ Admin added ${m} mins to ${code} (new total: ${newMinutes})`);
     return res.json({
       success: true,
-      message: `Added ${minutes} minutes to ${code}`,
+      message: `${m > 0 ? 'Added' : 'Removed'} ${Math.abs(m)} minutes to ${code}`,
       minutes_remaining: newMinutes
     });
   } catch (err) {
@@ -185,9 +189,13 @@ router.post('/promos', adminAuth, (req, res) => {
 
     // Support both duration_minutes (new) and duration_days (old)
     const minutes = duration_minutes || (duration_days * 1440);
+    const p = parseInt(price, 10);
 
-    if (!minutes || !price) {
-      return res.status(400).json({ success: false, message: 'Duration and price required' });
+    if (!minutes || minutes <= 0) {
+      return res.status(400).json({ success: false, message: 'Duration must be a positive number' });
+    }
+    if (!Number.isFinite(p) || p < 0) {
+      return res.status(400).json({ success: false, message: 'Price must be a non-negative number' });
     }
 
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -198,9 +206,9 @@ router.post('/promos', adminAuth, (req, res) => {
 
     // Store as fractional days for backward compat
     const durationDays = minutes / 1440;
-    db.prepare('INSERT INTO promo_vouchers (code, duration_days, price) VALUES (?, ?, ?)').run(code, durationDays, price);
+    db.prepare('INSERT INTO promo_vouchers (code, duration_days, price) VALUES (?, ?, ?)').run(code, durationDays, p);
     console.log(`🎫 Promo created: ${code} — ${minutes} mins`);
-    return res.json({ success: true, code, duration_minutes: minutes, price });
+    return res.json({ success: true, code, duration_minutes: minutes, price: p });
   } catch (err) {
     console.error('Admin create promo error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -231,7 +239,26 @@ router.get('/rates', adminAuth, (req, res) => {
 router.post('/rates', adminAuth, (req, res) => {
   try {
     const { coin_value, minutes, expiration_minutes, label } = req.body;
-    db.prepare('INSERT INTO rates (coin_value, minutes, expiration_minutes, label) VALUES (?, ?, ?, ?)').run(coin_value, minutes, expiration_minutes, label);
+
+    // Validate inputs
+    const cv = parseInt(coin_value, 10);
+    const m = parseInt(minutes, 10);
+    const em = parseInt(expiration_minutes, 10);
+
+    if (!Number.isFinite(cv) || cv <= 0) {
+      return res.status(400).json({ success: false, message: 'coin_value must be a positive number' });
+    }
+    if (!Number.isFinite(m) || m <= 0) {
+      return res.status(400).json({ success: false, message: 'minutes must be a positive number' });
+    }
+    if (!Number.isFinite(em) || em <= 0) {
+      return res.status(400).json({ success: false, message: 'expiration_minutes must be a positive number' });
+    }
+    if (!label || label.trim().length === 0) {
+      return res.status(400).json({ success: false, message: 'label is required' });
+    }
+
+    db.prepare('INSERT INTO rates (coin_value, minutes, expiration_minutes, label) VALUES (?, ?, ?, ?)').run(cv, m, em, label.trim());
     return res.json({ success: true, message: 'Rate added' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -243,7 +270,26 @@ router.put('/rates/:id', adminAuth, (req, res) => {
   try {
     const { id } = req.params;
     const { coin_value, minutes, expiration_minutes, label } = req.body;
-    db.prepare('UPDATE rates SET coin_value = ?, minutes = ?, expiration_minutes = ?, label = ? WHERE id = ?').run(coin_value, minutes, expiration_minutes, label, id);
+
+    // Validate inputs
+    const cv = parseInt(coin_value, 10);
+    const m = parseInt(minutes, 10);
+    const em = parseInt(expiration_minutes, 10);
+
+    if (!Number.isFinite(cv) || cv <= 0) {
+      return res.status(400).json({ success: false, message: 'coin_value must be a positive number' });
+    }
+    if (!Number.isFinite(m) || m <= 0) {
+      return res.status(400).json({ success: false, message: 'minutes must be a positive number' });
+    }
+    if (!Number.isFinite(em) || em <= 0) {
+      return res.status(400).json({ success: false, message: 'expiration_minutes must be a positive number' });
+    }
+    if (!label || label.trim().length === 0) {
+      return res.status(400).json({ success: false, message: 'label is required' });
+    }
+
+    db.prepare('UPDATE rates SET coin_value = ?, minutes = ?, expiration_minutes = ?, label = ? WHERE id = ?').run(cv, m, em, label.trim(), id);
     return res.json({ success: true, message: 'Rate updated' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -265,8 +311,9 @@ router.get('/settings', adminAuth, (req, res) => {
   try {
     const settings = db.prepare('SELECT * FROM settings').all();
     const settingsObj = {};
+    const sensitiveKeys = ['admin_password', 'admin_username', 'mikrotik_pass'];
     settings.forEach(s => {
-      if (s.key !== 'admin_password') settingsObj[s.key] = s.value;
+      if (!sensitiveKeys.includes(s.key)) settingsObj[s.key] = s.value;
     });
     return res.json({ success: true, settings: settingsObj });
   } catch (err) {
@@ -298,6 +345,9 @@ router.get('/spam-settings', adminAuth, (req, res) => {
     };
     return res.json({
       success: true,
+      enable_bandwidth_cap: getSetting('enable_bandwidth_cap', '0'),
+      bandwidth_cap_download_mbps: getSetting('bandwidth_cap_download_mbps', '5'),
+      bandwidth_cap_upload_mbps: getSetting('bandwidth_cap_upload_mbps', '5'),
       max_mbps: getSetting('max_mbps', '5'),
       spam_max_attempts: getSetting('spam_max_attempts', '3'),
       spam_block_minutes: getSetting('spam_block_minutes', '1')
@@ -310,7 +360,7 @@ router.get('/spam-settings', adminAuth, (req, res) => {
 // POST /api/admin/spam-settings
 router.post('/spam-settings', adminAuth, (req, res) => {
   try {
-    const { max_mbps, spam_max_attempts, spam_block_minutes } = req.body;
+    const { enable_bandwidth_cap, bandwidth_cap_download_mbps, bandwidth_cap_upload_mbps, max_mbps, spam_max_attempts, spam_block_minutes } = req.body;
     const updateSetting = (key, value) => {
       if (value === undefined) return;
       const existing = db.prepare('SELECT key FROM settings WHERE key = ?').get(key);
@@ -320,6 +370,9 @@ router.post('/spam-settings', adminAuth, (req, res) => {
         db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(key, String(value));
       }
     };
+    updateSetting('enable_bandwidth_cap', enable_bandwidth_cap);
+    updateSetting('bandwidth_cap_download_mbps', bandwidth_cap_download_mbps);
+    updateSetting('bandwidth_cap_upload_mbps', bandwidth_cap_upload_mbps);
     updateSetting('max_mbps', max_mbps);
     updateSetting('spam_max_attempts', spam_max_attempts);
     updateSetting('spam_block_minutes', spam_block_minutes);
@@ -545,8 +598,8 @@ router.get('/sysinfo', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/vendo/register
-router.post('/vendo/register', (req, res) => {
+// POST /api/vendo/register — REQUIRES ADMIN AUTH
+router.post('/vendo/register', adminAuth, (req, res) => {
   try {
     const { mac, name, ip, version } = req.body;
 
@@ -601,7 +654,7 @@ router.get('/check-update', adminAuth, async (req, res) => {
       headers: { 'User-Agent': 'RJ-PisoWifi' }
     };
 
-    https.get(options, (response) => {
+    const req = https.get(options, (response) => {
       let data = '';
       response.on('data', chunk => data += chunk);
       response.on('end', () => {
@@ -628,6 +681,18 @@ router.get('/check-update', adminAuth, async (req, res) => {
         }
       });
     }).on('error', () => {
+      return res.json({
+        success: true,
+        current_version: currentVersion,
+        latest_version: currentVersion,
+        has_update: false,
+        release_notes: ''
+      });
+    });
+
+    // Timeout after 5 seconds
+    req.setTimeout(5000, () => {
+      req.destroy();
       return res.json({
         success: true,
         current_version: currentVersion,
@@ -677,6 +742,7 @@ router.post('/network', adminAuth, (req, res) => {
     }
 
     fs.writeFileSync('/tmp/rj-network.yaml', netplanConfig);
+    // Use execFile for safer command execution (no shell injection)
     execSync('sudo cp /tmp/rj-network.yaml /etc/netplan/50-cloud-init.yaml');
     execSync('sudo netplan apply');
 

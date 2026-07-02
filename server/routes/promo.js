@@ -24,7 +24,7 @@ router.post('/redeem', async (req, res) => {
 
     // Find promo voucher
     const promo = db.prepare(`
-      SELECT * FROM promo_vouchers 
+      SELECT * FROM promo_vouchers
       WHERE code = ? AND status = 'unused'
     `).get(normalized);
 
@@ -35,12 +35,36 @@ router.post('/redeem', async (req, res) => {
       });
     }
 
+    // Check if promo has expired
+    if (promo.expires_at) {
+      const expiresAt = new Date(promo.expires_at);
+      if (new Date() >= expiresAt) {
+        return res.status(404).json({
+          success: false,
+          message: 'This promo code has expired'
+        });
+      }
+    }
+
     // Check if MAC already has active session
     const existing = getSessionByMac(mac);
     if (existing) {
       return res.status(400).json({
         success: false,
         message: 'You already have an active session'
+      });
+    }
+
+    // Check if MAC has already redeemed ANY promo (prevent duplicate redemption)
+    const previousPromo = db.prepare(`
+      SELECT id FROM promo_vouchers
+      WHERE mac_address = ? AND status IN ('active', 'used')
+    `).get(mac);
+
+    if (previousPromo) {
+      return res.status(400).json({
+        success: false,
+        message: 'You have already redeemed a promo code. Please wait for your session to expire.'
       });
     }
 

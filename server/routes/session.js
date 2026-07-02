@@ -90,7 +90,7 @@ router.get('/voucher/:code', (req, res) => {
 });
 
 // POST /api/session/pause
-router.post('/pause', (req, res) => {
+router.post('/pause', async (req, res) => {
   try {
     const { voucher_code } = req.body;
     if (!voucher_code) {
@@ -100,7 +100,7 @@ router.post('/pause', (req, res) => {
       });
     }
 
-    const session = pauseSession(voucher_code);
+    const session = await pauseSession(voucher_code);
     if (!session) {
       return res.status(404).json({
         success: false,
@@ -124,7 +124,7 @@ router.post('/pause', (req, res) => {
 });
 
 // POST /api/session/resume
-router.post('/resume', (req, res) => {
+router.post('/resume', async (req, res) => {
   try {
     const { voucher_code } = req.body;
     if (!voucher_code) {
@@ -134,7 +134,7 @@ router.post('/resume', (req, res) => {
       });
     }
 
-    const session = resumeSession(voucher_code);
+    const session = await resumeSession(voucher_code);
     if (!session) {
       return res.status(404).json({
         success: false,
@@ -263,6 +263,14 @@ router.post('/free-claim', async (req, res) => {
     );
 
     const session = await createSession(mac, ip || '', freeMinutes, freeMinutes);
+
+    // Verify session was created successfully
+    if (!session || !session.voucher_code) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create session. Please try again.'
+      });
+    }
 
     db.prepare(`INSERT INTO free_claims (mac_address) VALUES (?)`).run(mac);
 

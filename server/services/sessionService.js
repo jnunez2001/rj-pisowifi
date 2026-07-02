@@ -10,8 +10,13 @@ const {
   removeClientBandwidth
 } = require('./networkService');
 
+function isBandwidthCapEnabled() {
+  const value = db.prepare("SELECT value FROM settings WHERE key = 'enable_bandwidth_cap'").get()?.value || '0';
+  return value === '1';
+}
+
 function getMaxMbps() {
-  const value = db.prepare("SELECT value FROM settings WHERE key = 'max_mbps'").get()?.value || '5';
+  const value = db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_download_mbps'").get()?.value || '5';
   return parseInt(value, 10) || 5;
 }
 
@@ -56,7 +61,12 @@ async function createSession(mac, ip, minutes, expirationMinutes) {
   try {
     await allowClient(mac);
     console.log(`[Network] Internet unlocked for ${mac}`);
-    await setClientBandwidth(mac, getMaxMbps());
+    if (isBandwidthCapEnabled()) {
+      await setClientBandwidth(mac, getMaxMbps());
+      console.log(`[Network] Bandwidth cap applied to ${mac}: ${getMaxMbps()} Mbps`);
+    } else {
+      console.log(`[Network] Bandwidth cap disabled - allowing full speed for ${mac}`);
+    }
   } catch(e) {
     console.error(`[Network] Failed to unlock ${mac}:`, e.message);
   }
@@ -91,7 +101,9 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
   // Ensure internet access is still allowed (in case of reboot)
   try {
     await allowClient(mac);
-    await setClientBandwidth(mac, getMaxMbps());
+    if (isBandwidthCapEnabled()) {
+      await setClientBandwidth(mac, getMaxMbps());
+    }
   } catch(e) {}
 
   return db.prepare(
@@ -99,7 +111,7 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
   ).get(mac, 'active');
 }
 
-function pauseSession(voucherCode) {
+async function pauseSession(voucherCode) {
   const session = getSessionByVoucher(voucherCode);
   if (!session || session.is_paused === 1) return null;
 
@@ -109,26 +121,34 @@ function pauseSession(voucherCode) {
   ) / 60000;
 
   db.prepare(`
-    UPDATE sessions 
-    SET is_paused = 1, 
+    UPDATE sessions
+    SET is_paused = 1,
         paused_at = ?,
         minutes_remaining = ?
     WHERE voucher_code = ?
   `).run(now, Math.max(0, remaining), voucherCode);
+
+  // Block internet access when pausing
+  try {
+    await blockClient(session.mac_address);
+    console.log(`[Network] Internet blocked for ${session.mac_address} (paused)`);
+  } catch(e) {
+    console.error(`[Network] Failed to block ${session.mac_address} on pause:`, e.message);
+  }
 
   return db.prepare(
     'SELECT * FROM sessions WHERE voucher_code = ?'
   ).get(voucherCode);
 }
 
-function resumeSession(voucherCode) {
+async function resumeSession(voucherCode) {
   const session = getSessionByVoucher(voucherCode);
   if (!session || session.is_paused === 0) return null;
 
   const now = new Date();
   const hardExpires = new Date(session.hard_expires_at);
   if (now >= hardExpires) {
-    expireSession(voucherCode);
+    await expireSession(voucherCode);
     return null;
   }
 
@@ -137,12 +157,26 @@ function resumeSession(voucherCode) {
   ).toISOString();
 
   db.prepare(`
-    UPDATE sessions 
-    SET is_paused = 0, 
+    UPDATE sessions
+    SET is_paused = 0,
         paused_at = NULL,
         expires_at = ?
     WHERE voucher_code = ?
   `).run(newExpiresAt, voucherCode);
+
+  // Re-enable internet access when resuming
+  try {
+    await allowClient(session.mac_address);
+    console.log(`[Network] Internet unlocked for ${session.mac_address} (resumed)`);
+    if (isBandwidthCapEnabled()) {
+      await setClientBandwidth(session.mac_address, getMaxMbps());
+      console.log(`[Network] Bandwidth cap reapplied to ${session.mac_address}: ${getMaxMbps()} Mbps`);
+    } else {
+      console.log(`[Network] Bandwidth cap disabled - allowing full speed for ${session.mac_address}`);
+    }
+  } catch(e) {
+    console.error(`[Network] Failed to unlock ${session.mac_address} on resume:`, e.message);
+  }
 
   return db.prepare(
     'SELECT * FROM sessions WHERE voucher_code = ?'
