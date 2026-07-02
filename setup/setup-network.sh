@@ -138,7 +138,7 @@ NFTEOF
 
     # ── TC BANDWIDTH SHAPING SETUP ────────────────────────────────
     tc qdisc del dev $LAN_IF root 2>/dev/null || true
-    tc qdisc add dev $LAN_IF root handle 1: htb default 999
+    tc qdisc add dev $LAN_IF root handle 1: htb default 999 r2q 1
     tc class add dev $LAN_IF parent 1: classid 1:999 htb rate 100mbit ceil 100mbit
     echo "tc root qdisc configured on $LAN_IF" >> $LOG
 
