@@ -26,7 +26,7 @@
 2. **Harder to cheat** → server-authoritative time, client just displays
 3. **Better windows lockdown** → uses Windows Assigned Access (Microsoft official kiosk mode)
 4. **Offline-first** → works even if internet is down (syncs when back online)
-5. **Integrated WiFi** → R&J PisoWifi WiFi bandwidth control per PC
+5. **Optional bandwidth control** → per-PC bandwidth management (via router, not mandatory)
 6. **Audit everything** → every staff action logged, nothing hidden from owner
 
 ---
@@ -36,55 +36,41 @@
 ### Overview Diagram
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                    ZENCAFE ENTERPRISE                        │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  CLOUD TIER (AWS/Azure or Local Cloud Server)       │   │
-│  │  ┌─────────────────────────────────────────────┐   │   │
-│  │  │ API Server (Node.js/Express)                │   │   │
-│  │  │ - Session Management                        │   │   │
-│  │  │ - POS Integration                           │   │   │
-│  │  │ - Billing & Accounting                      │   │   │
-│  │  │ - Remote PC Control (RPC)                   │   │   │
-│  │  │ - User/Staff Management                     │   │   │
-│  │  └─────────────────────────────────────────────┘   │   │
-│  │                                                      │   │
-│  │  Database (PostgreSQL or SQLite with sync)         │   │
-│  │  - Sessions, POS, Audit Logs, Users               │   │
-│  │  - Reports & Analytics                            │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                         ↓                                   │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  ADMIN DASHBOARD (Web + Mobile)                     │   │
-│  │  - Live PC Status (screenshot, CPU, RAM)            │   │
-│  │  - Remote Control (lock, reboot, shutdown)          │   │
-│  │  - Revenue & Reports                               │   │
-│  │  - Staff Management & Audit Trail                  │   │
-│  │  - Customer Profiles & Balances                    │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                         ↓↑                                  │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │  CAFE LOCATION NETWORK                              │   │
-│  │  ┌──────────────┐  ┌──────────────┐               │   │
-│  │  │ PC1 + Client │  │ PC2 + Client │  ...          │   │
-│  │  │ (Locked)     │  │ (Locked)     │               │   │
-│  │  └──────────────┘  └──────────────┘               │   │
-│  │       ↓                  ↓                         │   │
-│  │  Local Server (Optional for fast sync)            │   │
-│  │  - Local mode (offline operation)                 │   │
-│  │  - Caches sessions/transactions                   │   │
-│  │  - Syncs to cloud when online                     │   │
-│  │                                                     │   │
-│  │  Cashier Terminal (Windows/Linux/iPad)            │   │
-│  │  - POS for snacks + PC time                       │   │
-│  │  - Session start/end                              │   │
-│  │  - Audit trail visible to owner                   │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                              │
-└──────────────────────────────────────────────────────────────┘
+                           ISP / Internet
+                                ↓
+                          ┌──────────────┐
+                          │   ROUTER     │ ← Single gateway for entire network
+                          └──────┬───────┘
+                                 │
+                ┌────────────────┼────────────────┐
+                │                │                │
+        ┌──────────────┐  ┌──────────────┐  ┌────────────┐
+        │ ZenCafe      │  │ PC Clients   │  │ WiFi AP    │
+        │ Server       │  │              │  │            │
+        │ (Management) │  │ PC1 (Gaming) │  │ (Guest WiFi)
+        │              │  │ PC2 (General)│  │            │
+        │ API, DB,     │  │ PC3 (General)│  │ For public/
+        │ Remote RPC   │  │ PC4 (General)│  │ staff WiFi │
+        └──────────────┘  └──────────────┘  └────────────┘
+                │
+        ┌──────────────┐
+        │ Cashier      │
+        │ Terminal     │
+        │ (iPad/Tab)   │
+        └──────────────┘
+
+        ↑ All devices on SAME subnet
+        ↑ Router manages WiFi + internet
+        ↑ ZenCafe manages sessions (not internet)
+        ↑ Optional: Local cache server (same network)
 ```
+
+**Network Architecture:**
+- **ISP → Router:** All internet comes from router (the hub)
+- **Router → All Devices:** PCs, ZenCafe server, WiFi AP, cashier terminal all connected to router
+- **WiFi Management:** Router handles WiFi (not ZenCafe)
+- **ZenCafe Role:** Session management, billing, POS, remote control (NOT internet gateway)
+- **Bandwidth Control (Optional):** Can be configured on router if supported, or via ZenCafe API calling router/switch APIs
 
 ### Component Breakdown
 
@@ -95,7 +81,7 @@
 | **Admin Dashboard** | Remote control, monitoring, reports | React/Vue + WebSocket | New |
 | **Client Agent** | PC time enforcement, lockdown | Electron + Windows API | New |
 | **POS Terminal** | Snacks + PC billing | React/Next.js or web app | New |
-| **Network Layer** | WiFi bandwidth control | tc HTB (your existing) | Extend |
+| **Network Layer** | Optional bandwidth control (router API or local shaping) | Router QoS OR tc HTB | Optional |
 | **Local Server** | Offline mode, sync | Node.js (lightweight) | Optional |
 
 ---
@@ -402,22 +388,54 @@ Server:
 
 ---
 
-### E. Network Integration (Your WiFi System)
+### E. Network Integration (Optional Bandwidth Control)
 
-**WiFi bandwidth control per PC.**
+**Bandwidth management is OPTIONAL and router-centric.**
 
-**Integration:**
+**Architecture:**
 ```
-When session starts on PC1:
-1. Server knows: PC1's MAC = aa:bb:cc:dd:ee:ff
-2. Server calls bandwidth shaper: "Allow aa:bb:cc:dd:ee:ff, cap 5 Mbps"
-3. Your tc HTB rules apply: "Client aa:bb:cc:dd:ee:ff → 5 Mbps"
-4. PC1 gets internet, but capped at 5 Mbps
-5. When session ends: "Block aa:bb:cc:dd:ee:ff"
-6. PC1 loses internet
-
-Result: Can't separate PC from WiFi, both controlled by one system
+DEFAULT (No bandwidth control):
+  ISP → Router → PC gets full internet speed
+  ZenCafe server manages sessions only (not internet path)
+  
+OPTIONAL (With bandwidth control):
+  ISP → Router (supports API for QoS/traffic shaping)
+         ↓
+  ZenCafe detects router type, calls API:
+    "Router, limit MAC aa:bb:cc:dd:ee:ff to 5 Mbps"
+  Router applies shaping (not ZenCafe)
+  
+  OR: Use Linux bridge on ZenCafe server (if PCs use server as gateway)
+    Then: ZenCafe applies tc HTB shaping
+    (Your existing bandwidth control system)
 ```
+
+**Implementation (Choose One):**
+
+**Option A: Router with QoS API (Recommended)**
+```
+- Modern routers: MikroTik, Ubiquiti, Cisco
+- ZenCafe calls router API: "Limit this MAC to 5 Mbps"
+- No changes to network topology
+- Cleaner, no single point of failure
+```
+
+**Option B: Local bandwidth shaping (Your existing)**
+```
+- If router doesn't support API, use your tc HTB system
+- ZenCafe server becomes bandwidth enforcer
+- Trade-off: ZenCafe can't be bypassed, but requires server involvement
+```
+
+**Option C: No bandwidth control (Simplest)**
+```
+- Router manages internet, ZenCafe manages sessions
+- All PCs get full internet speed
+- Staff controls via paid time (not bandwidth)
+- Good for general-use cafes
+```
+
+**Decision:** Start with Option A or C. Add bandwidth control later if needed.
 
 ---
 
@@ -693,7 +711,8 @@ Revenue model:
 - ✅ Cloud-based control (multi-location, remote management)
 - ✅ Unbreakable Windows lockdown (customer can't escape)
 - ✅ Zero fraud (server-authoritative, immutable audit log)
-- ✅ WiFi integrated (bandwidth control per PC)
+- ✅ Network-agnostic (router manages internet, ZenCafe manages sessions)
+- ✅ Optional bandwidth control (add later if needed)
 - ✅ Offline-capable (sync when internet back)
 - ✅ Scalable (10-50+ cafes as product)
 
