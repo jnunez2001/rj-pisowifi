@@ -1026,18 +1026,39 @@ CREATE TABLE voucher_group_members (
 1. Remaining 10 low-severity bugs (cache, graceful shutdown, etc.)
 2. Payment integration (GCash/Maya)
 
-### ⚠️ **Known Limitations**
+### ⚠️ **CRITICAL ISSUES BLOCKING PRODUCTION**
 
-**WiFi Infrastructure Issue (Not App Code):**
-- High packet loss at network layer (28.5%)
-- WiFi AP signal appears weak
-- Phone experiencing "avoiding slow connection" 
-- This is outside app control — requires:
-  - USB-LAN adapter proper setup
-  - WiFi AP repositioning or upgrade
-  - Network optimization (separate task)
+**Major Blockers:**
+1. ❌ **WiFi Connectivity Broken**
+   - High packet loss (28.5%) at network layer
+   - Phone can't complete DHCP (stuck on "obtaining IP")
+   - WiFi AP signal weak or misconfigured
+   - **Impact:** Customers cannot connect to system
 
-**App Code:** ✅ Production-ready
+2. ❌ **Network Infrastructure Issues**
+   - WAN speed good (77 Mbps) but not reaching clients
+   - Piso WiFi speeds very slow (0.23 Mbps when working)
+   - HTB qdisc and nftables configured but not solving performance
+   - **Impact:** Customers get unusable speeds even if they connect
+
+3. ❌ **WiFi AP Not Properly Configured**
+   - USB-LAN adapter not properly recognized by VirtualBox
+   - EAP225 signal weak or unreliable
+   - Network bridge between WAN (enp0s3) and LAN (enp0s8) has issues
+   - **Impact:** System cannot serve customers reliably
+
+### ✅ **What Works (App Code)**
+- All 15 critical + high-severity code bugs FIXED
+- Session management works (when connection available)
+- Pause/resume blocks/unblocks internet correctly
+- Promo expiry enforcement working
+- Rate/promo validation working
+- One client successfully tested (pause/resume/promo)
+
+### 🚨 **Status: NOT PRODUCTION-READY**
+- **App Code:** ✅ Fixed
+- **System Overall:** ❌ Non-functional (network issues prevent customer access)
+- **Next Steps Required:** Network infrastructure troubleshooting (USB-LAN, WiFi AP, bridging)
 
 ---
 
