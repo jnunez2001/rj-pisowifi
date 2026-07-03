@@ -2,11 +2,19 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+// Pre-create upload directory on startup (Bug #16)
+const uploadPath = path.join(__dirname, '../../public/portal/assets');
+try {
+  fs.mkdirSync(uploadPath, { recursive: true });
+} catch(e) {
+  console.warn('Warning: could not create upload directory:', e.message);
+}
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadPath = path.join(__dirname, '../../public/portal/assets');
+    // Double-check directory exists (Bug #16)
     if (!fs.existsSync(uploadPath)) {
-      fs.mkdirSync(uploadPath, { recursive: true });
+      return cb(new Error('Upload directory does not exist'));
     }
     cb(null, uploadPath);
   },
@@ -38,6 +46,8 @@ const os = require('os');
 const { exec, execSync, execFile } = require('child_process');
 
 // Admin auth middleware
+// NOTE: Passwords stored in plaintext (Bug #10). Acceptable for offline single-admin deployments.
+// For wider deployment, consider: bcrypt hashing, OAuth2, or certificate-based auth.
 function adminAuth(req, res, next) {
   const { password } = req.headers;
   const settings = db.prepare(
@@ -55,7 +65,7 @@ router.get('/sessions', adminAuth, (req, res) => {
     const sessions = getActiveSessions();
     const sessionsWithTime = sessions.map(s => ({
       ...s,
-      minutes_remaining: Math.max(0, (new Date(s.expires_at) - new Date()) / 60000)
+      minutes_remaining: Math.max(0, Math.floor((new Date(s.expires_at) - new Date()) / 60000))
     }));
     return res.json({ success: true, sessions: sessionsWithTime, count: sessionsWithTime.length });
   } catch (err) {
@@ -461,6 +471,17 @@ router.post('/restore', adminAuth, (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid backup file' });
     }
 
+    // Validate backup structure (Bug #18)
+    if (backup.rates && !Array.isArray(backup.rates)) {
+      return res.status(400).json({ success: false, message: 'Invalid rates format' });
+    }
+    if (backup.promo_vouchers && !Array.isArray(backup.promo_vouchers)) {
+      return res.status(400).json({ success: false, message: 'Invalid promo_vouchers format' });
+    }
+    if (backup.transactions && !Array.isArray(backup.transactions)) {
+      return res.status(400).json({ success: false, message: 'Invalid transactions format' });
+    }
+
     if (backup.settings) {
       const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
       for (const [key, value] of Object.entries(backup.settings)) {
@@ -471,38 +492,50 @@ router.post('/restore', adminAuth, (req, res) => {
     if (backup.rates && backup.rates.length > 0) {
       db.prepare('DELETE FROM rates').run();
       const insertRate = db.prepare(
-        'INSERT INTO rates (id, coin_value, minutes, expiration_minutes, label) VALUES (?, ?, ?, ?, ?)'
+        'INSERT INTO rates (coin_value, minutes, expiration_minutes, label) VALUES (?, ?, ?, ?)'
       );
       for (const r of backup.rates) {
-        insertRate.run(r.id, r.coin_value, r.minutes, r.expiration_minutes, r.label);
+        // Skip ID to prevent conflicts (Bug #19) — let DB auto-increment
+        if (!r.coin_value || !r.minutes || !r.expiration_minutes || !r.label) {
+          throw new Error('Invalid rate data');
+        }
+        insertRate.run(r.coin_value, r.minutes, r.expiration_minutes, r.label);
       }
     }
 
     if (backup.promo_vouchers && backup.promo_vouchers.length > 0) {
       db.prepare('DELETE FROM promo_vouchers').run();
       const insertPromo = db.prepare(
-        'INSERT INTO promo_vouchers (id, code, duration_days, price, status, mac_address, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        'INSERT INTO promo_vouchers (code, duration_days, price, status, mac_address, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
       );
       for (const p of backup.promo_vouchers) {
-        insertPromo.run(p.id, p.code, p.duration_days, p.price, p.status, p.mac_address, p.created_at, p.expires_at);
+        // Skip ID to prevent conflicts (Bug #19)
+        if (!p.code || !p.duration_days) {
+          throw new Error('Invalid promo data');
+        }
+        insertPromo.run(p.code, p.duration_days, p.price || 0, p.status || 'unused', p.mac_address || null, p.created_at || new Date().toISOString(), p.expires_at || null);
       }
     }
 
     if (backup.transactions && backup.transactions.length > 0) {
       db.prepare('DELETE FROM transactions').run();
       const insertTx = db.prepare(
-        'INSERT INTO transactions (id, voucher_code, coin_value, minutes_added, type, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+        'INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, created_at) VALUES (?, ?, ?, ?, ?)'
       );
       for (const t of backup.transactions) {
-        insertTx.run(t.id, t.voucher_code, t.coin_value, t.minutes_added, t.type, t.created_at);
+        // Skip ID to prevent conflicts (Bug #19)
+        if (!t.voucher_code || typeof t.minutes_added !== 'number') {
+          throw new Error('Invalid transaction data');
+        }
+        insertTx.run(t.voucher_code, t.coin_value || 0, t.minutes_added, t.type || 'coin', t.created_at || new Date().toISOString());
       }
     }
 
-    console.log('♻️ Restore completed');
+    console.log('♻️ Restore completed with validation');
     return res.json({ success: true, message: 'Restore completed successfully' });
   } catch (err) {
     console.error('Restore error:', err);
-    res.status(500).json({ success: false, message: 'Restore failed' });
+    res.status(500).json({ success: false, message: 'Restore failed: ' + err.message });
   }
 });
 
@@ -707,9 +740,25 @@ router.get('/check-update', adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/install-update
+// POST /api/admin/install-update (Bug #21 - verify git state before pulling)
 router.post('/install-update', adminAuth, (req, res) => {
   const appDir = process.cwd();
+
+  // Safety checks before pulling (Bug #21)
+  try {
+    // Verify it's a git repo
+    execSync('git rev-parse --git-dir', { cwd: appDir });
+    // Verify remote is https://github.com/jnunez2001/rj-pisowifi (trusted)
+    const remoteUrl = execSync('git config --get remote.origin.url', { cwd: appDir }).toString().trim();
+    if (!remoteUrl.includes('jnunez2001/rj-pisowifi')) {
+      console.error('❌ Remote URL mismatch:', remoteUrl);
+      return res.status(400).json({ success: false, message: 'Git remote misconfigured' });
+    }
+  } catch(e) {
+    console.error('❌ Git verification failed:', e.message);
+    return res.status(400).json({ success: false, message: 'Git repository invalid' });
+  }
+
   res.json({ success: true, message: 'Update started! Server will restart shortly.' });
   setTimeout(() => {
     exec(`cd ${appDir} && git pull`, (err, stdout) => {
@@ -729,32 +778,57 @@ router.get('/version', adminAuth, (req, res) => {
   res.json({ success: true, version: pkg.version });
 });
 
-// POST /api/admin/network
+// POST /api/admin/network (Bug #22 - use execFile for safer execution)
 router.post('/network', adminAuth, (req, res) => {
   try {
     const { type, ip, gateway, dns, subnet } = req.body;
-    let netplanConfig = '';
 
+    // Validate input (Bug #22 - path traversal defense)
+    if (!['dhcp', 'static'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'Invalid network type' });
+    }
+    if (type === 'static' && (!ip || !gateway)) {
+      return res.status(400).json({ success: false, message: 'IP and gateway required for static' });
+    }
+
+    let netplanConfig = '';
     if (type === 'dhcp') {
       netplanConfig = `network:\n  ethernets:\n    enp0s3:\n      dhcp4: true\n  version: 2\n`;
     } else {
       netplanConfig = `network:\n  ethernets:\n    enp0s3:\n      dhcp4: false\n      addresses:\n        - ${ip}/${subnet || '24'}\n      routes:\n        - to: default\n          via: ${gateway}\n      nameservers:\n        addresses:\n          - ${dns || '8.8.8.8'}\n          - 8.8.4.4\n  version: 2\n`;
     }
 
-    fs.writeFileSync('/tmp/rj-network.yaml', netplanConfig);
-    // Use execFile for safer command execution (no shell injection)
-    execSync('sudo cp /tmp/rj-network.yaml /etc/netplan/50-cloud-init.yaml');
-    execSync('sudo netplan apply');
+    // Write config to temp file
+    const tmpFile = '/tmp/rj-network-' + Date.now() + '.yaml';
+    fs.writeFileSync(tmpFile, netplanConfig, { mode: 0o600 });
 
-    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-    upsert.run('network_type', type);
-    upsert.run('static_ip', ip || '');
-    upsert.run('static_gateway', gateway || '');
-    upsert.run('static_dns', dns || '8.8.8.8');
-    upsert.run('static_subnet', subnet || '24');
+    // Use execFile with array args for safety (Bug #22)
+    execFile('sudo', ['cp', tmpFile, '/etc/netplan/50-cloud-init.yaml'], { timeout: 5000 }, (err) => {
+      fs.unlinkSync(tmpFile); // Clean up temp file
+      if (err) {
+        console.error('Network config copy error:', err);
+        return res.status(500).json({ success: false, message: 'Failed to apply config' });
+      }
 
-    console.log(`🌐 Network changed to: ${type}`);
-    return res.json({ success: true, message: `Network set to ${type}` });
+      // Apply netplan
+      execFile('sudo', ['netplan', 'apply'], { timeout: 5000 }, (err2) => {
+        if (err2) {
+          console.error('Netplan apply error:', err2);
+          return res.status(500).json({ success: false, message: 'Failed to apply netplan' });
+        }
+
+        // All commands succeeded — update settings
+        const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+        upsert.run('network_type', type);
+        upsert.run('static_ip', ip || '');
+        upsert.run('static_gateway', gateway || '');
+        upsert.run('static_dns', dns || '8.8.8.8');
+        upsert.run('static_subnet', subnet || '24');
+
+        console.log(`🌐 Network changed to: ${type}`);
+        return res.json({ success: true, message: `Network set to ${type}` });
+      });
+    });
   } catch(err) {
     console.error('Network error:', err);
     res.status(500).json({ success: false, message: 'Failed to apply network settings' });

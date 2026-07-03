@@ -15,6 +15,10 @@ const portalRoute = require('./routes/portal');
 
 const { startTimer } = require('./services/timerService');
 
+// Cache package.json on startup (Bug #47)
+const packageJson = require('../package.json');
+const APP_VERSION = packageJson.version;
+
 const app = express();
 const PORT = 3000;
 
@@ -25,24 +29,41 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use(express.static(path.join(__dirname, '../public')));
 
-// ── Auth cache (avoid calling nft on every request) ───────────
+// ── Caching ──────────────────────────────────────────────────────
 const authCache = new Map();
-const CACHE_TTL = 0; // disabled
+const macCache = new Map();
+const CACHE_TTL = 30000; // 30 seconds (re-enabled, was 0)
+const MAC_CACHE_TTL = 10000; // 10 seconds for IP→MAC mapping (Bug #45)
 
-// ── Helper: get MAC from IP ───────────────────────────────────
+// ── Helper: get MAC from IP (cached) ──────────────────────────
 function getMacFromIp(ip) {
+  // Check MAC cache first (Bug #45)
+  const cachedMac = macCache.get(ip);
+  if (cachedMac && Date.now() - cachedMac.time < MAC_CACHE_TTL) {
+    return cachedMac.mac;
+  }
+
   try {
     const arp = execSync(`ip neigh show ${ip} 2>/dev/null`).toString().trim();
     const match = arp.match(/lladdr\s+([0-9a-f:]{17})/i);
-    if (match) return match[1].toLowerCase();
+    if (match) {
+      const mac = match[1].toLowerCase();
+      macCache.set(ip, { mac, time: Date.now() });
+      return mac;
+    }
   } catch(e) {}
 
   try {
     const leases = fs.readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
     const line = leases.split('\n').find(l => l.includes(ip));
-    if (line) return line.split(' ')[1].toLowerCase();
+    if (line) {
+      const mac = line.split(' ')[1].toLowerCase();
+      macCache.set(ip, { mac, time: Date.now() });
+      return mac;
+    }
   } catch(e) {}
 
+  macCache.set(ip, { mac: null, time: Date.now() });
   return null;
 }
 
@@ -148,13 +169,38 @@ app.get('/api/health', (req, res) => {
 
 startTimer();
 
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('');
   console.log('🚀 R&J PisoWifi Server Started!');
   console.log(`📡 Running on port ${PORT}`);
   console.log(`🌐 Admin: http://localhost:${PORT}/admin`);
   console.log(`📱 Portal: http://localhost:${PORT}/portal`);
   console.log('');
+});
+
+// Graceful shutdown on SIGTERM (Bug #46)
+process.on('SIGTERM', () => {
+  console.log('\n⏹️ SIGTERM received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed');
+    try {
+      const db = require('./config/database');
+      db.close();
+      console.log('✅ Database connection closed');
+    } catch(e) {}
+    process.exit(0);
+  });
+  // Force shutdown after 30 seconds
+  setTimeout(() => {
+    console.error('❌ Forced shutdown after timeout');
+    process.exit(1);
+  }, 30000);
+});
+
+// Handle SIGINT (Ctrl+C)
+process.on('SIGINT', () => {
+  console.log('\n⏹️ SIGINT received, shutting down gracefully...');
+  process.emit('SIGTERM');
 });
 
 module.exports = app;

@@ -4,8 +4,23 @@ const db = require('../config/database');
 const { getRates } = require('../services/voucherService');
 const { execSync } = require('child_process');
 
-// Detect client MAC from IP using ARP table
+// Rate limiting for /detect endpoint (Bug #32)
+const detectRateLimit = new Map();
+const DETECT_RATE_LIMIT_MS = 5000; // Allow 1 request per 5 seconds per IP
+
+// MAC resolution cache (Bug #33)
+const macResolutionCache = new Map();
+const MAC_CACHE_TTL_MS = 10000; // 10 seconds
+
+// Detect client MAC from IP using ARP table (with caching)
 function getMacFromIp(ip) {
+  // Check cache first (Bug #33 — cache MAC resolution)
+  const cached = macResolutionCache.get(ip);
+  if (cached && Date.now() - cached.time < MAC_CACHE_TTL_MS) {
+    return cached.mac;
+  }
+
+  let mac = null;
   try {
     // Read dnsmasq leases file
     const leases = require('fs').readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
@@ -14,29 +29,45 @@ function getMacFromIp(ip) {
       const parts = line.split(' ');
       // Format: timestamp MAC IP hostname client-id
       if (parts[2] === ip) {
-        return parts[1].toUpperCase();
+        mac = parts[1].toUpperCase();
+        break;
       }
     }
   } catch (e) {}
 
-  try {
-    // Fallback: use ARP table
-    const arp = execSync(`arp -n ${ip} 2>/dev/null`).toString();
-    const match = arp.match(/([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2})/i);
-    if (match) return match[1].toUpperCase();
-  } catch (e) {}
+  if (!mac) {
+    try {
+      // Fallback: use ARP table
+      const arp = execSync(`arp -n ${ip} 2>/dev/null`).toString();
+      const match = arp.match(/([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2})/i);
+      if (match) mac = match[1].toUpperCase();
+    } catch (e) {}
+  }
 
-  return null;
+  // Cache the result (even null, to avoid repeated lookups)
+  macResolutionCache.set(ip, { mac, time: Date.now() });
+  return mac;
 }
 
 // GET /api/portal/detect — detect client MAC from IP
 router.get('/detect', (req, res) => {
-  const clientIp = req.headers['x-forwarded-for'] || 
+  const clientIp = req.headers['x-forwarded-for'] ||
                    req.connection.remoteAddress ||
                    req.socket.remoteAddress;
-  
+
   // Clean IPv6 prefix
-  const ip = clientIp.replace('::ffff:', '');
+  const ip = (clientIp || '').replace('::ffff:', '');
+
+  // Rate limiting (Bug #32)
+  const lastRequest = detectRateLimit.get(ip);
+  if (lastRequest && Date.now() - lastRequest < DETECT_RATE_LIMIT_MS) {
+    return res.status(429).json({
+      success: false,
+      message: 'Rate limit exceeded. Try again later.'
+    });
+  }
+  detectRateLimit.set(ip, Date.now());
+
   const mac = getMacFromIp(ip);
 
   return res.json({

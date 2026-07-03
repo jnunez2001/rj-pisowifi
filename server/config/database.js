@@ -12,6 +12,7 @@ if (!fs.existsSync(dbDir)) {
 
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
@@ -20,13 +21,13 @@ db.exec(`
     mac_address TEXT NOT NULL,
     ip_address TEXT,
     minutes_remaining REAL NOT NULL,
-    status TEXT DEFAULT 'active',
     is_paused INTEGER DEFAULT 0,
     paused_at DATETIME,
     hard_expires_at DATETIME NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     expires_at DATETIME NOT NULL
   );
+  -- Note: status column removed (Bug #1) — sessions are deleted on expiry, so existing sessions are always active
 
   CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,13 +35,14 @@ db.exec(`
     coin_value INTEGER NOT NULL,
     minutes_added REAL NOT NULL,
     type TEXT DEFAULT 'coin',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(voucher_code) REFERENCES sessions(voucher_code)
   );
 
   CREATE TABLE IF NOT EXISTS promo_vouchers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     code TEXT UNIQUE NOT NULL,
-    duration_days INTEGER NOT NULL,
+    duration_days REAL NOT NULL,
     price INTEGER NOT NULL,
     status TEXT DEFAULT 'unused',
     mac_address TEXT,
@@ -64,9 +66,10 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS free_claims (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     mac_address TEXT NOT NULL,
+    ip_address TEXT,
     claimed_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
-  
+
   CREATE TABLE IF NOT EXISTS vendos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     mac_address TEXT UNIQUE NOT NULL,

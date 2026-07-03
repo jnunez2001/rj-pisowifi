@@ -235,17 +235,36 @@ router.post('/free-claim', async (req, res) => {
     }
 
     const today = new Date().toISOString().split('T')[0];
-    const existing = db.prepare(`
+
+    // Check MAC-based claim (Bug #7 — primary check)
+    const existingMac = db.prepare(`
       SELECT id FROM free_claims
       WHERE mac_address = ?
       AND date(claimed_at) = ?
     `).get(mac, today);
 
-    if (existing) {
+    if (existingMac) {
       return res.status(403).json({
         success: false,
         message: 'You have already claimed your free minutes today.'
       });
+    }
+
+    // Check IP-based claim as secondary defense against MAC spoofing (Bug #7)
+    if (ip) {
+      const existingIp = db.prepare(`
+        SELECT id FROM free_claims
+        WHERE ip_address = ?
+        AND date(claimed_at) = ?
+      `).get(ip, today);
+
+      if (existingIp) {
+        console.warn(`⚠️ Possible MAC spoofing attempt from IP ${ip}`);
+        return res.status(403).json({
+          success: false,
+          message: 'Free minutes already claimed from this network today.'
+        });
+      }
     }
 
     const { getSessionByMac, createSession } = require('../services/sessionService');
@@ -272,7 +291,8 @@ router.post('/free-claim', async (req, res) => {
       });
     }
 
-    db.prepare(`INSERT INTO free_claims (mac_address) VALUES (?)`).run(mac);
+    // Record claim with both MAC and IP for anti-spoofing (Bug #7)
+    db.prepare(`INSERT INTO free_claims (mac_address, ip_address) VALUES (?, ?)`).run(mac, ip || null);
 
     db.prepare(`
       INSERT INTO transactions (voucher_code, coin_value, minutes_added, type)

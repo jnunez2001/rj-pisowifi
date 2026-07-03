@@ -149,9 +149,20 @@ function removeClientBandwidth(mac) {
     const classId = macToClassId(normalizedMac);
     const lanIf = getLanInterface();
     exec(
-      `sudo tc filter del dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_mac ${normalizedMac} classid 1:${classId} 2>/dev/null; ` +
-      `sudo tc class del dev ${lanIf} classid 1:${classId} 2>/dev/null`,
-      () => resolve()
+      `sudo tc filter del dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_mac ${normalizedMac} classid 1:${classId}; ` +
+      `sudo tc class del dev ${lanIf} classid 1:${classId}`,
+      (error, stdout, stderr) => {
+        // Log errors instead of suppressing (Bug #38)
+        if (error) {
+          console.warn(`[TC] Warning during cleanup for ${normalizedMac}: ${error.message}`);
+          if (stderr && !stderr.includes('No such file')) {
+            console.warn(`[TC] stderr: ${stderr.trim()}`);
+          }
+        } else {
+          console.log(`[TC] Cleaned up bandwidth shaping for ${normalizedMac}`);
+        }
+        resolve();
+      }
     );
   });
 }

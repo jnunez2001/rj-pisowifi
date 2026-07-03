@@ -3,6 +3,11 @@ const router = express.Router();
 const db = require('../config/database');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
 
+// MAC address validation helper (Bug #27)
+function isValidMac(mac) {
+  return /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(String(mac || '').trim());
+}
+
 // In-memory store of which MAC is currently "pending" a coin insertion.
 // Single-vendo setup: only one pending slot needed at a time.
 let pendingCoinMac = null;
@@ -12,12 +17,12 @@ const PENDING_TIMEOUT_MS = 40000; // must match/slightly exceed portal's 30s coi
 // POST /api/coin/pending — portal calls this right when INSERT COIN modal opens
 router.post('/pending', (req, res) => {
   const { mac } = req.body;
-  if (!mac) {
-    return res.status(400).json({ success: false, message: 'MAC required' });
+  if (!mac || !isValidMac(mac)) {
+    return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
-  pendingCoinMac = mac;
+  pendingCoinMac = mac.toLowerCase();
   pendingSetAt = Date.now();
-  console.log(`⏳ Pending coin registered for ${mac}`);
+  console.log(`⏳ Pending coin registered for ${pendingCoinMac}`);
   return res.json({ success: true });
 });
 
@@ -26,10 +31,10 @@ router.post('/', async (req, res) => {
   try {
     const { mac: deviceMac, coin_value, ip } = req.body;
 
-    if (!coin_value) {
+    if (!coin_value || typeof coin_value !== 'number' || coin_value <= 0) {
       return res.status(400).json({
         success: false,
-        message: 'Coin value required'
+        message: 'Valid coin value required'
       });
     }
 
@@ -45,12 +50,14 @@ router.post('/', async (req, res) => {
       pendingCoinMac = null;
     }
 
-    if (!mac) {
+    // Validate MAC format early (Bug #27)
+    if (!mac || !isValidMac(mac)) {
       return res.status(400).json({
         success: false,
-        message: 'No pending customer MAC and no MAC provided'
+        message: 'Valid MAC address required'
       });
     }
+    mac = mac.toLowerCase();
 
     // Check spam
     const spamCheck = checkSpam(mac);

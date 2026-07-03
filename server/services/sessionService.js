@@ -10,20 +10,38 @@ const {
   removeClientBandwidth
 } = require('./networkService');
 
+// Cache bandwidth settings to avoid repeated DB queries (Bug #35)
+let settingCache = {
+  enable_bandwidth_cap: null,
+  bandwidth_cap_download_mbps: null,
+  last_check: 0
+};
+const SETTING_CACHE_TTL = 60000; // 1 minute
+
 function isBandwidthCapEnabled() {
-  const value = db.prepare("SELECT value FROM settings WHERE key = 'enable_bandwidth_cap'").get()?.value || '0';
-  return value === '1';
+  const now = Date.now();
+  if (settingCache.enable_bandwidth_cap === null || now - settingCache.last_check > SETTING_CACHE_TTL) {
+    const value = db.prepare("SELECT value FROM settings WHERE key = 'enable_bandwidth_cap'").get()?.value || '0';
+    settingCache.enable_bandwidth_cap = value === '1';
+    settingCache.last_check = now;
+  }
+  return settingCache.enable_bandwidth_cap;
 }
 
 function getMaxMbps() {
-  const value = db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_download_mbps'").get()?.value || '5';
-  return parseInt(value, 10) || 5;
+  const now = Date.now();
+  if (settingCache.bandwidth_cap_download_mbps === null || now - settingCache.last_check > SETTING_CACHE_TTL) {
+    const value = db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_download_mbps'").get()?.value || '5';
+    settingCache.bandwidth_cap_download_mbps = parseInt(value, 10) || 5;
+    settingCache.last_check = now;
+  }
+  return settingCache.bandwidth_cap_download_mbps;
 }
 
 function getSessionByMac(mac) {
   return db.prepare(`
-    SELECT * FROM sessions 
-    WHERE mac_address = ? AND status = 'active'
+    SELECT * FROM sessions
+    WHERE mac_address = ?
   `).get(mac);
 }
 
@@ -37,8 +55,9 @@ async function createSession(mac, ip, minutes, expirationMinutes) {
   const voucherCode = generateVoucherCode();
   const now = Date.now();
 
-  const mins = parseFloat(minutes) || 0;
-  const expMins = parseFloat(expirationMinutes) || mins;
+  // Use Math.floor for consistency (Bug #49 — floating point precision)
+  const mins = Math.floor(parseFloat(minutes) || 0);
+  const expMins = Math.floor(parseFloat(expirationMinutes) || mins);
 
   const expiresAt = new Date(
     now + mins * 60 * 1000
@@ -91,11 +110,11 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
   ).toISOString();
 
   db.prepare(`
-    UPDATE sessions 
-    SET minutes_remaining = ?, 
+    UPDATE sessions
+    SET minutes_remaining = ?,
         expires_at = ?,
         hard_expires_at = ?
-    WHERE mac_address = ? AND status = 'active'
+    WHERE mac_address = ?
   `).run(newMinutes, newExpiresAt, newHardExpiresAt, mac);
 
   // Ensure internet access is still allowed (in case of reboot)
@@ -107,8 +126,8 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
   } catch(e) {}
 
   return db.prepare(
-    'SELECT * FROM sessions WHERE mac_address = ? AND status = ?'
-  ).get(mac, 'active');
+    'SELECT * FROM sessions WHERE mac_address = ?'
+  ).get(mac);
 }
 
 async function pauseSession(voucherCode) {
@@ -116,9 +135,9 @@ async function pauseSession(voucherCode) {
   if (!session || session.is_paused === 1) return null;
 
   const now = new Date().toISOString();
-  const remaining = (
-    new Date(session.expires_at) - new Date()
-  ) / 60000;
+  const remaining = Math.floor(
+    (new Date(session.expires_at) - new Date()) / 60000
+  );
 
   db.prepare(`
     UPDATE sessions
@@ -204,8 +223,7 @@ async function expireSession(voucherCode) {
 
 function getActiveSessions() {
   return db.prepare(`
-    SELECT * FROM sessions 
-    WHERE status = 'active' 
+    SELECT * FROM sessions
     ORDER BY created_at DESC
   `).all();
 }

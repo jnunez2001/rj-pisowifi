@@ -3,13 +3,16 @@ const cron = require('node-cron');
 // Track sessions being expired to prevent double expiry
 const expiringNow = new Set();
 
+// Lock to prevent cron job overlap (Bug #39)
+let cronLock = false;
+
 async function restoreActiveSessions() {
   try {
     const db = require('../config/database');
     const { allowClient, setClientBandwidth } = require('./networkService');
 
     const activeSessions = db.prepare(`
-      SELECT * FROM sessions WHERE status = 'active'
+      SELECT * FROM sessions
     `).all();
 
     if (activeSessions.length === 0) {
@@ -62,14 +65,27 @@ function checkTcQdisc() {
   }
 }
 
-function startTimer() {
+async function startTimer() {
   // Check tc qdisc on startup
   setTimeout(checkTcQdisc, 1000);
 
-  // Restore active sessions on startup
-  setTimeout(restoreActiveSessions, 3000);
+  // Restore active sessions on startup (wait for completion, Bug #40)
+  setTimeout(async () => {
+    try {
+      await restoreActiveSessions();
+    } catch(e) {
+      console.error('Failed to restore sessions on startup:', e.message);
+    }
+  }, 3000);
 
   cron.schedule('*/30 * * * * *', async () => {
+    // Prevent overlap: skip if previous job still running (Bug #39)
+    if (cronLock) {
+      console.warn('⚠️ [Timer] Previous cron job still running, skipping this cycle');
+      return;
+    }
+
+    cronLock = true;
     try {
       const db = require('../config/database');
       const { expireSession } = require('./sessionService');
@@ -78,9 +94,8 @@ function startTimer() {
 
       // Find expired sessions
       const expiredSessions = db.prepare(`
-        SELECT * FROM sessions 
-        WHERE expires_at <= ? 
-        AND status = 'active'
+        SELECT * FROM sessions
+        WHERE expires_at <= ?
         AND is_paused = 0
       `).all(now);
 
@@ -100,9 +115,8 @@ function startTimer() {
 
       // Update minutes_remaining for active sessions
       const activeSessions = db.prepare(`
-        SELECT * FROM sessions 
-        WHERE status = 'active' 
-        AND is_paused = 0
+        SELECT * FROM sessions
+        WHERE is_paused = 0
       `).all();
 
       for (const session of activeSessions) {
@@ -121,6 +135,8 @@ function startTimer() {
 
     } catch (err) {
       console.error('Timer error:', err.message);
+    } finally {
+      cronLock = false;
     }
   });
 
