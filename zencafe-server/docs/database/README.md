@@ -328,20 +328,20 @@ version_compatibility
 
 ## Migration Strategy
 
-Migrations live in `/migrations/`, applied in phases matching build order rather than one giant file:
+Migrations live in `/migrations/`, applied in phases matching build order rather than one giant file. Each numbered migration is a **pair of files** — `NNN_name.up.sql` (apply) and `NNN_name.down.sql` (reverse it, in the opposite order of creation to respect foreign keys):
 
 ```
-001_foundation.sql          -- users, cafes, pcs, staff, wallets, games, sessions, transactions
-002_reservations.sql
-003_cosmetics_and_marketplace.sql
-004_subscriptions.sql       -- platform_subscriptions, game_passes, pc_licenses
-005_compliance.sql          -- age_verifications, admin_notifications, audit_log
-006_social.sql              -- friends, messages, reports
-007_gamification.sql        -- leaderboards, seasons, badges, challenges
-008_localization_and_versioning.sql
+001_foundation.up.sql / .down.sql          -- users, cafes, pcs, staff, wallets, games, sessions, transactions
+002_reservations.up.sql / .down.sql
+003_cosmetics_and_marketplace.up.sql / .down.sql
+004_subscriptions.up.sql / .down.sql       -- platform_subscriptions, game_passes, pc_licenses
+005_compliance.up.sql / .down.sql          -- age_verifications, admin_notifications, audit_log
+006_social.up.sql / .down.sql              -- friends, messages, reports
+007_gamification.up.sql / .down.sql        -- leaderboards, seasons, badges, challenges
+008_localization_and_versioning.up.sql / .down.sql
 ```
 
-Each migration is forward + backward (rollback script) and idempotent (safe to re-run).
+**On "idempotent":** raw `CREATE TABLE` statements are not naturally idempotent, and adding `IF NOT EXISTS` everywhere would silently mask real schema drift rather than catch it. Instead, idempotency comes from the migration **runner**, not the SQL itself — the runner maintains its own `schema_migrations` tracking table (recording which numbered migrations have already been applied) and skips any migration already marked done. This is the standard approach used by tools like `golang-migrate`/Flyway/Rails, and is what `src/database/` should implement rather than hand-rolling `IF NOT EXISTS` checks in every migration file.
 
 ## Indexing Priorities (v1)
 

@@ -1,11 +1,10 @@
--- Migration 001: Foundation
+-- Migration 001: Foundation (UP)
+-- Requires PostgreSQL 13+ (gen_random_uuid() is built into core as of PG13;
+-- no pgcrypto/uuid-ossp extension needed).
+--
 -- users, cafes, pcs, staff, wallets, games, sessions, transactions
 -- Everything else (reservations, cosmetics, subscriptions, compliance, social,
 -- gamification, localization/versioning) builds on top of this in later migrations.
-
--- ============================================================
--- UP
--- ============================================================
 
 CREATE TABLE users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -39,7 +38,7 @@ CREATE TABLE cafes (
     min_credit_for_account_transfer NUMERIC(10,2) NOT NULL DEFAULT 0,
     temporary_account_validity_days INT NOT NULL DEFAULT 7,
     lobby_chat_enabled BOOLEAN NOT NULL DEFAULT false,
-    vip_seat_pc_id UUID, -- FK added after pcs table exists
+    vip_seat_pc_id UUID, -- FK added below, after pcs table exists (circular reference)
     vip_seat_category TEXT,
     default_language TEXT NOT NULL DEFAULT 'en',
     update_channel TEXT NOT NULL DEFAULT 'stable' CHECK (update_channel IN ('beta', 'stable')),
@@ -119,18 +118,6 @@ CREATE TABLE transactions (
 );
 
 -- Indexing priorities per docs/database/README.md
+-- (wallets(user_id, cafe_id) already covered by its UNIQUE constraint above)
 CREATE INDEX idx_sessions_pc_ended ON sessions (pc_id, ended_at);
 CREATE INDEX idx_transactions_cafe_created ON transactions (cafe_id, created_at);
-
--- ============================================================
--- DOWN
--- ============================================================
--- DROP TABLE transactions;
--- DROP TABLE sessions;
--- DROP TABLE games;
--- DROP TABLE wallets;
--- DROP TABLE staff;
--- ALTER TABLE cafes DROP CONSTRAINT fk_vip_seat_pc;
--- DROP TABLE pcs;
--- DROP TABLE cafes;
--- DROP TABLE users;
