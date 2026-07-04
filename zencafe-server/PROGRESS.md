@@ -22,7 +22,9 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | Migration runner (`src/database/`) | ❌ Not started | Needs a `schema_migrations` tracking table + apply/rollback logic — see `docs/database/README.md` Migration Strategy section |
 | `002_reservations.up.sql` / `.down.sql` written | ✅ Done | Adds `reservations` table, `cafes.reservation_grace_period_minutes` / `reservation_min_credit`, `sessions.reservation_id` |
 | `002_reservations` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001. Explicitly tested the double-booking exclusion constraint by inserting two overlapping reservations for the same PC — the second insert was correctly rejected by the database itself (`conflicting key value violates exclusion constraint`), not just caught in application code. Rollback (`.down.sql`) and re-apply also confirmed clean. |
-| `003_cosmetics_and_marketplace.up.sql` / `.down.sql` | ❌ Not started | 001 + 002 both verified — safe to build on top of |
+| `003_cosmetics_and_marketplace.up.sql` / `.down.sql` written | ✅ Done | Adds `cafe_branding`, `game_whitelist`, `cosmetics`, `user_cosmetics`; also fixes a real gap — `users.role` never allowed `'designer'` despite it being referenced elsewhere in the docs |
+| `003_cosmetics_and_marketplace` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001+002. Explicitly tested: (1) a rank-locked cosmetic with a price is rejected by the `rank_locked_pricing` CHECK constraint, (2) a duplicate cafe-wide game-whitelist entry is rejected by the partial unique index (confirms the NULL-handling fix actually works, not just compiles), (3) `cafe_branding` insert works. Rollback and re-apply both confirmed clean. |
+| `004_subscriptions.up.sql` / `.down.sql` | ❌ Not started | 001, 002, 003 all verified — safe to build on top of |
 
 ---
 
@@ -43,6 +45,14 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 - **Double-booking prevention is enforced at the database level**, not just application code — a PostgreSQL `EXCLUDE` constraint (using `btree_gist`) rejects any two `pending`/`active` reservations for the same PC with overlapping time ranges. `completed`/`cancelled`/`no_show_released` reservations don't count, so a freed-up slot can be rebooked. This was explicitly tested (see above), not just written and assumed correct.
 - **`sessions.reservation_id`** links a session back to the reservation that spawned it, added via `ALTER TABLE` since `sessions` already existed from 001 — nullable, since most sessions are still walk-in, not reserved.
 - **Grace period and minimum-credit-to-reserve are per-café settings** (`cafes.reservation_grace_period_minutes`, `cafes.reservation_min_credit`), defaulting to 30 minutes / ₱0 — actual defaults are a business decision, not locked in permanently, just reasonable starting values.
+
+---
+
+## Manual Review + Verification Findings (003_cosmetics_and_marketplace)
+
+- **`'designer'` was missing from `users.role`** — referenced by `cosmetics.designer_id` and the `designer_payout` transaction type since the original schema consolidation, but never actually added to the CHECK constraint in `001_foundation`. Fixed via `ALTER TABLE ... DROP/ADD CONSTRAINT` in this migration rather than editing 001 after the fact (migrations are additive/forward-only once verified, not rewritten retroactively).
+- **Simplified the schema during this migration:** the original consolidated doc sketched a separate `rank_locked_cosmetics` table, but it was a pure 1:1 relationship with `cosmetics` (each rank-locked item has exactly one unlock condition) — merged it into `cosmetics` directly as `is_rank_locked` + `unlock_condition` columns, with a CHECK constraint enforcing that rank-locked items have no price and purchasable items have no unlock condition. Removes an unnecessary join.
+- **`game_whitelist` NULL-handling required a partial unique index, not a plain UNIQUE constraint** — Postgres treats NULL values as distinct in a regular UNIQUE constraint, so `UNIQUE (cafe_id, game_id, pc_id)` alone would NOT have caught two duplicate cafe-wide entries (both with `pc_id = NULL`). Used two separate partial unique indexes instead — one for per-PC entries, one for cafe-wide entries — and explicitly tested the duplicate-rejection case rather than assuming the constraint worked as intended.
 
 ---
 
@@ -71,7 +81,7 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 
 1. ✅ `001_foundation` — users, cafes, pcs, staff, wallets, games, sessions, transactions (verified against live Postgres)
 2. ✅ `002_reservations` — reservations table, double-booking prevention (verified against live Postgres)
-3. ⬜ `003_cosmetics_and_marketplace`
+3. ✅ `003_cosmetics_and_marketplace` — cafe_branding, game_whitelist, cosmetics, user_cosmetics (verified against live Postgres)
 4. ⬜ `004_subscriptions` — platform_subscriptions, game_passes, pc_licenses
 5. ⬜ `005_compliance` — age_verifications, admin_notifications, audit_log
 6. ⬜ `006_social` — friends, messages, reports

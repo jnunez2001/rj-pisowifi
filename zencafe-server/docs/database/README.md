@@ -131,22 +131,32 @@ games
   ├─ metadata (JSON)
 
 game_whitelist
+  ├─ id (PK)
   ├─ cafe_id (FK → cafes)
   ├─ game_id (FK → games)
   ├─ pc_id (nullable, FK → pcs — null means whitelisted cafe-wide)
+  ├─ unique per (cafe_id, game_id, pc_id) when pc_id set; unique per (cafe_id, game_id) when
+    pc_id is null (a plain UNIQUE constraint doesn't catch the null case, needs a partial index)
+
+cafe_branding (cafe's visibility in the platform-owned cosmetics marketplace UI — not a cut of revenue)
+  ├─ cafe_id (PK, FK → cafes)
+  ├─ logo_url
+  ├─ display_position (banner, corner)
+  ├─ enabled (boolean)
 
 cosmetics
   ├─ id (PK)
-  ├─ designer_id (FK → users, nullable — null for platform-created items)
+  ├─ designer_id (FK → users, nullable — null for platform-created items; requires users.role
+    to allow 'designer', added as a role option in migration 003)
   ├─ name
   ├─ type (skin, theme, profile)
-  ├─ price (null if rank_locked)
-  ├─ is_rank_locked (boolean — see rank_locked_cosmetics below)
+  ├─ price (set only for purchasable items)
+  ├─ is_rank_locked (boolean)
+  ├─ unlock_condition (e.g., "hold #1 in hours_total at any branch" — set only when rank-locked)
   ├─ sales_count
-
-rank_locked_cosmetics
-  ├─ cosmetic_id (FK → cosmetics)
-  ├─ unlock_condition (e.g., "hold #1 in hours_total at any branch")
+  ├─ CHECK: rank-locked items have unlock_condition + no price; purchasable items have price +
+    no unlock_condition (mutually exclusive — merged what was originally sketched as a separate
+    rank_locked_cosmetics table, since it was a pure 1:1 relationship not worth a join)
 
 user_cosmetics (ownership)
   ├─ user_id (FK → users)
