@@ -168,34 +168,55 @@ user_cosmetics (ownership)
 
 ## Subscriptions (Two-Layer Model)
 
+The platform side (`platform_features`/`platform_plans`/`platform_plan_features`/`platform_subscriptions`) is a flexible catalog rather than one row per feature — this lets a café subscribe to a single feature OR a bundle (e.g. a future "Pro" plan granting Game Pass + Cloud Monitoring together) without a schema change once actual bundles/pricing are decided. Per-PC licensing stays separate since it's quantity-based, not a flat on/off toggle.
+
 ```sql
-platform_subscriptions
+platform_features (catalog of toggleable platform capabilities)
+  ├─ id (PK)
+  ├─ key (unique — e.g. 'game_pass', 'cloud_monitoring', 'multi_location_dashboard')
+  ├─ description
+
+platform_plans (a single-feature plan OR a bundle — same shape either way)
+  ├─ id (PK)
+  ├─ name
+  ├─ price (nullable — pricing not decided yet)
+  ├─ billing_cycle (monthly, yearly)
+  ├─ is_bundle (informational — true if this plan grants 2+ features)
+
+platform_plan_features (many-to-many: which features a plan grants)
+  ├─ plan_id (FK → platform_plans)
+  ├─ feature_id (FK → platform_features)
+
+platform_subscriptions (a cafe's actual subscription to one plan)
   ├─ id (PK)
   ├─ cafe_id (FK → cafes)
-  ├─ feature (game_pass_module, base_pc_license)
+  ├─ plan_id (FK → platform_plans)
   ├─ status (active, lapsed, cancelled)
-  ├─ billing_cycle
-  ├─ expires_at
+  ├─ started_at / expires_at
+  ├─ unique per (cafe_id, plan_id) while status = active — prevents double-billing
 
-game_passes
+game_passes (each cafe's own Game Pass product)
   ├─ id (PK)
   ├─ cafe_id (FK → cafes)
   ├─ name
   ├─ price
   ├─ perks (JSON)
-  ├─ active (boolean — only true if cafe has active platform_subscriptions.game_pass_module)
+  ├─ active (boolean — should only be true if the cafe holds an active platform_subscriptions
+    row granting the 'game_pass' feature; NOT enforced by a DB constraint, since the
+    lapse/grace-period rule is still an open decision — enforce in the service layer)
   ├─ billing_cycle
 
-game_pass_subscriptions
+game_pass_subscriptions (a player subscribing to a specific cafe's Game Pass)
   ├─ id (PK)
   ├─ player_id (FK → users)
   ├─ game_pass_id (FK → game_passes)
   ├─ status (active, expired, cancelled)
   ├─ renewed_at / expires_at
+  ├─ unique per (player_id, game_pass_id) while status = active
 
-pc_licenses
+pc_licenses (per-PC base licensing fee — mandatory, quantity-based, not part of the plan system above)
+  ├─ pc_id (PK, FK → pcs)
   ├─ cafe_id (FK → cafes)
-  ├─ pc_id (FK → pcs)
   ├─ monthly_fee
   ├─ status (active, lapsed)
   ├─ renewed_at

@@ -24,7 +24,9 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | `002_reservations` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001. Explicitly tested the double-booking exclusion constraint by inserting two overlapping reservations for the same PC — the second insert was correctly rejected by the database itself (`conflicting key value violates exclusion constraint`), not just caught in application code. Rollback (`.down.sql`) and re-apply also confirmed clean. |
 | `003_cosmetics_and_marketplace.up.sql` / `.down.sql` written | ✅ Done | Adds `cafe_branding`, `game_whitelist`, `cosmetics`, `user_cosmetics`; also fixes a real gap — `users.role` never allowed `'designer'` despite it being referenced elsewhere in the docs |
 | `003_cosmetics_and_marketplace` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001+002. Explicitly tested: (1) a rank-locked cosmetic with a price is rejected by the `rank_locked_pricing` CHECK constraint, (2) a duplicate cafe-wide game-whitelist entry is rejected by the partial unique index (confirms the NULL-handling fix actually works, not just compiles), (3) `cafe_branding` insert works. Rollback and re-apply both confirmed clean. |
-| `004_subscriptions.up.sql` / `.down.sql` | ❌ Not started | 001, 002, 003 all verified — safe to build on top of |
+| `004_subscriptions.up.sql` / `.down.sql` written | ✅ Done | Redesigned from the original flat sketch into a flexible `platform_features`/`platform_plans`/`platform_plan_features`/`platform_subscriptions` catalog so cafes can subscribe to a single feature OR a bundle (e.g. Game Pass + Cloud Monitoring together) — per user direction to support bundles without pricing being decided yet. Also adds `game_passes`, `game_pass_subscriptions`, `pc_licenses` (kept separate — quantity-based, not a flat toggle). |
+| `004_subscriptions` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-003. Explicitly tested: (1) a bundle plan correctly grants two features via the join table, (2) a cafe cannot hold two simultaneously-active subscriptions to the same plan (partial unique index), (3) a player cannot hold two simultaneously-active subscriptions to the same Game Pass, (4) `pc_licenses` insert works. Rollback and re-apply both confirmed clean. |
+| `005_compliance.up.sql` / `.down.sql` | ❌ Not started | 001-004 all verified — safe to build on top of |
 
 ---
 
@@ -56,6 +58,14 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 
 ---
 
+## Manual Review + Verification Findings (004_subscriptions)
+
+- **Redesigned platform subscriptions into a bundle-capable catalog, per explicit user direction.** The original design doc sketch had `platform_subscriptions.feature` as a single text field (one row per feature). User asked whether cafes should be able to buy bundles (e.g., Game Pass + Cloud Monitoring together) without pricing being decided yet — the fix was a `platform_features` catalog + `platform_plans` (single-feature or bundle, price nullable) + `platform_plan_features` many-to-many join, so bundling is structurally supported now without needing another schema change once actual bundle contents/pricing are decided later.
+- **Cross-table business rule deliberately NOT enforced by a DB constraint:** `game_passes.active` should only be true if the cafe holds an active `platform_subscriptions` row granting the `game_pass` feature. This would require a trigger, and the lapse/grace-period behavior when a subscription expires is still an explicit open decision (see below) — enforcing it in SQL now would mean guessing at a rule that hasn't been decided. Documented as a service-layer responsibility instead of silently deciding the business rule via a trigger.
+- **Two double-booking-style protections added, both explicitly tested:** a cafe can't hold two simultaneously-active subscriptions to the same plan, and a player can't hold two simultaneously-active subscriptions to the same Game Pass — both via partial unique indexes on `status = 'active'`, following the same pattern established in 002/003.
+
+---
+
 ## How 001_foundation Was Verified
 
 Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool triggered, suggesting a local environment issue, likely WSL2-backend related — never resolved, and not worth resolving just for a one-off test). Instead:
@@ -72,6 +82,7 @@ Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool
 
 - [ ] Do guest-type accounts (walk-in, no formal registration) actually collect a birthdate for curfew purposes, or is curfew enforcement only possible for players who at least create a lightweight account? This affects whether the `player_requires_birthdate` constraint should be broadened.
 - [ ] Confirm target minimum PostgreSQL version (currently assuming 13+, recommend 15+ for a fresh build in 2026 — no real downside to requiring a recent version since this isn't a migration of an existing system)
+- [ ] What happens when a cafe's `platform_subscriptions` lapses while their `game_passes.active` is still true (or their per-PC `pc_licenses.status` lapses)? Grace period before auto-deactivating? Immediate lockout? This determines service-layer enforcement logic, not the schema itself.
 
 ---
 
@@ -82,7 +93,7 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 1. ✅ `001_foundation` — users, cafes, pcs, staff, wallets, games, sessions, transactions (verified against live Postgres)
 2. ✅ `002_reservations` — reservations table, double-booking prevention (verified against live Postgres)
 3. ✅ `003_cosmetics_and_marketplace` — cafe_branding, game_whitelist, cosmetics, user_cosmetics (verified against live Postgres)
-4. ⬜ `004_subscriptions` — platform_subscriptions, game_passes, pc_licenses
+4. ✅ `004_subscriptions` — platform_features/plans/subscriptions (bundle-capable), game_passes, pc_licenses (verified against live Postgres)
 5. ⬜ `005_compliance` — age_verifications, admin_notifications, audit_log
 6. ⬜ `006_social` — friends, messages, reports
 7. ⬜ `007_gamification` — leaderboards, seasons, badges, challenges
