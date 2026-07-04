@@ -26,7 +26,9 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | `003_cosmetics_and_marketplace` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001+002. Explicitly tested: (1) a rank-locked cosmetic with a price is rejected by the `rank_locked_pricing` CHECK constraint, (2) a duplicate cafe-wide game-whitelist entry is rejected by the partial unique index (confirms the NULL-handling fix actually works, not just compiles), (3) `cafe_branding` insert works. Rollback and re-apply both confirmed clean. |
 | `004_subscriptions.up.sql` / `.down.sql` written | ✅ Done | Redesigned from the original flat sketch into a flexible `platform_features`/`platform_plans`/`platform_plan_features`/`platform_subscriptions` catalog so cafes can subscribe to a single feature OR a bundle (e.g. Game Pass + Cloud Monitoring together) — per user direction to support bundles without pricing being decided yet. Also adds `game_passes`, `game_pass_subscriptions`, `pc_licenses` (kept separate — quantity-based, not a flat toggle). |
 | `004_subscriptions` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-003. Explicitly tested: (1) a bundle plan correctly grants two features via the join table, (2) a cafe cannot hold two simultaneously-active subscriptions to the same plan (partial unique index), (3) a player cannot hold two simultaneously-active subscriptions to the same Game Pass, (4) `pc_licenses` insert works. Rollback and re-apply both confirmed clean. |
-| `005_compliance.up.sql` / `.down.sql` | ❌ Not started | 001-004 all verified — safe to build on top of |
+| `005_subscription_grace_period.up.sql` / `.down.sql` written | ✅ Done | Resolves the open decision below (24h grace period). Adds `lapsed_at` to `platform_subscriptions` and `pc_licenses`. Inserted as its own migration and renumbered the still-unwritten compliance/social/gamification/localization migrations down by one, since nothing beyond 004 existed yet — no rework cost. |
+| `005_subscription_grace_period` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-004. Explicitly tested the grace-period math itself, not just that the column exists: a subscription lapsed 1 hour ago correctly computes "don't enforce yet," one lapsed 25 hours ago correctly computes "enforce now." Rollback and re-apply both confirmed clean. |
+| `006_compliance.up.sql` / `.down.sql` | ❌ Not started | 001-005 all verified — safe to build on top of |
 
 ---
 
@@ -66,6 +68,13 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 
 ---
 
+## Manual Review + Verification Findings (005_subscription_grace_period)
+
+- **Grace period is a hardcoded 24-hour policy constant, not a per-cafe column.** This is deliberately different from `reservations`' grace period (which IS per-cafe-configurable) — reservation no-show leniency is a café owner's call over their own customers, but subscription lapse leniency is Zentry's own leniency policy toward café owners. Same word ("grace period"), two different owners of the decision — worth remembering so a future session doesn't assume they should be modeled the same way.
+- **Tested the actual grace-period arithmetic, not just column existence:** inserted a subscription lapsed 1 hour ago and confirmed `now() > lapsed_at + interval '24 hours'` correctly evaluates false; updated it to 25 hours ago and confirmed it flips to true. This is the exact expression the service layer will need to use for enforcement.
+
+---
+
 ## How 001_foundation Was Verified
 
 Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool triggered, suggesting a local environment issue, likely WSL2-backend related — never resolved, and not worth resolving just for a one-off test). Instead:
@@ -82,7 +91,7 @@ Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool
 
 - [ ] Do guest-type accounts (walk-in, no formal registration) actually collect a birthdate for curfew purposes, or is curfew enforcement only possible for players who at least create a lightweight account? This affects whether the `player_requires_birthdate` constraint should be broadened.
 - [ ] Confirm target minimum PostgreSQL version (currently assuming 13+, recommend 15+ for a fresh build in 2026 — no real downside to requiring a recent version since this isn't a migration of an existing system)
-- [ ] What happens when a cafe's `platform_subscriptions` lapses while their `game_passes.active` is still true (or their per-PC `pc_licenses.status` lapses)? Grace period before auto-deactivating? Immediate lockout? This determines service-layer enforcement logic, not the schema itself.
+- [x] ~~What happens when a cafe's `platform_subscriptions` lapses...~~ **RESOLVED: 24-hour grace period** before the service layer enforces lockout (disabling Game Pass / the PC), measured from `lapsed_at`. See `005_subscription_grace_period`.
 
 ---
 
@@ -94,7 +103,8 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 2. ✅ `002_reservations` — reservations table, double-booking prevention (verified against live Postgres)
 3. ✅ `003_cosmetics_and_marketplace` — cafe_branding, game_whitelist, cosmetics, user_cosmetics (verified against live Postgres)
 4. ✅ `004_subscriptions` — platform_features/plans/subscriptions (bundle-capable), game_passes, pc_licenses (verified against live Postgres)
-5. ⬜ `005_compliance` — age_verifications, admin_notifications, audit_log
-6. ⬜ `006_social` — friends, messages, reports
-7. ⬜ `007_gamification` — leaderboards, seasons, badges, challenges
-8. ⬜ `008_localization_and_versioning`
+5. ✅ `005_subscription_grace_period` — lapsed_at + 24h grace period policy (verified against live Postgres)
+6. ⬜ `006_compliance` — age_verifications, admin_notifications, audit_log
+7. ⬜ `007_social` — friends, messages, reports
+8. ⬜ `008_gamification` — leaderboards, seasons, badges, challenges
+9. ⬜ `009_localization_and_versioning`

@@ -193,6 +193,8 @@ platform_subscriptions (a cafe's actual subscription to one plan)
   ├─ plan_id (FK → platform_plans)
   ├─ status (active, lapsed, cancelled)
   ├─ started_at / expires_at
+  ├─ lapsed_at (set when status transitions to lapsed — starts the 24h grace-period clock,
+    see "Grace Period Policy" below)
   ├─ unique per (cafe_id, plan_id) while status = active — prevents double-billing
 
 game_passes (each cafe's own Game Pass product)
@@ -202,8 +204,8 @@ game_passes (each cafe's own Game Pass product)
   ├─ price
   ├─ perks (JSON)
   ├─ active (boolean — should only be true if the cafe holds an active platform_subscriptions
-    row granting the 'game_pass' feature; NOT enforced by a DB constraint, since the
-    lapse/grace-period rule is still an open decision — enforce in the service layer)
+    row granting the 'game_pass' feature, or is within its 24h grace period; NOT enforced by
+    a DB constraint — enforce in the service layer)
   ├─ billing_cycle
 
 game_pass_subscriptions (a player subscribing to a specific cafe's Game Pass)
@@ -220,7 +222,10 @@ pc_licenses (per-PC base licensing fee — mandatory, quantity-based, not part o
   ├─ monthly_fee
   ├─ status (active, lapsed)
   ├─ renewed_at
+  ├─ lapsed_at (same 24h grace-period policy as platform_subscriptions above)
 ```
+
+**Grace Period Policy (decided):** when a `platform_subscriptions` or `pc_licenses` row transitions to `lapsed`, the café gets a **24-hour grace period** (measured from `lapsed_at`) before the service layer fully enforces lockout (disabling the Game Pass toggle, disabling the PC). This is a platform-wide policy constant set by Zentry, not a per-café configurable setting, so it isn't stored as a column — the service layer computes `now() > lapsed_at + interval '24 hours'` to decide whether to enforce.
 
 ---
 
@@ -367,14 +372,15 @@ version_compatibility
 Migrations live in `/migrations/`, applied in phases matching build order rather than one giant file. Each numbered migration is a **pair of files** — `NNN_name.up.sql` (apply) and `NNN_name.down.sql` (reverse it, in the opposite order of creation to respect foreign keys):
 
 ```
-001_foundation.up.sql / .down.sql          -- users, cafes, pcs, staff, wallets, games, sessions, transactions
+001_foundation.up.sql / .down.sql              -- users, cafes, pcs, staff, wallets, games, sessions, transactions
 002_reservations.up.sql / .down.sql
 003_cosmetics_and_marketplace.up.sql / .down.sql
-004_subscriptions.up.sql / .down.sql       -- platform_subscriptions, game_passes, pc_licenses
-005_compliance.up.sql / .down.sql          -- age_verifications, admin_notifications, audit_log
-006_social.up.sql / .down.sql              -- friends, messages, reports
-007_gamification.up.sql / .down.sql        -- leaderboards, seasons, badges, challenges
-008_localization_and_versioning.up.sql / .down.sql
+004_subscriptions.up.sql / .down.sql           -- platform_subscriptions (bundle-capable), game_passes, pc_licenses
+005_subscription_grace_period.up.sql / .down.sql  -- lapsed_at columns, 24h grace period policy
+006_compliance.up.sql / .down.sql              -- age_verifications, admin_notifications, audit_log
+007_social.up.sql / .down.sql                  -- friends, messages, reports
+008_gamification.up.sql / .down.sql            -- leaderboards, seasons, badges, challenges
+009_localization_and_versioning.up.sql / .down.sql
 ```
 
 **On "idempotent":** raw `CREATE TABLE` statements are not naturally idempotent, and adding `IF NOT EXISTS` everywhere would silently mask real schema drift rather than catch it. Instead, idempotency comes from the migration **runner**, not the SQL itself — the runner maintains its own `schema_migrations` tracking table (recording which numbered migrations have already been applied) and skips any migration already marked done. This is the standard approach used by tools like `golang-migrate`/Flyway/Rails, and is what `src/database/` should implement rather than hand-rolling `IF NOT EXISTS` checks in every migration file.
