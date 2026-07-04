@@ -18,9 +18,9 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | Consolidated schema reference | ✅ Done | `docs/database/README.md` |
 | `001_foundation.up.sql` / `.down.sql` written | ✅ Done | Tables: users, cafes, pcs, staff, wallets, games, sessions, transactions |
 | `001_foundation` manually reviewed for SQL correctness | ✅ Done | See "Manual Review Findings" below |
-| `001_foundation` executed against a real PostgreSQL instance | ❌ **NOT DONE** | Docker Desktop would not start cleanly in this dev sandbox (daemon connection hung, `com.docker.diagnose` triggered). This is an **environment limitation, not a code problem** — see "How to Verify" below. |
+| `001_foundation` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Ran against a live Neon (free-tier) Postgres instance: applied `.up.sql` cleanly, confirmed all 8 tables created, applied `.down.sql` to confirm rollback works with no errors, then re-applied `.up.sql` to leave the DB in a known state. Full pass, no errors at any step. (Docker Desktop was abandoned as the test method — its daemon connection hung in this sandbox; Neon's hosted Postgres was used instead, which also matches the free-tier dev approach already decided in `docs/deployment/cloud-stack.md`.) |
 | Migration runner (`src/database/`) | ❌ Not started | Needs a `schema_migrations` tracking table + apply/rollback logic — see `docs/database/README.md` Migration Strategy section |
-| `002_reservations.up.sql` / `.down.sql` | ❌ Not started | Do not start until 001 is confirmed to actually run (see below) |
+| `002_reservations.up.sql` / `.down.sql` | ❌ Not started | Foundation is now verified — safe to build on top of |
 
 ---
 
@@ -36,21 +36,15 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 
 ---
 
-## How to Verify 001_foundation (Next Concrete Action)
+## How 001_foundation Was Verified
 
-This environment (Windows sandbox) could not run Docker Desktop cleanly — the daemon connection hung and Docker's own diagnostic tool kicked in, suggesting a local environment issue (possibly WSL2 backend), not something fixable from inside this session. Whoever picks this up next should do ONE of the following, then update this file:
+Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool triggered, suggesting a local environment issue, likely WSL2-backend related — never resolved, and not worth resolving just for a one-off test). Instead:
 
-1. **Easiest: free-tier cloud Postgres** — spin up a free instance on Neon or Supabase (matches the free-tier development approach already decided in `docs/deployment/cloud-stack.md`), then run:
-   ```
-   psql "<connection-string>" -f migrations/001_foundation.up.sql
-   ```
-   If it applies cleanly, run `.down.sql` after to confirm rollback also works, then re-run `.up.sql` to leave it in a known state.
+1. User created a free Neon Postgres project and provided the connection string
+2. A throwaway Node.js script (`pg` client) applied `001_foundation.up.sql`, listed the resulting tables, applied `.down.sql` to confirm rollback, then re-applied `.up.sql` — all four steps succeeded with no errors
+3. The scratch script and connection string were kept out of the repo entirely (temp/scratchpad only) — the connection string is a secret and was never written to any committed file
 
-2. **Local Docker, once fixed** — `docker run --name zencafe-test -e POSTGRES_PASSWORD=test -p 5432:5432 -d postgres:15`, then `psql -h localhost -U postgres -f migrations/001_foundation.up.sql`
-
-3. **Local PostgreSQL install** — if Docker continues to be unreliable on this machine, installing PostgreSQL directly on Windows avoids the container layer entirely.
-
-**Once verified, update the status table above and proceed to `002_reservations`.** Do not add more migrations before this is confirmed — that's exactly the "circle back and fix things later" scenario we're trying to avoid.
+**For future migrations (002 onward):** reuse this same approach (a real Postgres instance, even a disposable free-tier one, beats manual-only review) rather than re-attempting Docker in this environment unless it gets fixed separately.
 
 ---
 
@@ -65,7 +59,7 @@ This environment (Windows sandbox) could not run Docker Desktop cleanly — the 
 
 Matches `docs/database/README.md` Migration Strategy section — do not skip ahead:
 
-1. ✅ `001_foundation` — users, cafes, pcs, staff, wallets, games, sessions, transactions
+1. ✅ `001_foundation` — users, cafes, pcs, staff, wallets, games, sessions, transactions (verified against live Postgres)
 2. ⬜ `002_reservations`
 3. ⬜ `003_cosmetics_and_marketplace`
 4. ⬜ `004_subscriptions` — platform_subscriptions, game_passes, pc_licenses
