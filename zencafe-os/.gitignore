@@ -1,0 +1,58 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+dist/
+
+# Object files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+
+# Executables
+*.exe
+*.out
+
+# Qt specific
+moc_*.cpp
+ui_*.h
+*.moc
+
+# IDE specific
+.vscode/
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.sln.DotSettings
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.DS_Store
+
+# Debug symbols
+*.pdb
+*.dSYM/
+
+# Config with secrets (local overrides)
+config.local.json
+
+# OS specific
+Thumbs.db
+.directory
