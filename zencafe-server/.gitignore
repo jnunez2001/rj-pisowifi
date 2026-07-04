@@ -1,0 +1,66 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+dist/
+
+# Object files
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+
+# Executables
+*.exe
+*.out
+
+# Qt specific
+moc_*.cpp
+ui_*.h
+*.moc
+
+# IDE specific
+.vscode/
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.sln.DotSettings
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Logs and temporary files
+*.log
+logs/
+*.tmp
+*.temp
+*~
+.DS_Store
+
+# Debug symbols
+*.pdb
+*.dSYM/
+
+# Environment and secrets
+.env
+.env.local
+config.local.json
+secrets/
+
+# Database
+*.db
+*.sqlite
+
+# OS specific
+Thumbs.db
+.directory
+
+# Dependencies
+vcpkg_installed/
