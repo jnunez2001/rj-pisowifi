@@ -43,6 +43,8 @@ cafes
   ├─ min_credit_for_account_transfer (₱ threshold)
   ├─ temporary_account_validity_days
   ├─ lobby_chat_enabled (boolean, opt-in)
+  ├─ reservation_grace_period_minutes (default 30 — auto-release unclaimed reservation)
+  ├─ reservation_min_credit (₱ minimum balance required to reserve a PC)
   ├─ vip_seat_pc_id (nullable, FK → pcs)
   ├─ vip_seat_category (which leaderboard category grants the VIP seat)
   ├─ default_language
@@ -92,6 +94,7 @@ sessions
   ├─ amount_charged
   ├─ ended_reason (manual, credit_depleted, curfew_auto_end, admin_forced)
   ├─ is_reservation (boolean)
+  ├─ reservation_id (nullable, FK → reservations — links session back to the booking that spawned it)
 
 reservations
   ├─ id (PK)
@@ -101,6 +104,8 @@ reservations
   ├─ reserved_start / reserved_end
   ├─ status (pending, active, completed, no_show_released, cancelled)
   ├─ created_at
+  ├─ DB-level EXCLUDE constraint (pc_id, time range overlap) prevents double-booking the same
+    PC for overlapping pending/active reservations — enforced at the database, not just app code
 
 transactions
   ├─ id (PK)

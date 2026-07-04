@@ -20,7 +20,9 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | `001_foundation` manually reviewed for SQL correctness | ✅ Done | See "Manual Review Findings" below |
 | `001_foundation` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Ran against a live Neon (free-tier) Postgres instance: applied `.up.sql` cleanly, confirmed all 8 tables created, applied `.down.sql` to confirm rollback works with no errors, then re-applied `.up.sql` to leave the DB in a known state. Full pass, no errors at any step. (Docker Desktop was abandoned as the test method — its daemon connection hung in this sandbox; Neon's hosted Postgres was used instead, which also matches the free-tier dev approach already decided in `docs/deployment/cloud-stack.md`.) |
 | Migration runner (`src/database/`) | ❌ Not started | Needs a `schema_migrations` tracking table + apply/rollback logic — see `docs/database/README.md` Migration Strategy section |
-| `002_reservations.up.sql` / `.down.sql` | ❌ Not started | Foundation is now verified — safe to build on top of |
+| `002_reservations.up.sql` / `.down.sql` written | ✅ Done | Adds `reservations` table, `cafes.reservation_grace_period_minutes` / `reservation_min_credit`, `sessions.reservation_id` |
+| `002_reservations` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001. Explicitly tested the double-booking exclusion constraint by inserting two overlapping reservations for the same PC — the second insert was correctly rejected by the database itself (`conflicting key value violates exclusion constraint`), not just caught in application code. Rollback (`.down.sql`) and re-apply also confirmed clean. |
+| `003_cosmetics_and_marketplace.up.sql` / `.down.sql` | ❌ Not started | 001 + 002 both verified — safe to build on top of |
 
 ---
 
@@ -33,6 +35,14 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 - **`player_requires_birthdate` CHECK constraint logic verified correct** by De Morgan's law: it only requires `birthdate IS NOT NULL` when `role = 'player' AND account_type = 'registered'` — guest/temporary accounts are not constrained at the DB level.
 - **Open gap, not yet resolved (flagging, not deciding):** `docs/compliance/README.md` describes curfew rules applying based on birthdate, but also describes "Guest (no account, walk-in cash session)" players. It's unclear whether guest-type accounts (as modeled in this schema) actually collect a birthdate at all, or whether "guest" in the compliance doc means something with zero account footprint (which wouldn't match having an `account_type = 'guest'` row in `users` with curfew enforcement applied to it). **This needs a decision, not an assumption** — see Open Decisions below.
 - **No cascading deletes on `sessions.player_id` or `transactions.user_id`** — intentional. Financial/session history should not disappear if a user is deleted; account-deletion requests (from the earlier "data export / account deletion" feature idea) will need a proper soft-delete or anonymization strategy, not a hard `ON DELETE CASCADE`. Flagging so this isn't "fixed" into a cascade later without realizing why it was left out.
+
+---
+
+## Manual Review + Verification Findings (002_reservations)
+
+- **Double-booking prevention is enforced at the database level**, not just application code — a PostgreSQL `EXCLUDE` constraint (using `btree_gist`) rejects any two `pending`/`active` reservations for the same PC with overlapping time ranges. `completed`/`cancelled`/`no_show_released` reservations don't count, so a freed-up slot can be rebooked. This was explicitly tested (see above), not just written and assumed correct.
+- **`sessions.reservation_id`** links a session back to the reservation that spawned it, added via `ALTER TABLE` since `sessions` already existed from 001 — nullable, since most sessions are still walk-in, not reserved.
+- **Grace period and minimum-credit-to-reserve are per-café settings** (`cafes.reservation_grace_period_minutes`, `cafes.reservation_min_credit`), defaulting to 30 minutes / ₱0 — actual defaults are a business decision, not locked in permanently, just reasonable starting values.
 
 ---
 
@@ -60,7 +70,7 @@ Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool
 Matches `docs/database/README.md` Migration Strategy section — do not skip ahead:
 
 1. ✅ `001_foundation` — users, cafes, pcs, staff, wallets, games, sessions, transactions (verified against live Postgres)
-2. ⬜ `002_reservations`
+2. ✅ `002_reservations` — reservations table, double-booking prevention (verified against live Postgres)
 3. ⬜ `003_cosmetics_and_marketplace`
 4. ⬜ `004_subscriptions` — platform_subscriptions, game_passes, pc_licenses
 5. ⬜ `005_compliance` — age_verifications, admin_notifications, audit_log
