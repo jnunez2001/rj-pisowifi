@@ -28,7 +28,9 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | `004_subscriptions` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-003. Explicitly tested: (1) a bundle plan correctly grants two features via the join table, (2) a cafe cannot hold two simultaneously-active subscriptions to the same plan (partial unique index), (3) a player cannot hold two simultaneously-active subscriptions to the same Game Pass, (4) `pc_licenses` insert works. Rollback and re-apply both confirmed clean. |
 | `005_subscription_grace_period.up.sql` / `.down.sql` written | ✅ Done | Resolves the open decision below (24h grace period). Adds `lapsed_at` to `platform_subscriptions` and `pc_licenses`. Inserted as its own migration and renumbered the still-unwritten compliance/social/gamification/localization migrations down by one, since nothing beyond 004 existed yet — no rework cost. |
 | `005_subscription_grace_period` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-004. Explicitly tested the grace-period math itself, not just that the column exists: a subscription lapsed 1 hour ago correctly computes "don't enforce yet," one lapsed 25 hours ago correctly computes "enforce now." Rollback and re-apply both confirmed clean. |
-| `006_compliance.up.sql` / `.down.sql` | ❌ Not started | 001-005 all verified — safe to build on top of |
+| `006_compliance.up.sql` / `.down.sql` written | ✅ Done | Resolves the guest-birthdate open decision (widened the constraint to cover all player account types). Adds `age_verifications`, `admin_notifications`, `audit_log`. Also fixed `verified_by_staff_id` → `verified_by_user_id` since `staff`'s PK is composite and can't be FK'd by a single column. |
+| `006_compliance` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-005. Explicitly tested: (1) inserting a guest player with no birthdate is now rejected (confirms the widened constraint actually works), (2) `age_verifications`, `admin_notifications`, and a system-triggered (`user_id IS NULL`) `audit_log` row all insert correctly. Rollback and re-apply both confirmed clean. |
+| `007_social.up.sql` / `.down.sql` | ❌ Not started | 001-006 all verified — safe to build on top of |
 
 ---
 
@@ -75,6 +77,14 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 
 ---
 
+## Manual Review + Verification Findings (006_compliance)
+
+- **Resolved the guest-birthdate open decision by reasoning from the doc's own logic**, rather than re-asking: `docs/compliance/README.md` describes a guest player's credit being refunded and admin-flagged specifically when curfew hits mid-session — that flow is only possible if the system already knows the guest is a minor, which requires a birthdate on file. Widened `player_requires_birthdate` (`001_foundation` had it scoped to `account_type = 'registered'` only) to cover every player account type, and explicitly tested that a guest player without a birthdate is now rejected by the database.
+- **Caught and fixed a design inconsistency before it became a bug:** the schema doc had already (correctly) described `age_verifications.verified_by_staff_id` as an FK to `users`, but `staff`'s primary key is composite (`user_id`, `cafe_id`) — a single-column FK can't reference a composite key. Renamed to `verified_by_user_id` referencing `users(id)` directly, since a staff member's (or owner's) identity for accountability purposes is just their `user_id`.
+- **`admin_notifications.type` deliberately left as free text, not a CHECK enum** — unlike `audit_log.action` (a small, genuinely closed CRUD set), notification types are an open/growing taxonomy that other features (social reports, subscription lapses) will keep adding to; a CHECK enum would force editing this migration every time.
+
+---
+
 ## How 001_foundation Was Verified
 
 Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool triggered, suggesting a local environment issue, likely WSL2-backend related — never resolved, and not worth resolving just for a one-off test). Instead:
@@ -89,7 +99,7 @@ Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool
 
 ## Open Decisions (Need Owner Input)
 
-- [ ] Do guest-type accounts (walk-in, no formal registration) actually collect a birthdate for curfew purposes, or is curfew enforcement only possible for players who at least create a lightweight account? This affects whether the `player_requires_birthdate` constraint should be broadened.
+- [x] ~~Do guest-type accounts collect a birthdate for curfew purposes...~~ **RESOLVED: yes.** The compliance doc's own guest-curfew-refund flow only makes sense if guest accounts have a birthdate on file, so `player_requires_birthdate` was widened in `006_compliance` to cover every player account type, not just registered.
 - [ ] Confirm target minimum PostgreSQL version (currently assuming 13+, recommend 15+ for a fresh build in 2026 — no real downside to requiring a recent version since this isn't a migration of an existing system)
 - [x] ~~What happens when a cafe's `platform_subscriptions` lapses...~~ **RESOLVED: 24-hour grace period** before the service layer enforces lockout (disabling Game Pass / the PC), measured from `lapsed_at`. See `005_subscription_grace_period`.
 
@@ -104,7 +114,7 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 3. ✅ `003_cosmetics_and_marketplace` — cafe_branding, game_whitelist, cosmetics, user_cosmetics (verified against live Postgres)
 4. ✅ `004_subscriptions` — platform_features/plans/subscriptions (bundle-capable), game_passes, pc_licenses (verified against live Postgres)
 5. ✅ `005_subscription_grace_period` — lapsed_at + 24h grace period policy (verified against live Postgres)
-6. ⬜ `006_compliance` — age_verifications, admin_notifications, audit_log
+6. ✅ `006_compliance` — age_verifications, admin_notifications, audit_log (verified against live Postgres)
 7. ⬜ `007_social` — friends, messages, reports
 8. ⬜ `008_gamification` — leaderboards, seasons, badges, challenges
 9. ⬜ `009_localization_and_versioning`

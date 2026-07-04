@@ -231,19 +231,24 @@ pc_licenses (per-PC base licensing fee — mandatory, quantity-based, not part o
 
 ## Compliance
 
+**Resolved:** guest-type accounts DO collect a birthdate, same as registered players — the compliance doc's "guest curfew refund" flow only works if the system already knows the guest's age. Widened `users.player_requires_birthdate` (originally scoped to `account_type = 'registered'` only in 001) to cover every player account type.
+
 ```sql
 age_verifications
   ├─ id (PK)
   ├─ user_id (FK → users)
-  ├─ verified_by_staff_id (FK → users, role = staff — accountability record)
+  ├─ verified_by_user_id (FK → users — not the staff table, since staff's PK is composite
+    (user_id, cafe_id); a staff member's or owner's identity for accountability is just their
+    user_id)
   ├─ cafe_id (FK → cafes)
   ├─ verified_at
   ├─ id_type_checked
-  ├─ notes (encrypted)
+  ├─ notes
 
 admin_notifications
   ├─ id (PK)
-  ├─ type (minor_guest_curfew_refund, temporary_account_expiring, etc.)
+  ├─ type (free text, not a CHECK enum — this is a growing/open taxonomy across many features,
+    unlike audit_log.action below which is a genuinely closed CRUD set)
   ├─ cafe_id (FK → cafes)
   ├─ session_id (nullable, FK → sessions)
   ├─ amount_refunded (nullable)
@@ -251,10 +256,10 @@ admin_notifications
 
 audit_log
   ├─ id (PK)
-  ├─ user_id (FK → users)
+  ├─ user_id (FK → users, nullable — some system-triggered changes have no acting user)
   ├─ action (create, update, delete)
   ├─ table_name
-  ├─ record_id
+  ├─ record_id (no FK — polymorphic reference across many different tables)
   ├─ old_value (JSON)
   ├─ new_value (JSON)
   ├─ timestamp
