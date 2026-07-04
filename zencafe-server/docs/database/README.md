@@ -1,36 +1,35 @@
-# ZenCafe Backend Database Design
+# ZenCafe Backend Database Design (Consolidated Schema)
 
-## PostgreSQL Schema
-
-### Documents to Create
-
-- `schema-design.md` - Core tables and relationships
-- `users-table.md` - Cafe owners, staff, players
-- `cafes-table.md` - Locations, settings, configuration
-- `sessions-table.md` - Gaming sessions, time tracking, billing
-- `games-table.md` - Game library, metadata
-- `cosmetics-table.md` - Cosmetic items and inventory
-- `transactions-table.md` - Payments, purchases, revenue
-- `audit-log-table.md` - Compliance and change tracking
-- `indexes-and-optimization.md` - Performance tuning
-- `backup-and-recovery.md` - Data protection strategy
+This reconciles every table sketched across the design docs (business-model, compliance, social, gamification, deployment, architecture/localization) into one authoritative reference. Individual docs still explain *why* a field exists — this doc is the single source of truth for *what* the schema actually looks like.
 
 ## Key Design Principles
 
-1. **ACID Guarantees** - Financial transactions must not fail
-2. **Normalization** - Reduce data duplication
-3. **Audit Trail** - Every change is traceable
-4. **Encryption** - Sensitive data (passwords, tokens) encrypted
-5. **Performance** - Proper indexes on frequently queried columns
+1. **ACID Guarantees** — financial transactions must not fail or double-apply
+2. **Normalization** — reduce data duplication
+3. **Audit Trail** — every sensitive change is traceable (who, when, where)
+4. **Encryption** — passwords, tokens, and staff verification notes encrypted at rest
+5. **Per-branch scoping** — most café-specific settings (curfew, pricing, update channel) live on `cafes`, not globally
 
-## Core Tables Overview
+---
 
-```
+## Core Identity & Café Structure
+
+```sql
 users
   ├─ id (PK)
-  ├─ email (unique)
-  ├─ password_hash
+  ├─ email (unique, nullable for guest accounts)
+  ├─ password_hash (nullable — Google-only accounts won't have one)
+  ├─ google_id (nullable, unique — for "Sign in with Google")
   ├─ role (owner, staff, player)
+  ├─ account_type (registered, guest, temporary)
+  ├─ birthdate (required for player role)
+  ├─ is_minor (computed/cached from birthdate, refreshed periodically)
+  ├─ social_unlocked (boolean — true only once staff-verified as adult; gates friends/chat/spend-leaderboards)
+  ├─ status_visibility (public, friends_only, private)
+  ├─ preferred_language (e.g., "en", "fil", "id", "vi", "th", "ms")
+  ├─ temporary_expires_at (nullable — only for temporary accounts)
+  ├─ temporary_expiry_reminder_sent (boolean)
+  ├─ temporary_deactivated (boolean)
   ├─ created_at
 
 cafes
@@ -38,46 +37,175 @@ cafes
   ├─ owner_id (FK → users)
   ├─ name
   ├─ location
-  ├─ settings (JSON)
+  ├─ is_staffed (boolean — determines refund vs temp-account flow on forced session end)
+  ├─ curfew_enabled (boolean)
+  ├─ curfew_start / curfew_end (time)
+  ├─ min_credit_for_account_transfer (₱ threshold)
+  ├─ temporary_account_validity_days
+  ├─ lobby_chat_enabled (boolean, opt-in)
+  ├─ vip_seat_pc_id (nullable, FK → pcs)
+  ├─ vip_seat_category (which leaderboard category grants the VIP seat)
+  ├─ default_language
+  ├─ update_channel (beta, stable)
+  ├─ maintenance_window_start / maintenance_window_end
   ├─ created_at
 
 pcs
   ├─ id (PK)
   ├─ cafe_id (FK → cafes)
   ├─ pc_name
-  ├─ specs (CPU, RAM, GPU)
-  ├─ status (online, offline, maintenance)
+  ├─ specs (CPU, RAM, GPU — JSON)
+  ├─ tier (regular, vip — drives hourly rate for credit-burn conversion)
+  ├─ status (online, offline, maintenance, reserved)
+  ├─ current_os_version
+  ├─ last_update_check_at
+  ├─ last_update_status (success, failed_rolled_back, pending)
+
+staff
+  ├─ user_id (FK → users, role = staff)
+  ├─ cafe_id (FK → cafes)
+  ├─ permissions (JSON — e.g., can_verify_age, can_manage_pricing)
+```
+
+---
+
+## Wallet, Sessions & Billing
+
+Credit is **per café** (not a single global balance), since pricing and revenue both route to the specific café a player is at.
+
+```sql
+wallets
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ cafe_id (FK → cafes)
+  ├─ balance (₱, decimal — never float, for exact money math)
+  ├─ updated_at
 
 sessions
   ├─ id (PK)
   ├─ pc_id (FK → pcs)
   ├─ player_id (FK → users)
-  ├─ game_id (FK → games)
+  ├─ game_id (FK → games, nullable)
   ├─ started_at
   ├─ ended_at
   ├─ total_minutes
-  ├─ amount_paid
+  ├─ amount_charged
+  ├─ ended_reason (manual, credit_depleted, curfew_auto_end, admin_forced)
+  ├─ is_reservation (boolean)
 
+reservations
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ pc_id (FK → pcs)
+  ├─ cafe_id (FK → cafes)
+  ├─ reserved_start / reserved_end
+  ├─ status (pending, active, completed, no_show_released, cancelled)
+  ├─ created_at
+
+transactions
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ cafe_id (FK → cafes, nullable — null for pure platform transactions)
+  ├─ type (session_billing, cosmetic_purchase, game_pass_subscription, platform_fee, designer_payout, pc_license_fee, refund)
+  ├─ payee (platform, cafe)
+  ├─ amount
+  ├─ platform_fee (nullable — cut taken on café-owned revenue like Game Pass)
+  ├─ description
+  ├─ created_at
+```
+
+---
+
+## Games & Cosmetics
+
+```sql
 games
   ├─ id (PK)
   ├─ title
   ├─ description
   ├─ metadata (JSON)
 
+game_whitelist
+  ├─ cafe_id (FK → cafes)
+  ├─ game_id (FK → games)
+  ├─ pc_id (nullable, FK → pcs — null means whitelisted cafe-wide)
+
 cosmetics
   ├─ id (PK)
-  ├─ designer_id (FK → users)
+  ├─ designer_id (FK → users, nullable — null for platform-created items)
   ├─ name
   ├─ type (skin, theme, profile)
-  ├─ price
-  ├─ sales
+  ├─ price (null if rank_locked)
+  ├─ is_rank_locked (boolean — see rank_locked_cosmetics below)
+  ├─ sales_count
 
-transactions
+rank_locked_cosmetics
+  ├─ cosmetic_id (FK → cosmetics)
+  ├─ unlock_condition (e.g., "hold #1 in hours_total at any branch")
+
+user_cosmetics (ownership)
+  ├─ user_id (FK → users)
+  ├─ cosmetic_id (FK → cosmetics)
+  ├─ acquired_at
+```
+
+---
+
+## Subscriptions (Two-Layer Model)
+
+```sql
+platform_subscriptions
+  ├─ id (PK)
+  ├─ cafe_id (FK → cafes)
+  ├─ feature (game_pass_module, base_pc_license)
+  ├─ status (active, lapsed, cancelled)
+  ├─ billing_cycle
+  ├─ expires_at
+
+game_passes
+  ├─ id (PK)
+  ├─ cafe_id (FK → cafes)
+  ├─ name
+  ├─ price
+  ├─ perks (JSON)
+  ├─ active (boolean — only true if cafe has active platform_subscriptions.game_pass_module)
+  ├─ billing_cycle
+
+game_pass_subscriptions
+  ├─ id (PK)
+  ├─ player_id (FK → users)
+  ├─ game_pass_id (FK → game_passes)
+  ├─ status (active, expired, cancelled)
+  ├─ renewed_at / expires_at
+
+pc_licenses
+  ├─ cafe_id (FK → cafes)
+  ├─ pc_id (FK → pcs)
+  ├─ monthly_fee
+  ├─ status (active, lapsed)
+  ├─ renewed_at
+```
+
+---
+
+## Compliance
+
+```sql
+age_verifications
   ├─ id (PK)
   ├─ user_id (FK → users)
-  ├─ type (session_billing, cosmetic_purchase, designer_payout)
-  ├─ amount
-  ├─ description
+  ├─ verified_by_staff_id (FK → users, role = staff — accountability record)
+  ├─ cafe_id (FK → cafes)
+  ├─ verified_at
+  ├─ id_type_checked
+  ├─ notes (encrypted)
+
+admin_notifications
+  ├─ id (PK)
+  ├─ type (minor_guest_curfew_refund, temporary_account_expiring, etc.)
+  ├─ cafe_id (FK → cafes)
+  ├─ session_id (nullable, FK → sessions)
+  ├─ amount_refunded (nullable)
   ├─ created_at
 
 audit_log
@@ -91,16 +219,133 @@ audit_log
   ├─ timestamp
 ```
 
+---
+
+## Social
+
+```sql
+friends
+  ├─ user_id (FK → users)
+  ├─ friend_id (FK → users)
+  ├─ status (pending, accepted, blocked)
+  ├─ created_at
+
+messages
+  ├─ id (PK)
+  ├─ sender_id (FK → users)
+  ├─ receiver_id (nullable, FK → users)
+  ├─ room_id (nullable — branch lobby chat)
+  ├─ content
+  ├─ flagged (boolean)
+  ├─ created_at
+
+reports
+  ├─ id (PK)
+  ├─ reporter_id (FK → users)
+  ├─ reported_user_id (FK → users)
+  ├─ message_id (nullable, FK → messages)
+  ├─ reason
+  ├─ resolved (boolean)
+  ├─ created_at
+```
+
+---
+
+## Gamification
+
+```sql
+leaderboard_seasons
+  ├─ id (PK)
+  ├─ cafe_id (nullable — null means cross-branch/platform-wide)
+  ├─ category (hours_total, hours_per_game, streak, diverse_games, top_spender, referral)
+  ├─ period_type (weekly, monthly)
+  ├─ starts_at / ends_at
+  ├─ status (active, closed)
+
+leaderboard_entries
+  ├─ season_id (FK → leaderboard_seasons)
+  ├─ user_id (FK → users)
+  ├─ game_id (nullable, FK → games)
+  ├─ score
+  ├─ rank
+
+season_history
+  ├─ season_id (FK → leaderboard_seasons)
+  ├─ user_id (FK → users)
+  ├─ final_rank
+  ├─ title_awarded
+
+user_badges
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ badge_type (former_champion, first_to_achieve, vip_seat_holder, game_pass_subscriber)
+  ├─ label
+  ├─ awarded_at
+  ├─ is_permanent (boolean)
+
+challenges
+  ├─ id (PK)
+  ├─ challenger_id (FK → users)
+  ├─ challenged_id (FK → users)
+  ├─ category
+  ├─ target_value
+  ├─ status (pending, active, won_by_challenger, defended_by_challenged, expired)
+  ├─ expires_at
+```
+
+---
+
+## Localization & Versioning
+
+```sql
+translation_keys
+  ├─ key
+  ├─ language_code
+  ├─ value
+
+server_versions
+  ├─ version_number
+  ├─ release_notes
+  ├─ channel (beta, stable)
+  ├─ released_at
+  ├─ is_critical_security_update (boolean)
+
+os_versions
+  ├─ version_number
+  ├─ release_notes
+  ├─ channel (beta, stable)
+  ├─ released_at
+  ├─ is_critical_security_update (boolean)
+
+version_compatibility
+  ├─ server_version
+  ├─ minimum_os_version_required
+  ├─ os_version
+  ├─ minimum_server_version_required
+```
+
+---
+
 ## Migration Strategy
 
-Migrations stored in `/migrations/` with naming:
+Migrations live in `/migrations/`, applied in phases matching build order rather than one giant file:
+
 ```
-001_initial_schema.sql
-002_add_cosmetics_table.sql
-003_add_audit_logging.sql
+001_foundation.sql          -- users, cafes, pcs, staff, wallets, games, sessions, transactions
+002_reservations.sql
+003_cosmetics_and_marketplace.sql
+004_subscriptions.sql       -- platform_subscriptions, game_passes, pc_licenses
+005_compliance.sql          -- age_verifications, admin_notifications, audit_log
+006_social.sql              -- friends, messages, reports
+007_gamification.sql        -- leaderboards, seasons, badges, challenges
+008_localization_and_versioning.sql
 ```
 
-Each migration is:
-- Forward (apply changes)
-- Backward (rollback changes)
-- Idempotent (safe to run multiple times)
+Each migration is forward + backward (rollback script) and idempotent (safe to re-run).
+
+## Indexing Priorities (v1)
+
+- `sessions(pc_id, ended_at)` — fast lookup of active sessions per PC
+- `wallets(user_id, cafe_id)` — unique constraint, hot path on every credit check
+- `leaderboard_entries(season_id, category, rank)` — leaderboard reads happen constantly
+- `transactions(cafe_id, created_at)` — revenue reporting queries
