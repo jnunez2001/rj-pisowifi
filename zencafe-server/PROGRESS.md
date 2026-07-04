@@ -30,7 +30,9 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | `005_subscription_grace_period` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-004. Explicitly tested the grace-period math itself, not just that the column exists: a subscription lapsed 1 hour ago correctly computes "don't enforce yet," one lapsed 25 hours ago correctly computes "enforce now." Rollback and re-apply both confirmed clean. |
 | `006_compliance.up.sql` / `.down.sql` written | ✅ Done | Resolves the guest-birthdate open decision (widened the constraint to cover all player account types). Adds `age_verifications`, `admin_notifications`, `audit_log`. Also fixed `verified_by_staff_id` → `verified_by_user_id` since `staff`'s PK is composite and can't be FK'd by a single column. |
 | `006_compliance` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-005. Explicitly tested: (1) inserting a guest player with no birthdate is now rejected (confirms the widened constraint actually works), (2) `age_verifications`, `admin_notifications`, and a system-triggered (`user_id IS NULL`) `audit_log` row all insert correctly. Rollback and re-apply both confirmed clean. |
-| `007_social.up.sql` / `.down.sql` | ❌ Not started | 001-006 all verified — safe to build on top of |
+| `007_age_verification_requests.up.sql` / `.down.sql` written | ✅ Done | New feature requested mid-build: remote selfie+ID verification workflow, layered on top of `age_verifications` (which now only represents an already-approved outcome). Selfie required alongside ID photo after identifying that photo-only submission would let a minor submit someone else's ID with no face comparison ever happening. |
+| `007_age_verification_requests` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-006. Explicitly tested all three CHECK constraints: (1) can't set `rejection_reason` unless status is rejected, (2) can't approve without `resulting_verification_id`, (3) full approval flow correctly links a request to its `age_verifications` outcome row. Also tested `audit_log` accepting the new `'view'` action and the `remote_verification_blocked` column. Rollback and re-apply both clean. |
+| `008_social.up.sql` / `.down.sql` | ❌ Not started | 001-007 all verified — safe to build on top of |
 
 ---
 
@@ -85,6 +87,18 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 
 ---
 
+## Manual Review + Verification Findings (007_age_verification_requests)
+
+- **Identified a real security gap before building this, not after:** the user asked about remote account creation with ID photo submission. A photo of an ID alone doesn't prove the submitter IS the person in it — a minor could submit a sibling's or parent's ID with no one ever comparing faces. Flagged this explicitly and got user confirmation to require a selfie alongside the ID photo (matches standard KYC patterns) before writing any schema, rather than building the weaker version first and fixing it later.
+- **`age_verifications` (006) vs `age_verification_requests` (007) are deliberately two different tables, not one.** `age_verifications` only ever represents an ALREADY-APPROVED outcome (accountability log). `age_verification_requests` is the pending workflow (submitted → approved/rejected). Approval creates a row in the former and links back via `resulting_verification_id`; rejection never touches `age_verifications` at all.
+- **ID/selfie photos must NOT share the cosmetics R2 bucket** — government ID images are sensitive PII under the PH Data Privacy Act, meaningfully higher-stakes than public marketplace images. Needs its own private bucket, accessed only via short-lived signed URLs, never a permanent link stored in the database. Documented in `docs/deployment/cloud-stack.md`.
+- **Retention policy documented but not enforced by this migration** — `photo_purge_at` is just a scheduling column; the actual purge cron job is service-layer work for later. Exact retention window (suggested default: 30 days) is an open business decision, not decided here.
+- **Anti-abuse column added (`users.remote_verification_blocked`) without hardcoding the rejection threshold** — the exact number of rejections before lockout (suggested default: 3) is a policy call for later; the schema just supports the mechanism.
+- **Renumbered the still-unwritten social/gamification/localization migrations again** (008/009/010, was 007/008/009) — same zero-cost renumbering pattern as when `005_subscription_grace_period` was inserted, since nothing beyond `006` existed yet.
+
+
+---
+
 ## How 001_foundation Was Verified
 
 Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool triggered, suggesting a local environment issue, likely WSL2-backend related — never resolved, and not worth resolving just for a one-off test). Instead:
@@ -115,6 +129,7 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 4. ✅ `004_subscriptions` — platform_features/plans/subscriptions (bundle-capable), game_passes, pc_licenses (verified against live Postgres)
 5. ✅ `005_subscription_grace_period` — lapsed_at + 24h grace period policy (verified against live Postgres)
 6. ✅ `006_compliance` — age_verifications, admin_notifications, audit_log (verified against live Postgres)
-7. ⬜ `007_social` — friends, messages, reports
-8. ⬜ `008_gamification` — leaderboards, seasons, badges, challenges
-9. ⬜ `009_localization_and_versioning`
+7. ✅ `007_age_verification_requests` — remote selfie+ID verification workflow (verified against live Postgres)
+8. ⬜ `008_social` — friends, messages, reports
+9. ⬜ `009_gamification` — leaderboards, seasons, badges, challenges
+10. ⬜ `010_localization_and_versioning`

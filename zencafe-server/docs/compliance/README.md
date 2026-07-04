@@ -41,6 +41,17 @@ Many LGUs (local government units) in the Philippines enforce curfew ordinances 
 - Self-reported birthdate is sufficient for **curfew enforcement** (a restriction, so erring cautious is fine even if imperfect)
 - For features that **grant access** rather than restrict it (e.g., friends/chat — see [social/README.md](../social/README.md)), self-reported age is NOT sufficient — those require staff verification, logged in the shared `age_verifications` table below, with accountability (which staff member verified, at which branch, when)
 
+### 5. Remote Verification (Selfie + ID)
+
+In-person verification (staff physically compares an ID to the person standing in front of them) doesn't scale well — staff may be busy, or a player may want to pre-register before ever visiting. A remote submission path exists, but with a deliberate safeguard:
+
+- **A photo of an ID alone proves nothing** — a minor could submit a photo of an older sibling's or parent's ID with no one ever comparing the face on the ID to the actual person. **A selfie is required alongside the ID photo**, so staff can visually compare the two before approving — this preserves the "someone actually checked this is you" guarantee that pure in-person verification provides, rather than silently accepting a weaker remote-only path.
+- Workflow: player submits ID photo + selfie → **pending** → staff reviews and approves/rejects (with a reason if rejected) → **only on approval** does a permanent row get written to `age_verifications` (the accountability log). Rejections do not create an accountability record.
+- **Anti-abuse:** repeated rejected submissions are a risk specific to this feature's purpose — a minor could keep trying different fake/borrowed IDs remotely. After a policy-defined number of rejections (exact threshold TBD — see Open Decisions), the account is flagged `remote_verification_blocked`, forcing in-person-only verification going forward.
+- **Storage:** ID and selfie photos live in a **separate, private, access-controlled storage bucket** — never the public-facing cosmetics/marketplace bucket (see [deployment/cloud-stack.md](../deployment/cloud-stack.md)). Access is via short-lived signed URLs generated on demand for staff review, not permanent links stored in the database.
+- **Retention:** once a request is approved or rejected, the raw photos don't need to be kept indefinitely — only the verification *outcome* (who verified, when, what ID type) needs to persist permanently. Photos should be auto-purged after a policy-defined retention window (default suggestion: 30 days — see Open Decisions) post-decision.
+- **Staff review interface:** this doesn't need a separate native mobile app — a responsive/installable web version of the admin dashboard (a PWA) can access a phone's camera fine via standard browser APIs, avoiding the cost of maintaining a second client alongside the OS and server (see [deployment/update-strategy.md](../deployment/update-strategy.md)).
+
 ---
 
 ## Remaining Credit Handling at Session End
@@ -160,3 +171,5 @@ Credit handling on forced session end:
 - [ ] Default `temporary_account_validity_days` suggestion (e.g., 7 days), or fully owner-configurable?
 - [ ] Does a forfeited temporary-account credit get logged anywhere for the café owner's records (e.g., "unclaimed credit" report), or simply disappears?
 - [ ] Which free-tier email service to use for expiry reminders (e.g., free SMTP relay, or a free tier of a transactional email provider) — needs research during Foundation phase since volume limits vary
+- [ ] Photo retention window for remote verification submissions (default suggestion: 30 days post-decision, then auto-purge)
+- [ ] Rejection threshold before `remote_verification_blocked` is set (default suggestion: 3 rejections, then in-person-only)

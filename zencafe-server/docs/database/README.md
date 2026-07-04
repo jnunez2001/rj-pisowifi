@@ -257,12 +257,37 @@ admin_notifications
 audit_log
   ├─ id (PK)
   ├─ user_id (FK → users, nullable — some system-triggered changes have no acting user)
-  ├─ action (create, update, delete)
+  ├─ action (create, update, delete, view — 'view' added for logging sensitive photo access,
+    see age_verification_requests below)
   ├─ table_name
   ├─ record_id (no FK — polymorphic reference across many different tables)
   ├─ old_value (JSON)
   ├─ new_value (JSON)
   ├─ timestamp
+
+age_verification_requests (pending-review workflow for REMOTE verification — distinct from
+  age_verifications above, which only ever represents an ALREADY-APPROVED outcome)
+  ├─ id (PK)
+  ├─ user_id (FK → users)
+  ├─ cafe_id (FK → cafes)
+  ├─ id_photo_key (private bucket object key — NOT the public cosmetics R2 bucket, NOT a
+    permanent URL; access via short-lived signed URLs generated on demand)
+  ├─ selfie_photo_key (required alongside id_photo_key — a photo of an ID alone doesn't
+    prove the submitter is the person in it; staff compares selfie to ID before approving)
+  ├─ status (pending, approved, rejected)
+  ├─ rejection_reason (set only when rejected)
+  ├─ reviewed_by_user_id (FK → users, set only once reviewed)
+  ├─ reviewed_at (set only once reviewed)
+  ├─ resulting_verification_id (FK → age_verifications, set only on approval — links the
+    request to the permanent accountability record it created)
+  ├─ submitted_at
+  ├─ photo_purge_at (scheduled deletion time for the raw photos once decided — actual purge
+    job is a service-layer/cron responsibility, not enforced by the schema itself)
+
+users — addition
+  ├─ remote_verification_blocked (boolean — set by the service layer after a policy-defined
+    number of rejected requests; forces in-person-only verification going forward, an
+    anti-abuse control against repeated fake/borrowed-ID submission attempts)
 ```
 
 ---
@@ -383,9 +408,10 @@ Migrations live in `/migrations/`, applied in phases matching build order rather
 004_subscriptions.up.sql / .down.sql           -- platform_subscriptions (bundle-capable), game_passes, pc_licenses
 005_subscription_grace_period.up.sql / .down.sql  -- lapsed_at columns, 24h grace period policy
 006_compliance.up.sql / .down.sql              -- age_verifications, admin_notifications, audit_log
-007_social.up.sql / .down.sql                  -- friends, messages, reports
-008_gamification.up.sql / .down.sql            -- leaderboards, seasons, badges, challenges
-009_localization_and_versioning.up.sql / .down.sql
+007_age_verification_requests.up.sql / .down.sql  -- remote selfie+ID verification workflow
+008_social.up.sql / .down.sql                  -- friends, messages, reports
+009_gamification.up.sql / .down.sql            -- leaderboards, seasons, badges, challenges
+010_localization_and_versioning.up.sql / .down.sql
 ```
 
 **On "idempotent":** raw `CREATE TABLE` statements are not naturally idempotent, and adding `IF NOT EXISTS` everywhere would silently mask real schema drift rather than catch it. Instead, idempotency comes from the migration **runner**, not the SQL itself — the runner maintains its own `schema_migrations` tracking table (recording which numbered migrations have already been applied) and skips any migration already marked done. This is the standard approach used by tools like `golang-migrate`/Flyway/Rails, and is what `src/database/` should implement rather than hand-rolling `IF NOT EXISTS` checks in every migration file.

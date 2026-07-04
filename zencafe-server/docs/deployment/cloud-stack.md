@@ -21,7 +21,8 @@
 | **Oracle Cloud Free Tier** | Hosts the cloud aggregation server (if/when multi-location sync is needed) | Free forever, not a trial — good fit for a bootstrapped budget |
 | **Cloudflare Tunnel** | Exposes each café's local server to the cloud securely | No router port-forwarding needed — cafés often have basic/shared internet setups, this avoids networking headaches for non-technical owners |
 | **Cloudflare Pages** | Hosts the admin dashboard (web UI) and any marketing site | Free static hosting, fast CDN |
-| **Cloudflare R2** | Stores cosmetics images/marketplace assets | No egress fees, unlike most S3-compatible storage |
+| **Cloudflare R2** (public bucket) | Stores cosmetics images/marketplace assets | No egress fees, unlike most S3-compatible storage |
+| **Cloudflare R2** (separate private bucket) | Stores ID/selfie photos for remote age verification (see [compliance/README.md](../compliance/README.md)) | Government ID photos are sensitive PII (PH Data Privacy Act) — must NOT share a bucket with public-facing cosmetics assets. Access only via short-lived signed URLs generated on demand for staff review, never permanent public links. Photos auto-purged after the retention window once a request is decided. |
 | **Firebase Auth** | Handles "Sign in with Google" | Avoids building OAuth from scratch; narrow use — NOT used for the main database |
 | **Firebase Cloud Messaging** | Push notifications (kiosk/app alerts) | Free, avoids the per-message cost of SMS (already ruled out) |
 | **GitHub Actions** | CI/CD — build/test the C++ server before deploy | Already using GitHub for source control; free tier covers early-stage build volume |
