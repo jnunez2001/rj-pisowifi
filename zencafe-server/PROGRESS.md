@@ -194,7 +194,7 @@ Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool
 ## Open Decisions (Need Owner Input)
 
 - [x] ~~Do guest-type accounts collect a birthdate for curfew purposes...~~ **RESOLVED: yes.** The compliance doc's own guest-curfew-refund flow only makes sense if guest accounts have a birthdate on file, so `player_requires_birthdate` was widened in `006_compliance` to cover every player account type, not just registered.
-- [ ] Confirm target minimum PostgreSQL version (currently assuming 13+, recommend 15+ for a fresh build in 2026 — no real downside to requiring a recent version since this isn't a migration of an existing system)
+- [x] ~~Confirm target minimum PostgreSQL version...~~ **RESOLVED: PostgreSQL 16.** No legacy system to support, and PG16 covers everything used across all 13 migrations. See "Hardware Requirements" section above.
 - [x] ~~What happens when a cafe's `platform_subscriptions` lapses...~~ **RESOLVED: 24-hour grace period** before the service layer enforces lockout (disabling Game Pass / the PC), measured from `lapsed_at`. See `005_subscription_grace_period`.
 
 ---
@@ -216,3 +216,33 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 11. ✅ `011_guest_self_attestation` — reverts guest birthdate requirement, fixes is_minor default, guest chat exclusion (verified against live Postgres)
 12. ✅ `012_gamification` — leaderboards, seasons, badges, challenges (verified against live Postgres)
 13. ✅ `013_localization_and_versioning` — translation_keys, server_versions, os_versions (verified against live Postgres)
+
+---
+
+## Current Phase: Service-Layer Code (src/)
+
+First real service code, not more schema. Started with the migration runner, since everything else depends on migrations being applicable automatically rather than by hand through a scratch script.
+
+### Migration Runner — Status: WRITTEN, **NOT COMPILED, NOT TESTED**
+
+**Read this carefully before trusting this code works.** This environment has no C++ compiler, no CMake, no Qt toolchain available (checked: `cmake`, `g++`, `cl`, `qmake` all absent) — the same limitation that blocked local Docker testing earlier in this project. Unlike every one of the 13 SQL migrations (all genuinely verified against live Postgres), **this C++ code has never been built or run.** It is carefully reasoned through, not verified.
+
+**Files:**
+- `src/database/migration_runner.h` / `.cpp` — `MigrationRunner` class: ensures a `schema_migrations` tracking table exists, finds pending migrations by scanning `migrations/*.up.sql`, applies each one inside its own transaction (rolls back cleanly on failure), records it as applied
+- `src/main.cpp` — entry point; `zencafe-server --migrate` runs the migration runner and exits. Normal server mode isn't implemented yet.
+- `CMakeLists.txt` updated — now actually builds an executable (was fully commented out before), linking only `Qt6::Core` + `Qt6::Sql` (Network/Concurrent deliberately not linked yet — nothing in this build uses them)
+
+**Key design decision, worth understanding before touching this code:** each migration file is executed as **one whole string**, never split by semicolon. `008_content_and_chat_tiers.up.sql` and `009_social.up.sql` define PL/pgSQL trigger functions with semicolons *inside* `$$ ... $$` bodies — naive semicolon-splitting would break mid-function. PostgreSQL's own query protocol (used by the `QPSQL` driver) correctly parses multi-statement strings including dollar-quoted bodies when given the whole file at once. This is reasoned from how PostgreSQL's `PQexec` is documented to behave and how the earlier Node.js test scripts (`pg` library) successfully executed entire migration files as single calls throughout this project's testing — but it has NOT been specifically confirmed against Qt's `QPSQL` driver implementation. **This is the single most important thing to verify first** once a real build environment is available.
+
+**Also unverified:** whether `QSqlDatabase`/`QSqlQuery`'s error-handling/transaction methods behave exactly as assumed (e.g., that `m_db.transaction()`/`commit()`/`rollback()` interact correctly with `QPSQL` the way they do with other Qt SQL drivers).
+
+### How To Verify (Next Concrete Action)
+
+Needs an actual Qt6 + CMake + C++ compiler environment, which this sandbox doesn't have:
+
+1. Install Qt6 (Core + Sql modules, with the `QPSQL` plugin — on Windows this usually means building/obtaining the PostgreSQL driver plugin, which isn't always bundled by default with prebuilt Qt installers; may need `libpq` available at build time)
+2. `cmake -B build && cmake --build build` from `zencafe-server/`
+3. Set environment variables: `ZENCAFE_DB_HOST`, `ZENCAFE_DB_NAME`, `ZENCAFE_DB_USER`, `ZENCAFE_DB_PASSWORD` (and optionally `ZENCAFE_DB_PORT`, `ZENCAFE_MIGRATIONS_DIR`)
+4. Run `./ZenCafeServer --migrate` against a **fresh, empty** test database (a new free Neon project works well, same approach used throughout this project's SQL testing) and confirm all 13 migrations apply successfully in order
+5. Run it a second time immediately after — it should report success with **zero** migrations applied the second time (proves the `schema_migrations` tracking actually prevents re-running)
+6. Update this section with real results once done — replace "NOT COMPILED, NOT TESTED" with what was actually confirmed working

@@ -6,42 +6,33 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
 # Find dependencies
+# Only Core + Sql for now - this build covers the migration runner only (see
+# PROGRESS.md "What's Next"). Network/Concurrent will be added back once
+# api_server.cpp and the other service modules are actually built, not before -
+# no point finding packages this specific build doesn't yet use.
 find_package(Qt6 REQUIRED COMPONENTS
     Core
-    Network
     Sql
-    Concurrent
 )
 
-find_package(PostgreSQL REQUIRED)
+# Source files - migration runner is the first real service code in this project
+# (everything else in src/ is still header-only stubs).
+set(SOURCES
+    src/main.cpp
+    src/database/migration_runner.cpp
+)
 
-# Source files placeholder structure
-# set(SOURCES
-#     src/main.cpp
-#     src/api/api_server.cpp
-#     src/database/database_manager.cpp
-#     src/auth/auth_service.cpp
-#     src/sessions/session_manager.cpp
-#     src/games/game_service.cpp
-#     src/analytics/analytics_service.cpp
-#     src/admin/admin_service.cpp
-#     src/billing/billing_service.cpp
-# )
+add_executable(ZenCafeServer ${SOURCES})
 
-# Executable
-# add_executable(ZenCafeServer ${SOURCES})
-
-# Link Qt6 and PostgreSQL
-# target_link_libraries(ZenCafeServer
-#     Qt6::Core
-#     Qt6::Network
-#     Qt6::Sql
-#     Qt6::Concurrent
-#     pq          # PostgreSQL client library
-# )
+# Database access goes through Qt6::Sql's QPSQL driver, which links libpq internally -
+# no separate PostgreSQL client library (e.g. libpqxx) needed on top of that.
+target_link_libraries(ZenCafeServer
+    Qt6::Core
+    Qt6::Sql
+)
 
 message(STATUS "ZenCafe Server build configuration")
 message(STATUS "  C++ Standard: 17")
 message(STATUS "  Qt Version: 6.7")
-message(STATUS "  Database: PostgreSQL")
-message(STATUS "  API: REST + WebSocket")
+message(STATUS "  Database: PostgreSQL (via Qt6::Sql QPSQL driver)")
+message(STATUS "  Current scope: migration runner only (--migrate)")
