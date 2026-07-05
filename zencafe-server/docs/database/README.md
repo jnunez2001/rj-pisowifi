@@ -22,15 +22,26 @@ users
   ├─ google_id (nullable, unique — for "Sign in with Google")
   ├─ role (owner, staff, player)
   ├─ account_type (registered, guest, temporary)
-  ├─ birthdate (required for player role)
-  ├─ is_minor (computed/cached from birthdate, refreshed periodically)
+  ├─ birthdate (required only for role=player AND account_type='registered' — see
+    011_guest_self_attestation, which reversed an earlier decision requiring it for guests
+    too, once the desired zero-friction guest experience was clarified)
+  ├─ is_minor (computed/cached from birthdate for registered players; for guests, set
+    directly from a single unverified "18+?" self-attestation prompt instead. Defaults to
+    `true` — fixed in 011_guest_self_attestation from an earlier unsafe `false` default that
+    only seemed harmless because every player previously always had an immediate
+    birthdate-driven computation, so the raw default was never actually relied upon until
+    guests could skip that step entirely)
   ├─ age_tier (kids <13, teens 13-17, adults 18+ — self-reported/cached, added in
     008_content_and_chat_tiers; safe for RESTRICTING content like the game menu, same logic
-    as is_minor/curfew, NOT sufficient to unlock chat)
+    as is_minor/curfew, NOT sufficient to unlock chat. Defaults to 'kids', the fail-safe
+    direction, consistent with is_minor's default above)
   ├─ verified_chat_tier (teens, adults, nullable — staff-verified only, added in
     008_content_and_chat_tiers; replaces the earlier conceptual "social_unlocked" boolean,
     which was never actually built as a column before this. Null = no chat access at all,
-    covering kids unconditionally and any unverified teen/adult)
+    covering kids unconditionally and any unverified teen/adult. Can only ever be set for
+    `account_type = 'registered'` — enforced by the `chat_tier_requires_registered`
+    constraint added in 011_guest_self_attestation, since guests/temporary accounts are
+    excluded from social features entirely)
   ├─ remote_verification_blocked (boolean — see age_verification_requests section below)
   ├─ status_visibility (public, friends_only, private)
   ├─ preferred_language (e.g., "en", "fil", "id", "vi", "th", "ms")
@@ -247,7 +258,7 @@ pc_licenses (per-PC base licensing fee — mandatory, quantity-based, not part o
 
 ## Compliance
 
-**Resolved:** guest-type accounts DO collect a birthdate, same as registered players — the compliance doc's "guest curfew refund" flow only works if the system already knows the guest's age. Widened `users.player_requires_birthdate` (originally scoped to `account_type = 'registered'` only in 001) to cover every player account type.
+**Superseded by `011_guest_self_attestation`:** an earlier decision widened `player_requires_birthdate` to require every account type (including guest) to have a birthdate, so curfew could apply to guests. That was reversed once the actual desired guest experience was clarified — guests should have zero registration friction. `player_requires_birthdate` is back to `registered`-only; guests instead get a single unverified "18 or older?" prompt that sets `age_tier`/`is_minor` directly (see [compliance/README.md](../compliance/README.md) "Guest Access"). Falling back to the fail-safe defaults (`kids`/`true`) if unanswered is an accepted, documented limitation, not a gap that was missed.
 
 ```sql
 age_verifications
@@ -451,8 +462,9 @@ Migrations live in `/migrations/`, applied in phases matching build order rather
 008_content_and_chat_tiers.up.sql / .down.sql  -- kids/teens/adults tier system (games.age_rating, users tier fields)
 009_social.up.sql / .down.sql                  -- tier-aware friends, messages, chat_rooms, reports
 010_cafe_security_toggles.up.sql / .down.sql   -- remote_verification_enabled (owner-configurable settings, see compliance/README.md)
-011_gamification.up.sql / .down.sql            -- leaderboards, seasons, badges, challenges
-012_localization_and_versioning.up.sql / .down.sql
+011_guest_self_attestation.up.sql / .down.sql  -- reverts birthdate requirement for guests, fixes is_minor default, adds chat_tier_requires_registered
+012_gamification.up.sql / .down.sql            -- leaderboards, seasons, badges, challenges
+013_localization_and_versioning.up.sql / .down.sql
 ```
 
 **On "idempotent":** raw `CREATE TABLE` statements are not naturally idempotent, and adding `IF NOT EXISTS` everywhere would silently mask real schema drift rather than catch it. Instead, idempotency comes from the migration **runner**, not the SQL itself — the runner maintains its own `schema_migrations` tracking table (recording which numbered migrations have already been applied) and skips any migration already marked done. This is the standard approach used by tools like `golang-migrate`/Flyway/Rails, and is what `src/database/` should implement rather than hand-rolling `IF NOT EXISTS` checks in every migration file.

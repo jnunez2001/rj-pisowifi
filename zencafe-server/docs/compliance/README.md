@@ -13,12 +13,21 @@ Many LGUs (local government units) in the Philippines enforce curfew ordinances 
 ## Design
 
 ### 1. Age Capture & Tiers
-- Require **birthdate** (not just "are you 18+" checkbox) at account registration
+- Require **birthdate** (not just "are you 18+" checkbox) at **registered** account creation
 - Store birthdate, calculate age server-side whenever curfew logic runs (never trust a client-side age claim)
 - Minor = under 18 (used for curfew — see Open Decisions on whether some LGUs define this differently)
 - **Three content/chat tiers, decided directly with the owner:** **Kids** (under 13), **Teens** (13-17), **Adults** (18+). This drives two separate things:
   - `age_tier` (self-reported, cached from birthdate) — safe to use for *restricting* content, same logic as curfew (e.g., filtering the game menu by rating — see [database/README.md](../database/README.md))
   - `verified_chat_tier` (staff-verified only, nullable) — used for *granting* chat access (see [social/README.md](../social/README.md)); self-reported age is never sufficient to unlock this, only a completed staff verification specifying which tier (teens or adults — kids never get a verified_chat_tier at all, since they get no chat access regardless)
+
+### 1a. Guest Access (Lightweight, No Verification)
+
+Guests are walk-up PC users, not members — no registration, no ID, no social features, no friction. This is deliberately much lighter than the registered-account flow above (`011_guest_self_attestation`):
+
+- **No birthdate required** — full birthdate collection is member-registration friction, not appropriate for someone who just wants to use a PC
+- **A single, unverified prompt instead** — "Are you 18 or older?" at session start. Answering "yes" sets `age_tier = 'adults'`. Answering "no," declining, or skipping leaves the account at its **fail-safe defaults** (`age_tier = 'kids'`, `is_minor = true`) — the same defaults already used elsewhere in this system when age is unknown, erring toward the more restrictive assumption
+- **Known, accepted limitation:** this is self-attestation, not proof — a minor could claim to be 18 and get the `adults` game menu. This is a deliberate friction/protection tradeoff for guest mode specifically, distinct from the registered-account flow, which still requires actual staff verification before any *access-granting* feature (chat) unlocks. Guests never get chat regardless of what they answer here — `verified_chat_tier` can only ever be set for `registered` accounts (enforced by a database constraint, `chat_tier_requires_registered`)
+- **No account persists in any special way** — a guest's `users` row lives only as long as needed for their current session/wallet, same as already designed for guest credit handling below
 
 ### 2. Curfew Hours Are Per-Branch, Not Global
 - Curfew ordinances vary by city/municipality (e.g., 10PM-5AM in one LGU, different hours in another)

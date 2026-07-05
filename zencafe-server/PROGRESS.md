@@ -38,7 +38,9 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | `009_social` executed against a real PostgreSQL instance | ✅ **VERIFIED — all safety-critical paths explicitly tested, not assumed.** | Set up real test accounts (verified teen, verified adult, unverified self-reported-adult, kid) and confirmed: teen→adult friend request rejected, adult→teen friend request rejected (both directions), kid can't add any friend, an unverified account can't add any friend (self-report insufficient), teen posting in the adults room rejected, adult posting in the teens room rejected, teen DMing an adult rejected, duplicate global room per tier rejected, message can't target both a room and a DM recipient at once. All same-tier paths (teen↔teen, adult↔adult) confirmed to work normally. Rollback and re-apply both clean. |
 | `010_cafe_security_toggles.up.sql` / `.down.sql` written | ✅ Done | Direct response to a request to make ALL safety measures toggleable by café owners, backed by a liability waiver. **Declined for the core minor-protection mechanisms** (kids blocked from chat, teen/adult separation, mandatory staff verification) — a signed waiver doesn't reliably waive statutory child-protection obligations, and would expose the platform itself, not just the café. Owner deferred the final call to this judgment. Only added the one legitimate operational toggle: `cafes.remote_verification_enabled` (photo verification vs. in-person-only — doesn't weaken what "verified" means). Full reasoning locked in at `docs/compliance/README.md` "Owner-Configurable vs. Platform-Fixed Security Settings" so this isn't quietly reversed in a future session without the same context. |
 | `010_cafe_security_toggles` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Confirmed `remote_verification_enabled` defaults to `true`. Then explicitly confirmed the important thing: toggling it OFF has zero effect on the `009_social` tier-matching triggers — a teen still cannot friend an adult regardless of this cafe-level setting. Rollback and re-apply both clean. |
-| `011_gamification.up.sql` / `.down.sql` | ❌ Not started | 001-010 all verified — safe to build on top of |
+| `011_guest_self_attestation.up.sql` / `.down.sql` written | ✅ Done | Reverses part of `006_compliance`: guests no longer require a birthdate (registration friction was the wrong call once the actual desired guest experience — walk-up, zero-friction, no membership features — was clarified). Guests instead get a single unverified "18+?" prompt setting `age_tier`/`is_minor` directly. **Found and fixed a real bug while building this:** `is_minor` defaulted to `false` (unsafe direction) since `001_foundation` — harmless before because every player always had immediate birthdate computation, but a real inconsistency risk now that guests can skip that step and rely on the raw default. Also added `chat_tier_requires_registered`, a DB constraint ensuring guest/temporary accounts can never get chat access no matter what. |
+| `011_guest_self_attestation` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Confirmed: a guest can be created with no birthdate at all, defaulting consistently to `is_minor=true` + `age_tier='kids'` (the bug fix actually works). Confirmed registered accounts still require a birthdate (unchanged). Confirmed a guest self-attesting "18+" correctly sets `age_tier='adults'`. **Confirmed a guest can never get `verified_chat_tier` set, even via direct UPDATE** — the database itself refuses it. Confirmed a registered account can still get it set normally. Rollback and re-apply both clean. |
+| `012_gamification.up.sql` / `.down.sql` | ❌ Not started | 001-011 all verified — safe to build on top of |
 
 ---
 
@@ -117,6 +119,22 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 
 ---
 
+## Manual Review + Verification Findings (010_cafe_security_toggles)
+
+- **This migration exists because of a request that was partially declined, not fully implemented.** The user asked to make ALL safety measures toggleable per café, backed by a liability waiver. Explained why a waiver doesn't reliably waive statutory child-protection obligations and would expose the platform itself, not just the café — the owner deferred the final call to that judgment. Only the one legitimate operational setting (`remote_verification_enabled`) was added; no toggle exists for the core minor-protection mechanisms, and none should be added without redoing this risk analysis. Full reasoning locked into `compliance/README.md`.
+- **Explicitly tested that the new toggle has zero effect on the safety triggers** — not assumed from the fact that the two features live in different migrations. A teen still cannot friend an adult with `remote_verification_enabled = false`.
+
+---
+
+## Manual Review + Verification Findings (011_guest_self_attestation)
+
+- **This migration reverses a decision made in `006_compliance`**, once the actual desired guest experience was clarified mid-build: guests should have zero registration friction (no birthdate, no verification, no social features) — not the "guest still needs a birthdate for curfew" model built earlier. Documented as a reversal, not silently overwritten, so a future session understands why `006`'s reasoning no longer applies to guests.
+- **Found and fixed a real bug while building this, not after:** `is_minor` defaulted to `false` since `001_foundation` — the unsafe direction. This was harmless before because every player always had an immediate birthdate-driven computation overwriting the default, so the raw default value was never actually exercised in practice. Guests skipping that computation entirely made this a live risk: a guest who never answers the self-attestation prompt would previously have defaulted to `is_minor=false` (curfew doesn't apply) while `age_tier` correctly defaulted to `'kids'` (game menu is restricted) — two fields disagreeing about the same person. Fixed by changing the default to `true`, and explicitly tested that a guest with no birthdate now gets consistent fail-safe values on both fields.
+- **Added `chat_tier_requires_registered` as a defensive DB constraint**, not just a service-layer assumption — guests and temporary accounts can never get `verified_chat_tier` set, tested by attempting a direct `UPDATE` and confirming the database itself refuses it, not just the application flow.
+- **No new column was needed for the self-attestation itself** — it reuses the existing `age_tier`/`is_minor` fields, which were already self-reported and already fail-safe by design. The only real change was loosening the birthdate constraint and fixing the default-value inconsistency it exposed.
+
+---
+
 ## How 001_foundation Was Verified
 
 Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool triggered, suggesting a local environment issue, likely WSL2-backend related — never resolved, and not worth resolving just for a one-off test). Instead:
@@ -151,5 +169,6 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 8. ✅ `008_content_and_chat_tiers` — kids/teens/adults tier system (verified against live Postgres)
 9. ✅ `009_social` — tier-aware friends, messages, chat_rooms, reports (verified against live Postgres)
 10. ✅ `010_cafe_security_toggles` — remote_verification_enabled, owner-configurable settings policy (verified against live Postgres)
-11. ⬜ `011_gamification` — leaderboards, seasons, badges, challenges
-12. ⬜ `012_localization_and_versioning`
+11. ✅ `011_guest_self_attestation` — reverts guest birthdate requirement, fixes is_minor default, guest chat exclusion (verified against live Postgres)
+12. ⬜ `012_gamification` — leaderboards, seasons, badges, challenges
+13. ⬜ `013_localization_and_versioning`
