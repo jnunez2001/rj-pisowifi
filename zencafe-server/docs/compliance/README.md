@@ -165,6 +165,24 @@ Credit handling on forced session end:
 
 ---
 
+## Owner-Configurable vs. Platform-Fixed Security Settings (Locked Decision)
+
+A request was made to make **all** safety measures toggleable per café — curfew, age verification, teen/adult chat separation — backed by a liability waiver café owners sign when subscribing, on the theory that this shifts all legal responsibility to them. **This was declined for the core minor-protection mechanisms**, after explaining the reasoning, and the owner deferred the final call. Recorded here permanently so this doesn't get quietly reversed in a future session without the same context.
+
+**Why a waiver doesn't solve this:** a signed form does not reliably waive statutory child-protection obligations (e.g., RA 7610 in the Philippines). If a café disables a protection and a minor is harmed, "they agreed to a form" is unlikely to shield the café owner — and it specifically would NOT shield the platform, since the platform would have knowingly built and shipped the bypass. This is a business-existential legal risk, not a technical preference, and genuinely warrants real legal counsel before ever being revisited — not something to decide by default in a schema design session.
+
+### What IS café-owner-configurable (`cafes` table toggles — no safety trade-off):
+- `curfew_enabled`, `curfew_start`/`curfew_end` — whether/when curfew applies (LGU ordinances differ by branch)
+- `lobby_chat_enabled` — whether local (per-branch) chat rooms exist at all for that café
+- `remote_verification_enabled` (added in `010_cafe_security_toggles`) — whether that café allows photo-based remote verification, or requires in-person-only. Turning this off only changes *how* someone gets verified — it does NOT weaken what "verified" means or who can chat with whom.
+
+### What is NOT toggleable, fixed platform-wide, no schema exists to disable it:
+- Kids get no chat access, period — no `cafes` column exists to override this, and none should be added without redoing this entire risk analysis first
+- Teens and adults never chat with each other — enforced by the `trg_friends_tier_match`/`trg_messages_tier_check` database triggers (`009_social`), not a setting
+- Some form of staff verification is always required before ANY chat unlocks — self-reported age never grants access, only restricts (same as curfew)
+
+---
+
 ## Open Decisions (Need Owner Input)
 
 - [ ] Exact minor age cutoff — under 18? Some LGUs define minors as under 15 for curfew purposes — confirm which applies

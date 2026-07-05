@@ -50,6 +50,10 @@ cafes
   ├─ min_credit_for_account_transfer (₱ threshold)
   ├─ temporary_account_validity_days
   ├─ lobby_chat_enabled (boolean, opt-in)
+  ├─ remote_verification_enabled (boolean, default true — added in
+    010_cafe_security_toggles; whether this café allows photo-based remote verification vs
+    in-person-only. See "Owner-Configurable vs. Platform-Fixed Security Settings" in
+    compliance/README.md for what is and is NOT toggleable, and why)
   ├─ reservation_grace_period_minutes (default 30 — auto-release unclaimed reservation)
   ├─ reservation_min_credit (₱ minimum balance required to reserve a PC)
   ├─ vip_seat_pc_id (nullable, FK → pcs)
@@ -446,8 +450,9 @@ Migrations live in `/migrations/`, applied in phases matching build order rather
 007_age_verification_requests.up.sql / .down.sql  -- remote selfie+ID verification workflow
 008_content_and_chat_tiers.up.sql / .down.sql  -- kids/teens/adults tier system (games.age_rating, users tier fields)
 009_social.up.sql / .down.sql                  -- tier-aware friends, messages, chat_rooms, reports
-010_gamification.up.sql / .down.sql            -- leaderboards, seasons, badges, challenges
-011_localization_and_versioning.up.sql / .down.sql
+010_cafe_security_toggles.up.sql / .down.sql   -- remote_verification_enabled (owner-configurable settings, see compliance/README.md)
+011_gamification.up.sql / .down.sql            -- leaderboards, seasons, badges, challenges
+012_localization_and_versioning.up.sql / .down.sql
 ```
 
 **On "idempotent":** raw `CREATE TABLE` statements are not naturally idempotent, and adding `IF NOT EXISTS` everywhere would silently mask real schema drift rather than catch it. Instead, idempotency comes from the migration **runner**, not the SQL itself — the runner maintains its own `schema_migrations` tracking table (recording which numbered migrations have already been applied) and skips any migration already marked done. This is the standard approach used by tools like `golang-migrate`/Flyway/Rails, and is what `src/database/` should implement rather than hand-rolling `IF NOT EXISTS` checks in every migration file.
