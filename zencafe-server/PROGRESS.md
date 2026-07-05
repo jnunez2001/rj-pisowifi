@@ -19,7 +19,7 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | `001_foundation.up.sql` / `.down.sql` written | ✅ Done | Tables: users, cafes, pcs, staff, wallets, games, sessions, transactions |
 | `001_foundation` manually reviewed for SQL correctness | ✅ Done | See "Manual Review Findings" below |
 | `001_foundation` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Ran against a live Neon (free-tier) Postgres instance: applied `.up.sql` cleanly, confirmed all 8 tables created, applied `.down.sql` to confirm rollback works with no errors, then re-applied `.up.sql` to leave the DB in a known state. Full pass, no errors at any step. (Docker Desktop was abandoned as the test method — its daemon connection hung in this sandbox; Neon's hosted Postgres was used instead, which also matches the free-tier dev approach already decided in `docs/deployment/cloud-stack.md`.) |
-| Migration runner (`src/database/`) | ❌ Not started | Needs a `schema_migrations` tracking table + apply/rollback logic — see `docs/database/README.md` Migration Strategy section |
+| Migration runner (`src/database/`) | ✅ **COMPILED AND VERIFIED** | Real Qt6/CMake/MSVC toolchain set up specifically to test this. Compiled cleanly (app logic needed zero changes), two real deployment bugs found and fixed (Qt SQL plugin + its libpq dependency not being copied to the output folder), then genuinely ran `--migrate` against a wiped Neon database: all 14 migrations applied, verified via direct SQL query (37 tables, all versions recorded), and a second run correctly applied zero migrations (idempotency confirmed). See "Current Phase: Service-Layer Code" below for full detail. |
 | `002_reservations.up.sql` / `.down.sql` written | ✅ Done | Adds `reservations` table, `cafes.reservation_grace_period_minutes` / `reservation_min_credit`, `sessions.reservation_id` |
 | `002_reservations` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001. Explicitly tested the double-booking exclusion constraint by inserting two overlapping reservations for the same PC — the second insert was correctly rejected by the database itself (`conflicting key value violates exclusion constraint`), not just caught in application code. Rollback (`.down.sql`) and re-apply also confirmed clean. |
 | `003_cosmetics_and_marketplace.up.sql` / `.down.sql` written | ✅ Done | Adds `cafe_branding`, `game_whitelist`, `cosmetics`, `user_cosmetics`; also fixes a real gap — `users.role` never allowed `'designer'` despite it being referenced elsewhere in the docs |
@@ -158,16 +158,18 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 
 ## What's Next (Beyond the Original Migration Build Order)
 
-The database schema is now complete and fully verified — 13 migrations, every one tested against live Postgres, not just reviewed on paper. The next phase is **service-layer code** (`src/` — api, auth, sessions, games, database, admin, billing, analytics), not more schema:
+The database schema is now complete and fully verified — 14 migrations, every one tested against live Postgres, not just reviewed on paper. The migration runner (below) is now ALSO genuinely compiled and verified, not just designed. Remaining service-layer work:
 
-- A real **migration runner** (`src/database/`) with its own `schema_migrations` tracking table — needed before any of the `.up.sql`/`.down.sql` files here can be applied automatically rather than by hand through a scratch script
+- ~~A real migration runner~~ — **DONE, see below.**
 - The cross-table business rules explicitly deferred to "the service layer" throughout these migrations now need to actually be written there — e.g., `game_passes.active` consistency, subscription lapse/grace-period enforcement, the photo-purge cron job, season-closing logic, minor-exclusion from spend-based leaderboards
+- The WiFi bridge endpoint (`docs/api/wifi-bridge-api.md`) — designed but not implemented
 - Authentication (`src/auth/`) — Google Sign-In, session tokens, staff/owner login
 - The actual API surface (`src/api/`) that the ZenCafe OS client and admin dashboard will call
+- The unified admin dashboard website (HTML/JS) — not started at all yet, calls both this C++ server's API and the existing R&J PisoWifi Node.js API
 
-**Before starting service code — both now decided:**
-- **Minimum PostgreSQL version: 16.** No legacy system to support, and PG16 already covers everything used across all 13 migrations (`gen_random_uuid()`, `EXCLUDE USING gist`, partial indexes, `plpgsql` triggers).
-- **Migration runner: a small custom one written in C++** (likely using `libpqxx`), not an existing tool like `golang-migrate`/Flyway — those require installing a separate language runtime (Go/Java) purely to run migrations, when the server itself is already C++. A minimal runner (read the numbered `.up.sql` files, track applied ones in a `schema_migrations` table, apply what's missing in order) is a small amount of code and keeps the deployment footprint to just the C++ server binary.
+**Already decided:**
+- **Minimum PostgreSQL version: 16.** No legacy system to support, and PG16 covers everything used across all 14 migrations.
+- **Migration runner: a small custom one written in C++, using Qt6's `Sql` module (`QSqlDatabase`/`QSqlQuery` with the `QPSQL` driver)** — not `libpqxx` as originally guessed before checking the existing `CMakeLists.txt`, which already planned `Qt6::Sql`. Confirmed working for real.
 
 ## Hardware Requirements (Server + Client OS) — See Dedicated Docs
 
@@ -224,29 +226,41 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 
 First real service code, not more schema. Started with the migration runner, since everything else depends on migrations being applicable automatically rather than by hand through a scratch script.
 
-### Migration Runner — Status: WRITTEN, **NOT COMPILED, NOT TESTED**
+### Migration Runner — Status: ✅ **COMPILED AND VERIFIED against live PostgreSQL**
 
-**Read this carefully before trusting this code works.** This environment has no C++ compiler, no CMake, no Qt toolchain available (checked: `cmake`, `g++`, `cl`, `qmake` all absent) — the same limitation that blocked local Docker testing earlier in this project. Unlike every one of the 13 SQL migrations (all genuinely verified against live Postgres), **this C++ code has never been built or run.** It is carefully reasoned through, not verified.
+Previously written blind with no compiler available. A real Qt6 + CMake + MSVC toolchain was set up specifically to verify this (see "Build Environment Setup" below), and the code was genuinely compiled and run — not just reasoned through anymore.
 
 **Files:**
 - `src/database/migration_runner.h` / `.cpp` — `MigrationRunner` class: ensures a `schema_migrations` tracking table exists, finds pending migrations by scanning `migrations/*.up.sql`, applies each one inside its own transaction (rolls back cleanly on failure), records it as applied
 - `src/main.cpp` — entry point; `zencafe-server --migrate` runs the migration runner and exits. Normal server mode isn't implemented yet.
-- `CMakeLists.txt` updated — now actually builds an executable (was fully commented out before), linking only `Qt6::Core` + `Qt6::Sql` (Network/Concurrent deliberately not linked yet — nothing in this build uses them)
+- `CMakeLists.txt` — builds `ZenCafeServer.exe`, linking `Qt6::Core` + `Qt6::Sql`, plus two post-build deployment fixes found by actually running the compiled binary (see "Real Bugs Found and Fixed" below)
 
-**Key design decision, worth understanding before touching this code:** each migration file is executed as **one whole string**, never split by semicolon. `008_content_and_chat_tiers.up.sql` and `009_social.up.sql` define PL/pgSQL trigger functions with semicolons *inside* `$$ ... $$` bodies — naive semicolon-splitting would break mid-function. PostgreSQL's own query protocol (used by the `QPSQL` driver) correctly parses multi-statement strings including dollar-quoted bodies when given the whole file at once. This is reasoned from how PostgreSQL's `PQexec` is documented to behave and how the earlier Node.js test scripts (`pg` library) successfully executed entire migration files as single calls throughout this project's testing — but it has NOT been specifically confirmed against Qt's `QPSQL` driver implementation. **This is the single most important thing to verify first** once a real build environment is available.
+**Verified true, not just designed:** each migration file is executed as **one whole string**, never split by semicolon — `008_content_and_chat_tiers.up.sql` and `009_social.up.sql` define PL/pgSQL trigger functions with semicolons *inside* `$$ ... $$` bodies, and this approach worked correctly against the real `QPSQL` driver, applying all 14 migrations (including those two) without error.
 
-**Also unverified:** whether `QSqlDatabase`/`QSqlQuery`'s error-handling/transaction methods behave exactly as assumed (e.g., that `m_db.transaction()`/`commit()`/`rollback()` interact correctly with `QPSQL` the way they do with other Qt SQL drivers).
+**Actual verification performed (2026, same day the build environment was set up):**
+1. Wiped the Neon test database completely (`DROP SCHEMA public CASCADE`) for a genuine from-scratch test
+2. Ran the compiled `ZenCafeServer.exe --migrate` — reported "All pending migrations applied successfully"
+3. **Independently confirmed via direct SQL query** (not just trusting the program's own message): all 37 expected tables exist, and `schema_migrations` contains all 14 versions in the correct order
+4. Ran it a **second time** — correctly applied **zero** new migrations (only a harmless `NOTICE: relation "schema_migrations" already exists, skipping`), proving the tracking table genuinely prevents re-running
 
-### How To Verify (Next Concrete Action)
+### Real Bugs Found and Fixed (Only Discoverable By Actually Compiling)
 
-Needs an actual Qt6 + CMake + C++ compiler environment, which this sandbox doesn't have:
+These are exactly the kind of mistakes that could NOT have been caught by "careful reasoning" alone — they only surface when you actually try to run a compiled Qt application, which is precisely why this verification mattered:
 
-1. Install Qt6 (Core + Sql modules, with the `QPSQL` plugin — on Windows this usually means building/obtaining the PostgreSQL driver plugin, which isn't always bundled by default with prebuilt Qt installers; may need `libpq` available at build time)
-2. `cmake -B build && cmake --build build` from `zencafe-server/`
-3. Set environment variables: `ZENCAFE_DB_HOST`, `ZENCAFE_DB_NAME`, `ZENCAFE_DB_USER`, `ZENCAFE_DB_PASSWORD` (and optionally `ZENCAFE_DB_PORT`, `ZENCAFE_MIGRATIONS_DIR`)
-4. Run `./ZenCafeServer --migrate` against a **fresh, empty** test database (a new free Neon project works well, same approach used throughout this project's SQL testing) and confirm all 14 migrations apply successfully in order
-5. Run it a second time immediately after — it should report success with **zero** migrations applied the second time (proves the `schema_migrations` tracking actually prevents re-running)
-6. Update this section with real results once done — replace "NOT COMPILED, NOT TESTED" with what was actually confirmed working
+1. **Qt SQL drivers (including `QPSQL`) load as runtime plugins from a `sqldrivers` subfolder next to the executable** — this is separate from normal DLL dependency deployment, which only follows an executable's *direct* link dependencies. The first compiled run failed with `Could not connect to database: Driver not loaded` even though compilation succeeded cleanly with zero errors. Fixed by adding an explicit post-build step in `CMakeLists.txt` that copies the plugin DLL into place.
+2. **The `QPSQL` plugin itself has its own runtime dependencies** (`libpq.dll`, and libpq's own dependencies: OpenSSL for encrypted connections, lz4 for compression) that are invisible to normal dependency deployment for the same reason — they're the *plugin's* dependencies, not the main executable's. Same symptom (`Driver not loaded`) persisted even after fixing #1, until these were also explicitly copied via `CMakeLists.txt`.
+3. **A path-derivation bug in the first attempt at fixing #1** — used `get_target_property(Qt6::Sql LOCATION)` to locate the Qt install prefix, which isn't reliable for multi-config generators like Visual Studio (resolved to the wrong path, missing a `debug/` path segment, and failed the build outright with a copy error). Fixed by using vcpkg's own `VCPKG_INSTALLED_DIR`/`VCPKG_TARGET_TRIPLET` variables directly instead, which are always reliable.
+
+**The actual C++ logic (migration_runner.cpp, main.cpp) required zero changes** — every fix needed was in the build/deployment configuration (`CMakeLists.txt`), not the application code itself. The code that was written blind turned out to be correct on the first real compile.
+
+### Build Environment Setup (For Future Reference)
+
+Set up specifically to verify this, using the D: drive for disk space (C: only had ~11GB free):
+- **CMake** via `winget install --id Kitware.CMake`
+- **MSVC (C++ compiler)** via `winget install --id Microsoft.VisualStudio.2022.BuildTools` with the `Microsoft.VisualStudio.Workload.VCTools` workload, installed to `D:\dev-tools\VSBuildTools`
+- **Qt6 (Core + Sql only, with the PostgreSQL driver)** via `vcpkg` rather than Qt's official multi-GB SDK installer — since the server is headless and never needs Qt's GUI modules, only `qtbase[sql,sql-psql]` was built (`vcpkg install "qtbase[sql,sql-psql]:x64-windows"`), which pulls in `libpq` automatically. vcpkg cloned to `D:\dev-tools\vcpkg`.
+- Build command: `cmake -B build -DCMAKE_TOOLCHAIN_FILE=D:/dev-tools/vcpkg/scripts/buildsystems/vcpkg.cmake && cmake --build build`
+- Run command: set `ZENCAFE_DB_HOST`, `ZENCAFE_DB_NAME`, `ZENCAFE_DB_USER`, `ZENCAFE_DB_PASSWORD`, `ZENCAFE_MIGRATIONS_DIR` environment variables, then `build/Debug/ZenCafeServer.exe --migrate`
 
 ---
 
