@@ -216,6 +216,7 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 11. ✅ `011_guest_self_attestation` — reverts guest birthdate requirement, fixes is_minor default, guest chat exclusion (verified against live Postgres)
 12. ✅ `012_gamification` — leaderboards, seasons, badges, challenges (verified against live Postgres)
 13. ✅ `013_localization_and_versioning` — translation_keys, server_versions, os_versions (verified against live Postgres)
+14. ✅ `014_connection_grace_period` — cafes.connection_grace_period_seconds, bounded 5-30, default 15 (verified against live Postgres) — see zencafe-os/docs/architecture/communication-protocol.md
 
 ---
 

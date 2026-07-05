@@ -65,6 +65,10 @@ cafes
     010_cafe_security_toggles; whether this café allows photo-based remote verification vs
     in-person-only. See "Owner-Configurable vs. Platform-Fixed Security Settings" in
     compliance/README.md for what is and is NOT toggleable, and why)
+  ├─ connection_grace_period_seconds (default 15, bounded 5-30 — added in
+    014_connection_grace_period; how long a client PC keeps running seamlessly after
+    losing contact with the server before pausing. See
+    zencafe-os/docs/architecture/communication-protocol.md)
   ├─ reservation_grace_period_minutes (default 30 — auto-release unclaimed reservation)
   ├─ reservation_min_credit (₱ minimum balance required to reserve a PC)
   ├─ vip_seat_pc_id (nullable, FK → pcs)
@@ -486,6 +490,7 @@ Migrations live in `/migrations/`, applied in phases matching build order rather
 011_guest_self_attestation.up.sql / .down.sql  -- reverts birthdate requirement for guests, fixes is_minor default, adds chat_tier_requires_registered
 012_gamification.up.sql / .down.sql            -- leaderboards, seasons, badges, challenges
 013_localization_and_versioning.up.sql / .down.sql
+014_connection_grace_period.up.sql / .down.sql -- cafes.connection_grace_period_seconds
 ```
 
 **On "idempotent":** raw `CREATE TABLE` statements are not naturally idempotent, and adding `IF NOT EXISTS` everywhere would silently mask real schema drift rather than catch it. Instead, idempotency comes from the migration **runner**, not the SQL itself — the runner maintains its own `schema_migrations` tracking table (recording which numbered migrations have already been applied) and skips any migration already marked done. This is the standard approach used by tools like `golang-migrate`/Flyway/Rails, and is what `src/database/` should implement rather than hand-rolling `IF NOT EXISTS` checks in every migration file.
