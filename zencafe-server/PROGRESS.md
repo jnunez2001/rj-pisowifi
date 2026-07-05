@@ -244,6 +244,21 @@ Needs an actual Qt6 + CMake + C++ compiler environment, which this sandbox doesn
 1. Install Qt6 (Core + Sql modules, with the `QPSQL` plugin — on Windows this usually means building/obtaining the PostgreSQL driver plugin, which isn't always bundled by default with prebuilt Qt installers; may need `libpq` available at build time)
 2. `cmake -B build && cmake --build build` from `zencafe-server/`
 3. Set environment variables: `ZENCAFE_DB_HOST`, `ZENCAFE_DB_NAME`, `ZENCAFE_DB_USER`, `ZENCAFE_DB_PASSWORD` (and optionally `ZENCAFE_DB_PORT`, `ZENCAFE_MIGRATIONS_DIR`)
-4. Run `./ZenCafeServer --migrate` against a **fresh, empty** test database (a new free Neon project works well, same approach used throughout this project's SQL testing) and confirm all 13 migrations apply successfully in order
+4. Run `./ZenCafeServer --migrate` against a **fresh, empty** test database (a new free Neon project works well, same approach used throughout this project's SQL testing) and confirm all 14 migrations apply successfully in order
 5. Run it a second time immediately after — it should report success with **zero** migrations applied the second time (proves the `schema_migrations` tracking actually prevents re-running)
 6. Update this section with real results once done — replace "NOT COMPILED, NOT TESTED" with what was actually confirmed working
+
+---
+
+## WiFi Rental Integration — Decided and Documented
+
+Long discussion resolved into a locked decision: **R&J PisoWifi (the existing, working Node.js/Express/SQLite system) stays as its own separate system — not rewritten, not merged into a shared database.** The risk of rewriting proven code, plus the added RAM overhead of running two backend runtimes on a low-spec box (Orange Pi/mini PC), didn't justify a full unification.
+
+**But a small, deliberate bridge is required**, not optional — without it, a minor could bypass every curfew/age protection built elsewhere in this project simply by using WiFi instead of PC rental. See `docs/api/wifi-bridge-api.md`:
+- A read-only `GET /api/wifi-bridge/curfew-status` endpoint on the C++ server (reads `cafes.curfew_enabled`/`curfew_start`/`curfew_end`, already existing columns — no new table needed)
+- A simple "18 or older?" self-attestation added to R&J PisoWifi's existing captive portal, same unverified/fail-safe pattern already used for PC cafe guests (`011_guest_self_attestation`)
+- Periodic re-checking during an active WiFi session, so curfew starting mid-session cuts it off too, matching how PC cafe sessions already behave
+
+**Also decided in this session:** client PC disconnection handling — short grace period (15s default, 5-30s owner-configurable, `cafes.connection_grace_period_seconds` added in `014_connection_grace_period`) runs seamlessly, beyond that the session pauses (not locks) with no billing during the pause. Explicitly rejected an alternative (let the client keep tracking time locally and reconcile with the server later) because it would reintroduce client-side trust this whole system is built to avoid, and reopen a curfew-bypass window during outages. Full reasoning in `zencafe-os/docs/architecture/communication-protocol.md`.
+
+**Neither of these required touching the migration runner's uncompiled status above** — they were pure schema (migration 014, tested) and documentation work.

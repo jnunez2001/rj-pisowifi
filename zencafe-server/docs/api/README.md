@@ -16,6 +16,7 @@ RESTful API + WebSocket for real-time updates. All endpoints require JWT authent
 - `websocket-protocol.md` - Real-time events and updates
 - `error-codes.md` - HTTP status codes and error messages
 - `rate-limiting.md` - API usage limits and quotas
+- `wifi-bridge-api.md` - **Written.** Small bridge API to the existing R&J PisoWifi system, so curfew protection extends to WiFi customers without merging the two systems.
 
 ## API Base URL
 
