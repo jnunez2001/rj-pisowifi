@@ -165,7 +165,17 @@ The database schema is now complete and fully verified — 13 migrations, every 
 - Authentication (`src/auth/`) — Google Sign-In, session tokens, staff/owner login
 - The actual API surface (`src/api/`) that the ZenCafe OS client and admin dashboard will call
 
-**Before starting service code:** confirm the target minimum PostgreSQL version (still an open decision, see below) and pick the actual migration-runner library/approach, since that's a real technical decision, not something to leave implicit.
+**Before starting service code — both now decided:**
+- **Minimum PostgreSQL version: 16.** No legacy system to support, and PG16 already covers everything used across all 13 migrations (`gen_random_uuid()`, `EXCLUDE USING gist`, partial indexes, `plpgsql` triggers).
+- **Migration runner: a small custom one written in C++** (likely using `libpqxx`), not an existing tool like `golang-migrate`/Flyway — those require installing a separate language runtime (Go/Java) purely to run migrations, when the server itself is already C++. A minimal runner (read the numbered `.up.sql` files, track applied ones in a `schema_migrations` table, apply what's missing in order) is a small amount of code and keeps the deployment footprint to just the C++ server binary.
+
+## Hardware Requirements (Server + Client OS) — See Dedicated Docs
+
+Raised directly: many target café PCs are low-spec, older Windows 10/11 machines, and the "server" is sometimes a cheap single-board computer (e.g., Orange Pi), not a proper server box. This was worth reconsidering seriously, not just noting in passing:
+
+- **Server:** `docs/deployment/hardware-requirements.md` — recommends 4GB+ RAM minimum (8GB comfortable), Linux over Windows for the server role specifically (lighter footprint), PostgreSQL tuning guidance for low-spec hardware (`shared_buffers`, `max_connections`, `work_mem`). **Orange Pi with only 1GB RAM is explicitly NOT recommended for production** — 2GB minimum, tested/reasoned through, not just asserted.
+- **Client OS:** `zencafe-os/docs/setup/system-requirements.md` — gaming PC specs are dictated by whichever games a café offers, not by our software; but the OS's own footprint (shell, launcher, lockdown, watchdog) must stay minimal so it doesn't compete with the game for resources on low-spec machines. **Windows 10 must be a first-class supported target, not just Windows 11** — Windows 11's stricter hardware requirements (TPM 2.0, etc.) would exclude real customers' older machines.
+- **This reconsidered, but did not reverse, the `cloud-stack.md` decision to self-host PostgreSQL everywhere** (rather than SQLite locally, as the original company proposal had planned). Rewriting all 13 already-verified migrations for SQLite (no `EXCLUDE` constraint, no native UUID/JSONB, different triggers) was judged not worth it once it was clear PostgreSQL can be tuned to run comfortably on the hardware actually being discussed. Full reasoning in `docs/deployment/hardware-requirements.md`.
 
 ---
 
