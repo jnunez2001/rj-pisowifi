@@ -24,7 +24,14 @@ users
   ├─ account_type (registered, guest, temporary)
   ├─ birthdate (required for player role)
   ├─ is_minor (computed/cached from birthdate, refreshed periodically)
-  ├─ social_unlocked (boolean — true only once staff-verified as adult; gates friends/chat/spend-leaderboards)
+  ├─ age_tier (kids <13, teens 13-17, adults 18+ — self-reported/cached, added in
+    008_content_and_chat_tiers; safe for RESTRICTING content like the game menu, same logic
+    as is_minor/curfew, NOT sufficient to unlock chat)
+  ├─ verified_chat_tier (teens, adults, nullable — staff-verified only, added in
+    008_content_and_chat_tiers; replaces the earlier conceptual "social_unlocked" boolean,
+    which was never actually built as a column before this. Null = no chat access at all,
+    covering kids unconditionally and any unverified teen/adult)
+  ├─ remote_verification_blocked (boolean — see age_verification_requests section below)
   ├─ status_visibility (public, friends_only, private)
   ├─ preferred_language (e.g., "en", "fil", "id", "vi", "th", "ms")
   ├─ temporary_expires_at (nullable — only for temporary accounts)
@@ -129,6 +136,11 @@ games
   ├─ title
   ├─ description
   ├─ metadata (JSON)
+  ├─ age_rating (kids, teens, adults — added in 008_content_and_chat_tiers; defaults to
+    'kids', the most restrictive, if unset — an unrated game should never accidentally be
+    visible to kids by defaulting the other direction. Drives game-menu filtering: a
+    player's menu shows games rated at or below their own age_tier, intersected with
+    whatever the café has whitelisted)
 
 game_whitelist
   ├─ id (PK)
@@ -244,6 +256,9 @@ age_verifications
   ├─ verified_at
   ├─ id_type_checked
   ├─ notes
+  ├─ verified_tier (kids, teens, adults — added in 008_content_and_chat_tiers; staff states
+    which tier they confirmed, not just a binary adult check. NOT NULL, no meaningful
+    default — every insert must be an explicit staff decision)
 
 admin_notifications
   ├─ id (PK)
@@ -283,6 +298,9 @@ age_verification_requests (pending-review workflow for REMOTE verification — d
   ├─ submitted_at
   ├─ photo_purge_at (scheduled deletion time for the raw photos once decided — actual purge
     job is a service-layer/cron responsibility, not enforced by the schema itself)
+  ├─ approved_tier (teens, adults — added in 008_content_and_chat_tiers; set only when
+    status = approved, flows into age_verifications.verified_tier and then
+    users.verified_chat_tier)
 
 users — addition
   ├─ remote_verification_blocked (boolean — set by the service layer after a policy-defined
@@ -292,23 +310,38 @@ users — addition
 
 ---
 
-## Social
+## Social (Tier-Aware Chat)
+
+Added in `009_social`, built on top of the tier system from `008_content_and_chat_tiers`. **Deliberate exception to how this schema normally handles cross-table rules:** everywhere else (Game Pass activation, subscription lapses), those are left to the service layer. Here, tier-matching for friends and messages is enforced by actual PostgreSQL triggers (`trg_friends_tier_match`, `trg_messages_tier_check`) — the stakes of an adult contacting a verified teen are high enough to warrant defense in depth, not just an app-layer promise.
 
 ```sql
+chat_rooms
+  ├─ id (PK)
+  ├─ cafe_id (nullable, FK → cafes — null means a global, cross-branch room)
+  ├─ tier (teens, adults — kids never get a room, no chat at all)
+  ├─ room_type (local, global)
+  ├─ exactly one global room per tier; exactly one local room per (cafe_id, tier)
+
 friends
   ├─ user_id (FK → users)
   ├─ friend_id (FK → users)
   ├─ status (pending, accepted, blocked)
   ├─ created_at
+  ├─ PK (user_id, friend_id)
+  ├─ TRIGGER: rejects insert unless both users hold a matching, non-null
+    verified_chat_tier (both teens, or both adults)
 
 messages
   ├─ id (PK)
   ├─ sender_id (FK → users)
-  ├─ receiver_id (nullable, FK → users)
-  ├─ room_id (nullable — branch lobby chat)
+  ├─ receiver_id (nullable, FK → users — set for a DM)
+  ├─ room_id (nullable, FK → chat_rooms — set for a room post; exactly one of
+    receiver_id/room_id is set, never both, never neither)
   ├─ content
   ├─ flagged (boolean)
   ├─ created_at
+  ├─ TRIGGER: rejects insert if sender isn't verified, or if sender/room or
+    sender/receiver verified_chat_tier don't match
 
 reports
   ├─ id (PK)
@@ -319,6 +352,8 @@ reports
   ├─ resolved (boolean)
   ├─ created_at
 ```
+
+**Known limitation:** the triggers only validate at insert time. If a `verified_chat_tier` is revoked or changed after a friendship/room membership already exists, nothing automatically re-validates existing rows — periodic re-validation is service-layer follow-up work, not part of this migration.
 
 ---
 
@@ -409,9 +444,10 @@ Migrations live in `/migrations/`, applied in phases matching build order rather
 005_subscription_grace_period.up.sql / .down.sql  -- lapsed_at columns, 24h grace period policy
 006_compliance.up.sql / .down.sql              -- age_verifications, admin_notifications, audit_log
 007_age_verification_requests.up.sql / .down.sql  -- remote selfie+ID verification workflow
-008_social.up.sql / .down.sql                  -- friends, messages, reports
-009_gamification.up.sql / .down.sql            -- leaderboards, seasons, badges, challenges
-010_localization_and_versioning.up.sql / .down.sql
+008_content_and_chat_tiers.up.sql / .down.sql  -- kids/teens/adults tier system (games.age_rating, users tier fields)
+009_social.up.sql / .down.sql                  -- tier-aware friends, messages, chat_rooms, reports
+010_gamification.up.sql / .down.sql            -- leaderboards, seasons, badges, challenges
+011_localization_and_versioning.up.sql / .down.sql
 ```
 
 **On "idempotent":** raw `CREATE TABLE` statements are not naturally idempotent, and adding `IF NOT EXISTS` everywhere would silently mask real schema drift rather than catch it. Instead, idempotency comes from the migration **runner**, not the SQL itself — the runner maintains its own `schema_migrations` tracking table (recording which numbered migrations have already been applied) and skips any migration already marked done. This is the standard approach used by tools like `golang-migrate`/Flyway/Rails, and is what `src/database/` should implement rather than hand-rolling `IF NOT EXISTS` checks in every migration file.

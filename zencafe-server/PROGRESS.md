@@ -32,7 +32,11 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | `006_compliance` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-005. Explicitly tested: (1) inserting a guest player with no birthdate is now rejected (confirms the widened constraint actually works), (2) `age_verifications`, `admin_notifications`, and a system-triggered (`user_id IS NULL`) `audit_log` row all insert correctly. Rollback and re-apply both confirmed clean. |
 | `007_age_verification_requests.up.sql` / `.down.sql` written | ✅ Done | New feature requested mid-build: remote selfie+ID verification workflow, layered on top of `age_verifications` (which now only represents an already-approved outcome). Selfie required alongside ID photo after identifying that photo-only submission would let a minor submit someone else's ID with no face comparison ever happening. |
 | `007_age_verification_requests` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-006. Explicitly tested all three CHECK constraints: (1) can't set `rejection_reason` unless status is rejected, (2) can't approve without `resulting_verification_id`, (3) full approval flow correctly links a request to its `age_verifications` outcome row. Also tested `audit_log` accepting the new `'view'` action and the `remote_verification_blocked` column. Rollback and re-apply both clean. |
-| `008_social.up.sql` / `.down.sql` | ❌ Not started | 001-007 all verified — safe to build on top of |
+| `008_content_and_chat_tiers.up.sql` / `.down.sql` written | ✅ Done | Major revision requested mid-build: replaces the earlier "minors fully blocked, no exceptions" rule with a three-tier model (kids <13, teens 13-17, adults 18+). Adds `users.age_tier` (self-reported, restricts content), `users.verified_chat_tier` (staff-verified only, grants chat), `games.age_rating`, and tier fields on `age_verifications`/`age_verification_requests`. |
+| `008_content_and_chat_tiers` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-007. Tested: `age_tier` defaults to `kids` (fail-safe), `games.age_rating` defaults to `kids`, `verified_chat_tier` rejects `'kids'` as a value, `age_verifications.verified_tier` is genuinely NOT NULL, `age_verification_requests.approved_tier` can't be set on a pending request. Rollback and re-apply both clean. |
+| `009_social.up.sql` / `.down.sql` written | ✅ Done | Tier-aware friends/messages/chat_rooms/reports, built on 008. **Deliberate one-off exception to the project's "cross-table rules belong in the service layer" convention**: teen↔adult tier-matching is enforced by actual PostgreSQL triggers (`trg_friends_tier_match`, `trg_messages_tier_check`), not just app logic — the stakes of an adult contacting a verified minor are too high for a service-layer promise alone. |
+| `009_social` executed against a real PostgreSQL instance | ✅ **VERIFIED — all safety-critical paths explicitly tested, not assumed.** | Set up real test accounts (verified teen, verified adult, unverified self-reported-adult, kid) and confirmed: teen→adult friend request rejected, adult→teen friend request rejected (both directions), kid can't add any friend, an unverified account can't add any friend (self-report insufficient), teen posting in the adults room rejected, adult posting in the teens room rejected, teen DMing an adult rejected, duplicate global room per tier rejected, message can't target both a room and a DM recipient at once. All same-tier paths (teen↔teen, adult↔adult) confirmed to work normally. Rollback and re-apply both clean. |
+| `010_gamification.up.sql` / `.down.sql` | ❌ Not started | 001-009 all verified — safe to build on top of |
 
 ---
 
@@ -96,6 +100,18 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 - **Anti-abuse column added (`users.remote_verification_blocked`) without hardcoding the rejection threshold** — the exact number of rejections before lockout (suggested default: 3) is a policy call for later; the schema just supports the mechanism.
 - **Renumbered the still-unwritten social/gamification/localization migrations again** (008/009/010, was 007/008/009) — same zero-cost renumbering pattern as when `005_subscription_grace_period` was inserted, since nothing beyond `006` existed yet.
 
+---
+
+## Manual Review + Verification Findings (008_content_and_chat_tiers + 009_social)
+
+**Context:** mid-build, the user requested a significant revision — replacing the earlier "minors fully blocked from chat, no exceptions" rule (documented as a hard, non-configurable rule in `social/README.md`) with a three-tier model: kids (no chat at all), teens (restricted to a teens-only pool), adults (full global chat). This is the single biggest design change since the schema consolidation.
+
+- **Two independent tier fields, deliberately not one** — `age_tier` (self-reported, safe for restricting content like the game menu, same logic already established for curfew) vs. `verified_chat_tier` (staff-verified only, since chat is access-granting). Reused the existing self-report-vs-verified split rather than inventing a new pattern.
+- **Fail-safe defaults throughout:** `age_tier` defaults to `'kids'` (most restrictive) rather than `'adults'`, and `games.age_rating` defaults to `'kids'` too — consistent with the OS lockdown philosophy ("if anything breaks, stay locked") already established elsewhere in this project. Both explicitly tested, not just assumed from reading the SQL.
+- **Deliberate, flagged exception to the "cross-table rules go in the service layer" convention that's been consistent since `004_subscriptions`:** teen↔adult tier-matching for friends and messages is enforced by actual PostgreSQL triggers (`trg_friends_tier_match`, `trg_messages_tier_check`), not application code. This is the one place in the whole schema where a database trigger was judged worth the added complexity — the risk of an adult contacting a verified minor is categorically higher-stakes than, say, a Game Pass staying active a day longer than it should.
+- **All four safety-critical directions were explicitly tested against a live database, not assumed from reading the trigger logic:** teen→adult friend rejected, adult→teen friend rejected, teen→adult DM rejected, teen posting in the adults room rejected (and the adult-in-teens-room mirror case). Also tested that kids and self-reported-but-unverified accounts get rejected identically to a tier mismatch — verification, not self-report, is what unlocks chat.
+- **Known gap, explicitly documented, not silently accepted:** the tier-matching triggers only run at INSERT time. If a `verified_chat_tier` is revoked after a friendship or room membership already exists, nothing automatically re-validates the existing rows. Flagged as service-layer follow-up work in both `social/README.md` and here — not something this migration solves.
+- **`social_unlocked` (a boolean mentioned in early design docs) was never actually built as a column in any prior migration** — so this wasn't a breaking change to real running code, just a doc-vs-reality correction once the actual tier system was designed.
 
 ---
 
@@ -130,6 +146,7 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 5. ✅ `005_subscription_grace_period` — lapsed_at + 24h grace period policy (verified against live Postgres)
 6. ✅ `006_compliance` — age_verifications, admin_notifications, audit_log (verified against live Postgres)
 7. ✅ `007_age_verification_requests` — remote selfie+ID verification workflow (verified against live Postgres)
-8. ⬜ `008_social` — friends, messages, reports
-9. ⬜ `009_gamification` — leaderboards, seasons, badges, challenges
-10. ⬜ `010_localization_and_versioning`
+8. ✅ `008_content_and_chat_tiers` — kids/teens/adults tier system (verified against live Postgres)
+9. ✅ `009_social` — tier-aware friends, messages, chat_rooms, reports (verified against live Postgres)
+10. ⬜ `010_gamification` — leaderboards, seasons, badges, challenges
+11. ⬜ `011_localization_and_versioning`

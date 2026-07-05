@@ -12,10 +12,13 @@ Many LGUs (local government units) in the Philippines enforce curfew ordinances 
 
 ## Design
 
-### 1. Age Capture
+### 1. Age Capture & Tiers
 - Require **birthdate** (not just "are you 18+" checkbox) at account registration
 - Store birthdate, calculate age server-side whenever curfew logic runs (never trust a client-side age claim)
-- Minor = under 18 (default assumption; may vary — see Open Decisions)
+- Minor = under 18 (used for curfew — see Open Decisions on whether some LGUs define this differently)
+- **Three content/chat tiers, decided directly with the owner:** **Kids** (under 13), **Teens** (13-17), **Adults** (18+). This drives two separate things:
+  - `age_tier` (self-reported, cached from birthdate) — safe to use for *restricting* content, same logic as curfew (e.g., filtering the game menu by rating — see [database/README.md](../database/README.md))
+  - `verified_chat_tier` (staff-verified only, nullable) — used for *granting* chat access (see [social/README.md](../social/README.md)); self-reported age is never sufficient to unlock this, only a completed staff verification specifying which tier (teens or adults — kids never get a verified_chat_tier at all, since they get no chat access regardless)
 
 ### 2. Curfew Hours Are Per-Branch, Not Global
 - Curfew ordinances vary by city/municipality (e.g., 10PM-5AM in one LGU, different hours in another)
@@ -47,6 +50,7 @@ In-person verification (staff physically compares an ID to the person standing i
 
 - **A photo of an ID alone proves nothing** — a minor could submit a photo of an older sibling's or parent's ID with no one ever comparing the face on the ID to the actual person. **A selfie is required alongside the ID photo**, so staff can visually compare the two before approving — this preserves the "someone actually checked this is you" guarantee that pure in-person verification provides, rather than silently accepting a weaker remote-only path.
 - Workflow: player submits ID photo + selfie → **pending** → staff reviews and approves/rejects (with a reason if rejected) → **only on approval** does a permanent row get written to `age_verifications` (the accountability log). Rejections do not create an accountability record.
+- **Staff must specify which tier they're confirming, not just pass/fail an adult check** — approval sets `approved_tier` (`teens` or `adults`) on the request, which flows into `age_verifications.verified_tier` and then `users.verified_chat_tier`. A staff member reviewing an ID determines the actual tier (e.g., "this person is 15, that's teens"), not a binary yes/no.
 - **Anti-abuse:** repeated rejected submissions are a risk specific to this feature's purpose — a minor could keep trying different fake/borrowed IDs remotely. After a policy-defined number of rejections (exact threshold TBD — see Open Decisions), the account is flagged `remote_verification_blocked`, forcing in-person-only verification going forward.
 - **Storage:** ID and selfie photos live in a **separate, private, access-controlled storage bucket** — never the public-facing cosmetics/marketplace bucket (see [deployment/cloud-stack.md](../deployment/cloud-stack.md)). Access is via short-lived signed URLs generated on demand for staff review, not permanent links stored in the database.
 - **Retention:** once a request is approved or rejected, the raw photos don't need to be kept indefinitely — only the verification *outcome* (who verified, when, what ID type) needs to persist permanently. Photos should be auto-purged after a policy-defined retention window (default suggestion: 30 days — see Open Decisions) post-decision.
