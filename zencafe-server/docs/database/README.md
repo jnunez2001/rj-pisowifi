@@ -434,31 +434,36 @@ challenges
 
 ## Localization & Versioning
 
+`users.preferred_language`, `cafes.default_language`, `cafes.update_channel`,
+`cafes.maintenance_window_start`/`end`, and `pcs.current_os_version`/`last_update_check_at`/
+`last_update_status` all already exist (`001_foundation`). `013_localization_and_versioning`
+adds the rest.
+
+**Design simplification:** the originally sketched standalone `version_compatibility` table didn't have a clean row-per-what meaning — it read like a per-pair matrix, but a compatibility check is really just "does the other side's version meet my own minimum requirement," which only needs one value per version row. Folded `minimum_os_version_required` into `server_versions` and `minimum_server_version_required` into `os_versions` instead. These are plain `TEXT`, not FKs to each other's `version_number` — actual compatibility checks need semver comparison logic (e.g. "1.1.5 satisfies a minimum of 1.1.0"), not exact-match referential integrity, and a minimum requirement can reasonably be set before the referenced version has even shipped.
+
 ```sql
 translation_keys
   ├─ key
-  ├─ language_code
+  ├─ language_code (free text, not a CHECK enum — the language rollout list grows over
+    phases, see architecture/localization.md)
   ├─ value
+  ├─ PK (key, language_code)
 
 server_versions
-  ├─ version_number
+  ├─ version_number (PK)
   ├─ release_notes
   ├─ channel (beta, stable)
   ├─ released_at
   ├─ is_critical_security_update (boolean)
+  ├─ minimum_os_version_required (nullable — see design simplification above)
 
 os_versions
-  ├─ version_number
+  ├─ version_number (PK)
   ├─ release_notes
   ├─ channel (beta, stable)
   ├─ released_at
   ├─ is_critical_security_update (boolean)
-
-version_compatibility
-  ├─ server_version
-  ├─ minimum_os_version_required
-  ├─ os_version
-  ├─ minimum_server_version_required
+  ├─ minimum_server_version_required (nullable — see design simplification above)
 ```
 
 ---

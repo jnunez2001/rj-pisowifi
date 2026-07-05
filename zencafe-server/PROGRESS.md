@@ -42,7 +42,9 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | `011_guest_self_attestation` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Confirmed: a guest can be created with no birthdate at all, defaulting consistently to `is_minor=true` + `age_tier='kids'` (the bug fix actually works). Confirmed registered accounts still require a birthdate (unchanged). Confirmed a guest self-attesting "18+" correctly sets `age_tier='adults'`. **Confirmed a guest can never get `verified_chat_tier` set, even via direct UPDATE** — the database itself refuses it. Confirmed a registered account can still get it set normally. Rollback and re-apply both clean. |
 | `012_gamification.up.sql` / `.down.sql` written | ✅ Done | Adds `leaderboard_seasons`, `leaderboard_entries`, `season_history`, `user_badges`, `challenges`. `cafes.vip_seat_pc_id`/`vip_seat_category` and `cosmetics.is_rank_locked`/`unlock_condition` already existed from earlier migrations. Caught and fixed two of the same NULL-in-unique-constraint bugs already seen once in `game_whitelist` (003) — both `leaderboard_seasons` (cafe_id nullable) and `leaderboard_entries` (game_id nullable) needed split partial indexes, not a plain UNIQUE. Also tightened `cafes.vip_seat_category`, an unvalidated loose `TEXT` column since `001_foundation`, now that the category enum is concretely defined. |
 | `012_gamification` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-011. Explicitly tested: duplicate active global season rejected, duplicate active branch season rejected, invalid season time range (`ends_at` before `starts_at`) rejected, duplicate overall leaderboard entry rejected while multiple per-game entries for the same player succeed, self-challenge rejected, invalid `vip_seat_category` rejected. Rollback and re-apply both clean. |
-| `013_localization_and_versioning.up.sql` / `.down.sql` | ❌ Not started | 001-012 all verified — safe to build on top of |
+| `013_localization_and_versioning.up.sql` / `.down.sql` written | ✅ Done | Adds `translation_keys`, `server_versions`, `os_versions`. All the per-record language/update-channel columns (`users.preferred_language`, `cafes.default_language`/`update_channel`/`maintenance_window_*`, `pcs.current_os_version`/etc.) already existed from `001_foundation`. **Simplified the design:** the originally sketched standalone `version_compatibility` table read like a per-pair matrix with no clean row-per-what meaning — folded `minimum_os_version_required`/`minimum_server_version_required` directly into `server_versions`/`os_versions` instead, since a compatibility check only ever needs one value per version row, and semver comparison logic doesn't want a strict FK anyway. |
+| `013_localization_and_versioning` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Confirmed the same translation key works across two languages, confirmed a true duplicate `(key, language_code)` pair is rejected, confirmed `server_versions`/`os_versions` insert correctly with their new minimum-version columns, confirmed duplicate `version_number` is rejected. Rollback and re-apply both clean. |
+| **This completes the original migration build order (001-013).** | ✅ | Every migration planned in `docs/database/README.md`'s Migration Strategy section is now written and verified against live Postgres. Next phase is service-layer code (`src/`), not more schema — see "What's Next" below. |
 
 ---
 
@@ -146,6 +148,27 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 
 ---
 
+## Manual Review + Verification Findings (013_localization_and_versioning)
+
+- **Simplified a design that didn't hold up under scrutiny:** the originally sketched `version_compatibility` table (four columns: `server_version`, `minimum_os_version_required`, `os_version`, `minimum_server_version_required`) read like a per-pair compatibility matrix, but that's not actually how version checks work — each side just needs to state its own minimum requirement for the other, one value per version row. Folded both minimums directly into `server_versions`/`os_versions` instead of building a table whose row-per-what meaning was never actually clear. Deliberately not FKs to each other's `version_number`, since real compatibility checks need semver comparison (e.g. "1.1.5 satisfies a minimum of 1.1.0"), not exact-match referential integrity — and a minimum requirement can reasonably be declared before the version it points to has even shipped.
+- **Confirmed most of the per-record columns this migration might have needed were already built** in `001_foundation` (`users.preferred_language`, `cafes.default_language`/`update_channel`/`maintenance_window_*`, `pcs.current_os_version`/`last_update_check_at`/`last_update_status`) — checked before writing anything, rather than assuming they still needed to be added.
+- **This is the last migration in the original build order.** All 13 planned migrations are now written and verified against live Postgres. See "What's Next" below for the actual next phase.
+
+---
+
+## What's Next (Beyond the Original Migration Build Order)
+
+The database schema is now complete and fully verified — 13 migrations, every one tested against live Postgres, not just reviewed on paper. The next phase is **service-layer code** (`src/` — api, auth, sessions, games, database, admin, billing, analytics), not more schema:
+
+- A real **migration runner** (`src/database/`) with its own `schema_migrations` tracking table — needed before any of the `.up.sql`/`.down.sql` files here can be applied automatically rather than by hand through a scratch script
+- The cross-table business rules explicitly deferred to "the service layer" throughout these migrations now need to actually be written there — e.g., `game_passes.active` consistency, subscription lapse/grace-period enforcement, the photo-purge cron job, season-closing logic, minor-exclusion from spend-based leaderboards
+- Authentication (`src/auth/`) — Google Sign-In, session tokens, staff/owner login
+- The actual API surface (`src/api/`) that the ZenCafe OS client and admin dashboard will call
+
+**Before starting service code:** confirm the target minimum PostgreSQL version (still an open decision, see below) and pick the actual migration-runner library/approach, since that's a real technical decision, not something to leave implicit.
+
+---
+
 ## How 001_foundation Was Verified
 
 Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool triggered, suggesting a local environment issue, likely WSL2-backend related — never resolved, and not worth resolving just for a one-off test). Instead:
@@ -182,4 +205,4 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 10. ✅ `010_cafe_security_toggles` — remote_verification_enabled, owner-configurable settings policy (verified against live Postgres)
 11. ✅ `011_guest_self_attestation` — reverts guest birthdate requirement, fixes is_minor default, guest chat exclusion (verified against live Postgres)
 12. ✅ `012_gamification` — leaderboards, seasons, badges, challenges (verified against live Postgres)
-13. ⬜ `013_localization_and_versioning`
+13. ✅ `013_localization_and_versioning` — translation_keys, server_versions, os_versions (verified against live Postgres)

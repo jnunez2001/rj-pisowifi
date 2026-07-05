@@ -85,10 +85,12 @@ Based on semantic versioning (`MAJOR.MINOR.PATCH`):
 
 ## Data Model Addition (Version Compatibility)
 
+**Simplified during `013_localization_and_versioning`:** rather than a standalone `version_compatibility` table (which read like a per-pair matrix with no clean row-per-what meaning), each minimum requirement is just a column on the relevant version table — `server_versions.minimum_os_version_required` and `os_versions.minimum_server_version_required`. A compatibility check is really "does the other side's version meet my own stated minimum," which only needs one value per version row.
+
 ```
-version_compatibility
-  ├─ server_version
+server_versions — addition
   ├─ minimum_os_version_required
-  ├─ os_version
+
+os_versions — addition
   ├─ minimum_server_version_required
 ```
