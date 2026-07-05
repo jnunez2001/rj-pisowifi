@@ -15,7 +15,8 @@ The actual hardware a café needs is dictated by whichever games they choose to 
 Concrete guidance for development:
 - **Minimize background footprint** — the watchdog/monitor and lockdown enforcement should be lightweight, event-driven where possible rather than constantly polling
 - **No unnecessary GUI overhead** — avoid heavy animations, effects, or unnecessary Qt Widgets usage in the kiosk shell; it should render fast and then get out of the way once a game launches
-- **Target: total OS overhead well under what a single low-end game needs** — a rough goal to validate once real builds exist, not a hard number decided in the abstract
+- **Design target: roughly 50-150MB total RAM** for shell + launcher + lockdown + watchdog combined, based on how lightweight C++/Qt desktop apps typically behave — this is an unverified estimate, not a measurement, since no OS code exists yet (see Open Question below). Stated as a concrete number rather than left vague, so there's something specific to hold real builds accountable to later.
+- **Our software's footprint should be a rounding error compared to Windows itself (2GB Microsoft-stated minimum, 4GB+ realistic) and whatever the specific game needs (the dominant, variable factor — a light esports title needs far less than a modern AAA game).** The PC's overall minimum spec is driven by those two things, not by us.
 
 ## Absolute Floor for the OS Software Itself (Separate From Game Requirements)
 
