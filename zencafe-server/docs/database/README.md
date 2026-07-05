@@ -374,32 +374,43 @@ reports
 
 ## Gamification
 
+`cafes.vip_seat_pc_id`/`vip_seat_category` and `cosmetics.is_rank_locked`/`unlock_condition` were already added in `001_foundation`/`003_cosmetics_and_marketplace` — `012_gamification` adds the rest, plus a constraint tightening `vip_seat_category` (previously an unvalidated loose `TEXT` column) now that the category enum is concretely defined below.
+
 ```sql
 leaderboard_seasons
   ├─ id (PK)
-  ├─ cafe_id (nullable — null means cross-branch/platform-wide)
+  ├─ cafe_id (nullable, FK → cafes — null means cross-branch/platform-wide)
   ├─ category (hours_total, hours_per_game, streak, diverse_games, top_spender, referral)
   ├─ period_type (weekly, monthly)
-  ├─ starts_at / ends_at
+  ├─ starts_at / ends_at (CHECK: ends_at > starts_at)
   ├─ status (active, closed)
+  ├─ only one active season per (category, period_type) — two partial unique indexes, split
+    on cafe_id IS NULL vs NOT NULL, since a plain UNIQUE treats NULLs as distinct (same
+    NULL-handling issue already caught once in game_whitelist, 003)
 
 leaderboard_entries
+  ├─ id (PK)
   ├─ season_id (FK → leaderboard_seasons)
   ├─ user_id (FK → users)
-  ├─ game_id (nullable, FK → games)
-  ├─ score
+  ├─ game_id (nullable, FK → games — only set for hours_per_game category)
+  ├─ score (NUMERIC — meaning depends on category: minutes, streak days, pesos spent, etc.)
   ├─ rank
+  ├─ one entry per (season_id, user_id) when game_id is null; one per (season_id, user_id,
+    game_id) when set — same split-partial-index pattern as leaderboard_seasons above
 
 season_history
   ├─ season_id (FK → leaderboard_seasons)
   ├─ user_id (FK → users)
   ├─ final_rank
   ├─ title_awarded
+  ├─ PK (season_id, user_id)
 
 user_badges
   ├─ id (PK)
   ├─ user_id (FK → users)
-  ├─ badge_type (former_champion, first_to_achieve, vip_seat_holder, game_pass_subscriber)
+  ├─ badge_type (free text, not a CHECK enum — same reasoning as admin_notifications.type:
+    an open/growing taxonomy, e.g. former_champion, first_to_achieve, vip_seat_holder,
+    game_pass_subscriber)
   ├─ label
   ├─ awarded_at
   ├─ is_permanent (boolean)
@@ -408,11 +419,16 @@ challenges
   ├─ id (PK)
   ├─ challenger_id (FK → users)
   ├─ challenged_id (FK → users)
-  ├─ category
+  ├─ category (same enum as leaderboard_seasons.category)
   ├─ target_value
   ├─ status (pending, active, won_by_challenger, defended_by_challenged, expired)
   ├─ expires_at
+  ├─ CHECK: challenger_id != challenged_id (can't challenge yourself)
 ```
+
+**Note on `top_spender` challenges/leaderboards and minors:** per `gamification/README.md`, spend-based leaderboards should exclude minors (financial-pressure risk). This is NOT enforced by a DB constraint here — unlike the teen/adult chat separation, this is judged lower-stakes (a fairness/pressure concern, not a contact-safety one), so it's left to the service layer, consistent with how most cross-table business rules in this schema are handled.
+
+**Season closing (recalculating final ranks, freezing into `season_history`, opening the next season) is service-layer/cron work**, not enforced by this migration — same pattern as subscription lapse enforcement and the photo-purge job.
 
 ---
 

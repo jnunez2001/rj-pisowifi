@@ -40,7 +40,9 @@ We are consolidating the full design (spread across `docs/`) into a real databas
 | `010_cafe_security_toggles` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Confirmed `remote_verification_enabled` defaults to `true`. Then explicitly confirmed the important thing: toggling it OFF has zero effect on the `009_social` tier-matching triggers — a teen still cannot friend an adult regardless of this cafe-level setting. Rollback and re-apply both clean. |
 | `011_guest_self_attestation.up.sql` / `.down.sql` written | ✅ Done | Reverses part of `006_compliance`: guests no longer require a birthdate (registration friction was the wrong call once the actual desired guest experience — walk-up, zero-friction, no membership features — was clarified). Guests instead get a single unverified "18+?" prompt setting `age_tier`/`is_minor` directly. **Found and fixed a real bug while building this:** `is_minor` defaulted to `false` (unsafe direction) since `001_foundation` — harmless before because every player always had immediate birthdate computation, but a real inconsistency risk now that guests can skip that step and rely on the raw default. Also added `chat_tier_requires_registered`, a DB constraint ensuring guest/temporary accounts can never get chat access no matter what. |
 | `011_guest_self_attestation` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Confirmed: a guest can be created with no birthdate at all, defaulting consistently to `is_minor=true` + `age_tier='kids'` (the bug fix actually works). Confirmed registered accounts still require a birthdate (unchanged). Confirmed a guest self-attesting "18+" correctly sets `age_tier='adults'`. **Confirmed a guest can never get `verified_chat_tier` set, even via direct UPDATE** — the database itself refuses it. Confirmed a registered account can still get it set normally. Rollback and re-apply both clean. |
-| `012_gamification.up.sql` / `.down.sql` | ❌ Not started | 001-011 all verified — safe to build on top of |
+| `012_gamification.up.sql` / `.down.sql` written | ✅ Done | Adds `leaderboard_seasons`, `leaderboard_entries`, `season_history`, `user_badges`, `challenges`. `cafes.vip_seat_pc_id`/`vip_seat_category` and `cosmetics.is_rank_locked`/`unlock_condition` already existed from earlier migrations. Caught and fixed two of the same NULL-in-unique-constraint bugs already seen once in `game_whitelist` (003) — both `leaderboard_seasons` (cafe_id nullable) and `leaderboard_entries` (game_id nullable) needed split partial indexes, not a plain UNIQUE. Also tightened `cafes.vip_seat_category`, an unvalidated loose `TEXT` column since `001_foundation`, now that the category enum is concretely defined. |
+| `012_gamification` executed against a real PostgreSQL instance | ✅ **VERIFIED** | Applied cleanly on top of 001-011. Explicitly tested: duplicate active global season rejected, duplicate active branch season rejected, invalid season time range (`ends_at` before `starts_at`) rejected, duplicate overall leaderboard entry rejected while multiple per-game entries for the same player succeed, self-challenge rejected, invalid `vip_seat_category` rejected. Rollback and re-apply both clean. |
+| `013_localization_and_versioning.up.sql` / `.down.sql` | ❌ Not started | 001-012 all verified — safe to build on top of |
 
 ---
 
@@ -135,6 +137,15 @@ Reviewed line-by-line for table creation order, FK dependencies, and PostgreSQL 
 
 ---
 
+## Manual Review + Verification Findings (012_gamification)
+
+- **Proactively caught the same NULL-in-unique-constraint bug class twice, before it shipped, having already learned the lesson once in `game_whitelist` (003):** both `leaderboard_seasons` (nullable `cafe_id` for global seasons) and `leaderboard_entries` (nullable `game_id` for non-per-game categories) needed split partial unique indexes rather than a single plain `UNIQUE`, since Postgres treats NULLs as distinct values. Applied the fix proactively during design this time instead of discovering it via a failed test.
+- **Closed a loose end left over from `001_foundation`:** `cafes.vip_seat_category` was added as an unvalidated `TEXT` column back when the category enum didn't concretely exist yet. Added a `CHECK` constraint now that `leaderboard_seasons.category` defines the real valid values, and explicitly tested that an invalid category string gets rejected.
+- **`top_spender` challenges/leaderboards and minors:** the gamification design doc says spend-based leaderboards should exclude minors. Deliberately NOT enforced by a DB constraint here — judged lower-stakes than the teen/adult chat-contact issue (a fairness/pressure concern, not a contact-safety one), so left to the service layer, consistent with how most cross-table rules in this schema are handled. Documented so this isn't mistaken for an oversight.
+- **Season closing (computing final ranks, freezing `season_history`, opening the next season) is explicitly out of scope for this migration** — service-layer/cron work, same pattern as the subscription lapse enforcement and photo-purge job.
+
+---
+
 ## How 001_foundation Was Verified
 
 Docker Desktop's daemon connection hung in this sandbox (its own diagnostic tool triggered, suggesting a local environment issue, likely WSL2-backend related — never resolved, and not worth resolving just for a one-off test). Instead:
@@ -170,5 +181,5 @@ Matches `docs/database/README.md` Migration Strategy section — do not skip ahe
 9. ✅ `009_social` — tier-aware friends, messages, chat_rooms, reports (verified against live Postgres)
 10. ✅ `010_cafe_security_toggles` — remote_verification_enabled, owner-configurable settings policy (verified against live Postgres)
 11. ✅ `011_guest_self_attestation` — reverts guest birthdate requirement, fixes is_minor default, guest chat exclusion (verified against live Postgres)
-12. ⬜ `012_gamification` — leaderboards, seasons, badges, challenges
+12. ✅ `012_gamification` — leaderboards, seasons, badges, challenges (verified against live Postgres)
 13. ⬜ `013_localization_and_versioning`
