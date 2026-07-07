@@ -157,6 +157,17 @@ echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/tc" \
 echo "$USER ALL=(ALL) NOPASSWD: /sbin/ip, /usr/sbin/ip" \
   >> /etc/sudoers.d/rj-pisowifi
 
+# Bug: the admin panel's Reboot/Shutdown buttons (server/routes/admin.js
+# POST /system/reboot and /system/shutdown) call `sudo reboot`/`sudo
+# shutdown` directly, but no sudoers entry for either was ever added here -
+# the API call still returned success (it responds before the command's
+# result comes back), so the button looked like it worked while the actual
+# command silently failed waiting on a password prompt that never comes.
+echo "$USER ALL=(ALL) NOPASSWD: /sbin/reboot, /usr/sbin/reboot" \
+  >> /etc/sudoers.d/rj-pisowifi
+echo "$USER ALL=(ALL) NOPASSWD: /sbin/shutdown, /usr/sbin/shutdown" \
+  >> /etc/sudoers.d/rj-pisowifi
+
 # avahi mDNS — rjcyberzone.local
 cat > /etc/avahi/services/rjcyberzone.service << EOF
 <?xml version="1.0" standalone='no'?>

@@ -1232,6 +1232,13 @@ Superseded the single "LAN VLAN ID" field above with a proper VLAN manager, afte
 - **Fix:** if a LAN-mode VLAN row exists, its `base_interface` is used directly (even if it equals `WAN_IF`) before falling back to the old separate-NIC auto-detect. The VLAN sub-interface (e.g. `enp0s3.13`) is what actually separates the traffic, not which physical NIC it's on.
 - **Verification status:** `bash -n` passes. Not yet confirmed against the reporter's live single-NIC + VLAN 13 setup — please confirm the admin panel becomes reachable again after applying and creating the matching VLAN in Network > VLAN Management.
 
+#### Bug #79 (HIGH): Reboot/Shutdown buttons appeared to work but did nothing
+- **Files:** `setup/install.sh`
+- **Reported:** clicking Reboot/Shutdown in the admin panel didn't actually reboot/shut down the server.
+- **Cause:** `server/routes/admin.js`'s `/system/reboot` and `/system/shutdown` routes call `execFile('sudo', ['reboot'])`/`execFile('sudo', ['shutdown', '-h', 'now'])`, but `install.sh` never added a passwordless-sudo entry for either command (only `setup-network.sh`, `nft`, and `tc` had one). The route also responds with success to the browser *before* the exec's result comes back (matching the confirm-then-fire-and-forget pattern used for real reboots), so the button looked like it worked while `sudo reboot` silently sat waiting on a password prompt that would never arrive, and failed.
+- **Fix:** added `NOPASSWD` sudoers entries for `reboot` and `shutdown` in `install.sh`.
+- **Verification status:** `bash -n` passes. Requires re-running `install.sh` on an existing server to pick up (a plain `git pull` won't add the new sudoers lines) — please confirm both buttons actually reboot/shut down the machine after applying.
+
 ---
 
 **Generated:** 2026-07-04  
