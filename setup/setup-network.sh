@@ -9,6 +9,7 @@ echo "=== R&J Network Setup $(date) ===" >> $LOG
 WAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='wan_interface';" 2>/dev/null)
 LAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='lan_interface';" 2>/dev/null)
 NETWORK_MODE=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='network_mode';" 2>/dev/null)
+LAN_VLAN_ID=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='lan_vlan_id';" 2>/dev/null)
 
 # Auto-detect fallback
 if [ -z "$WAN_IF" ]; then
@@ -71,11 +72,29 @@ echo "nodogsplash chains cleaned" >> $LOG
 # our own address the normal way.
 if [ "$NETWORK_MODE" = "standalone" ]; then
 
+  # Bug: some setups run the ISP modem, this board, and the WiFi access
+  # point(s) all off one shared unmanaged switch, with the AP(s) tagging
+  # customer traffic with an 802.1Q VLAN ID to keep it separate from the
+  # ISP's untagged traffic on the same wire. Previously this script only
+  # ever bound everything to the raw physical interface, which can't tell
+  # tagged customer frames apart from the ISP's — with a VLAN ID configured,
+  # create a VLAN sub-interface and bind the gateway IP/dnsmasq/nftables/tc
+  # to that instead, leaving the physical interface itself untagged and
+  # unassigned (so the ISP's own untagged traffic is never touched by any
+  # of this).
+  LAN_VIF="$LAN_IF"
+  if [ -n "$LAN_VLAN_ID" ]; then
+    LAN_VIF="${LAN_IF}.${LAN_VLAN_ID}"
+    ip link set $LAN_IF up
+    ip link add link $LAN_IF name $LAN_VIF type vlan id $LAN_VLAN_ID 2>/dev/null || true
+    echo "VLAN: $LAN_VIF (id $LAN_VLAN_ID) on $LAN_IF" >> $LOG
+  fi
+
   # ── CONFIGURE LAN ─────────────────────────────────────────────
-  ip addr flush dev $LAN_IF 2>/dev/null
-  ip addr add ${GATEWAY_IP}/24 dev $LAN_IF
-  ip link set $LAN_IF up
-  echo "LAN: $LAN_IF → $GATEWAY_IP" >> $LOG
+  ip addr flush dev $LAN_VIF 2>/dev/null
+  ip addr add ${GATEWAY_IP}/24 dev $LAN_VIF
+  ip link set $LAN_VIF up
+  echo "LAN: $LAN_VIF → $GATEWAY_IP" >> $LOG
 
   # IP forwarding
   echo 1 > /proc/sys/net/ipv4/ip_forward
@@ -84,8 +103,8 @@ if [ "$NETWORK_MODE" = "standalone" ]; then
   iptables -t nat -F POSTROUTING 2>/dev/null
   iptables -F FORWARD 2>/dev/null
   iptables -t nat -A POSTROUTING -o $WAN_IF -j MASQUERADE
-  iptables -A FORWARD -i $LAN_IF -o $WAN_IF -j ACCEPT
-  iptables -A FORWARD -i $WAN_IF -o $LAN_IF -m state \
+  iptables -A FORWARD -i $LAN_VIF -o $WAN_IF -j ACCEPT
+  iptables -A FORWARD -i $WAN_IF -o $LAN_VIF -m state \
       --state RELATED,ESTABLISHED -j ACCEPT
 
   # Port 80 → 3000 for WAN side (admin access)
@@ -116,7 +135,7 @@ if [ "$NETWORK_MODE" = "standalone" ]; then
   #    12h is up. Widened the range and cut the lease time so departed
   #    customers' addresses free up much sooner.
   cat > /etc/dnsmasq.d/rj-pisowifi.conf << EOF
-interface=$LAN_IF
+interface=$LAN_VIF
 bind-interfaces
 dhcp-authoritative
 dhcp-range=10.0.0.10,10.0.0.250,255.255.255.0,2h
@@ -154,14 +173,14 @@ table ip rj_piso {
     }
     chain input {
         type filter hook input priority filter; policy accept;
-        iifname "$LAN_IF" udp dport 67 accept
-        iifname "$LAN_IF" tcp dport 3000 accept
-        iifname "$LAN_IF" tcp dport 80 accept
+        iifname "$LAN_VIF" udp dport 67 accept
+        iifname "$LAN_VIF" tcp dport 3000 accept
+        iifname "$LAN_VIF" tcp dport 80 accept
     }
     chain forward {
         type filter hook forward priority filter; policy accept;
         ct state established,related accept
-        iifname "$LAN_IF" ether saddr @allowed_macs accept
+        iifname "$LAN_VIF" ether saddr @allowed_macs accept
         # Bug #76: this was a silent "drop" for every unpaid device's
         # traffic that wasn't DNS(53)/HTTP(80) - including HTTPS(443),
         # which is what modern phones increasingly use for their
@@ -175,7 +194,7 @@ table ip rj_piso {
         # milliseconds and the OS falls back to the HTTP-based check
         # (which the prerouting DNAT below already redirects to the
         # portal correctly).
-        iifname "$LAN_IF" reject
+        iifname "$LAN_VIF" reject
     }
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;
@@ -183,9 +202,9 @@ table ip rj_piso {
     }
     chain prerouting {
         type nat hook prerouting priority dstnat; policy accept;
-        iifname "$LAN_IF" ether saddr != @allowed_macs udp dport 53 dnat to $GATEWAY_IP:53
-        iifname "$LAN_IF" ether saddr != @allowed_macs tcp dport 53 dnat to $GATEWAY_IP:53
-        iifname "$LAN_IF" ether saddr != @allowed_macs tcp dport 80 dnat to $GATEWAY_IP:3000
+        iifname "$LAN_VIF" ether saddr != @allowed_macs udp dport 53 dnat to $GATEWAY_IP:53
+        iifname "$LAN_VIF" ether saddr != @allowed_macs tcp dport 53 dnat to $GATEWAY_IP:53
+        iifname "$LAN_VIF" ether saddr != @allowed_macs tcp dport 80 dnat to $GATEWAY_IP:3000
     }
 }
 NFTEOF
@@ -194,10 +213,10 @@ NFTEOF
     echo "nftables captive portal loaded" >> $LOG
 
     # ── TC BANDWIDTH SHAPING SETUP ────────────────────────────────
-    tc qdisc del dev $LAN_IF root 2>/dev/null || true
-    tc qdisc add dev $LAN_IF root handle 1: htb default 999 r2q 1
-    tc class add dev $LAN_IF parent 1: classid 1:999 htb rate 100mbit ceil 100mbit
-    echo "tc root qdisc configured on $LAN_IF" >> $LOG
+    tc qdisc del dev $LAN_VIF root 2>/dev/null || true
+    tc qdisc add dev $LAN_VIF root handle 1: htb default 999 r2q 1
+    tc class add dev $LAN_VIF parent 1: classid 1:999 htb rate 100mbit ceil 100mbit
+    echo "tc root qdisc configured on $LAN_VIF" >> $LOG
 
 elif [ "$NETWORK_MODE" = "mikrotik" ]; then
     echo "MikroTik mode" >> $LOG

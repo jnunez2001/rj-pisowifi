@@ -54,6 +54,8 @@ async function loadSettings() {
     document.getElementById('mikrotikPass').value = s.mikrotik_pass || '';
     document.getElementById('mikrotikInterface').value = s.mikrotik_interface || 'ether1';
     document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
+    document.getElementById('lanVlanId').value = s.lan_vlan_id || '';
+    document.getElementById('standaloneFields').style.display = mode !== 'mikrotik' ? 'block' : 'none';
     updateNetworkModeCards(mode);
 
     // Network config
@@ -190,6 +192,7 @@ async function restoreSystem() {
 function onNetworkModeChange() {
   const mode = document.querySelector('input[name="networkMode"]:checked').value;
   document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
+  document.getElementById('standaloneFields').style.display = mode !== 'mikrotik' ? 'block' : 'none';
   updateNetworkModeCards(mode);
 }
 
@@ -210,6 +213,7 @@ async function saveNetworkSettings() {
       mikrotik_user: document.getElementById('mikrotikUser').value,
       mikrotik_pass: document.getElementById('mikrotikPass').value,
       mikrotik_interface: document.getElementById('mikrotikInterface').value,
+      lan_vlan_id: document.getElementById('lanVlanId').value,
     });
     if (data.success) showToast('Network settings saved!');
     else showToast(data.message || 'Failed to save.', 'error');

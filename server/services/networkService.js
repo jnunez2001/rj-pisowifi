@@ -106,12 +106,21 @@ function macToClassId(mac) {
   return 100 + hash;
 }
 
+// Bug: setup-network.sh binds the tc root qdisc (and everything else) to a
+// VLAN sub-interface like "enp0s8.13" when lan_vlan_id is configured (some
+// setups share one switch between the ISP modem and the AP, tagging
+// customer traffic with a VLAN ID to separate it) - per-client tc commands
+// issued from here must target that same sub-interface, not the raw
+// physical one, or they'd fail since the qdisc they're attaching to
+// doesn't exist on the physical interface at all.
 function getLanInterface() {
   try {
     const db = require('../config/database');
-    return db.prepare("SELECT value FROM settings WHERE key = 'lan_interface'").get()?.value ||
+    const base = db.prepare("SELECT value FROM settings WHERE key = 'lan_interface'").get()?.value ||
       process.env.LAN_IF ||
       'enp0s8';
+    const vlanId = db.prepare("SELECT value FROM settings WHERE key = 'lan_vlan_id'").get()?.value;
+    return vlanId ? `${base}.${vlanId}` : base;
   } catch (e) {
     return process.env.LAN_IF || 'enp0s8';
   }

@@ -1195,6 +1195,17 @@ Read through every file in `esp32/firmware/rj_pisowifi/` (~1,100 lines). No Ardu
 
 ---
 
+## New: shared-switch VLAN support (2026-07-08)
+
+Some deployments run the ISP modem, the board, and the WiFi access point(s) all off one unmanaged switch, with the AP(s) tagging customer WiFi traffic with an 802.1Q VLAN ID to keep it separate from the ISP's untagged traffic on the same cable — a real pattern used by other piso-wifi setups (confirmed against real competitor wiring diagrams and an admin panel screenshot showing this exact `eth0.13` VLAN interface approach). This project only ever bound everything to the raw physical interface, which can't tell tagged customer frames apart from the ISP's, so this pattern wasn't previously supported.
+
+- **New setting: LAN VLAN ID** (Settings → Network Mode → Standalone), optional, blank by default (no behavior change for existing setups with a dedicated LAN cable).
+- **`setup/setup-network.sh`:** when a VLAN ID is configured, creates a VLAN sub-interface (e.g. `enp0s8.13`) off the physical LAN interface and binds the gateway IP, dnsmasq, the nftables captive-portal ruleset, and the tc root qdisc to that sub-interface instead of the raw physical one — which is left untagged and unassigned, so the ISP's own untagged traffic on the same wire is never touched.
+- **`server/services/networkService.js`:** `getLanInterface()` (used by per-client `tc` bandwidth-shaping commands) now appends the same `.{vlanId}` suffix when configured, so per-client shaping attaches to the same sub-interface the root qdisc actually lives on, instead of a physical interface with no qdisc on it at all.
+- **Verified:** setting saves/loads correctly through the actual Settings UI (round-tripped a real value through the running app, not just read the code) and `bash -n` passes on the updated script. VLAN tagging itself not verified against real 802.1Q-tagging AP hardware in this environment (no such setup present here) — please confirm end-to-end after applying on real hardware.
+
+---
+
 **Generated:** 2026-07-04  
 **System:** R&J PisoWifi v1.0.1  
 **Status:** PRODUCTION-READY ✅

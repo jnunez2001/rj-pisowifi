@@ -273,6 +273,17 @@ setups with dedicated networking hardware.</div>
     </div>
   </div>
 
+  <!-- STANDALONE SETTINGS (shown only when Standalone selected) -->
+  <div id="standaloneFields" style="display:none;margin-top:16px;">
+    <div class="form-group">
+      <label class="form-label">LAN VLAN ID (optional)</label>
+      <input type="number" id="lanVlanId" class="form-control" placeholder="Leave blank if not using VLANs" min="1" max="4094">
+      <small style="color:var(--text-muted);">Only needed if your access point(s) tag customer WiFi traffic with a VLAN ID
+      and share the same switch/cable as your internet connection (a common setup with an unmanaged switch). Leave blank
+      if the LAN port connects straight to your access point with nothing else on that cable.</small>
+    </div>
+  </div>
+
   <!-- MIKROTIK SETTINGS (shown only when MikroTik selected) -->
   <div id="mikrotikFields" style="display:none;margin-top:16px;">
 
