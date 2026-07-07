@@ -1225,6 +1225,13 @@ Superseded the single "LAN VLAN ID" field above with a proper VLAN manager, afte
 - **Fix:** added `chattr -i /etc/resolv.conf` (ignoring errors, since a fresh install has no immutable flag to clear yet) right before the `rm`, making the whole DNS step idempotent.
 - **Verification status:** `bash -n` passes. Not re-run against a real already-installed server in this environment — please confirm re-running `install.sh` now gets past this step.
 
+#### Bug #78 (HIGH): couldn't run in a single-NIC + VLAN setup at all
+- **File:** `setup/setup-network.sh`
+- **Reported:** after moving to a real single-shared-switch setup (ISP modem + server + VLAN-tagged AP all on one switch, one physical NIC on the server), the admin panel became unreachable — `setup-network.sh`'s log showed `WAN: enp0s3  LAN:` and `ERROR: No LAN interface found`, aborting before setting up the port-80 redirect or anything else.
+- **Cause:** the LAN-interface auto-detect explicitly excluded whatever `WAN_IF` was, on the assumption LAN always has its own separate physical NIC. But a configured LAN-mode VLAN's base interface can legitimately BE `WAN_IF` — that's the entire point of VLAN tagging on a shared switch (the AP tags its traffic to separate it from the modem's untagged traffic on the same wire/interface). With only one physical NIC and a VLAN configured, the old logic could never find a "LAN interface" and gave up.
+- **Fix:** if a LAN-mode VLAN row exists, its `base_interface` is used directly (even if it equals `WAN_IF`) before falling back to the old separate-NIC auto-detect. The VLAN sub-interface (e.g. `enp0s3.13`) is what actually separates the traffic, not which physical NIC it's on.
+- **Verification status:** `bash -n` passes. Not yet confirmed against the reporter's live single-NIC + VLAN 13 setup — please confirm the admin panel becomes reachable again after applying and creating the matching VLAN in Network > VLAN Management.
+
 ---
 
 **Generated:** 2026-07-04  

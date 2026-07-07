@@ -41,6 +41,17 @@ fi
 if [ -z "$WAN_IF" ]; then
     WAN_IF=$(ip route show default 2>/dev/null | awk '/default/ {print $5}' | head -1)
 fi
+# Bug #78: a configured LAN-mode VLAN's base interface can legitimately be
+# the SAME physical NIC as WAN_IF - that's the whole point of VLAN tagging
+# on a shared switch (modem + server + AP all on one cable/switch, the AP
+# tags customer traffic to separate it). The old auto-detect below
+# explicitly excluded WAN_IF when searching for a LAN interface, so a
+# single-NIC setup with a VLAN configured would never find one and the
+# script would abort with "No LAN interface found" - even though the LAN
+# VLAN row it needs is sitting right there in the DB.
+if [ -z "$LAN_IF" ] && [ -n "$LAN_VLAN_BASE" ]; then
+    LAN_IF="$LAN_VLAN_BASE"
+fi
 if [ -z "$LAN_IF" ]; then
     for iface in $(ls /sys/class/net/ | grep -E '^(eth|enp|ens|enx)'); do
         if [ "$iface" != "$WAN_IF" ]; then
