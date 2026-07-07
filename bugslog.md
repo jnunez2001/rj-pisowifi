@@ -1218,6 +1218,13 @@ Superseded the single "LAN VLAN ID" field above with a proper VLAN manager, afte
 - **`server/services/networkService.js`:** `getLanInterface()` now looks up the `vlans` table's `lan`-mode row instead of the old setting, keeping per-client `tc` bandwidth shaping targeting the same sub-interface the root qdisc actually lives on.
 - **Verified:** full create → list → delete round-trip tested directly against the running app's API and DB (not just read the code) — VLAN row persists correctly, table renders it, delete removes it and the list reflects zero rows afterward. `bash -n`/`node -c` clean on all touched files. The actual `ip link add`/`dhclient`/`sudo` calls are not exercised in this environment (no Linux host here) — please verify a real VLAN (both LAN and WAN mode) applies correctly on your server after pulling.
 
+#### Bug #77 (HIGH): `install.sh` isn't safe to run a second time
+- **File:** `setup/install.sh`
+- **Reported:** re-running `install.sh` to pick up the new VLAN feature's sudoers/package additions failed at "[4/8] Configuring DNS..." with `rm: cannot remove '/etc/resolv.conf': Operation not permitted`.
+- **Cause:** the DNS step makes `/etc/resolv.conf` immutable (`chattr +i`) after writing it — correct the first time, but any later run of the script tries to `rm` that same now-immutable file and fails, since even root can't delete an immutable file without clearing the flag first. This blocked applying any future update that needs a re-run of the installer (like this VLAN feature's new sudoers entry and `isc-dhcp-client` package).
+- **Fix:** added `chattr -i /etc/resolv.conf` (ignoring errors, since a fresh install has no immutable flag to clear yet) right before the `rm`, making the whole DNS step idempotent.
+- **Verification status:** `bash -n` passes. Not re-run against a real already-installed server in this environment — please confirm re-running `install.sh` now gets past this step.
+
 ---
 
 **Generated:** 2026-07-04  

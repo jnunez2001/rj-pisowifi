@@ -48,6 +48,11 @@ echo "Node: $(node -v)" | tee -a $LOG
 echo "[4/8] Configuring DNS..." | tee -a $LOG
 systemctl stop systemd-resolved >> $LOG 2>&1 || true
 systemctl disable systemd-resolved >> $LOG 2>&1 || true
+# Bug: chattr +i below makes this file immutable, so a second run of this
+# script (e.g. to pick up new sudoers/package changes after a git pull)
+# fails right here with "Operation not permitted" - rm can't remove an
+# immutable file even as root without clearing the flag first.
+chattr -i /etc/resolv.conf 2>/dev/null || true
 rm -f /etc/resolv.conf
 echo "nameserver 8.8.8.8" > /etc/resolv.conf
 echo "nameserver 1.1.1.1" >> /etc/resolv.conf
