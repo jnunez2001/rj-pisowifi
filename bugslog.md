@@ -1151,6 +1151,28 @@ Read through every file in `esp32/firmware/rj_pisowifi/` (~1,100 lines). No Ardu
 
 ---
 
+## Real-time coin credit reflection (2026-07-08)
+
+#### Bug #73 (HIGH): Coin credit took 1-2 seconds to show on customer portal
+- **Files:** `server/services/sseService.js` (new), `server/routes/session.js`, `server/services/sessionService.js`, `public/portal/assets/js/portal.js`
+- **Reported:** inserted coins reflect on the client portal after a noticeable 1-2 second delay, slower than competing systems.
+- **Cause:** the portal only ever found out about a credited coin by polling `/api/session/mac/:mac` on a timer (every 8s normally, every 1.5s while the Insert Coin modal was open), so even the fast path meant waiting up to ~1.5s for the next tick.
+- **Fix:** added a Server-Sent Events channel. `sseService.js` keeps an in-memory map of MAC to open SSE connections; a new `GET /api/session/events/:mac` route in `session.js` opens the stream (with a 25s heartbeat to survive idle-timeout proxies/browsers); `sessionService.js` calls `sseService.notify(mac)` at the end of `createSession`, `addTimeToSession`, `pauseSession`, `resumeSession`, and `expireSession`. The portal (`portal.js`) opens an `EventSource` on load and refetches session status the instant a message arrives, instead of waiting on its poll timer. Existing polling is left in place as a fallback in case a browser's stream connection drops silently.
+- **Verified end-to-end:** connected a real portal tab, confirmed `EventSource.readyState === OPEN`; measured push latency atomically in a single browser-side call (`performance.now()` around a `fetch('/api/coin')` through to the SSE message arriving) — **39.4ms**, versus the previously reported 1-2s. Confirmed the session data reflected (voucher code, minutes remaining) was correct. Test session/transaction cleaned up from the DB afterward.
+
+---
+
+## Free minutes claim blocked (2026-07-08)
+
+#### Bug #74 (HIGH): "Claim Free 5 Mins" failed for customers after the first one each day
+- **File:** `server/routes/session.js`
+- **Reported:** free minutes claim failed with an error, couldn't claim.
+- **Cause:** `POST /api/session/free-claim` had a secondary anti-spoofing check that hard-blocked any claim from an IP that had already claimed that day, on top of the primary MAC-based check. Reproduced directly: two different MACs claiming back to back, both landing on the server as the same source IP, and the second one was rejected with "Free minutes already claimed from this network today." Multiple real customer devices legitimately show up as one IP to this server whenever there's a router doing NAT in front of it (e.g. the MikroTik in external-router mode) — so in practice, only the first customer of the day could ever claim; everyone after got blocked.
+- **Fix:** removed the hard IP-based block. The MAC check (already the primary, and the one every other part of this system relies on for device identity) is enough on its own; the IP check is now just a console log for visibility, no longer stops a claim.
+- **Verified end-to-end:** two different MACs claiming from the same source IP both got `200` with unique voucher codes, where before the second one was hard-rejected. Test data cleaned up afterward.
+
+---
+
 **Generated:** 2026-07-04  
 **System:** R&J PisoWifi v1.0.1  
 **Status:** PRODUCTION-READY ✅

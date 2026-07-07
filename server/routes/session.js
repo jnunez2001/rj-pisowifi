@@ -8,6 +8,7 @@ const {
   expireSession
 } = require('../services/sessionService');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
+const sseService = require('../services/sseService');
 
 // This server has no reverse proxy in front of it (confirmed: setup/nginx.conf
 // is an unused empty placeholder, nothing sets up nginx) — clients hit Express
@@ -35,6 +36,36 @@ function sessionActionRateLimit(req, res, next) {
   req._rateLimitId = `session-action:${ip}`;
   next();
 }
+
+// GET /api/session/events/:mac — Server-Sent Events stream. The portal
+// keeps this connection open and gets pushed an instant wake-up the
+// moment a coin/promo/free-claim credits this MAC, instead of waiting on
+// its next poll (previously the fastest path was still up to ~1.5s).
+router.get('/events/:mac', (req, res) => {
+  const mac = String(req.params.mac || '').trim().toLowerCase();
+  if (!mac) return res.status(400).end();
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+  if (res.flushHeaders) res.flushHeaders();
+  res.write('\n');
+
+  sseService.subscribe(mac, res);
+
+  // Keep the connection alive through any idle-timeout proxies/browsers
+  // that might otherwise close a long-lived HTTP connection.
+  const heartbeat = setInterval(() => {
+    try { res.write(': heartbeat\n\n'); } catch (e) {}
+  }, 25000);
+
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sseService.unsubscribe(mac, res);
+  });
+});
 
 // GET /api/session/mac/:mac
 router.get('/mac/:mac', async (req, res) => {
@@ -300,7 +331,12 @@ router.post('/free-claim', async (req, res) => {
       });
     }
 
-    // Check IP-based claim as secondary defense against MAC spoofing (Bug #7)
+    // Bug #74: this used to hard-block a second claim from the same IP,
+    // meant as a secondary defense against MAC spoofing. But many customer
+    // devices legitimately share one IP as the server sees it (a router
+    // doing hotspot NAT in front of it, e.g. the MikroTik in external-router
+    // mode), which blocked every customer after the first each day. The MAC
+    // check above is the real defense; this is now just a visibility log.
     if (ip) {
       const existingIp = db.prepare(`
         SELECT id FROM free_claims
@@ -309,11 +345,7 @@ router.post('/free-claim', async (req, res) => {
       `).get(ip, today);
 
       if (existingIp) {
-        console.warn(`⚠️ Possible MAC spoofing attempt from IP ${ip}`);
-        return res.status(403).json({
-          success: false,
-          message: 'Free minutes already claimed from this network today.'
-        });
+        console.warn(`[Free claim] Multiple claims from IP ${ip} today (expected behind a NATting router)`);
       }
     }
 
