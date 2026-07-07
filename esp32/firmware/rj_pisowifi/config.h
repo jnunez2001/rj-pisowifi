@@ -18,7 +18,20 @@
 // Set to true if your relay module is ACTIVE-LOW
 // (i.e. LOW = relay ON, HIGH = relay OFF). Most cheap Songle
 // 1-channel boards without an H/L jumper are active-LOW.
-#define RELAY_ACTIVE_LOW  true
+//
+// Bug report: relay (D5) stays energized from boot regardless of Insert
+// Coin, and toggling from the portal behaves backwards. That's the exact
+// symptom of this flag not matching the actual board - firmware writes
+// HIGH believing "off," but on an ACTIVE-HIGH board HIGH means "on," so
+// it reads as always-on and Insert Coin's LOW (firmware's "on") is what
+// actually turns it off. Flipped to false (active-HIGH) to match.
+//
+// If your relay now stays OFF by default and never turns on when you
+// click Insert Coin, your board really is active-LOW after all - flip
+// this back to `true` and look at the physical wiring/module instead
+// (this constant can only correct a logic-level mismatch, not a wiring
+// fault).
+#define RELAY_ACTIVE_LOW  false
 
 #if RELAY_ACTIVE_LOW
   #define RELAY_ON_STATE   LOW

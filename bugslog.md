@@ -1135,6 +1135,22 @@ Read through every file in `esp32/firmware/rj_pisowifi/` (~1,100 lines). No Ardu
 
 ---
 
+## Follow-up reports from real hardware/device testing (2026-07-08)
+
+#### Bug #72 (HIGH): Relay (D5) stays energized regardless of Insert Coin
+- **File:** `esp32/firmware/rj_pisowifi/config.h`
+- **Reported:** relay always active even without clicking Insert Coin; behaves backwards when it is clicked.
+- **Cause:** `RELAY_ACTIVE_LOW` was hardcoded `true` (LOW=on, HIGH=off — the default for common Songle-style boards). Firmware writes `HIGH` at boot believing that means off. On an active-HIGH board, `HIGH` actually means on, so it reads as always-energized from boot, and Insert Coin's `LOW` (firmware's "on") is what actually turns it off — exactly backwards, matching the report.
+- **Fix:** flipped to `false` (active-HIGH). Documented in the same comment block how to tell if this guess was wrong (relay now stays off and never responds to Insert Coin at all) and revert, since this constant can only correct a logic-level mismatch, not a wiring fault — not verified against the reporter's actual physical board.
+
+#### Sidebar unreachable on mobile (admin panel, not ESP32)
+- **File:** `public/admin/css/admin.css`
+- **Reported:** couldn't scroll down to reach the Shutdown button on a phone.
+- **Cause:** `.sidebar` used `min-height: 100vh` instead of a fixed `height`, so it grew taller than the screen instead of being clipped to it — `.sidebar-nav`'s `overflow-y: auto` never engaged since its parent was never height-constrained in the first place.
+- **Fix:** fixed `height: 100vh` on `.sidebar`, `flex-shrink: 0` on the header/footer so only the nav list scrolls. Verified on an actual 375×812 mobile viewport — nav region confirmed scrollable (726px content in a 650px area), Shutdown button lands fully in view after scrolling.
+
+---
+
 **Generated:** 2026-07-04  
 **System:** R&J PisoWifi v1.0.1  
 **Status:** PRODUCTION-READY ✅

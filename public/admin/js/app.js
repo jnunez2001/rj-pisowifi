@@ -64,6 +64,7 @@ function doLogout() {
   if (!confirm('Are you sure you want to logout?')) return;
   sessionStorage.removeItem('rj_admin_token');
   authToken = null;
+  stopSessionPolling();
   document.getElementById('adminLayout').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'block';
   document.getElementById('loginPassword').value = '';
@@ -98,6 +99,7 @@ const pageTitles = {
   sales: 'Sales Report',
   sessions: 'Active Sessions',
   vouchers: 'Vouchers',
+  promos: 'Promos',
   rates: 'Rates Manager',
   settings: 'Settings',
   security: 'Security',
@@ -140,6 +142,7 @@ async function navigateTo(page) {
       sales: () => typeof loadSales === 'function' && loadSales(),
       rates: () => typeof loadRates === 'function' && loadRates(),
       vouchers: () => typeof loadVouchers === 'function' && loadVouchers(),
+      promos: () => typeof loadPromosPage === 'function' && loadPromosPage(),
       settings: () => typeof loadSettings === 'function' && loadSettings(),
       security: () => typeof loadSecurity === 'function' && loadSecurity(),
       branding: () => typeof loadBranding === 'function' && loadBranding(),
@@ -181,9 +184,28 @@ function toggleSidebar() {
 }
 
 // ===== SESSION COUNT POLLING =====
+// Bug: this interval's id was never stored, so nothing could ever stop it.
+// Once authToken went stale for any reason (server restored from an older
+// backup with a different password while a tab was still logged in, DB
+// swapped out during testing, etc.), this kept firing every 15s with a bad
+// password forever — each failure recorded against the new admin-login
+// rate limiter, repeatedly re-triggering (and re-extending) a 429 block
+// that never had a chance to clear on its own. From the outside this looks
+// exactly like "everything in the admin panel is broken" (stuck loading,
+// "server error" on every save) even though the actual endpoints are fine.
+let sessionPollInterval = null;
+
 function startSessionPolling() {
   updateSessionCount();
-  setInterval(updateSessionCount, 15000);
+  if (sessionPollInterval) clearInterval(sessionPollInterval);
+  sessionPollInterval = setInterval(updateSessionCount, 15000);
+}
+
+function stopSessionPolling() {
+  if (sessionPollInterval) {
+    clearInterval(sessionPollInterval);
+    sessionPollInterval = null;
+  }
 }
 
 async function updateSessionCount() {
@@ -211,6 +233,7 @@ async function updateSessionCount() {
 function handleAuthFailure() {
   if (authToken === null) return; // already logged out, avoid repeat triggers
   authToken = null;
+  stopSessionPolling();
   sessionStorage.removeItem('rj_admin_token');
   sessionStorage.removeItem('rj_admin_user');
   document.getElementById('adminLayout').style.display = 'none';

@@ -16,7 +16,6 @@ function formatDuration(minutes) {
 async function loadVouchers() {
   await loadPromos();
   await loadVoucherGroups();
-  await loadFreeMinutesSettings();
 }
 
 function closeModal(id) {
@@ -26,11 +25,20 @@ function closeModal(id) {
 // ===== SINGLE VOUCHER =====
 
 async function loadPromos() {
+  const tbody = document.getElementById('promosTable');
   try {
     const data = await apiCall('GET', '/api/admin/promos');
-    const tbody = document.getElementById('promosTable');
 
-    if (!data.success || !data.promos.length) {
+    // Bug: a real failure (rate-limited, server error) has `data.success
+    // === false`, but this used to fall into the same branch as "no
+    // vouchers yet" and show a misleading "No Vouchers, create one!"
+    // message instead of the actual reason it failed.
+    if (!data.success) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--accent-red);padding:24px;">${data.message || 'Failed to load vouchers'}</td></tr>`;
+      return;
+    }
+
+    if (!data.promos.length) {
       tbody.innerHTML = `
         <tr>
           <td colspan="6">
@@ -79,7 +87,11 @@ async function loadPromos() {
     }).join('');
 
   } catch(e) {
+    // Bug: this used to just console.error and leave the table stuck on
+    // its initial "Loading..." row forever with no visible indication
+    // anything had gone wrong.
     console.error('Vouchers error:', e);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--accent-red);padding:24px;">Failed to load vouchers. Refresh to try again.</td></tr>`;
   }
 }
 
@@ -166,12 +178,21 @@ function openCreateGroup() {
 }
 
 async function loadVoucherGroups() {
+  const tbody = document.getElementById('voucherGroupsTable');
+  if (!tbody) return;
   try {
     const data = await apiCall('GET', '/api/admin/vouchers/groups');
-    const tbody = document.getElementById('voucherGroupsTable');
-    if (!tbody) return;
 
-    if (!data.success || !data.groups.length) {
+    // Bug: a real failure (rate-limited, server error) has
+    // `data.success === false`, but this used to fall into the same
+    // branch as "no groups yet" and show a misleading "create one!"
+    // message instead of the actual reason it failed.
+    if (!data.success) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--accent-red);padding:24px;">${data.message || 'Failed to load voucher groups'}</td></tr>`;
+      return;
+    }
+
+    if (!data.groups.length) {
       tbody.innerHTML = `
         <tr>
           <td colspan="6">
@@ -208,7 +229,11 @@ async function loadVoucherGroups() {
       </tr>
     `).join('');
   } catch(e) {
+    // Bug: this used to just console.error and leave the table stuck on
+    // its initial "Loading..." row forever with no visible indication
+    // anything had gone wrong.
     console.error('Voucher groups error:', e);
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--accent-red);padding:24px;">Failed to load voucher groups. Refresh to try again.</td></tr>`;
   }
 }
 
@@ -360,26 +385,3 @@ async function printVoucherGroup(id) {
   }
 }
 
-// ===== FREE MINUTES (moved from Settings) =====
-
-async function loadFreeMinutesSettings() {
-  try {
-    const data = await apiCall('GET', '/api/admin/settings');
-    if (!data.success) return;
-    setToggle('freeMinutesEnabled', 'freeMinutesEnabledLabel', data.settings.free_minutes_enabled === '1');
-    document.getElementById('freeMinutesAmount').value = data.settings.free_minutes_amount || 5;
-  } catch(e) {
-    console.error('Free minutes load error:', e);
-  }
-}
-
-async function saveFreeMinutesSettings() {
-  try {
-    const data = await apiCall('POST', '/api/admin/settings', {
-      free_minutes_enabled: document.getElementById('freeMinutesEnabled').checked ? '1' : '0',
-      free_minutes_amount: document.getElementById('freeMinutesAmount').value,
-    });
-    if (data.success) showToast('Free minutes settings saved!');
-    else showToast(data.message || 'Failed to save.', 'error');
-  } catch(e) { showToast('Server error.', 'error'); }
-}
