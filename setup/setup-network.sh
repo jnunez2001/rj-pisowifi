@@ -60,51 +60,62 @@ iptables -X ndsAUT 2>/dev/null || true
 iptables -t nat -X ndsOUT 2>/dev/null || true
 echo "nodogsplash chains cleaned" >> $LOG
 
-# ── CONFIGURE LAN ─────────────────────────────────────────────
-ip addr flush dev $LAN_IF 2>/dev/null
-ip addr add ${GATEWAY_IP}/24 dev $LAN_IF
-ip link set $LAN_IF up
-echo "LAN: $LAN_IF → $GATEWAY_IP" >> $LOG
+# Bug #75: this whole block (static gateway IP + NAT + dnsmasq as DHCP
+# server) used to run unconditionally, even in "mikrotik"/external-router
+# mode. There, the MikroTik is already the network's router and DHCP
+# server — running our own dnsmasq on the same LAN put two DHCP servers
+# answering the same clients' DISCOVERs, which is exactly what "stuck on
+# Obtaining IP Address" looks like (conflicting offers/NAKs). Only stand up
+# our own IP/NAT/DHCP when we're actually the router (standalone mode); in
+# mikrotik mode we're just another device on the MikroTik's network and get
+# our own address the normal way.
+if [ "$NETWORK_MODE" = "standalone" ]; then
 
-# IP forwarding
-echo 1 > /proc/sys/net/ipv4/ip_forward
+  # ── CONFIGURE LAN ─────────────────────────────────────────────
+  ip addr flush dev $LAN_IF 2>/dev/null
+  ip addr add ${GATEWAY_IP}/24 dev $LAN_IF
+  ip link set $LAN_IF up
+  echo "LAN: $LAN_IF → $GATEWAY_IP" >> $LOG
 
-# ── IPTABLES NAT ──────────────────────────────────────────────
-iptables -t nat -F POSTROUTING 2>/dev/null
-iptables -F FORWARD 2>/dev/null
-iptables -t nat -A POSTROUTING -o $WAN_IF -j MASQUERADE
-iptables -A FORWARD -i $LAN_IF -o $WAN_IF -j ACCEPT
-iptables -A FORWARD -i $WAN_IF -o $LAN_IF -m state \
-    --state RELATED,ESTABLISHED -j ACCEPT
+  # IP forwarding
+  echo 1 > /proc/sys/net/ipv4/ip_forward
 
-# Port 80 → 3000 for WAN side (admin access)
-iptables -t nat -F PREROUTING 2>/dev/null
-iptables -t nat -A PREROUTING -i $WAN_IF -p tcp --dport 80 \
-    -j REDIRECT --to-port 3000
-echo "iptables NAT configured" >> $LOG
+  # ── IPTABLES NAT ──────────────────────────────────────────────
+  iptables -t nat -F POSTROUTING 2>/dev/null
+  iptables -F FORWARD 2>/dev/null
+  iptables -t nat -A POSTROUTING -o $WAN_IF -j MASQUERADE
+  iptables -A FORWARD -i $LAN_IF -o $WAN_IF -j ACCEPT
+  iptables -A FORWARD -i $WAN_IF -o $LAN_IF -m state \
+      --state RELATED,ESTABLISHED -j ACCEPT
 
-# ── START DNSMASQ ─────────────────────────────────────────────
-sleep 1
-rm -f /var/lib/misc/dnsmasq.leases
+  # Port 80 → 3000 for WAN side (admin access)
+  iptables -t nat -F PREROUTING 2>/dev/null
+  iptables -t nat -A PREROUTING -i $WAN_IF -p tcp --dport 80 \
+      -j REDIRECT --to-port 3000
+  echo "iptables NAT configured" >> $LOG
 
-# Bug: clients getting stuck on "Obtaining IP Address" traces to two
-# compounding issues in the DHCP config below:
-# 1. dhcp-authoritative was missing. Every run of this script wipes the
-#    lease file (line above), but a phone that connected before a reboot
-#    still remembers its old IP and sends a DHCPREQUEST for it, not a fresh
-#    DISCOVER. Without this flag, dnsmasq doesn't know it's the sole
-#    authority on the network, so its RFC-correct response to a lease it
-#    doesn't recognize is to silently ignore the request — the client sits
-#    waiting through its own timeout (often 30-60+ seconds) before falling
-#    back to a full DISCOVER. With the flag, dnsmasq immediately NAKs it
-#    instead, and the client restarts DHCP right away.
-# 2. The pool (10.10-10.200, 191 addresses) with a 12h lease is sized for a
-#    small, mostly-static home network, not a walk-up coin-op location with
-#    many short, transient visits — leases can pile up faster than they
-#    expire and exhaust the pool mid-day, well before any single lease's
-#    12h is up. Widened the range and cut the lease time so departed
-#    customers' addresses free up much sooner.
-cat > /etc/dnsmasq.d/rj-pisowifi.conf << EOF
+  # ── START DNSMASQ ─────────────────────────────────────────────
+  sleep 1
+  rm -f /var/lib/misc/dnsmasq.leases
+
+  # Bug: clients getting stuck on "Obtaining IP Address" traces to two
+  # compounding issues in the DHCP config below:
+  # 1. dhcp-authoritative was missing. Every run of this script wipes the
+  #    lease file (line above), but a phone that connected before a reboot
+  #    still remembers its old IP and sends a DHCPREQUEST for it, not a fresh
+  #    DISCOVER. Without this flag, dnsmasq doesn't know it's the sole
+  #    authority on the network, so its RFC-correct response to a lease it
+  #    doesn't recognize is to silently ignore the request — the client sits
+  #    waiting through its own timeout (often 30-60+ seconds) before falling
+  #    back to a full DISCOVER. With the flag, dnsmasq immediately NAKs it
+  #    instead, and the client restarts DHCP right away.
+  # 2. The pool (10.10-10.200, 191 addresses) with a 12h lease is sized for a
+  #    small, mostly-static home network, not a walk-up coin-op location with
+  #    many short, transient visits — leases can pile up faster than they
+  #    expire and exhaust the pool mid-day, well before any single lease's
+  #    12h is up. Widened the range and cut the lease time so departed
+  #    customers' addresses free up much sooner.
+  cat > /etc/dnsmasq.d/rj-pisowifi.conf << EOF
 interface=$LAN_IF
 bind-interfaces
 dhcp-authoritative
@@ -117,8 +128,17 @@ server=8.8.8.8
 server=8.8.4.4
 EOF
 
-systemctl restart dnsmasq >> $LOG 2>&1
-echo "dnsmasq started" >> $LOG
+  systemctl restart dnsmasq >> $LOG 2>&1
+  echo "dnsmasq started" >> $LOG
+
+else
+  # mikrotik mode: the router owns DHCP/NAT — make sure our own dnsmasq
+  # isn't still running from a prior standalone setup and fighting it.
+  rm -f /etc/dnsmasq.d/rj-pisowifi.conf
+  systemctl stop dnsmasq >> $LOG 2>&1 || true
+  systemctl disable dnsmasq >> $LOG 2>&1 || true
+  echo "mikrotik mode: dnsmasq disabled, deferring to router for DHCP" >> $LOG
+fi
 
 # ── NFTABLES CAPTIVE PORTAL ───────────────────────────────────
 if [ "$NETWORK_MODE" = "standalone" ]; then

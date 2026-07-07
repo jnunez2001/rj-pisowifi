@@ -1173,6 +1173,17 @@ Read through every file in `esp32/firmware/rj_pisowifi/` (~1,100 lines). No Ardu
 
 ---
 
+## MikroTik mode fighting its own router for DHCP (2026-07-08)
+
+#### Bug #75 (CRITICAL): Clients stuck on "Obtaining IP Address" in External Router mode
+- **File:** `setup/setup-network.sh`
+- **Reported:** WiFi clients can't connect (stuck obtaining an IP) after switching to the MikroTik/External Router setup.
+- **Cause:** the static gateway IP assignment, NAT/iptables rules, and dnsmasq DHCP server all ran unconditionally on every setup, regardless of `network_mode`. In External Router mode the MikroTik is already the network's router and DHCP server — with the Pi's own dnsmasq also answering on the same LAN, two DHCP servers raced to answer every client's DISCOVER, producing conflicting offers/NAKs. That's the DHCP-level version of the same symptom fixed earlier for standalone mode (Bug from 2026-07-08 dhcp-authoritative fix), but caused by a second server this time, not a stale-lease NAK loop.
+- **Fix:** wrapped the static-IP/NAT/dnsmasq block in `if [ "$NETWORK_MODE" = "standalone" ]`. The mikrotik branch now explicitly stops and disables dnsmasq and removes its config, in case a device was previously set up in standalone mode and switched — deferring DHCP entirely to the router, as it should.
+- **Verification status:** confirmed the branching logic is correct against `settings.js`/`settings.html` (which does save `network_mode = "mikrotik"` for External Router selection) and passed `bash -n` syntax check. Not verified against real MikroTik hardware in this environment (no such router present here) — please confirm on your setup after applying.
+
+---
+
 **Generated:** 2026-07-04  
 **System:** R&J PisoWifi v1.0.1  
 **Status:** PRODUCTION-READY ✅
