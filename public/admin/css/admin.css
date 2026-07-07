@@ -19,7 +19,14 @@ body {
 .sidebar {
   width: var(--sidebar-width);
   background: var(--bg-sidebar);
-  min-height: 100vh;
+  /* Bug: this was min-height, which lets the sidebar grow taller than the
+     screen instead of being clipped to it. That meant .sidebar-nav's
+     overflow-y:auto below never actually engaged (its parent just kept
+     growing past the viewport instead), so on a short mobile screen with
+     this many nav items, the bottom of the list (down to Reboot/Shutdown)
+     rendered off-screen with no way to scroll down to it at all. A fixed
+     height is required for a flex child's own scrolling to kick in. */
+  height: 100vh;
   position: fixed;
   left: 0; top: 0;
   display: flex;
@@ -31,6 +38,7 @@ body {
 .sidebar-brand {
   padding: 20px 20px 16px;
   border-bottom: 1px solid rgba(255,255,255,0.1);
+  flex-shrink: 0;
 }
 
 .sidebar-brand .brand-logo {
@@ -125,6 +133,7 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
 }
 
 .sidebar-footer .admin-avatar {
