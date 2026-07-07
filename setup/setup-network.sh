@@ -162,7 +162,20 @@ table ip rj_piso {
         type filter hook forward priority filter; policy accept;
         ct state established,related accept
         iifname "$LAN_IF" ether saddr @allowed_macs accept
-        iifname "$LAN_IF" drop
+        # Bug #76: this was a silent "drop" for every unpaid device's
+        # traffic that wasn't DNS(53)/HTTP(80) - including HTTPS(443),
+        # which is what modern phones increasingly use for their
+        # background "do I have real internet" check. A silent drop means
+        # that check just hangs until the phone's own timeout, and Android
+        # in particular responds to that by deciding the network has no
+        # internet and disconnecting from it entirely ("Avoided poor
+        # internet connection"), instead of failing fast and showing the
+        # captive portal sign-in prompt. "reject" sends an immediate
+        # TCP RST/ICMP unreachable instead, so the check fails in
+        # milliseconds and the OS falls back to the HTTP-based check
+        # (which the prerouting DNAT below already redirects to the
+        # portal correctly).
+        iifname "$LAN_IF" reject
     }
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;

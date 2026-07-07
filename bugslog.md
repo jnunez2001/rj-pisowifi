@@ -1184,6 +1184,17 @@ Read through every file in `esp32/firmware/rj_pisowifi/` (~1,100 lines). No Ardu
 
 ---
 
+## Phones "avoided poor internet connection" instead of showing sign-in (2026-07-08)
+
+#### Bug #76 (HIGH): Unpaid clients' non-HTTP/DNS traffic was silently dropped instead of rejected
+- **File:** `setup/setup-network.sh`
+- **Reported:** a live diagnostic session traced a phone that got a real IP from dnsmasq (confirmed via `journalctl -u dnsmasq -f`) but then reported "Wi-Fi has no internet — Avoided poor internet connection" (an Android system message) instead of showing the captive portal.
+- **Cause:** the nftables `forward` chain's catch-all for unauthenticated MACs was a silent `drop`. DNS(53) and HTTP(80) are DNAT'd to the portal in `prerouting` and never hit this rule, but anything else — critically HTTPS(443), which modern phones increasingly use for their background "do I have real internet" probe — just hung until the phone's own timeout. Android in particular responds to a hung connectivity check by concluding the network has no real internet and auto-disconnecting, rather than falling back to the HTTP check and showing the sign-in prompt.
+- **Fix:** changed the catch-all from `drop` to `reject`, which sends an immediate TCP RST (or ICMP unreachable for other protocols). The HTTPS probe now fails in milliseconds instead of hanging, so the OS falls back to its HTTP-based check right away — which the existing DNAT-to-portal rule already handles correctly.
+- **Verification status:** traced against the actual DHCP handshake log from the reporter's live environment (dnsmasq correctly issuing IPs; the failure point was purely at the nftables forward-chain level for the phone's subsequent traffic) and passed `bash -n` syntax check. Not yet re-tested live against the reporter's actual phone after this fix — please confirm behavior after applying.
+
+---
+
 **Generated:** 2026-07-04  
 **System:** R&J PisoWifi v1.0.1  
 **Status:** PRODUCTION-READY ✅
