@@ -255,8 +255,8 @@
         <input type="radio" name="networkMode" id="modeNodogsplash" value="nodogsplash" onchange="onNetworkModeChange()" style="margin-top:3px;accent-color:var(--accent-green);">
         <div>
           <div style="font-weight:700;font-size:14px;">Nodogsplash</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Open-source captive portal solution. Runs directly on the server and manages 
-client authentication via a dedicated network interface. Ideal for standalone 
+          <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Open-source captive portal solution. Runs directly on the server and manages
+client authentication via a dedicated network interface. Ideal for standalone
 deployments without additional routing hardware.</div>
         </div>
       </label>
@@ -276,6 +276,18 @@ scalable deployments with full traffic management capabilities.</div>
 
   <!-- MIKROTIK SETTINGS (shown only when MikroTik selected) -->
   <div id="mikrotikFields" style="display:none;margin-top:16px;">
+
+    <div style="background:#fff8e1;border:1px solid #ffa000;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#e65100;">
+      <i class="fas fa-exclamation-triangle"></i>
+      <strong> Before switching to MikroTik mode:</strong>
+      <ul style="margin:6px 0 0 18px;padding:0;">
+        <li>Router must run <strong>RouterOS 7+</strong> with the REST API enabled (IP &rarr; Services &rarr; <code>www</code>, port 80 by default).</li>
+        <li>The Hotspot service must already be set up on the interface below, with a DHCP server bound to it (bandwidth limits are applied by IP, looked up from the client's DHCP lease — a device that hasn't received an IP yet can't be shaped).</li>
+        <li>This mode grants access by adding a bypass <strong>IP binding</strong> for the paying device's MAC, not by logging it into MikroTik's own Hotspot page — customers never see MikroTik's login screen.</li>
+        <li>Session timing is still enforced by this server, not the router — the router only reflects allow/block state when told to.</li>
+      </ul>
+    </div>
+
     <div class="grid-2">
       <div class="form-group">
         <label class="form-label">MikroTik IP Address</label>

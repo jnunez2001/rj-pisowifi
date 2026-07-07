@@ -1,5 +1,14 @@
 const { exec } = require('child_process');
 
+// Network backend is selectable per-deployment (Settings > Network Mode).
+// Default ('nodogsplash') drives nftables/tc directly on this box, below.
+// 'mikrotik' delegates every call to mikrotikService, which drives an
+// external router over its REST API instead. sessionService/timerService
+// only ever import from this module, so they stay backend-agnostic.
+function isMikrotikMode() {
+  return require('./mikrotikService').isMikrotikModeEnabled();
+}
+
 function normalizeMac(mac) {
   const normalizedMac = String(mac || '').trim().toLowerCase();
   if (!/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(normalizedMac)) {
@@ -9,15 +18,18 @@ function normalizeMac(mac) {
 }
 
 function allowClient(mac) {
-  return new Promise((resolve, reject) => {
-    let normalizedMac;
-    try {
-      normalizedMac = normalizeMac(mac);
-    } catch (error) {
-      reject(error);
-      return;
-    }
+  let normalizedMac;
+  try {
+    normalizedMac = normalizeMac(mac);
+  } catch (error) {
+    return Promise.reject(error);
+  }
 
+  if (isMikrotikMode()) {
+    return require('./mikrotikService').allowClient(normalizedMac);
+  }
+
+  return new Promise((resolve, reject) => {
     exec(`sudo nft add element ip rj_piso allowed_macs { ${normalizedMac} }`,
       (error, stdout, stderr) => {
         if (error) {
@@ -43,16 +55,19 @@ function allowClient(mac) {
 }
 
 function blockClient(mac) {
-  return new Promise((resolve) => {
-    let normalizedMac;
-    try {
-      normalizedMac = normalizeMac(mac);
-    } catch (error) {
-      console.error('[Network] Invalid MAC during block:', error.message);
-      resolve();
-      return;
-    }
+  let normalizedMac;
+  try {
+    normalizedMac = normalizeMac(mac);
+  } catch (error) {
+    console.error('[Network] Invalid MAC during block:', error.message);
+    return Promise.resolve();
+  }
 
+  if (isMikrotikMode()) {
+    return require('./mikrotikService').blockClient(normalizedMac);
+  }
+
+  return new Promise((resolve) => {
     exec(`sudo nft delete element ip rj_piso allowed_macs { ${normalizedMac} }`,
       (error, stdout, stderr) => {
         if (error) {
@@ -103,23 +118,25 @@ function getLanInterface() {
 }
 
 function setClientBandwidth(mac, mbps) {
+  let normalizedMac;
+  try {
+    normalizedMac = normalizeMac(mac);
+  } catch (error) {
+    console.error('[TC] Invalid MAC during shaping:', error.message);
+    return Promise.resolve();
+  }
+
+  const speed = parseInt(mbps, 10);
+  if (!Number.isFinite(speed) || speed <= 0) {
+    console.error(`[TC] Invalid bandwidth for ${normalizedMac}: ${mbps}`);
+    return Promise.resolve();
+  }
+
+  if (isMikrotikMode()) {
+    return require('./mikrotikService').setClientBandwidth(normalizedMac, speed);
+  }
+
   return new Promise((resolve) => {
-    let normalizedMac;
-    try {
-      normalizedMac = normalizeMac(mac);
-    } catch (error) {
-      console.error('[TC] Invalid MAC during shaping:', error.message);
-      resolve();
-      return;
-    }
-
-    const speed = parseInt(mbps, 10);
-    if (!Number.isFinite(speed) || speed <= 0) {
-      console.error(`[TC] Invalid bandwidth for ${normalizedMac}: ${mbps}`);
-      resolve();
-      return;
-    }
-
     const classId = macToClassId(normalizedMac);
     const lanIf = getLanInterface();
     const cmds = [
@@ -136,16 +153,19 @@ function setClientBandwidth(mac, mbps) {
 }
 
 function removeClientBandwidth(mac) {
-  return new Promise((resolve) => {
-    let normalizedMac;
-    try {
-      normalizedMac = normalizeMac(mac);
-    } catch (error) {
-      console.error('[TC] Invalid MAC during cleanup:', error.message);
-      resolve();
-      return;
-    }
+  let normalizedMac;
+  try {
+    normalizedMac = normalizeMac(mac);
+  } catch (error) {
+    console.error('[TC] Invalid MAC during cleanup:', error.message);
+    return Promise.resolve();
+  }
 
+  if (isMikrotikMode()) {
+    return require('./mikrotikService').removeClientBandwidth(normalizedMac);
+  }
+
+  return new Promise((resolve) => {
     const classId = macToClassId(normalizedMac);
     const lanIf = getLanInterface();
     exec(

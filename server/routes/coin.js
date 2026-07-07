@@ -12,6 +12,11 @@ function isValidMac(mac) {
 // Single-vendo setup: only one pending slot needed at a time.
 let pendingCoinMac = null;
 let pendingSetAt = 0;
+// Running total (pesos) credited since this pending window opened — lets the
+// portal show "how much have I inserted so far" without having to reverse-
+// engineer pesos from minutes (not reliably invertible: different coin
+// denominations buy minutes at different rates).
+let pendingTotal = 0;
 const PENDING_TIMEOUT_MS = 40000; // must match/slightly exceed portal's 30s coin timer
 
 // POST /api/coin/pending — portal calls this right when INSERT COIN modal opens
@@ -22,8 +27,17 @@ router.post('/pending', (req, res) => {
   }
   pendingCoinMac = mac.toLowerCase();
   pendingSetAt = Date.now();
+  pendingTotal = 0;
   console.log(`⏳ Pending coin registered for ${pendingCoinMac}`);
   return res.json({ success: true });
+});
+
+// GET /api/coin/pending/:mac — portal polls this while the INSERT COIN modal
+// is open, to show a running total and detect new coins to reset its timer.
+router.get('/pending/:mac', (req, res) => {
+  const mac = String(req.params.mac || '').trim().toLowerCase();
+  const stillValid = pendingCoinMac === mac && (Date.now() - pendingSetAt < PENDING_TIMEOUT_MS);
+  return res.json({ success: true, pending: stillValid, total: stillValid ? pendingTotal : 0 });
 });
 
 // POST /api/coin — ESP32 calls this when a coin is detected
@@ -103,6 +117,17 @@ router.post('/', async (req, res) => {
 
     clearAttempts(mac);
 
+    // Bug: previously the pending window only got a fixed 40s from when the
+    // modal opened, and the portal's own 30s coin-modal timer never reset
+    // as coins came in — someone dropping several coins with a few seconds
+    // between each could run out of time to finish, even mid-insertion.
+    // Renew both the window and the running total on every valid coin
+    // attributed to the pending MAC, not just when the modal was opened.
+    if (pendingValid && mac === pendingCoinMac) {
+      pendingSetAt = Date.now();
+      pendingTotal += coin_value;
+    }
+
     let totalMinutes = 0;
     let totalExpirationMinutes = 0;
 
@@ -165,9 +190,15 @@ router.post('/', async (req, res) => {
       };
     }
 
-    // Coin successfully credited — clear the pending slot
-    pendingCoinMac = null;
-
+    // Bug: this used to clear pendingCoinMac immediately after any single
+    // credit, so a second coin dropped moments later (before the customer
+    // was done inserting) fell back to whatever bare MAC the vendo sent, or
+    // got rejected outright — the portal's countdown could never actually
+    // see it to reset. This is a single physical coin slot serving one
+    // customer at a time ("Single-vendo setup" above), so there's no real
+    // risk of a second, unrelated customer's coin landing in this window —
+    // leave the pending slot alone here and let it expire on its own via
+    // PENDING_TIMEOUT_MS (renewed per coin above), same as before this coin.
     return res.json(result);
 
   } catch (err) {

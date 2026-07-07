@@ -6,17 +6,34 @@ const {
   createSession
 } = require('../services/sessionService');
 
+// No reverse proxy sits in front of this server (setup/nginx.conf is an
+// unused empty placeholder), so the real client IP is the raw socket
+// address — the portal always sent '' as req.body.ip, which made every
+// promo-redeemed session's stored ip_address useless.
+function getRealClientIp(req) {
+  const raw = req.connection.remoteAddress || req.socket.remoteAddress || '';
+  return raw.replace('::ffff:', '').trim();
+}
+
 // POST /api/promo/redeem
 router.post('/redeem', async (req, res) => {
   try {
-    const { mac, code, ip } = req.body;
+    const ip = getRealClientIp(req);
 
-    if (!mac || !code) {
+    if (!req.body.mac || !req.body.code) {
       return res.status(400).json({
         success: false,
         message: 'MAC address and code required'
       });
     }
+
+    // Bug: promo_vouchers.mac_address is looked up/stored with whatever
+    // case the client sent — coin.js lowercases MACs before touching the
+    // sessions table, but this route didn't, so the same device could look
+    // "new" here just from a casing difference against its own coin-created
+    // history. Normalize to match the rest of the system.
+    const mac = String(req.body.mac).trim().toLowerCase();
+    const code = req.body.code;
 
     // Normalize code — accept with or without dash
     const raw = code.trim().toUpperCase();

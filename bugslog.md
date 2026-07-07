@@ -893,6 +893,83 @@ The system is **stable, reliable, and secure** for live operation.
 
 ---
 
+## Post-Audit: MikroTik Backend Wiring (2026-07-07)
+
+**Context:** The admin panel (Settings > Network Mode) has always let the owner pick "Nodogsplash" or "MikroTik" and save MikroTik credentials, and `server/services/mikrotikService.js` (RouterOS REST API client) already existed — but nothing ever actually branched on the `network_mode` setting. `server/services/sessionService.js` and `server/services/timerService.js` imported `allowClient`/`blockClient`/`setClientBandwidth`/`removeClientBandwidth` directly from `networkService.js` (nftables/tc), so selecting "MikroTik" in the UI had **zero effect** on real traffic control — it only changed what was stored in the `settings` table. This was found and fixed ahead of the owner's MikroTik hEX refresh arriving, so the server is ready to actually use it once it's on the network.
+
+- **Fix:** `networkService.js` now checks `network_mode` at the top of `allowClient`/`blockClient`/`setClientBandwidth`/`removeClientBandwidth` and delegates to `mikrotikService` when set to `'mikrotik'`, otherwise runs the existing nftables/tc commands as before. `sessionService.js`/`timerService.js` needed **no changes** — they still only import from `networkService.js`, which now silently picks the right backend.
+- **`mikrotikService.js` changes:** dropped the unused `minutes` argument from `allowClient` (the router never enforces session duration — this server's own DB/cron does that, via `blockClient` at expiry — so passing minutes into the ip-binding comment was cosmetic and inconsistent with `networkService`'s signature). Added `removeClientBandwidth()` (deletes the RouterOS simple queue for a MAC), which didn't exist before — `sessionService.expireSession()` calls both `blockClient()` and `removeClientBandwidth()`, and only the nftables/tc side had the latter.
+- **Verified:** ran both backends through `allowClient`/`blockClient`/`setClientBandwidth`/`removeClientBandwidth` with `network_mode` flipped to `'mikrotik'` and no router configured (`mikrotik_ip` empty) — all four correctly short-circuit to `mikrotikService`, log "MikroTik IP not configured", and resolve `false` instead of throwing (matches how the try/catch call sites in `sessionService.js` already handle a failed network call). Setting was restored to `'nodogsplash'` afterward — **not yet tested against a real MikroTik router**, since the hEX hadn't arrived at the time of this fix.
+- **Admin panel:** added a prerequisites note under the MikroTik fields in `public/admin/pages/settings.html` (RouterOS 7+, REST API enabled, Hotspot + DHCP already configured on the interface, and that this uses IP-binding bypass rather than MikroTik's own Hotspot login page).
+
+**Still not done — before actually switching to MikroTik mode on the live hEX:**
+- No integration test exists against a real RouterOS device yet — the REST endpoint paths/fields (`/rest/ip/hotspot/ip-binding`, `/rest/queue/simple`, `/rest/ip/dhcp-server/lease`) are implemented per RouterOS 7 REST API docs but unverified against real hardware.
+- The Hotspot server + DHCP server need to be manually configured on the hEX itself first (this code only manages bindings/queues, not initial Hotspot setup).
+- `mikrotik_pass` is stored in plaintext in the `settings` table (same as `admin_password` — see Bug #10 above); acceptable for now per that existing decision, not a new issue introduced here.
+
+---
+
+## Post-Audit: Second Bug Pass (2026-07-07)
+
+Requested as a general "fix bugs in the WiFi rental system" pass, done by re-reading every route/service file rather than trusting the 2026-07-04 audit's "production-ready" conclusion at face value. Each item below was reproduced against the running server + real SQLite DB before being called a bug, and re-verified fixed the same way (not just read-through).
+
+#### Bug #50 (CRITICAL): MAC address casing inconsistent across the whole system
+- **Files:** `server/services/sessionService.js`, `server/routes/promo.js`, `server/routes/session.js`, `server/routes/admin.js`, `server/routes/portal.js`
+- **Problem:** `coin.js` lowercases a MAC before storing/looking up a session; `promo.js`, `session.js`, and the portal's own `/api/portal/detect` (server-side auto-detection, used by every portal page load) did not — `/detect` returned `.toUpperCase()`. `mac_address` is matched with a plain case-sensitive `=` (no `COLLATE NOCASE`).
+- **Reproduced:** created a session via `POST /api/coin` (stored `mac_address = 'dd:dd:dd:dd:dd:01'`), then called `GET /api/session/mac/DD:DD:DD:DD:DD:01` (the case the real portal's own detection would send) — got back `"active": false, "message": "No active session"` for a session that was very much active and already billed.
+- **Impact:** a customer inserts a coin, gets charged, internet actually unlocks — but the portal UI the customer is looking at shows DISCONNECTED forever, because its own status polling can never find the session it just paid for.
+- **Fix:** normalized to lowercase in one place, `sessionService.js`'s `getSessionByMac`/`createSession`/`addTimeToSession`, so every caller gets consistent behavior regardless of input casing. Also fixed the two tables that bypass `sessionService` entirely (`promo_vouchers.mac_address` in `promo.js`, `free_claims.mac_address` in `session.js`'s free-claim routes, `vendos.mac_address` in `admin.js`) and changed `/api/portal/detect` to return lowercase, matching the convention `networkService.normalizeMac`/`app.js`'s `getMacFromIp` already used.
+- **Verified:** recreated the exact repro above after the fix — `GET /api/session/mac/DD:DD:DD:DD:DD:01` (uppercase) and `.../dd:dd:dd:dd:dd:01` (lowercase) both correctly return the active session.
+
+#### Bug #51 (HIGH): Admin "add time" could silently get wiped by a stale hard cap
+- **File:** `server/routes/admin.js` (`POST /session/:code/addtime`)
+- **Problem:** the route updated `minutes_remaining`/`expires_at` directly but never touched `hard_expires_at`. `resumeSession()` and `GET /api/session/mac/:mac` both force-expire a session once `hard_expires_at` passes, regardless of `minutes_remaining` — so admin-granted extra time could end up later than the session's original hard cap, and get force-expired on the next pause/resume or portal poll.
+- **Reproduced:** created a session (hard cap +25min buffer), added 60 minutes via the admin endpoint, confirmed `hard_expires_at` stayed at its original value while `expires_at` moved well past it.
+- **Fix:** `hard_expires_at` now shifts by the same delta being added/removed, floored so it can never end up earlier than the new `expires_at`.
+- **Verified:** repeated the repro after the fix — `hard_expires_at` now moves out to `01:14:04` after adding 60 minutes, correctly ahead of the new `expires_at` (`00:49:13`).
+
+#### Bug #52 (HIGH): Two advertised Session Settings did nothing
+- **File:** `server/services/timerService.js`
+- **Problem:** `grace_period_minutes` ("Extra time before disconnecting after session ends") and `max_pause_minutes` ("Auto-resume after this many minutes while paused") are both real, saved settings surfaced in Settings > Session Settings — but nothing in the codebase ever read either one. The expiry cron cut a session the instant `expires_at` passed regardless of grace period; a paused session stayed paused forever with the internet blocked and its slot held, regardless of the configured pause limit.
+- **Fix:** the existing 30-second cron in `timerService.js` now shifts its expiry cutoff back by `grace_period_minutes`, and separately auto-resumes any session that's been paused longer than `max_pause_minutes`.
+- **Verified against the live server, not just read through:** set `grace_period_minutes=5`, backdated a session's `expires_at` by 10 seconds, confirmed it survived a real cron tick (`active: true` after 33s). Set `max_pause_minutes=1`, backdated a paused session's `paused_at` by 2 minutes, confirmed the cron log showed `⏯️ Auto-resuming ... (paused over 1min limit)` and the session was active again.
+
+#### Bug #53 (MEDIUM): Free-minutes anti-spoofing check was a no-op
+- **File:** `server/routes/session.js` (`POST /free-claim`)
+- **Problem:** the IP-based secondary defense against MAC-spoofed repeat free-minute claims (documented as Bug #7's fix in the original audit) checked `req.body.ip` — but `portal.js` always sends `ip: ''` for this call, so `if (ip)` was always false and the check never ran. Worse, trusting a client-supplied `ip` field at all defeats the point of an anti-spoofing check.
+- **Fix:** derive the IP from the connection itself (`req.connection.remoteAddress`), which the client cannot set. Same fix applied to `promo.js`'s `/redeem` so promo-redeemed sessions get a real `ip_address` stored instead of always blank.
+- **Verified:** called `/free-claim` with `ip: ''` in the body (matching what the real portal sends) and confirmed the stored `free_claims.ip_address`/`sessions.ip_address` is the real connecting IP, not blank.
+
+#### Bug #54 (MEDIUM): Captive-portal IP detection trusted a client-controlled header
+- **Files:** `server/app.js` (`getClientIp`), `server/routes/portal.js` (`/detect`)
+- **Problem:** both preferred `req.headers['x-forwarded-for']` over the actual socket address. There is no reverse proxy in this deployment (`setup/nginx.conf` is an empty, unused placeholder — confirmed nothing references it), so `x-forwarded-for` is a plain client-suppliable header. A device could set it to another device's IP and have `/api/portal/detect` resolve (and hand back) that other device's MAC — the same identity `checkSession`/`pauseSession`/etc. all key off of.
+- **Fix:** use the raw socket address only, since there's no trusted proxy in front of this server to legitimately set that header.
+
+#### Cleanup
+- `server/routes/admin.js` line 43 destructured `allowClient` from `sessionService`, which doesn't export it — always `undefined`, silently unused (a real call at line 116-117 re-requires it correctly from `networkService`). Removed the dead import.
+- `server/middleware/auth.js` is a 0-byte file nothing `require()`s (admin routes define `adminAuth` locally in `admin.js`). Left in place, not deleted — flagging here in case it's a placeholder for a future change, rather than assuming and removing it.
+
+#### Bug #55 (MEDIUM): No rate limit on session actions — flagged to the owner before fixing
+- **File:** `server/routes/session.js`
+- **Problem:** `GET /api/session/mac/:mac` returns session status/eligibility for **any** MAC, and `POST /session/pause`, `/resume`, `/cancel` trust `voucher_code` alone with no rate limiting. MAC addresses are trivially visible to anyone on the same LAN (ARP), so a café patron could look up another customer's `voucher_code` via the status endpoint and then mass-guess/replay it against pause/resume/cancel to grief their paid session. This is a pre-existing property of the "no login, MAC + voucher code as identity" design (there's no account system to check "is this yours") — surfaced to the owner rather than silently redesigned, since changing the trust model is a product call, not a pure bug fix. Owner chose: rate-limit pause/resume/cancel now; leave the underlying no-login trust model as a known, accepted design constraint.
+- **Fix:** added `sessionActionRateLimit` middleware to `/pause`, `/resume`, `/cancel`, reusing the existing `spamService` (`checkSpam`/`recordAttempt`/`clearAttempts`) already used for coin-insertion abuse — same `spam_max_attempts`/`spam_block_minutes` settings, own identifier namespace (`session-action:<ip>`) so it doesn't share a counter with coin spam. Records an attempt only on a failed/not-found lookup, clears on success — a legitimate customer repeatedly pausing/resuming their own valid session is never penalized. `/cancel`'s response is unchanged either way (always a generic "Session cancelled") specifically so the rate-limit bookkeeping doesn't introduce a new voucher-code-validity oracle that didn't exist before.
+- **Verified:** 4 rapid wrong-voucher-code attempts against `/cancel` — first 3 returned the unchanged generic success response (no info leak), 4th correctly blocked with HTTP 429 and a countdown message. Confirmed the block is shared across `/pause` too (same IP, same bucket), matching the intent of stopping cross-endpoint guessing, not just single-endpoint guessing.
+
+---
+
+## Feature + Bug Fix: Insert Coin Modal Running Total (2026-07-07)
+
+**Requested:** show how much a customer has inserted so far inside the coin modal's circle (instead of the seconds countdown, which stays as the green ring animation), and fix a bug where the modal's 30-second insert window never reset as coins came in — someone dropping coins a few seconds apart could run out of time mid-insertion.
+
+- **Root cause (two bugs stacked):** (1) the portal's 30s coin-modal timer only ever reset via the general 8-second session poll, and only for a *second* coin onto an *already-active* session — a brand-new customer's first-ever coin closed the modal immediately (`updateUI()`'s `!prev.active` branch), so there was no window left to reset for the coins after that. (2) Once found and partly fixed, a second bug surfaced server-side: `server/routes/coin.js` cleared `pendingCoinMac` immediately after crediting *any* single coin, so even a correctly-timed second coin had nothing left to attribute itself to.
+- **Fix:**
+  - `server/routes/coin.js`: added a `pendingTotal` (pesos credited since the modal opened) alongside the existing `pendingCoinMac`/`pendingSetAt`, renewed on every valid coin instead of being cleared after the first one — safe here specifically because this is one physical coin slot serving one customer at a time ("Single-vendo setup" per the existing comment). Added `GET /api/coin/pending/:mac` for the portal to poll.
+  - `public/portal/assets/js/portal.js`: `updateUI()` no longer force-closes the coin modal on that first successful connection — it flags a redirect (if `redirect_url` is configured) to fire once the modal *actually* closes, instead of yanking the customer away mid-insertion. A new `pollPendingTotal()` polls the new endpoint every 1.5s (vs. the general 8s poll) specifically so a new coin is caught and reset promptly. `closeCoinModal()` now owns turning off the vendo relay and firing the delayed redirect, so those happen exactly once, whenever the modal is actually done (manual close or 30s of no new coins) — not tied to "was this the first coin."
+  - `public/portal/index.html` / `portal.css`: the modal's circle now shows `₱<total>` / "CREDITS" instead of a seconds count; font-size trimmed slightly (36px → 28px) so a 3-4 digit peso amount still fits the same 140px ring.
+- **Verified against the live server, not just read through:** confirmed via direct API calls that `GET /api/coin/pending/:mac` correctly accumulates across multiple coins (₱1 then ₱5 → `total: 6`) and stays valid rather than resetting after the first credit. Confirmed in the browser: modal shows `₱1` then `₱6` (ring visibly resets each time) without ever auto-closing between coins, and closing manually correctly shows the CONNECTED state with the right combined time (65 min for ₱1+₱5).
+
+---
+
 **Generated:** 2026-07-04  
 **System:** R&J PisoWifi v1.0.1  
 **Status:** PRODUCTION-READY ✅

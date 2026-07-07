@@ -95,8 +95,13 @@ function isAuthenticated(ip) {
 }
 
 function getClientIp(req) {
-  const raw = req.headers['x-forwarded-for'] ||
-              req.connection.remoteAddress ||
+  // No reverse proxy sits in front of this server (setup/nginx.conf is an
+  // unused empty placeholder) — clients hit Express directly, so
+  // x-forwarded-for is a client-suppliable header, not a trustworthy one.
+  // Any device could spoof it to another device's IP and have this resolve
+  // to that device's MAC via getMacFromIp() below. Use the raw socket
+  // address, which the client cannot set.
+  const raw = req.connection.remoteAddress ||
               req.socket.remoteAddress || '';
   return raw.replace('::ffff:', '').trim();
 }

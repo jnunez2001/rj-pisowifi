@@ -38,11 +38,24 @@ function getMaxMbps() {
   return settingCache.bandwidth_cap_download_mbps;
 }
 
+// Bug: mac_address is looked up with a case-sensitive exact match, but
+// callers were inconsistent about casing — coin.js lowercased before
+// storing, while promo.js/session.js and the portal's own MAC
+// auto-detection (uppercase) did not. A session created via coin insert
+// (stored lowercase) would silently show as "no active session" the moment
+// the portal polled its status using the uppercase MAC it had detected —
+// paid, internet unlocked, but the customer's own UI never showing it.
+// Normalizing once here, centrally, means every caller gets consistent
+// behavior regardless of what case they pass in.
+function normalizeMac(mac) {
+  return String(mac || '').trim().toLowerCase();
+}
+
 function getSessionByMac(mac) {
   return db.prepare(`
     SELECT * FROM sessions
     WHERE mac_address = ?
-  `).get(mac);
+  `).get(normalizeMac(mac));
 }
 
 function getSessionByVoucher(voucherCode) {
@@ -52,6 +65,7 @@ function getSessionByVoucher(voucherCode) {
 }
 
 async function createSession(mac, ip, minutes, expirationMinutes) {
+  mac = normalizeMac(mac);
   const voucherCode = generateVoucherCode();
   const now = Date.now();
 
@@ -96,6 +110,7 @@ async function createSession(mac, ip, minutes, expirationMinutes) {
 }
 
 async function addTimeToSession(mac, minutes, expirationMinutes) {
+  mac = normalizeMac(mac);
   const session = getSessionByMac(mac);
   if (!session) return null;
 

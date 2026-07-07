@@ -651,7 +651,7 @@ body {
 .coin-timer-number {
   display: block;
   font-family: 'Orbitron', monospace;
-  font-size: 36px;
+  font-size: 28px;
   font-weight: 900;
   color: #1a1a1a;
 }

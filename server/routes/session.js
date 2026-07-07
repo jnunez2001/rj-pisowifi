@@ -7,6 +7,34 @@ const {
   resumeSession,
   expireSession
 } = require('../services/sessionService');
+const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
+
+// This server has no reverse proxy in front of it (confirmed: setup/nginx.conf
+// is an unused empty placeholder, nothing sets up nginx) — clients hit Express
+// directly, so the real client IP is the raw socket address, never a
+// client-suppliable header or request-body field.
+function getRealClientIp(req) {
+  const raw = req.connection.remoteAddress || req.socket.remoteAddress || '';
+  return raw.replace('::ffff:', '').trim();
+}
+
+// pause/resume/cancel only require knowing a voucher_code — no login exists
+// to check "is this actually your session". MAC addresses (the only other
+// piece of identity in this system) are trivially visible to anyone on the
+// LAN via ARP, so without this, a device could mass-guess voucher codes and
+// pause/cancel other customers' paid sessions. Reuses the same
+// checkSpam/recordAttempt mechanism already used for coin-insertion abuse
+// (and its existing spam_max_attempts/spam_block_minutes settings), under a
+// separate identifier namespace so it doesn't share counters with that.
+function sessionActionRateLimit(req, res, next) {
+  const ip = getRealClientIp(req);
+  const check = checkSpam(`session-action:${ip}`);
+  if (check.blocked) {
+    return res.status(429).json({ success: false, message: check.message });
+  }
+  req._rateLimitId = `session-action:${ip}`;
+  next();
+}
 
 // GET /api/session/mac/:mac
 router.get('/mac/:mac', async (req, res) => {
@@ -90,7 +118,7 @@ router.get('/voucher/:code', (req, res) => {
 });
 
 // POST /api/session/pause
-router.post('/pause', async (req, res) => {
+router.post('/pause', sessionActionRateLimit, async (req, res) => {
   try {
     const { voucher_code } = req.body;
     if (!voucher_code) {
@@ -102,11 +130,13 @@ router.post('/pause', async (req, res) => {
 
     const session = await pauseSession(voucher_code);
     if (!session) {
+      recordAttempt(req._rateLimitId);
       return res.status(404).json({
         success: false,
         message: 'Session not found or already paused'
       });
     }
+    clearAttempts(req._rateLimitId);
 
     console.log(`⏸️ Paused: ${voucher_code}`);
 
@@ -124,7 +154,7 @@ router.post('/pause', async (req, res) => {
 });
 
 // POST /api/session/resume
-router.post('/resume', async (req, res) => {
+router.post('/resume', sessionActionRateLimit, async (req, res) => {
   try {
     const { voucher_code } = req.body;
     if (!voucher_code) {
@@ -136,11 +166,13 @@ router.post('/resume', async (req, res) => {
 
     const session = await resumeSession(voucher_code);
     if (!session) {
+      recordAttempt(req._rateLimitId);
       return res.status(404).json({
         success: false,
         message: 'Session not found, not paused, or hard expiration passed'
       });
     }
+    clearAttempts(req._rateLimitId);
 
     console.log(`▶️ Resumed: ${voucher_code}`);
 
@@ -159,7 +191,7 @@ router.post('/resume', async (req, res) => {
 });
 
 // POST /api/session/cancel
-router.post('/cancel', async (req, res) => {
+router.post('/cancel', sessionActionRateLimit, async (req, res) => {
   try {
     const { voucher_code } = req.body;
     if (!voucher_code) {
@@ -168,6 +200,14 @@ router.post('/cancel', async (req, res) => {
         message: 'Voucher code required'
       });
     }
+
+    // Keep the response identical either way (always a generic success) —
+    // this already didn't leak whether a voucher_code was real before the
+    // rate-limit fix, and it shouldn't start now just to decide which
+    // rate-limit bucket to increment.
+    const existing = getSessionByVoucher(voucher_code);
+    if (existing) clearAttempts(req._rateLimitId);
+    else recordAttempt(req._rateLimitId);
 
     await expireSession(voucher_code);
     console.log(`❌ Cancelled: ${voucher_code}`);
@@ -186,7 +226,8 @@ router.post('/cancel', async (req, res) => {
 // GET /api/session/free-claim/status/:mac
 router.get('/free-claim/status/:mac', (req, res) => {
   try {
-    const { mac } = req.params;
+    // Normalize casing to match how /free-claim stores free_claims.mac_address
+    const mac = String(req.params.mac || '').trim().toLowerCase();
     const db = require('../config/database');
 
     const enabled = db.prepare(
@@ -219,12 +260,21 @@ router.get('/free-claim/status/:mac', (req, res) => {
 // POST /api/session/free-claim
 router.post('/free-claim', async (req, res) => {
   try {
-    const { mac, ip } = req.body;
+    // Bug: this used to trust req.body.ip, which the portal always sent as
+    // '' — the IP-based anti-MAC-spoofing check below never actually ran.
+    // Derive it from the connection itself instead, so it can't be spoofed.
+    const ip = getRealClientIp(req);
     const db = require('../config/database');
 
-    if (!mac) {
+    if (!req.body.mac) {
       return res.status(400).json({ success: false, message: 'MAC address required' });
     }
+
+    // Bug: free_claims.mac_address was looked up/stored with whatever case
+    // the client sent, but coin.js lowercases MACs before touching the
+    // sessions table — a device could dodge the once-per-day free-minutes
+    // limit just by hitting this endpoint with different MAC casing.
+    const mac = String(req.body.mac).trim().toLowerCase();
 
     const enabled = db.prepare(
       "SELECT value FROM settings WHERE key = 'free_minutes_enabled'"

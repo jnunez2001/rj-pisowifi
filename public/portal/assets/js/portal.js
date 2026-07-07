@@ -24,6 +24,15 @@ let coinTimeLeft = 30;
 const COIN_TIMER_DURATION = 30;
 const CIRCUMFERENCE = 314;
 
+// Running total (pesos) credited so far during this INSERT COIN session —
+// fetched from the server rather than derived from minutes, since pesos
+// aren't reliably recoverable from a minutes delta (different coin
+// denominations buy minutes at different rates).
+let insertedTotal = 0;
+let pendingPollInterval = null;
+const PENDING_POLL_MS = 1500;
+let redirectAfterCoinModal = false;
+
 function startCoinTimer() {
   coinTimeLeft = COIN_TIMER_DURATION;
   updateCoinTimerUI();
@@ -54,13 +63,44 @@ function updateCoinTimerUI() {
   const numEl = document.getElementById('coinTimerNum');
   const arc = document.getElementById('timerArc');
   if (!numEl || !arc) return;
-  numEl.textContent = coinTimeLeft;
+  numEl.textContent = `₱${insertedTotal}`;
   const progress = coinTimeLeft / COIN_TIMER_DURATION;
   const offset = CIRCUMFERENCE * (1 - progress);
   arc.style.strokeDashoffset = offset;
   arc.className = 'timer-arc';
   if (coinTimeLeft <= 5) arc.classList.add('danger');
   else if (coinTimeLeft <= 10) arc.classList.add('warning');
+}
+
+// ===== PENDING COIN TOTAL (fast-polled while modal is open) =====
+// Bug: the modal's 30s countdown never reset as coins came in — someone
+// dropping coins a few seconds apart could run out of time mid-insertion.
+// This polls much faster than the normal 8s session poll specifically so a
+// new coin resets the countdown promptly, and shows a running peso total.
+async function pollPendingTotal() {
+  const mac = getMac();
+  if (!mac) return;
+  try {
+    const res = await fetch(`${SERVER}/api/coin/pending/${encodeURIComponent(mac)}`);
+    const data = await res.json();
+    if (data.success && data.total > insertedTotal) {
+      insertedTotal = data.total;
+      resetCoinTimer();
+      playSound('coin');
+    }
+  } catch (e) {}
+}
+
+function startPendingPoll() {
+  stopPendingPoll();
+  pendingPollInterval = setInterval(pollPendingTotal, PENDING_POLL_MS);
+}
+
+function stopPendingPoll() {
+  if (pendingPollInterval) {
+    clearInterval(pendingPollInterval);
+    pendingPollInterval = null;
+  }
 }
 
 // ===== SOUNDS =====
@@ -252,16 +292,26 @@ async function registerPendingCoin() {
 function handleInsertCoin() {
   if (isBlocked) return;
   playSound('insert');
+  insertedTotal = 0;
   document.getElementById('coinModal').classList.add('show');
   startCoinTimer();
   registerPendingCoin();
+  startPendingPoll();
   activateVendoRelay();
 }
 
 function closeCoinModal() {
   stopSound('insert');
   stopCoinTimer();
+  stopPendingPoll();
   document.getElementById('coinModal').classList.remove('show');
+  deactivateVendoRelay();
+  if (redirectAfterCoinModal) {
+    redirectAfterCoinModal = false;
+    setTimeout(() => {
+      window.location.href = portalSettings.redirect_url;
+    }, 500);
+  }
 }
 
 // ===== APPLY PORTAL SETTINGS TO UI =====
@@ -332,21 +382,29 @@ function updateUI(session) {
     document.getElementById('sectionPaused').style.display = 'block';
 
   } else {
+    const coinModalOpen = document.getElementById('coinModal').classList.contains('show');
     if (!prev || !prev.active) {
       playSound('success');
-      if (document.getElementById('coinModal').classList.contains('show')) {
-        closeCoinModal();
-      }
-      deactivateVendoRelay();
-      if (portalSettings.redirect_url) {
-        setTimeout(() => {
-          window.location.href = portalSettings.redirect_url;
-        }, 2000);
+      if (coinModalOpen) {
+        // Bug: this used to force-close the modal (and redirect) the instant
+        // the first coin created a session — cutting the customer off mid
+        // insertion if they were still dropping more coins. The coin's
+        // already reflected via pollPendingTotal's own faster poll; let the
+        // modal's own timer or a manual close decide when insertion is done,
+        // and only redirect once that actually happens.
+        if (portalSettings.redirect_url) redirectAfterCoinModal = true;
+      } else {
+        deactivateVendoRelay();
+        if (portalSettings.redirect_url) {
+          setTimeout(() => {
+            window.location.href = portalSettings.redirect_url;
+          }, 2000);
+        }
       }
     } else if (prev.voucher_code === session.voucher_code &&
                session.minutes_remaining > prev.minutes_remaining) {
       playSound('coin');
-      if (document.getElementById('coinModal').classList.contains('show')) {
+      if (coinModalOpen) {
         resetCoinTimer();
       }
     }

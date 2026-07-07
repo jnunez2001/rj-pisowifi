@@ -29,7 +29,7 @@ function getMacFromIp(ip) {
       const parts = line.split(' ');
       // Format: timestamp MAC IP hostname client-id
       if (parts[2] === ip) {
-        mac = parts[1].toUpperCase();
+        mac = parts[1].toLowerCase();
         break;
       }
     }
@@ -40,7 +40,7 @@ function getMacFromIp(ip) {
       // Fallback: use ARP table
       const arp = execSync(`arp -n ${ip} 2>/dev/null`).toString();
       const match = arp.match(/([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2})/i);
-      if (match) mac = match[1].toUpperCase();
+      if (match) mac = match[1].toLowerCase();
     } catch (e) {}
   }
 
@@ -51,8 +51,12 @@ function getMacFromIp(ip) {
 
 // GET /api/portal/detect — detect client MAC from IP
 router.get('/detect', (req, res) => {
-  const clientIp = req.headers['x-forwarded-for'] ||
-                   req.connection.remoteAddress ||
+  // No reverse proxy sits in front of this server (setup/nginx.conf is an
+  // unused empty placeholder) — x-forwarded-for is fully client-suppliable
+  // here, so trusting it let one device resolve (and act as) another
+  // device's MAC address just by sending a spoofed header. The raw socket
+  // address can't be set by the client.
+  const clientIp = req.connection.remoteAddress ||
                    req.socket.remoteAddress;
 
   // Clean IPv6 prefix

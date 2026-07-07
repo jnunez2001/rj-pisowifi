@@ -40,7 +40,7 @@ const upload = multer({
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
-const { getActiveSessions, expireSession, allowClient } = require('../services/sessionService');
+const { getActiveSessions, expireSession } = require('../services/sessionService');
 const { getRates } = require('../services/voucherService');
 const os = require('os');
 const { exec, execSync, execFile } = require('child_process');
@@ -107,9 +107,21 @@ router.post('/session/:code/addtime', adminAuth, async (req, res) => {
 
     const newMinutes = Math.max(0, session.minutes_remaining + m);
     const newExpiresAt = new Date(Date.now() + newMinutes * 60 * 1000).toISOString();
+
+    // Keep hard_expires_at in sync (Bug: admin-added time could get silently
+    // wiped — resumeSession() and GET /api/session/mac/:mac both force-expire
+    // once hard_expires_at passes, regardless of minutes_remaining/expires_at.
+    // Shift it by the same delta being added/removed here, never letting it
+    // fall behind the new expires_at.
+    const currentHardExpires = new Date(session.hard_expires_at).getTime();
+    const shiftedHardExpires = currentHardExpires + m * 60 * 1000;
+    const newHardExpiresAt = new Date(
+      Math.max(shiftedHardExpires, new Date(newExpiresAt).getTime())
+    ).toISOString();
+
     db.prepare(`
-      UPDATE sessions SET minutes_remaining = ?, expires_at = ? WHERE voucher_code = ?
-    `).run(newMinutes, newExpiresAt, code);
+      UPDATE sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ? WHERE voucher_code = ?
+    `).run(newMinutes, newExpiresAt, newHardExpiresAt, code);
 
     // Ensure MAC is unlocked (in case of reboot)
     try {
@@ -634,11 +646,15 @@ router.get('/sysinfo', adminAuth, (req, res) => {
 // POST /api/vendo/register — REQUIRES ADMIN AUTH
 router.post('/vendo/register', adminAuth, (req, res) => {
   try {
-    const { mac, name, ip, version } = req.body;
+    const { name, ip, version } = req.body;
 
-    if (!mac || !name) {
+    if (!req.body.mac || !name) {
       return res.status(400).json({ success: false, message: 'MAC and name required' });
     }
+
+    // Normalize casing — vendos.mac_address is UNIQUE with an ON CONFLICT
+    // upsert below, which only matches same-case duplicates.
+    const mac = String(req.body.mac).trim().toLowerCase();
 
     db.prepare(`
       INSERT INTO vendos (mac_address, name, ip_address, firmware, last_seen)

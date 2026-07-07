@@ -88,16 +88,26 @@ async function startTimer() {
     cronLock = true;
     try {
       const db = require('../config/database');
-      const { expireSession } = require('./sessionService');
+      const { expireSession, resumeSession } = require('./sessionService');
 
       const now = new Date().toISOString();
+      const getSetting = (key, def) => parseInt(db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? def, 10) || def;
 
-      // Find expired sessions
+      // Bug: grace_period_minutes was a real, saved setting ("Extra time
+      // before disconnecting after session ends" in Settings > Session
+      // Settings) that nothing ever read — sessions were always cut the
+      // instant expires_at passed. Shift the expiry cutoff back by the
+      // grace period instead of comparing against `now` directly. Defaults
+      // to 0, which reproduces the old (no-grace) behavior exactly.
+      const graceMinutes = getSetting('grace_period_minutes', 0);
+      const expiryCutoff = new Date(Date.now() - graceMinutes * 60000).toISOString();
+
+      // Find expired sessions (past their grace-adjusted cutoff)
       const expiredSessions = db.prepare(`
         SELECT * FROM sessions
         WHERE expires_at <= ?
         AND is_paused = 0
-      `).all(now);
+      `).all(expiryCutoff);
 
       for (const session of expiredSessions) {
         // Skip if already being expired
@@ -110,6 +120,27 @@ async function startTimer() {
           await expireSession(session.voucher_code);
         } finally {
           expiringNow.delete(session.voucher_code);
+        }
+      }
+
+      // Bug: max_pause_minutes was a real, saved setting ("Auto-resume after
+      // this many minutes while paused" in Settings > Session Settings) that
+      // nothing ever read — a paused session stayed paused (internet
+      // blocked, minutes frozen, slot held) forever with no time limit.
+      const maxPauseMinutes = getSetting('max_pause_minutes', 30);
+      const pauseCutoff = new Date(Date.now() - maxPauseMinutes * 60000).toISOString();
+
+      const overduePaused = db.prepare(`
+        SELECT * FROM sessions
+        WHERE is_paused = 1 AND paused_at IS NOT NULL AND paused_at <= ?
+      `).all(pauseCutoff);
+
+      for (const session of overduePaused) {
+        console.log(`⏯️ Auto-resuming ${session.voucher_code} (paused over ${maxPauseMinutes}min limit)`);
+        try {
+          await resumeSession(session.voucher_code);
+        } catch (e) {
+          console.error(`Failed to auto-resume ${session.voucher_code}:`, e.message);
         }
       }
 
