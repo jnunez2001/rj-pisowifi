@@ -9,6 +9,7 @@ const {
   setClientBandwidth,
   removeClientBandwidth
 } = require('./networkService');
+const sseService = require('./sseService');
 
 // Cache bandwidth settings to avoid repeated DB queries (Bug #35)
 let settingCache = {
@@ -104,6 +105,11 @@ async function createSession(mac, ip, minutes, expirationMinutes) {
     console.error(`[Network] Failed to unlock ${mac}:`, e.message);
   }
 
+  // Bug: the portal only found out a coin landed by polling — this pushes
+  // an instant wake-up to any open portal tab for this MAC right now,
+  // instead of it waiting on its next poll tick.
+  sseService.notify(mac);
+
   return db.prepare(
     'SELECT * FROM sessions WHERE voucher_code = ?'
   ).get(voucherCode);
@@ -140,6 +146,8 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
     }
   } catch(e) {}
 
+  sseService.notify(mac);
+
   return db.prepare(
     'SELECT * FROM sessions WHERE mac_address = ?'
   ).get(mac);
@@ -169,6 +177,8 @@ async function pauseSession(voucherCode) {
   } catch(e) {
     console.error(`[Network] Failed to block ${session.mac_address} on pause:`, e.message);
   }
+
+  sseService.notify(session.mac_address);
 
   return db.prepare(
     'SELECT * FROM sessions WHERE voucher_code = ?'
@@ -212,6 +222,8 @@ async function resumeSession(voucherCode) {
     console.error(`[Network] Failed to unlock ${session.mac_address} on resume:`, e.message);
   }
 
+  sseService.notify(session.mac_address);
+
   return db.prepare(
     'SELECT * FROM sessions WHERE voucher_code = ?'
   ).get(voucherCode);
@@ -223,6 +235,10 @@ async function expireSession(voucherCode) {
   db.prepare(
     'DELETE FROM sessions WHERE voucher_code = ?'
   ).run(voucherCode);
+
+  if (session && session.mac_address) {
+    sseService.notify(session.mac_address);
+  }
 
   // Block internet access
   if (session && session.mac_address) {

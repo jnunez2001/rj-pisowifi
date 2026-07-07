@@ -28,6 +28,30 @@ function updateConnectionBanner(failed) {
   }
 }
 
+// Bug: the portal only ever found out about a coin credit by polling —
+// every 8s normally, every 1.5s while the Insert Coin modal was open — so
+// even the fast path meant waiting up to ~1.5s to reflect a coin that
+// already physically landed. This opens a live push connection so the
+// server can wake the portal up the instant a coin/promo/free-claim
+// actually credits this MAC, instead of it waiting on the next poll tick.
+// Polling stays in place as a fallback in case this connection drops.
+let eventSource = null;
+
+function connectEventStream(mac) {
+  if (!mac || typeof EventSource === 'undefined') return;
+  if (eventSource) eventSource.close();
+
+  eventSource = new EventSource(`${SERVER}/api/session/events/${encodeURIComponent(mac)}`);
+  eventSource.onmessage = () => {
+    checkSession();
+    if (document.getElementById('coinModal').classList.contains('show')) {
+      pollPendingTotal();
+    }
+  };
+  // No custom onerror handling needed — EventSource reconnects
+  // automatically on its own after a drop.
+}
+
 // ===== PORTAL SETTINGS =====
 let portalSettings = {
   welcome_message: 'Welcome! Insert a coin to get started.',
@@ -748,6 +772,7 @@ async function claimFreeMinutes() {
 async function init() {
   await loadSettings();
   await detectDevice();
+  connectEventStream(getMac());
   await checkSession();
   await checkFreeClaimEligibility();
   startPolling();
