@@ -20,18 +20,17 @@
 // 1-channel boards without an H/L jumper are active-LOW.
 //
 // Bug report: relay (D5) stays energized from boot regardless of Insert
-// Coin, and toggling from the portal behaves backwards. That's the exact
-// symptom of this flag not matching the actual board - firmware writes
-// HIGH believing "off," but on an ACTIVE-HIGH board HIGH means "on," so
-// it reads as always-on and Insert Coin's LOW (firmware's "on") is what
-// actually turns it off. Flipped to false (active-HIGH) to match.
+// Coin. First guess was that the board was active-HIGH (flipped this to
+// false) - confirmed wrong after reflashing, relay was still stuck on.
+// Reverting to `true` (active-LOW, LOW = on): the board is a standard
+// active-LOW Songle-style module, matching the majority of cheap 1-channel
+// relay boards without an H/L jumper.
 //
-// If your relay now stays OFF by default and never turns on when you
-// click Insert Coin, your board really is active-LOW after all - flip
-// this back to `true` and look at the physical wiring/module instead
-// (this constant can only correct a logic-level mismatch, not a wiring
-// fault).
-#define RELAY_ACTIVE_LOW  false
+// If flashing this still leaves the relay always-on, this constant can
+// only correct a logic-level mismatch, not a wiring fault - check that
+// D5 is actually wired to the relay module's signal pin (not VCC/GND
+// swapped or a dead board/pin) before changing this again.
+#define RELAY_ACTIVE_LOW  true
 
 #if RELAY_ACTIVE_LOW
   #define RELAY_ON_STATE   LOW
