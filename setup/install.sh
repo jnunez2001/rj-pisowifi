@@ -30,6 +30,7 @@ echo "[2/8] Installing dependencies..." | tee -a $LOG
 apt install -y \
   curl git sqlite3 \
   dnsmasq \
+  isc-dhcp-client \
   iproute2 \
   nftables \
   iptables iptables-persistent netfilter-persistent \
@@ -144,6 +145,11 @@ chmod 440 /etc/sudoers.d/rj-pisowifi
 echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/nft" \
   >> /etc/sudoers.d/rj-pisowifi
 echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/tc" \
+  >> /etc/sudoers.d/rj-pisowifi
+
+# Allow Node.js to remove a VLAN sub-interface when a VLAN is deleted from
+# the admin panel's Network > VLAN Management page
+echo "$USER ALL=(ALL) NOPASSWD: /sbin/ip, /usr/sbin/ip" \
   >> /etc/sudoers.d/rj-pisowifi
 
 # avahi mDNS — rjcyberzone.local

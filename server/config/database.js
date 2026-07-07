@@ -81,6 +81,18 @@ db.exec(`
     claimed_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS vlans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    base_interface TEXT NOT NULL,
+    vlan_id INTEGER NOT NULL,
+    mode TEXT NOT NULL, -- 'lan' (customer network) or 'wan' (ISP requires VLAN-tagged uplink)
+    protocol TEXT NOT NULL DEFAULT 'dhcp', -- 'dhcp' or 'static' (WAN mode only; LAN mode is always static at the fixed gateway IP)
+    static_ip TEXT,
+    static_gateway TEXT,
+    static_netmask TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS vendos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     mac_address TEXT UNIQUE NOT NULL,

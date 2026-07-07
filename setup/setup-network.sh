@@ -9,7 +9,33 @@ echo "=== R&J Network Setup $(date) ===" >> $LOG
 WAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='wan_interface';" 2>/dev/null)
 LAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='lan_interface';" 2>/dev/null)
 NETWORK_MODE=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='network_mode';" 2>/dev/null)
-LAN_VLAN_ID=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='lan_vlan_id';" 2>/dev/null)
+
+# VLAN Management (admin panel > Network > VLAN Management): supports the
+# "everything on one unmanaged switch" wiring some setups use, where an ISP
+# requires a VLAN-tagged uplink (mode='wan') and/or an access point tags
+# customer WiFi traffic to keep it separate from the ISP's untagged traffic
+# on the same wire (mode='lan'). Only the most recently created row of each
+# mode is used - multiple LAN or multiple WAN VLANs aren't a real scenario
+# here since there's only one customer network and one ISP link.
+LAN_VLAN_ROW=$(sqlite3 -separator '|' "$DB" "SELECT base_interface, vlan_id FROM vlans WHERE mode='lan' ORDER BY id DESC LIMIT 1;" 2>/dev/null)
+WAN_VLAN_ROW=$(sqlite3 -separator '|' "$DB" "SELECT base_interface, vlan_id, protocol, static_ip, static_gateway, static_netmask FROM vlans WHERE mode='wan' ORDER BY id DESC LIMIT 1;" 2>/dev/null)
+if [ -n "$LAN_VLAN_ROW" ]; then
+    LAN_VLAN_BASE=$(echo "$LAN_VLAN_ROW" | cut -d'|' -f1)
+    LAN_VLAN_ID=$(echo "$LAN_VLAN_ROW" | cut -d'|' -f2)
+fi
+if [ -n "$WAN_VLAN_ROW" ]; then
+    WAN_VLAN_BASE=$(echo "$WAN_VLAN_ROW" | cut -d'|' -f1)
+    WAN_VLAN_ID=$(echo "$WAN_VLAN_ROW" | cut -d'|' -f2)
+    WAN_VLAN_PROTO=$(echo "$WAN_VLAN_ROW" | cut -d'|' -f3)
+    WAN_VLAN_IP=$(echo "$WAN_VLAN_ROW" | cut -d'|' -f4)
+    WAN_VLAN_GATEWAY=$(echo "$WAN_VLAN_ROW" | cut -d'|' -f5)
+    WAN_VLAN_NETMASK=$(echo "$WAN_VLAN_ROW" | cut -d'|' -f6)
+fi
+# LAN_IF auto-detect below needs to know the WAN VLAN's base interface too,
+# so it doesn't accidentally pick that as the LAN interface.
+if [ -n "$WAN_VLAN_BASE" ] && [ -z "$WAN_IF" ]; then
+    WAN_IF="$WAN_VLAN_BASE"
+fi
 
 # Auto-detect fallback
 if [ -z "$WAN_IF" ]; then
@@ -36,6 +62,29 @@ echo "WAN: $WAN_IF  LAN: $LAN_IF  Mode: $NETWORK_MODE" >> $LOG
 if [ -z "$LAN_IF" ]; then
     echo "ERROR: No LAN interface found." >> $LOG
     exit 0
+fi
+
+# If the ISP requires a VLAN-tagged uplink, create that sub-interface and
+# get it addressed (DHCP or static) - WAN_VIF is what every NAT/masquerade
+# rule below actually uses, WAN_IF stays the untagged physical parent.
+WAN_VIF="$WAN_IF"
+if [ -n "$WAN_VLAN_ID" ] && [ "$WAN_VLAN_BASE" = "$WAN_IF" ]; then
+    WAN_VIF="${WAN_IF}.${WAN_VLAN_ID}"
+    ip link set $WAN_IF up
+    ip link add link $WAN_IF name $WAN_VIF type vlan id $WAN_VLAN_ID 2>/dev/null || true
+    ip link set $WAN_VIF up
+    if [ "$WAN_VLAN_PROTO" = "static" ]; then
+        ip addr flush dev $WAN_VIF 2>/dev/null
+        ip addr add ${WAN_VLAN_IP}/${WAN_VLAN_NETMASK} dev $WAN_VIF
+        ip route replace default via $WAN_VLAN_GATEWAY dev $WAN_VIF
+        echo "WAN VLAN: $WAN_VIF static $WAN_VLAN_IP/$WAN_VLAN_NETMASK via $WAN_VLAN_GATEWAY" >> $LOG
+    else
+        # Backgrounded (-nw) - a fiber ISP's DHCP server on the tagged VLAN
+        # can take a few seconds to answer, this script shouldn't block on it.
+        pkill -f "dhclient.*$WAN_VIF" 2>/dev/null || true
+        dhclient -nw $WAN_VIF >> $LOG 2>&1 || true
+        echo "WAN VLAN: $WAN_VIF requesting DHCP" >> $LOG
+    fi
 fi
 
 # ── STOP NODOGSPLASH COMPLETELY ───────────────────────────────
@@ -83,7 +132,7 @@ if [ "$NETWORK_MODE" = "standalone" ]; then
   # unassigned (so the ISP's own untagged traffic is never touched by any
   # of this).
   LAN_VIF="$LAN_IF"
-  if [ -n "$LAN_VLAN_ID" ]; then
+  if [ -n "$LAN_VLAN_ID" ] && [ "$LAN_VLAN_BASE" = "$LAN_IF" ]; then
     LAN_VIF="${LAN_IF}.${LAN_VLAN_ID}"
     ip link set $LAN_IF up
     ip link add link $LAN_IF name $LAN_VIF type vlan id $LAN_VLAN_ID 2>/dev/null || true
@@ -102,14 +151,14 @@ if [ "$NETWORK_MODE" = "standalone" ]; then
   # ── IPTABLES NAT ──────────────────────────────────────────────
   iptables -t nat -F POSTROUTING 2>/dev/null
   iptables -F FORWARD 2>/dev/null
-  iptables -t nat -A POSTROUTING -o $WAN_IF -j MASQUERADE
-  iptables -A FORWARD -i $LAN_VIF -o $WAN_IF -j ACCEPT
-  iptables -A FORWARD -i $WAN_IF -o $LAN_VIF -m state \
+  iptables -t nat -A POSTROUTING -o $WAN_VIF -j MASQUERADE
+  iptables -A FORWARD -i $LAN_VIF -o $WAN_VIF -j ACCEPT
+  iptables -A FORWARD -i $WAN_VIF -o $LAN_VIF -m state \
       --state RELATED,ESTABLISHED -j ACCEPT
 
   # Port 80 → 3000 for WAN side (admin access)
   iptables -t nat -F PREROUTING 2>/dev/null
-  iptables -t nat -A PREROUTING -i $WAN_IF -p tcp --dport 80 \
+  iptables -t nat -A PREROUTING -i $WAN_VIF -p tcp --dport 80 \
       -j REDIRECT --to-port 3000
   echo "iptables NAT configured" >> $LOG
 
@@ -198,7 +247,7 @@ table ip rj_piso {
     }
     chain postrouting {
         type nat hook postrouting priority srcnat; policy accept;
-        oifname "$WAN_IF" masquerade
+        oifname "$WAN_VIF" masquerade
     }
     chain prerouting {
         type nat hook prerouting priority dstnat; policy accept;

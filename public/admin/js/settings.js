@@ -45,19 +45,6 @@ async function loadSettings() {
     document.getElementById('coinWaitMs').value = s.coin_wait_ms || 1500;
     document.getElementById('minCoins').value = s.min_coins || 1;
 
-    // Network Mode
-    const mode = s.network_mode || 'standalone';
-    document.getElementById('modeStandalone').checked = mode !== 'mikrotik';
-    document.getElementById('modeMikrotik').checked = mode === 'mikrotik';
-    document.getElementById('mikrotikIp').value = s.mikrotik_ip || '';
-    document.getElementById('mikrotikUser').value = s.mikrotik_user || 'admin';
-    document.getElementById('mikrotikPass').value = s.mikrotik_pass || '';
-    document.getElementById('mikrotikInterface').value = s.mikrotik_interface || 'ether1';
-    document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
-    document.getElementById('lanVlanId').value = s.lan_vlan_id || '';
-    document.getElementById('standaloneFields').style.display = mode !== 'mikrotik' ? 'block' : 'none';
-    updateNetworkModeCards(mode);
-
     // Network config
     await loadNetworkConfig();
     setTimeout(loadCurrentIp, 500);
@@ -187,37 +174,6 @@ async function restoreSystem() {
     statusBox.style.color = '#721c24';
     statusBox.innerHTML = '<i class="fas fa-times-circle"></i> Invalid backup file.';
   }
-}
-
-function onNetworkModeChange() {
-  const mode = document.querySelector('input[name="networkMode"]:checked').value;
-  document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
-  document.getElementById('standaloneFields').style.display = mode !== 'mikrotik' ? 'block' : 'none';
-  updateNetworkModeCards(mode);
-}
-
-function updateNetworkModeCards(mode) {
-  const standaloneCard = document.getElementById('modeStandaloneCard');
-  const mikrotikCard = document.getElementById('modeMikrotikCard');
-  if (!standaloneCard || !mikrotikCard) return;
-  standaloneCard.style.borderColor = mode !== 'mikrotik' ? 'var(--accent-green)' : 'var(--border-color)';
-  mikrotikCard.style.borderColor = mode === 'mikrotik' ? 'var(--accent-blue)' : 'var(--border-color)';
-}
-
-async function saveNetworkSettings() {
-  const mode = document.querySelector('input[name="networkMode"]:checked').value;
-  try {
-    const data = await apiCall('POST', '/api/admin/settings', {
-      network_mode: mode,
-      mikrotik_ip: document.getElementById('mikrotikIp').value,
-      mikrotik_user: document.getElementById('mikrotikUser').value,
-      mikrotik_pass: document.getElementById('mikrotikPass').value,
-      mikrotik_interface: document.getElementById('mikrotikInterface').value,
-      lan_vlan_id: document.getElementById('lanVlanId').value,
-    });
-    if (data.success) showToast('Network settings saved!');
-    else showToast(data.message || 'Failed to save.', 'error');
-  } catch(e) { showToast('Server error.', 'error'); }
 }
 
 // ===== NETWORK CONFIGURATION =====

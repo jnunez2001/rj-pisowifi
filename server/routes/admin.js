@@ -1247,4 +1247,136 @@ router.get('/network', adminAuth, (req, res) => {
   }
 });
 
+// ===== VLAN MANAGEMENT =====
+// Lets an owner reproduce the "everything on one unmanaged switch, VLAN
+// tags separate the traffic" wiring pattern common in other piso-wifi
+// setups: an ISP that requires a VLAN-tagged uplink (mode 'wan'), and/or
+// an access point tagging customer WiFi traffic to keep it off the ISP's
+// wire (mode 'lan'). Applying a change re-runs setup-network.sh so the
+// owner never has to SSH in and run it by hand.
+
+function applyNetworkSetup(callback) {
+  const scriptPath = path.join(__dirname, '../../setup/setup-network.sh');
+  execFile('sudo', ['bash', scriptPath], { timeout: 20000 }, (err) => {
+    if (err) console.error('setup-network.sh re-apply failed:', err.message);
+    if (callback) callback(err);
+  });
+}
+
+// GET /api/admin/network/interfaces — physical interfaces available as a
+// VLAN base (wired/wireless naming only, skips loopback/virtual ones this
+// script itself creates like nft/tc-managed devices or prior VLAN subs).
+router.get('/network/interfaces', adminAuth, (req, res) => {
+  try {
+    if (!fs.existsSync('/sys/class/net')) {
+      // Not on Linux (e.g. local dev on Windows) - nothing to list.
+      return res.json({ success: true, interfaces: [] });
+    }
+    const names = fs.readdirSync('/sys/class/net').filter(n =>
+      /^(eth|enp|ens|enx|wlan|wlx|wlp)/.test(n) && !n.includes('.')
+    );
+    const interfaces = names.map(name => {
+      let operstate = 'unknown';
+      try {
+        operstate = fs.readFileSync(`/sys/class/net/${name}/operstate`, 'utf8').trim();
+      } catch (e) {}
+      let mac = '';
+      try {
+        mac = fs.readFileSync(`/sys/class/net/${name}/address`, 'utf8').trim();
+      } catch (e) {}
+      return { name, status: operstate, mac };
+    });
+    return res.json({ success: true, interfaces });
+  } catch (err) {
+    console.error('Interfaces list error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/network/vlans
+router.get('/network/vlans', adminAuth, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM vlans ORDER BY id DESC').all();
+    const vlans = rows.map(v => {
+      const ifName = `${v.base_interface}.${v.vlan_id}`;
+      let status = 'down';
+      try {
+        status = fs.readFileSync(`/sys/class/net/${ifName}/operstate`, 'utf8').trim();
+      } catch (e) {}
+      return { ...v, interface_name: ifName, status };
+    });
+    return res.json({ success: true, vlans });
+  } catch (err) {
+    console.error('VLAN list error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/network/vlans
+router.post('/network/vlans', adminAuth, (req, res) => {
+  try {
+    const { base_interface, vlan_id, mode, protocol, static_ip, static_gateway, static_netmask } = req.body;
+
+    if (!base_interface || !/^[a-zA-Z0-9]+$/.test(base_interface)) {
+      return res.status(400).json({ success: false, message: 'Invalid base interface' });
+    }
+    const vlanIdNum = parseInt(vlan_id, 10);
+    if (!Number.isInteger(vlanIdNum) || vlanIdNum < 1 || vlanIdNum > 4094) {
+      return res.status(400).json({ success: false, message: 'VLAN ID must be between 1 and 4094' });
+    }
+    if (!['lan', 'wan'].includes(mode)) {
+      return res.status(400).json({ success: false, message: 'Mode must be lan or wan' });
+    }
+    const proto = protocol === 'static' ? 'static' : 'dhcp';
+    if (proto === 'static' && (!static_ip || !static_gateway || !static_netmask)) {
+      return res.status(400).json({ success: false, message: 'Static IP, gateway, and netmask are required for static protocol' });
+    }
+
+    const existing = db.prepare(
+      'SELECT id FROM vlans WHERE base_interface = ? AND vlan_id = ?'
+    ).get(base_interface, vlanIdNum);
+    if (existing) {
+      return res.status(409).json({ success: false, message: 'This VLAN ID already exists on that interface' });
+    }
+
+    const result = db.prepare(`
+      INSERT INTO vlans (base_interface, vlan_id, mode, protocol, static_ip, static_gateway, static_netmask)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(base_interface, vlanIdNum, mode, proto, static_ip || null, static_gateway || null, static_netmask || null);
+
+    console.log(`🔀 VLAN created: ${base_interface}.${vlanIdNum} (${mode}/${proto})`);
+    applyNetworkSetup();
+
+    return res.json({ success: true, id: result.lastInsertRowid });
+  } catch (err) {
+    console.error('VLAN create error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// DELETE /api/admin/network/vlans/:id
+router.delete('/network/vlans/:id', adminAuth, (req, res) => {
+  try {
+    const vlan = db.prepare('SELECT * FROM vlans WHERE id = ?').get(req.params.id);
+    if (!vlan) {
+      return res.status(404).json({ success: false, message: 'VLAN not found' });
+    }
+
+    const ifName = `${vlan.base_interface}.${vlan.vlan_id}`;
+    // Bug: setup-network.sh only ever creates VLAN sub-interfaces, it never
+    // tears down ones that get removed from the DB - without this, a
+    // deleted VLAN's interface (and whatever IP/routes/dnsmasq were bound
+    // to it) would keep running until the next reboot.
+    execFile('sudo', ['ip', 'link', 'delete', ifName], () => {
+      db.prepare('DELETE FROM vlans WHERE id = ?').run(req.params.id);
+      console.log(`🔀 VLAN deleted: ${ifName}`);
+      applyNetworkSetup();
+      return res.json({ success: true, message: 'VLAN deleted' });
+    });
+  } catch (err) {
+    console.error('VLAN delete error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 module.exports = router;

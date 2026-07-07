@@ -1206,6 +1206,20 @@ Some deployments run the ISP modem, the board, and the WiFi access point(s) all 
 
 ---
 
+## New: full VLAN Management page + WAN-side VLAN support (2026-07-08)
+
+Superseded the single "LAN VLAN ID" field above with a proper VLAN manager, after seeing real competitor piso-wifi admin panels (screenshots showing a "VLAN Management" page with a Configured VLANs list, a Create VLAN modal with Base Interface / VLAN ID / VLAN Mode / Protocol, and diagrams of an ISP modem + board + access points all sharing one unmanaged switch). Also added a use case the single-field version didn't cover: some ISPs (especially fiber, e.g. PLDT Fibr/Converge-style setups) require the WAN uplink itself to be VLAN-tagged, not just the LAN side.
+
+- **New nav item: Network** (sidebar, under Configuration) — a dedicated tab, separate from the general Settings page. Network Mode (Standalone/External Router), the MikroTik fields, Available Base Interfaces, and VLAN Management all live here now.
+- **New DB table `vlans`:** `base_interface`, `vlan_id`, `mode` (`lan` or `wan`), `protocol` (`dhcp` or `static`), and static IP/gateway/netmask for the WAN case. Removed the short-lived single `lan_vlan_id` setting (shipped a few minutes earlier same day, zero real-world usage) in favor of this.
+- **New routes:** `GET /api/admin/network/interfaces` (lists physical NICs from `/sys/class/net`, filtered to real wired/wireless naming), `GET/POST/DELETE /api/admin/network/vlans`. Creating or deleting a VLAN immediately re-runs `setup-network.sh` server-side (`execFile('sudo', ['bash', ...])`, reusing the existing passwordless-sudo entry from install) — the owner never has to SSH in and run anything by hand. Deleting also runs `sudo ip link delete <iface>` first, since `setup-network.sh` only ever creates VLAN sub-interfaces, never tears down ones removed from the DB.
+- **`setup/setup-network.sh`:** now reads the most recent `lan`-mode and `wan`-mode rows from the `vlans` table (instead of the old single setting). A `wan`-mode VLAN creates its own tagged sub-interface on the WAN side and either runs `dhclient` (background, `-nw`) or applies a static IP/gateway, then every NAT/masquerade rule uses that sub-interface (`WAN_VIF`) instead of the raw physical WAN interface.
+- **`setup/install.sh`:** added `isc-dhcp-client` to the apt dependency list (needed for the new `dhclient` call) and a `NOPASSWD: /sbin/ip, /usr/sbin/ip` sudoers entry (needed for the VLAN-delete cleanup). Existing installs need to re-run `install.sh`'s sudoers/package steps, or add these manually, to pick this up — a fresh `git pull` alone won't.
+- **`server/services/networkService.js`:** `getLanInterface()` now looks up the `vlans` table's `lan`-mode row instead of the old setting, keeping per-client `tc` bandwidth shaping targeting the same sub-interface the root qdisc actually lives on.
+- **Verified:** full create → list → delete round-trip tested directly against the running app's API and DB (not just read the code) — VLAN row persists correctly, table renders it, delete removes it and the list reflects zero rows afterward. `bash -n`/`node -c` clean on all touched files. The actual `ip link add`/`dhclient`/`sudo` calls are not exercised in this environment (no Linux host here) — please verify a real VLAN (both LAN and WAN mode) applies correctly on your server after pulling.
+
+---
+
 **Generated:** 2026-07-04  
 **System:** R&J PisoWifi v1.0.1  
 **Status:** PRODUCTION-READY ✅
