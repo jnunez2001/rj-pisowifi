@@ -69,7 +69,7 @@ async function checkForUpdates() {
       status.style.display = 'block';
       status.style.background = 'var(--card-green-bg)';
       status.style.color = 'var(--card-green-text)';
-      status.innerHTML = `<i class="fas fa-check-circle"></i> You are running the latest version — v${data.current_version}`;
+      status.innerHTML = `<i class="fas fa-check-circle"></i> You are running the latest version, v${data.current_version}`;
     }
 
   } catch(e) {

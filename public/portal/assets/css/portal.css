@@ -577,6 +577,27 @@ body {
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
 }
 
+/* ===== CONNECTION LOST BANNER ===== */
+.connection-lost-banner {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 999;
+  background: #ff9800;
+  color: #fff;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+.connection-lost-banner.show {
+  display: block;
+}
+
 /* ===== COIN SPIN ===== */
 .coin-spin {
   display: inline-block;

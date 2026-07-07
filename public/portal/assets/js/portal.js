@@ -7,6 +7,27 @@ let blockCountdown = null;
 let isBlocked = false;
 let detectedMac = '';
 
+// Improvement: checkSession()'s catch block used to just console.error and
+// silently do nothing — a customer with a live session but a flaky/dropped
+// connection to the server would see a frozen screen with zero indication
+// anything was wrong, easy to mistake for their session having ended.
+let consecutivePollFailures = 0;
+const POLL_FAILURE_BANNER_THRESHOLD = 2;
+
+function updateConnectionBanner(failed) {
+  const banner = document.getElementById('connectionLostBanner');
+  if (!banner) return;
+  if (failed) {
+    consecutivePollFailures++;
+    if (consecutivePollFailures >= POLL_FAILURE_BANNER_THRESHOLD) {
+      banner.classList.add('show');
+    }
+  } else {
+    consecutivePollFailures = 0;
+    banner.classList.remove('show');
+  }
+}
+
 // ===== PORTAL SETTINGS =====
 let portalSettings = {
   welcome_message: 'Welcome! Insert a coin to get started.',
@@ -137,7 +158,7 @@ function toggleSound() {
 
 // ===== MAC DETECTION =====
 async function detectDevice() {
-  // First check URL params (legacy/nodogsplash support)
+  // First check URL params (some captive-portal redirect flows pass ?mac=)
   const params = new URLSearchParams(window.location.search);
   const urlMac = params.get('mac');
   if (urlMac) {
@@ -451,6 +472,7 @@ async function checkSession() {
   try {
     const res = await fetch(`${SERVER}/api/session/mac/${encodeURIComponent(mac)}`);
     const data = await res.json();
+    updateConnectionBanner(false);
     updateUI(data.active ? data : null);
 
     if (!isBlocked) {
@@ -460,7 +482,10 @@ async function checkSession() {
         showBlockUI(spamData.remaining);
       }
     }
-  } catch(e) { console.error(e); }
+  } catch(e) {
+    console.error(e);
+    updateConnectionBanner(true);
+  }
 }
 
 // ===== LOAD SETTINGS =====

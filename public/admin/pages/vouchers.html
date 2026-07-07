@@ -1,0 +1,259 @@
+<div class="page-title">Vouchers</div>
+<div class="page-subtitle">Create and manage voucher codes for customers.</div>
+
+<!-- SINGLE VOUCHER -->
+<div class="card">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Vouchers</div>
+      <div class="card-subtitle">One-off codes, or created as part of a group below</div>
+    </div>
+    <button class="btn btn-primary" onclick="openCreateVoucher()">
+      <i class="fas fa-plus"></i> Create Voucher
+    </button>
+  </div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Duration</th>
+          <th>Price</th>
+          <th>Status</th>
+          <th>Used By</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="promosTable">
+        <tr>
+          <td colspan="6">
+            <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- VOUCHER GROUPS -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Voucher Groups</div>
+      <div class="card-subtitle">Batch-create and print a set of vouchers at once</div>
+    </div>
+    <button class="btn btn-primary" onclick="openCreateGroup()">
+      <i class="fas fa-layer-group"></i> Create Voucher Group
+    </button>
+  </div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Group Name</th>
+          <th>Quantity</th>
+          <th>Used / Unused</th>
+          <th>Duration</th>
+          <th>Price</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="voucherGroupsTable">
+        <tr>
+          <td colspan="6">
+            <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- FREE MINUTES -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-gift" style="margin-right:8px;color:#7c3aed;"></i>Free Minutes
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Daily free time for new customers</span>
+  </div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label class="form-label">Enable Free Minutes</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
+        <label class="toggle-switch">
+          <input type="checkbox" id="freeMinutesEnabled" onchange="updateToggleLabel('freeMinutesEnabled','freeMinutesEnabledLabel')">
+          <span class="toggle-slider"></span>
+        </label>
+        <span id="freeMinutesEnabledLabel" style="font-size:13px;color:var(--text-muted);">Disabled</span>
+      </div>
+      <small style="color:var(--text-muted);">Show free claim button on portal for new customers.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Free Minutes Amount</label>
+      <input type="number" id="freeMinutesAmount" class="form-control" placeholder="5" min="1" max="60">
+      <small style="color:var(--text-muted);">How many free minutes per customer per day.</small>
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="saveFreeMinutesSettings()">
+    <i class="fas fa-save"></i> Save Free Minutes Settings
+  </button>
+</div>
+
+<!-- CREATE VOUCHER MODAL -->
+<div class="modal-overlay" id="promoModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Create Voucher</div>
+      <button class="modal-close" onclick="closeModal('promoModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Duration</label>
+        <div style="display:flex;gap:8px;">
+          <input type="number" id="promoDuration" class="form-control"
+                 placeholder="e.g. 30" min="1" style="flex:1;">
+          <select id="promoDurationUnit" class="form-control" style="width:110px;flex-shrink:0;">
+            <option value="minutes">Minutes</option>
+            <option value="hours">Hours</option>
+            <option value="days" selected>Days</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Price (₱)</label>
+        <input type="number" id="promoPrice" class="form-control"
+               placeholder="e.g. 300" min="1">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+      <button class="btn btn-sm btn-secondary" onclick="setPromo(30,'minutes',5)">30 mins / ₱5</button>
+      <button class="btn btn-sm btn-secondary" onclick="setPromo(2,'hours',10)">2 hrs / ₱10</button>
+      <button class="btn btn-sm btn-secondary" onclick="setPromo(3,'days',100)">3 days / ₱100</button>
+      <button class="btn btn-sm btn-secondary" onclick="setPromo(7,'days',150)">7 days / ₱150</button>
+      <button class="btn btn-sm btn-secondary" onclick="setPromo(30,'days',300)">30 days / ₱300</button>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeModal('promoModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="createPromo()">
+        <i class="fas fa-ticket-alt"></i> Generate Code
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- SHOW CODE MODAL -->
+<div class="modal-overlay" id="showCodeModal">
+  <div class="modal" style="text-align:center;">
+    <div class="modal-header">
+      <div class="modal-title">Voucher Code Generated!</div>
+      <button class="modal-close" onclick="closeModal('showCodeModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <i class="fas fa-ticket-alt" style="font-size:40px;color:var(--accent-orange);margin-bottom:16px;"></i>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">Share this code with your customer:</p>
+    <div style="
+      font-family:monospace;
+      font-size:28px;
+      font-weight:900;
+      color:var(--accent-red);
+      letter-spacing:4px;
+      background:var(--bg-primary);
+      padding:16px;
+      border-radius:10px;
+      margin-bottom:16px;
+      border:2px dashed var(--border-color);
+    " id="generatedCode">--</div>
+    <p style="font-size:12px;color:var(--text-muted);margin-bottom:16px;" id="generatedDetails"></p>
+    <button class="btn btn-primary" style="width:100%" onclick="copyCode()">
+      <i class="fas fa-copy"></i> Copy Code
+    </button>
+  </div>
+</div>
+
+<!-- CREATE VOUCHER GROUP MODAL -->
+<div class="modal-overlay" id="groupModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Create Voucher Group</div>
+      <button class="modal-close" onclick="closeModal('groupModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Group Name</label>
+      <input type="text" id="groupName" class="form-control" placeholder="e.g. July Batch, School Event">
+    </div>
+
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Quantity</label>
+        <input type="number" id="groupQuantity" class="form-control" placeholder="e.g. 50" min="1" max="500">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Price (₱)</label>
+        <input type="number" id="groupPrice" class="form-control" placeholder="e.g. 100" min="1">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Duration (per voucher)</label>
+      <div style="display:flex;gap:8px;">
+        <input type="number" id="groupDuration" class="form-control" placeholder="e.g. 3" min="1" style="flex:1;">
+        <select id="groupDurationUnit" class="form-control" style="width:110px;flex-shrink:0;">
+          <option value="minutes">Minutes</option>
+          <option value="hours">Hours</option>
+          <option value="days" selected>Days</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card-title" style="font-size:13px;margin:16px 0 8px;color:var(--text-muted);">CODE FORMAT</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Code Length</label>
+        <input type="number" id="groupCodeLength" class="form-control" value="6" min="6" max="20">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Characters</label>
+        <select id="groupCodeCharset" class="form-control">
+          <option value="mixed" selected>Letters + Numbers</option>
+          <option value="letters">Letters only</option>
+          <option value="numbers">Numbers only</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Letter Case</label>
+        <select id="groupCodeCase" class="form-control">
+          <option value="upper" selected>UPPERCASE</option>
+          <option value="lower">lowercase</option>
+          <option value="mixed">MiXeD</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card-title" style="font-size:13px;margin:16px 0 8px;color:var(--text-muted);">PRINT APPEARANCE (optional)</div>
+    <div class="form-group">
+      <label class="form-label">Caption</label>
+      <input type="text" id="groupCaption" class="form-control" placeholder="e.g. Thank you for choosing R&J PisoWifi!">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Logo</label>
+      <input type="file" id="groupLogoFile" accept="image/*">
+      <small style="color:var(--text-muted);">Shown on each printed voucher card.</small>
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px;">
+      <button class="btn btn-secondary" onclick="closeModal('groupModal')">Cancel</button>
+      <button class="btn btn-primary" id="createGroupBtn" onclick="createVoucherGroup()">
+        <i class="fas fa-layer-group"></i> Create Group
+      </button>
+    </div>
+  </div>
+</div>

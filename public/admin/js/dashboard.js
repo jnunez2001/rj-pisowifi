@@ -1,13 +1,59 @@
 let revenueChart = null;
 let startTime = Date.now();
+let currentChartRange = 'weekly';
 
 async function loadDashboard() {
+  // Bug: initChart() used to run AFTER loadSalesStats(), so on every fresh
+  // dashboard load, updateChartData()'s `if (revenueChart && ...)` guard
+  // was always false (the chart didn't exist yet) — the revenue chart
+  // always rendered as a flat zero line until an admin happened to click
+  // one of the Daily/Weekly/Monthly buttons, easy to mistake for "no sales".
+  initChart();
   await loadSalesStats();
   await loadRecentTransactions();
   await loadActiveSessionsCount();
   await loadSystemVersion();
-  initChart();
-  startUptimeCounter();
+  await loadSystemStatus();
+}
+
+// Bug: "Server Uptime" ran its own client-side timer starting from page
+// load, so every browser refresh reset it to 00:00:00 — it never reflected
+// how long the actual server process had been running. "WiFi AP" was
+// hardcoded HTML that always said Online no matter what. "Coin Slot" had
+// an id in the markup but nothing anywhere ever wrote to it — permanently
+// stuck at "Unknown".
+async function loadSystemStatus() {
+  try {
+    const sysinfo = await apiCall('GET', '/api/admin/sysinfo');
+    if (sysinfo.success) {
+      startUptimeCounter(sysinfo.sysinfo.uptime_seconds || 0);
+
+      const wifiEl = document.getElementById('wifiApStatus');
+      if (wifiEl) {
+        const status = sysinfo.sysinfo.wifi_ap_status;
+        wifiEl.className = `badge ${status === 'up' ? 'badge-green' : status === 'down' ? 'badge-red' : 'badge-orange'}`;
+        wifiEl.innerHTML = `<span class="status-dot ${status === 'up' ? 'online' : ''}"></span>${
+          status === 'up' ? 'Online' : status === 'down' ? 'Offline' : 'Unknown'
+        }`;
+      }
+    }
+  } catch(e) {}
+
+  try {
+    const vendos = await apiCall('GET', '/api/admin/vendos');
+    const coinEl = document.getElementById('coinSlotStatus');
+    if (coinEl) {
+      if (vendos.success && vendos.vendos.length > 0) {
+        // Reuses the same online/offline window as the Devices page.
+        const on = vendos.vendos.some(v => isOnline(v.last_seen));
+        coinEl.className = `badge ${on ? 'badge-green' : 'badge-red'}`;
+        coinEl.textContent = on ? 'Online' : 'Offline';
+      } else {
+        coinEl.className = 'badge badge-orange';
+        coinEl.textContent = 'Unknown';
+      }
+    }
+  } catch(e) {}
 }
 
 async function loadSystemVersion() {
@@ -22,7 +68,7 @@ async function loadSystemVersion() {
 
 async function loadSalesStats() {
   try {
-    const data = await apiCall('GET', '/api/admin/sales');
+    const data = await apiCall('GET', `/api/admin/sales?range=${currentChartRange}`);
     if (!data.success) return;
 
     document.getElementById('todaySales').textContent =
@@ -36,13 +82,16 @@ async function loadSalesStats() {
     const weekTotal = data.week.reduce((sum, d) => sum + (d.total || 0), 0);
     document.getElementById('weeklySales').textContent = `₱${weekTotal.toFixed(2)}`;
 
-    // Monthly (approximate from week data)
+    // Bug: this used to be weekTotal * 4, a rough guess, not real data.
+    // The server now computes an actual month-to-date total.
     document.getElementById('monthlySales').textContent =
-      `₱${(weekTotal * 4).toFixed(2)}`;
+      `₱${(data.month?.total_income || 0).toFixed(2)}`;
 
-    // Update chart
-    if (revenueChart && data.week) {
-      updateChartData(data.week);
+    // Bug: the Daily/Weekly/Monthly buttons never changed what was charted
+    // — every click re-rendered the same fixed 7-day view. data.chart is
+    // now genuinely scoped to the selected range.
+    if (revenueChart && data.chart) {
+      updateChartData(data.chart, data.chart_format);
     }
 
   } catch(e) {
@@ -54,7 +103,9 @@ async function loadActiveSessionsCount() {
   try {
     const data = await apiCall('GET', '/api/admin/sessions');
     if (data.success) {
-      document.getElementById('activeSessions').textContent = data.count || 0;
+      // Bug: this used to be `count` (all sessions, including paused —
+      // internet blocked), but the card is labeled "Currently Connected".
+      document.getElementById('activeSessions').textContent = data.active_count ?? data.count ?? 0;
     }
   } catch(e) {}
 }
@@ -110,7 +161,10 @@ function formatMins(mins) {
   return `${Math.round(mins)} mins`;
 }
 
-function startUptimeCounter() {
+function startUptimeCounter(realUptimeSeconds) {
+  // Seed startTime so it reflects the server's actual uptime, then keep
+  // ticking locally every second for a live counter without re-polling.
+  startTime = Date.now() - (realUptimeSeconds || 0) * 1000;
   updateUptime();
   setInterval(updateUptime, 1000);
 }
@@ -185,15 +239,17 @@ function initChart() {
   });
 }
 
-function updateChartData(weekData) {
+function updateChartData(chartData, format) {
   if (!revenueChart) return;
 
-  const labels = weekData.map(d => {
-    const date = new Date(d.date);
-    return date.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' });
-  }).reverse();
-
-  const values = weekData.map(d => d.total || 0).reverse();
+  // Bug: this always assumed date-string labels and always reversed, which
+  // was only correct for the old fixed weekly view. The server now returns
+  // chart data already in chronological order, and 'hour' labels (e.g.
+  // "14:00" for the daily view) aren't Date-parseable strings.
+  const labels = chartData.map(d =>
+    format === 'hour' ? d.label : new Date(d.label).toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })
+  );
+  const values = chartData.map(d => d.total || 0);
 
   revenueChart.data.labels = labels;
   revenueChart.data.datasets[0].data = values;
@@ -207,5 +263,16 @@ function setChartRange(range) {
   });
   const active = document.getElementById(`btn${range.charAt(0).toUpperCase() + range.slice(1)}`);
   if (active) active.className = 'btn btn-sm btn-primary';
+
+  const subtitle = document.getElementById('chartRangeSubtitle');
+  if (subtitle) {
+    subtitle.textContent = range === 'daily' ? "Today's performance by hour"
+      : range === 'monthly' ? 'Last 30 days performance'
+      : 'Last 7 days performance';
+  }
+
+  // Bug: this used to just re-fetch and re-render the exact same fixed
+  // weekly data regardless of which button was clicked.
+  currentChartRange = range === 'daily' ? 'daily' : range === 'monthly' ? 'monthly' : 'weekly';
   loadSalesStats();
 }

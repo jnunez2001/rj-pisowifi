@@ -97,7 +97,7 @@ const pageTitles = {
   dashboard: 'Dashboard',
   sales: 'Sales Report',
   sessions: 'Active Sessions',
-  promos: 'Promo Vouchers',
+  vouchers: 'Vouchers',
   rates: 'Rates Manager',
   settings: 'Settings',
   security: 'Security',
@@ -139,7 +139,7 @@ async function navigateTo(page) {
       sessions: () => typeof loadSessions === 'function' && loadSessions(),
       sales: () => typeof loadSales === 'function' && loadSales(),
       rates: () => typeof loadRates === 'function' && loadRates(),
-      promos: () => typeof loadPromos === 'function' && loadPromos(),
+      vouchers: () => typeof loadVouchers === 'function' && loadVouchers(),
       settings: () => typeof loadSettings === 'function' && loadSettings(),
       security: () => typeof loadSecurity === 'function' && loadSecurity(),
       branding: () => typeof loadBranding === 'function' && loadBranding(),
@@ -191,11 +191,31 @@ async function updateSessionCount() {
     const res = await fetch(`${API}/api/admin/sessions`, {
       headers: { 'password': authToken }
     });
+    if (res.status === 401) { handleAuthFailure(); return; }
     const data = await res.json();
     if (data.success) {
-      document.getElementById('sessionCount').textContent = data.count || 0;
+      // Bug: this used to be `count` (includes paused sessions, whose
+      // internet is blocked), shown next to the "Active Sessions" nav label.
+      document.getElementById('sessionCount').textContent = data.active_count ?? data.count ?? 0;
     }
   } catch(e) {}
+}
+
+// Bug: nothing ever reacted to a 401 from an already-"logged in" session
+// (e.g. the admin password was changed in another tab, or the saved token
+// is just stale) — the background pollers (session count every 15s,
+// sysinfo every 5s) would keep silently retrying with the same bad
+// password forever. Combined with the new admin-auth rate limit, that would
+// lock the real admin out of their own panel. Log back out to the login
+// screen instead of retrying.
+function handleAuthFailure() {
+  if (authToken === null) return; // already logged out, avoid repeat triggers
+  authToken = null;
+  sessionStorage.removeItem('rj_admin_token');
+  sessionStorage.removeItem('rj_admin_user');
+  document.getElementById('adminLayout').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'block';
+  showLoginError('Session expired or invalid. Please log in again.');
 }
 
 // ===== API HELPER =====
@@ -209,6 +229,7 @@ async function apiCall(method, endpoint, body = null) {
   };
   if (body) options.body = JSON.stringify(body);
   const res = await fetch(`${API}${endpoint}`, options);
+  if (res.status === 401) { handleAuthFailure(); }
   return res.json();
 }
 
@@ -258,6 +279,59 @@ function showToast(message, type = 'success') {
   toast.innerHTML = `<i class="fas ${icons[type]}"></i> ${message}`;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 3000);
+}
+
+// ===== POWER CONTROLS (Reboot/Shutdown) =====
+let powerConfirmAction = null; // 'reboot' | 'shutdown'
+
+function openPowerConfirm(action) {
+  powerConfirmAction = action;
+  const isReboot = action === 'reboot';
+  document.getElementById('powerConfirmTitle').textContent = isReboot ? 'Reboot Server' : 'Shutdown Server';
+  document.getElementById('powerConfirmMessage').textContent = isReboot
+    ? 'The server will restart. The admin panel and customer portal will be briefly unreachable, then come back on their own.'
+    : 'The server will power off completely and will NOT come back on by itself, someone must physically power it back on. All customers will lose internet access until then.';
+  const word = isReboot ? 'REBOOT' : 'SHUTDOWN';
+  document.getElementById('powerConfirmWord').textContent = word;
+  document.getElementById('powerConfirmInput').value = '';
+  document.getElementById('powerConfirmBtn').disabled = true;
+  document.getElementById('powerConfirmBtnLabel').textContent = isReboot ? 'Reboot Now' : 'Shutdown Now';
+  document.getElementById('powerConfirmModal').classList.add('show');
+}
+
+function closePowerConfirm() {
+  document.getElementById('powerConfirmModal').classList.remove('show');
+  powerConfirmAction = null;
+}
+
+function checkPowerConfirmInput() {
+  const word = powerConfirmAction === 'reboot' ? 'REBOOT' : 'SHUTDOWN';
+  document.getElementById('powerConfirmBtn').disabled = document.getElementById('powerConfirmInput').value !== word;
+}
+
+async function executePowerAction() {
+  const action = powerConfirmAction;
+  const word = action === 'reboot' ? 'REBOOT' : 'SHUTDOWN';
+  const btn = document.getElementById('powerConfirmBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working...';
+
+  try {
+    const data = await apiCall('POST', `/api/admin/system/${action}`, { confirm: word });
+    if (data.success) {
+      showToast(data.message, 'success');
+      closePowerConfirm();
+    } else {
+      showToast(data.message || 'Failed', 'error');
+      btn.disabled = false;
+      btn.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${action === 'reboot' ? 'Reboot Now' : 'Shutdown Now'}`;
+    }
+  } catch (e) {
+    // The connection dropping is expected here — the server is rebooting/
+    // shutting down mid-response, not necessarily an actual failure.
+    showToast(action === 'reboot' ? 'Rebooting...' : 'Shutting down...', 'success');
+    closePowerConfirm();
+  }
 }
 
 // ===== INIT =====

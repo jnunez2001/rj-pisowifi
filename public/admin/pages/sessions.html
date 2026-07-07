@@ -38,19 +38,42 @@
 </div>
 
 <!-- ADD TIME MODAL -->
+<!-- Bug: this modal's markup was truncated mid-tag in the committed file —
+     the actual minutes input, quick-set buttons, and confirm button never
+     existed at all. Clicking "Add Time" called openAddTime(), which tried
+     to set .value on a null #addTimeMinutes element and threw immediately —
+     this whole feature was completely non-functional. -->
 <div class="modal-overlay" id="addTimeModal">
   <div class="modal">
     <div class="modal-header">
       <div class="modal-title">
         <i class="fas fa-clock" style="color:var(--accent-green);margin-right:8px;"></i>
-        Add Time
+        Add / Reduce Time
       </div>
       <button class="modal-close" onclick="closeModal('addTimeModal')">
         <i class="fas fa-times"></i>
       </button>
     </div>
     <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
-      Adding time to: <strong id="addTimeVoucher" style="color:var(--accent-red);font-family:monospace;"></strong>
+      Adjusting time for: <strong id="addTimeVoucher" style="color:var(--accent-red);font-family:monospace;"></strong>
     </p>
     <div class="form-group">
-      <label
+      <label class="form-label">Minutes</label>
+      <input type="number" id="addTimeMinutes" class="form-control" placeholder="e.g. 30 to add, -15 to reduce">
+      <small style="color:var(--text-muted);">Use a negative number to reduce a client's remaining time.</small>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
+      <button class="btn btn-sm btn-secondary" onclick="setMinutes(10)">+10 min</button>
+      <button class="btn btn-sm btn-secondary" onclick="setMinutes(30)">+30 min</button>
+      <button class="btn btn-sm btn-secondary" onclick="setMinutes(60)">+60 min</button>
+      <button class="btn btn-sm btn-secondary" onclick="setMinutes(-10)">-10 min</button>
+      <button class="btn btn-sm btn-secondary" onclick="setMinutes(-30)">-30 min</button>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeModal('addTimeModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAddTime()">
+        <i class="fas fa-save"></i> Apply
+      </button>
+    </div>
+  </div>
+</div>

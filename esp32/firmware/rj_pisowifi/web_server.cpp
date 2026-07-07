@@ -2,10 +2,42 @@
 #include <WiFi.h>
 #include <SPIFFS.h>
 
+// Bug (serious): setupWebServer() registers every route unconditionally,
+// and is called both in setup mode (own isolated AP, admin-only) AND in
+// normal mode after the device has joined the live customer WiFi network.
+// That meant /save, /reset, /reboot, /scan, /, and /config were reachable,
+// completely unauthenticated, by ANY paying customer on that same network
+// for as long as the vendo has been running — any of them could factory-
+// reset the vendo, overwrite its WiFi/server config (bricking it until
+// someone walks over and holds the setup button), or just repeatedly
+// reboot it, taking the entire coin-payment mechanism down. /config also
+// returned the WiFi password in plaintext to anyone who asked.
+// These endpoints are provisioning-only — nothing on the normal-mode
+// customer network legitimately needs them, so they're rejected once the
+// device has left setup mode.
+bool rejectUnlessSetupMode() {
+  if (setupMode) return true;
+  server.send(403, "application/json", "{\"success\":false,\"message\":\"Not available outside setup mode\"}");
+  return false;
+}
+
+// Bug: /relay/on and /relay/off had no restriction at all — any device on
+// the customer WiFi could toggle the coin acceptor relay directly (deny
+// paying customers their coin window, or interfere with the mechanism).
+// The backend server is the only legitimate caller (it proxies the
+// portal's "Insert Coin" button here) and its IP is already known —
+// config.server_ip — so only requests from that IP are allowed.
+bool rejectUnlessFromServer() {
+  if (config.server_ip.isEmpty() || server.client().remoteIP().toString() == config.server_ip) return true;
+  server.send(403, "application/json", "{\"success\":false,\"message\":\"Forbidden\"}");
+  return false;
+}
+
 void setupWebServer() {
 
   // Serve setup page
   server.on("/", HTTP_GET, []() {
+    if (!rejectUnlessSetupMode()) return;
     if (SPIFFS.exists("/index.html")) {
       File f = SPIFFS.open("/index.html", "r");
       server.streamFile(f, "text/html");
@@ -17,6 +49,7 @@ void setupWebServer() {
 
   // GET config as JSON
   server.on("/config", HTTP_GET, []() {
+    if (!rejectUnlessSetupMode()) return;
     String json = "{";
     json += "\"vendo_name\":\"" + config.vendo_name + "\",";
     json += "\"wifi_ssid\":\"" + config.wifi_ssid + "\",";
@@ -34,6 +67,7 @@ void setupWebServer() {
 
   // GET WiFi scan
   server.on("/scan", HTTP_GET, []() {
+    if (!rejectUnlessSetupMode()) return;
     int n = WiFi.scanNetworks();
     String json = "[";
     for (int i = 0; i < n; i++) {
@@ -51,6 +85,7 @@ void setupWebServer() {
 
   // POST save config
   server.on("/save", HTTP_POST, []() {
+    if (!rejectUnlessSetupMode()) return;
     if (server.hasArg("vendo_name"))  config.vendo_name  = server.arg("vendo_name");
     if (server.hasArg("wifi_ssid"))   config.wifi_ssid   = server.arg("wifi_ssid");
     if (server.hasArg("wifi_pass"))   config.wifi_pass   = server.arg("wifi_pass");
@@ -70,6 +105,7 @@ void setupWebServer() {
 
   // POST reboot
   server.on("/reboot", HTTP_POST, []() {
+    if (!rejectUnlessSetupMode()) return;
     server.send(200, "application/json",
       "{\"success\":true,\"message\":\"Rebooting...\"}");
     delay(500);
@@ -78,6 +114,7 @@ void setupWebServer() {
 
   // POST factory reset
   server.on("/reset", HTTP_POST, []() {
+    if (!rejectUnlessSetupMode()) return;
     server.send(200, "application/json",
       "{\"success\":true,\"message\":\"Reset! Rebooting...\"}");
     clearConfig();
@@ -87,12 +124,14 @@ void setupWebServer() {
 
   // POST relay on
   server.on("/relay/on", HTTP_POST, []() {
+    if (!rejectUnlessFromServer()) return;
     activateRelay();
     server.send(200, "application/json", "{\"success\":true}");
   });
 
   // POST relay off
   server.on("/relay/off", HTTP_POST, []() {
+    if (!rejectUnlessFromServer()) return;
     deactivateRelay();
     server.send(200, "application/json", "{\"success\":true}");
   });

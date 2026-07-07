@@ -22,7 +22,13 @@ if [ -z "$LAN_IF" ]; then
         fi
     done
 fi
-[ -z "$NETWORK_MODE" ] && NETWORK_MODE="nodogsplash"
+# 'nodogsplash' was this project's old internal name for standalone mode
+# (the real Nodogsplash software was replaced by this script's own
+# nftables/tc setup long ago; only the label lingered). The database was
+# renamed to 'standalone', so treat any leftover 'nodogsplash' value from
+# an un-migrated install the same way, not as a fourth, unrecognized mode.
+[ -z "$NETWORK_MODE" ] && NETWORK_MODE="standalone"
+[ "$NETWORK_MODE" = "nodogsplash" ] && NETWORK_MODE="standalone"
 
 echo "WAN: $WAN_IF  LAN: $LAN_IF  Mode: $NETWORK_MODE" >> $LOG
 
@@ -81,10 +87,28 @@ echo "iptables NAT configured" >> $LOG
 sleep 1
 rm -f /var/lib/misc/dnsmasq.leases
 
+# Bug: clients getting stuck on "Obtaining IP Address" traces to two
+# compounding issues in the DHCP config below:
+# 1. dhcp-authoritative was missing. Every run of this script wipes the
+#    lease file (line above), but a phone that connected before a reboot
+#    still remembers its old IP and sends a DHCPREQUEST for it, not a fresh
+#    DISCOVER. Without this flag, dnsmasq doesn't know it's the sole
+#    authority on the network, so its RFC-correct response to a lease it
+#    doesn't recognize is to silently ignore the request — the client sits
+#    waiting through its own timeout (often 30-60+ seconds) before falling
+#    back to a full DISCOVER. With the flag, dnsmasq immediately NAKs it
+#    instead, and the client restarts DHCP right away.
+# 2. The pool (10.10-10.200, 191 addresses) with a 12h lease is sized for a
+#    small, mostly-static home network, not a walk-up coin-op location with
+#    many short, transient visits — leases can pile up faster than they
+#    expire and exhaust the pool mid-day, well before any single lease's
+#    12h is up. Widened the range and cut the lease time so departed
+#    customers' addresses free up much sooner.
 cat > /etc/dnsmasq.d/rj-pisowifi.conf << EOF
 interface=$LAN_IF
 bind-interfaces
-dhcp-range=10.0.0.10,10.0.0.200,255.255.255.0,12h
+dhcp-authoritative
+dhcp-range=10.0.0.10,10.0.0.250,255.255.255.0,2h
 dhcp-option=3,$GATEWAY_IP
 dhcp-option=6,8.8.8.8
 dhcp-option=114,http://$GATEWAY_IP:3000/portal
@@ -97,7 +121,7 @@ systemctl restart dnsmasq >> $LOG 2>&1
 echo "dnsmasq started" >> $LOG
 
 # ── NFTABLES CAPTIVE PORTAL ───────────────────────────────────
-if [ "$NETWORK_MODE" = "nodogsplash" ]; then
+if [ "$NETWORK_MODE" = "standalone" ]; then
 
     nft delete table ip rj_piso 2>/dev/null || true
     sleep 1

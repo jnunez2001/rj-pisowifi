@@ -50,6 +50,17 @@ db.exec(`
     expires_at DATETIME
   );
 
+  CREATE TABLE IF NOT EXISTS voucher_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    duration_minutes REAL NOT NULL,
+    price INTEGER NOT NULL,
+    print_caption TEXT,
+    print_logo_url TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS rates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     coin_value INTEGER NOT NULL,
@@ -80,6 +91,15 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
+
+// CREATE TABLE IF NOT EXISTS doesn't add new columns to an already-existing
+// table, so existing installs need this added explicitly. Harmless no-op
+// once it's already there (SQLite throws "duplicate column name", caught).
+try {
+  db.exec('ALTER TABLE promo_vouchers ADD COLUMN group_id INTEGER REFERENCES voucher_groups(id)');
+} catch (e) {
+  // already applied
+}
 
 const rateCount = db.prepare(
   'SELECT COUNT(*) as count FROM rates'
@@ -142,14 +162,21 @@ if (settingCount.count === 0) {
   insertSetting.run('bandwidth_cap_download_mbps', '5');
   insertSetting.run('bandwidth_cap_upload_mbps', '5');
 
-  // Network mode
-  insertSetting.run('network_mode', 'nodogsplash');
+  // Network mode ('standalone' = built-in nftables/tc, no external router needed)
+  insertSetting.run('network_mode', 'standalone');
   insertSetting.run('mikrotik_ip', '');
   insertSetting.run('mikrotik_user', 'admin');
   insertSetting.run('mikrotik_pass', '');
   insertSetting.run('mikrotik_interface', 'ether1');
 }
 
+// One-time migration for existing installs: 'nodogsplash' was the old
+// internal name for the standalone mode (the actual Nodogsplash software
+// was replaced by this project's own nftables/tc code long ago — only the
+// label lingered). Nothing in the codebase checks for the literal string
+// 'nodogsplash' (networkService only ever checks `=== 'mikrotik'`), so this
+// is a safe rename, not a behavior change.
+db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' AND value = 'nodogsplash'").run();
 
 console.log('✅ Database initialized successfully');
 

@@ -970,6 +970,171 @@ Requested as a general "fix bugs in the WiFi rental system" pass, done by re-rea
 
 ---
 
+## Post-Audit: Third Bug Pass + Quality Improvements (2026-07-07)
+
+Requested: look for more bugs, and add something for quality to both users and admins. Read through every remaining admin-panel JS/HTML file not yet covered by earlier passes (dashboard, sessions, settings, promos, rates, security, sales, devices, branding, about, update). Each bug below was reproduced live before being fixed, not just read through.
+
+#### Bug #56 (CRITICAL): No rate limiting on admin login — brute-forceable
+- **File:** `server/routes/admin.js` (`adminAuth`)
+- **Problem:** the admin panel has no dedicated `/login` route — `doLogin()` authenticates by sending the password header straight to `GET /api/admin/settings`, and `adminAuth` did a bare string comparison with zero attempt tracking. Combined with the plaintext password storage (Bug #10, accepted risk for offline single-admin use), this meant unlimited automated password guessing against full admin control (rates, promos, network config, MikroTik credentials, session termination).
+- **Fix:** reused the existing `spamService` (`checkSpam`/`recordAttempt`/`clearAttempts`, same one used for coin/session-action abuse) directly inside `adminAuth`, keyed by `admin-auth:<ip>`, using the same `spam_max_attempts`/`spam_block_minutes` settings already exposed in Security.
+- **Necessary companion fix:** the admin panel polls constantly in the background (session count every 15s, sysinfo every 5s). A stale token (e.g. after a password change in another tab) would otherwise keep silently retrying with a bad password forever, tripping the new rate limit and locking the real admin out of their own panel. Added `handleAuthFailure()` in `app.js` — any 401 now logs the panel back out to the login screen instead of retrying.
+- **Verified:** 3 wrong passwords via curl → 401, 401, 401; 4th attempt (and a subsequent *correct* password) → 429, confirming the lockout actually blocks further attempts including legitimate ones until the block window expires — exactly the intended trade-off.
+
+#### Bug #57 (HIGH): Bandwidth cap feature unreachable from the admin UI
+- **Files:** `public/admin/js/security.js`, `public/admin/pages/security.html`
+- **Problem:** the real bandwidth-shaping code (`sessionService.js`/`networkService.js`/`mikrotikService.js`) reads `enable_bandwidth_cap` (on/off) and `bandwidth_cap_download_mbps` — both already correctly wired end to end. But the Security page's "Max Speed Per Client" field read/wrote a completely different, dead setting (`max_mbps`) that nothing in the enforcement path ever reads, and there was no UI control at all for `enable_bandwidth_cap`. Changing "Max Speed" in Security has always done nothing. The page's own copy ("Setting is saved for when you deploy") suggests whoever wrote it didn't realize the shaping code already existed and worked.
+- **Fix:** added an "Enable Bandwidth Cap" toggle, rewired the Mbps field to `bandwidth_cap_download_mbps`, corrected the misleading alert copy.
+- **Verified:** toggled on + set 8 Mbps + saved via the real UI, then queried the DB directly — `enable_bandwidth_cap='1'`, `bandwidth_cap_download_mbps='8'`, and the old `max_mbps` key untouched. Reset to disabled/5 afterward.
+
+#### Bug #58 (MEDIUM): "Monthly Sales" was a fabricated number
+- **Files:** `server/routes/admin.js`, `public/admin/js/dashboard.js`, `public/admin/js/sales.js`
+- **Problem:** both the Dashboard and Sales pages computed "This Month" as `weekTotal * 4` — a rough guess that's wrong the moment revenue isn't perfectly flat week to week (and dashboard.html didn't even label it an estimate; sales.html at least said "Estimated").
+- **Fix:** `GET /api/admin/sales` now also returns a real `month.total_income` via `date(created_at) >= date('now','start of month')`; both pages use it directly. Sales page's stat-desc corrected from "Estimated" to "Month to Date".
+
+#### Bug #59 (MEDIUM): Dashboard's Daily/Weekly/Monthly chart buttons did nothing
+- **Files:** `server/routes/admin.js`, `public/admin/js/dashboard.js`
+- **Problem:** `setChartRange()` only ever toggled which button *looked* active and re-called the same `loadSalesStats()` — the chart always rendered the same fixed 7-day view regardless of which button was clicked.
+- **Fix:** `GET /api/admin/sales` now accepts `?range=daily|weekly|monthly` and returns range-appropriate `chart`/`chart_format` data (hourly breakdown of today / 7-day / 30-day), independent from the `week` field (kept as-is, since the "This Week" stat card should stay accurate regardless of which chart range is selected). `setChartRange()` now actually threads the range through, and the card subtitle updates to match.
+- **Bonus bug found while verifying this fix:** `loadDashboard()` called `loadSalesStats()` *before* `initChart()`, so `updateChartData()`'s `if (revenueChart && ...)` guard was always false on first load — the revenue chart always rendered as a flat zero line until an admin happened to click a range button, easy to mistake for "no sales yet." Fixed by creating the chart first.
+- **Verified:** confirmed via direct API calls that `range=daily` returns hour-labeled data and `range=monthly` returns 30-day data; confirmed in the browser that clicking Daily actually changes `revenueChart`'s labels/data, and that a fresh dashboard load now shows the real data point immediately without needing a click first.
+
+## Quality Improvements
+
+**For admins — CSV export of transactions** (`server/routes/admin.js`, `public/admin/js/sales.js`, `public/admin/pages/sales.html`): the only way to get transaction data out of the system was the full JSON backup (settings + rates + promos + everything mixed together) — no quick way to open sales in Excel/Sheets for bookkeeping. Added `GET /api/admin/transactions/export` (full history, not just the 20-row dashboard preview) and an "Export CSV" button on the Sales page, following the same fetch-then-Blob-download pattern already used by `backupSystem()`.
+
+**For users — "connection lost" indicator on the portal** (`public/portal/assets/js/portal.js`, `index.html`, `portal.css`): `checkSession()`'s catch block used to just `console.error` and do nothing — a customer with an active session but a flaky connection to the server would see a frozen screen with zero indication anything was wrong, easy to mistake for their session having actually ended. Added a small banner that appears after 2 *consecutive* failed polls (avoids flashing on a single transient blip) and clears the moment a poll succeeds again. Verified the threshold logic directly (1 failure → hidden, 2 → shown, then a success → hidden again).
+
+**Flagged, not fixed — needs a deployment decision, not a code change:** the admin panel authenticates via a custom `password` HTTP header sent in plaintext on every request, with no TLS in front of this Express server (`app.listen(..., '0.0.0.0', ...)`, no HTTPS). On a shared café LAN, anyone with a network sniffer could capture the admin password in transit. Fixing this properly means adding real TLS termination (certificate + reverse proxy or Node HTTPS), which is an infrastructure decision, not something to bolt on speculatively without discussing the deployment setup first.
+
+---
+
+## Post-Audit: Fourth Bug Pass — Dashboard/About Metrics Were Mostly Fake (2026-07-07)
+
+Requested: keep looking, specifically at "active users, server uptime, RAM/storage usage and more." Every item below turned out to be either a hardcoded placeholder that was never wired up, or a real metric computed the wrong way — reproduced and re-verified live, not just read through.
+
+#### Bug #60 (HIGH): "Currently Connected" / "Active Sessions" counted paused sessions
+- **Files:** `server/routes/admin.js`, `public/admin/js/dashboard.js`, `public/admin/js/app.js`, `public/admin/js/sessions.js`
+- **Problem:** the Dashboard's "Active Sessions" card (subtitled "Currently Connected"), the persistent sidebar "Active Sessions" badge, and the Sessions page's "N clients connected" summary all counted every row in `sessions`, including paused ones — but a paused session has its internet blocked (`pauseSession()` calls `blockClient()`). A café with 5 connected + 3 paused customers showed "8 Currently Connected."
+- **Fix:** `GET /api/admin/sessions` now also returns `active_count` (excludes `is_paused=1`); all three surfaces use it. The sessions table itself is unchanged — it still correctly lists paused sessions too, clearly marked "Paused."
+- **Verified:** created one active + one paused session, confirmed `count: 2, active_count: 1` from the API, and confirmed all three UI surfaces (dashboard card, sidebar badge, sessions page summary) showed `1` while the table still listed both rows.
+
+#### Bug #61 (HIGH): "Server Uptime" was a fake client-side page-load timer
+- **Files:** `server/routes/admin.js`, `public/admin/js/dashboard.js`
+- **Problem:** `startUptimeCounter()` seeded its counter from `Date.now()` at the moment the dashboard.js script loaded — every browser refresh reset "Server Uptime" to `00:00:00`, with zero relationship to how long the server had actually been running.
+- **Fix:** `GET /api/admin/sysinfo` now also returns raw `uptime_seconds` (from the same `os.uptime()` already used for the About page's uptime string); the dashboard seeds its local ticking counter from that real value instead of the page-load timestamp.
+- **Verified:** on a machine already up ~18.7 hours, the dashboard immediately showed `18:41:53` and kept ticking — not `00:00:0x`.
+
+#### Bug #62 (MEDIUM): "WiFi AP" status was hardcoded HTML, always "Online"
+- **File:** `public/admin/pages/dashboard.html`, `server/routes/admin.js`, `public/admin/js/dashboard.js`
+- **Problem:** the badge had no `id` and nothing in any JS file ever touched it — it would say "Online" even if the actual AP interface were down, as long as the admin server itself could still respond.
+- **Fix:** added a real check (`ip link show <lan_interface>`, same interface bandwidth shaping already targets) returning up/down/unknown, wired to a real badge.
+- **Verified:** correctly shows "Unknown" (not a false "Online") on this Windows dev box where `ip link` doesn't exist — the fallback path, same pattern as the existing gateway/storage checks.
+
+#### Bug #63 (MEDIUM): "Coin Slot" status had an id but nothing ever wrote to it
+- **Files:** `public/admin/js/dashboard.js`
+- **Problem:** permanently stuck at "Unknown" (its hardcoded initial HTML) forever — no code path anywhere ever updated it, even though the exact same online/offline logic already existed and worked on the Devices page.
+- **Fix:** dashboard now fetches `/api/admin/vendos` and reuses the Devices page's existing `isOnline()` (3-minute window) against the most recently seen vendo.
+- **Verified:** registered a test vendo via `POST /api/admin/vendo/register` → badge flipped from "Unknown" to "Online" without a page reload.
+
+#### Bug #64 (MEDIUM): CPU usage was "average since boot," not current load
+- **File:** `server/routes/admin.js` (`GET /sysinfo`)
+- **Problem:** `os.cpus()[i].times` are cumulative tick counters since the system booted, not since the last check. Computing `(1 - idle/total) * 100` from a single snapshot gives the average usage over the entire uptime — on a server that's been up for weeks, this barely moves and has almost no relationship to what's happening right now, which is the entire point of a live CPU monitor.
+- **Fix:** samples `os.cpus()` twice, 300ms apart, and computes usage from the delta between the two snapshots (the standard correct approach) — same technique `top`/`htop` use internally.
+- **Verified:** before the fix this returns a fairly flat, low, uniform-looking number across cores after a long uptime; after the fix, sampled cores showed genuinely varied real-time values (0–35% across 12 cores) reflecting actual concurrent activity at that moment, not a multi-hour average.
+
+#### Bug #65 (LOW): RAM usage counted reclaimable page cache as "used"
+- **File:** `server/routes/admin.js` (`GET /sysinfo`)
+- **Problem:** `os.freemem()` doesn't know about reclaimable disk cache/buffers — on Linux this overstates real memory pressure compared to what `free -m`'s "available" column (and the OS itself) actually considers free. This project's own docs elsewhere are explicit about caring about accurate RAM headroom on low-spec hardware, which is exactly what this metric exists to show.
+- **Fix:** reads `MemAvailable` from `/proc/meminfo` when present (the same figure `free -m` uses) and falls back to `os.freemem()` where that file doesn't exist (non-Linux, or pre-3.14 kernels).
+- **Verified:** confirmed the fallback path engages correctly on this Windows dev box (no `/proc/meminfo`) — same numeric result as before there; the more accurate path only changes behavior on real Linux deployments.
+
+---
+
+## Post-Audit: Session Controls Were Broken/Incomplete (2026-07-07)
+
+Asked directly what admin-side client controls existed (pause, add time, reduce time). Answering that honestly required checking each one, which turned up the most severe bug found across all these passes.
+
+#### Bug #66 (CRITICAL): The entire "Add Time" admin feature was non-functional
+- **File:** `public/admin/pages/sessions.html`
+- **Problem:** the Add Time modal's HTML was truncated mid-tag in the committed file — cut off right after `<div class="form-group"><label` with no minutes input, no quick-set buttons, no confirm button, and no closing tags. This predates this session entirely (confirmed via `git diff HEAD` — zero uncommitted changes to this file before the fix; `git show HEAD` shows the same 55-line truncation). Clicking the "Add Time" button called `openAddTime()`, which tried to set `.value` on the missing `#addTimeMinutes` input and threw immediately — the modal never actually opened with working controls.
+- **Fix:** rebuilt the modal with the input field, quick-set buttons (+10/+30/+60/-10/-30 min), and Cancel/Apply buttons, following the same structure as the (working) promo-creation modal elsewhere in the panel.
+- **Verified:** confirmed via direct JS call that `openAddTime()` no longer throws, the modal actually shows, and submitting via `confirmAddTime()` updates the real session in the database.
+
+#### Bug #67 (HIGH): "Reduce time" was blocked by the frontend even though the backend always supported it
+- **File:** `public/admin/js/sessions.js`
+- **Problem:** `confirmAddTime()`'s validation was `if (!minutes || minutes < 1)` — rejecting every negative number. `POST /api/admin/session/:code/addtime` has always accepted negative deltas (it explicitly branches on `m > 0 ? 'Added' : 'Removed'`), but the admin UI made it impossible to ever send one.
+- **Fix:** validation now only rejects non-finite or exactly-zero values, matching what the backend actually accepts.
+- **Verified:** set -10 via the quick button, submitted, confirmed `minutes_remaining` actually dropped in the database (60 → ~47, accounting for elapsed time).
+
+#### Addition: admin-side Pause/Resume (previously customer-only)
+- **Files:** `server/routes/admin.js`, `public/admin/js/sessions.js`
+- Pause/resume only ever existed as customer self-service actions on the portal — staff had no way to pause a client's session on their behalf (e.g. a customer asks to pause while stepping out) without asking the customer to do it themselves on their own device.
+- Added `POST /api/admin/session/:code/pause` and `/resume`, reusing the exact same `pauseSession()`/`resumeSession()` the portal already uses — same network-block/unblock behavior, same hard-expiry handling. Sessions table's Actions column now shows a Pause or Resume icon (toggling based on current state) alongside Add Time and Cut Session.
+- **Verified:** paused a live test session via the new admin button, confirmed `is_paused=1` in the database and the "Currently Connected" count correctly dropped to 0; resumed it, confirmed `is_paused=0` again.
+
+**Current full set of admin session controls, confirmed working end to end:** Add Time / Reduce Time (same modal, positive or negative minutes), Pause, Resume, Cut Session (terminate immediately).
+
+---
+
+## Commercial Cleanup Pass: Rebranding, Power Controls, Voucher Overhaul (2026-07-08)
+
+Requested: stop exposing implementation details (Nodogsplash/nftables) in the admin panel, simplify network mode naming, add Reboot/Shutdown controls, and replace "Promo Vouchers" with a proper "Vouchers" system supporting batch creation and printing.
+
+### Network mode rebranding
+- Confirmed via `setup/install.sh`/`setup-network.sh` that the real Nodogsplash software was already replaced by this project's own nftables/tc code long ago — the setup scripts actively disable/kill/clean up after it. Only the label survived.
+- Renamed the displayed labels ("Nodogsplash" → "Standalone Mode", "MikroTik" → "External Router") **and** the underlying stored `network_mode` value (`'nodogsplash'` → `'standalone'`) — verified safe first: nothing in the backend ever checks for the literal string `'nodogsplash'` (`networkService.js` only ever checks `=== 'mikrotik'`), so this was a pure rename, not a behavior change.
+- Added a one-time migration (`UPDATE settings SET value='standalone' WHERE ... value='nodogsplash'`) so existing installs upgrade automatically. Verified: seeded a DB with the old value, restarted, confirmed it migrated.
+- Removed the "(tc/nftables)" mention from Security page copy; kept "MikroTik"/"RouterOS" in the detailed External Router setup instructions, since that's guidance about the admin's *own hardware*, not "our" implementation.
+
+### Reboot / Shutdown controls
+- Added to the sidebar under a new "Power" section. Both require typing the exact confirmation word (REBOOT/SHUTDOWN) — checked **server-side too**, not just client-side, since a client-only check is trivially bypassed by calling the API directly for a real power action.
+- Uses `execFile` (not `exec`), matching the existing Bug #22 safe-execution pattern.
+- Verified: wrong confirmation text → 400; correct text → command genuinely attempted (safely failed on this dev box with no `sudo`, confirming the code path without real risk); UI confirm button stays disabled until the exact word is typed.
+
+### Vouchers overhaul (replaces "Promo Vouchers")
+- Renamed throughout (nav, page, files: `promos.html/js` → `vouchers.html/js`, page key `promos` → `vouchers` in `app.js`'s routing tables).
+- **New: Voucher Groups** — batch-create N vouchers (1–500) at once with configurable code format: length (6–20), charset (letters/numbers/mixed), case (upper/lower/mixed). Guards against a generated code accidentally colliding with the reserved `RJ-`/`PROMO-` prefixes that `promo.js`'s redeem normalization treats specially.
+- **New: printable batch layout** — A4 grid of voucher cards (regular printer, per the chosen format), each showing the code, duration, price, and an optional owner-supplied caption + logo. New `voucher_groups` table + `group_id` FK on `promo_vouchers` (added via a safe `ALTER TABLE` + try/catch for existing installs).
+- Extended the existing image-upload endpoint with a `voucher` type — logos are now saved with a unique per-upload filename (`voucher-<timestamp>.png`) rather than the shared `logo.png`/`banner.png` pattern, since multiple groups can each have their own logo.
+- Moved Free Minutes settings from the Settings page into this tab (its own section, unchanged logic).
+- **Verified end-to-end:** created a real 5-voucher group (8-char lowercase-letters-only codes) via the actual UI form, confirmed all 5 unique codes landed in the DB tagged to the right group; confirmed the print view's generated HTML includes the right code/duration/price/caption per card; confirmed the logo upload returns a unique filename and the file lands on disk; confirmed deleting a group removes its vouchers too.
+
+**Not yet done — next up:** ESP32 firmware stability review, coin roulette/spin-to-win promo, customer accounts, merchant marketing banner. Tracked as open tasks.
+
+---
+
+## ESP32 Firmware Review (2026-07-08)
+
+Read through every file in `esp32/firmware/rj_pisowifi/` (~1,100 lines). No Arduino/ESP32 build toolchain exists on this machine (no `arduino-cli`, no `platformio`, no `platformio.ini` in the repo) — this was a manual code review, not a compiled/flashed verification. Findings ranked by severity:
+
+#### Bug #68 (CRITICAL): Admin endpoints wide open on the live customer network
+- **File:** `esp32/firmware/rj_pisowifi/web_server.cpp`
+- **Problem:** `setupWebServer()` registers `/`, `/config`, `/scan`, `/save`, `/reboot`, `/reset` unconditionally, and is called both in setup mode (its own isolated AP) *and* in normal mode once the device has joined the real customer WiFi. That meant any paying customer connected to the café's WiFi — the entire point of this system — could hit any of these with zero authentication: `/reset` factory-resets the vendo (bricks the whole coin-payment mechanism until someone physically holds the setup button), `/save` overwrites its WiFi/server config with garbage (same result), `/reboot` is a trivial repeatable DoS, and `/config` leaks the WiFi password in plaintext to anyone who asks.
+- **Fix:** all six now check `setupMode` first and return 403 otherwise. The physical setup-button-hold procedure (already an existing, designed mechanism) is required for any future reconfiguration — a reasonable bar for a payment device the owner has physical access to, unlike random customers.
+
+#### Bug #69 (HIGH): Relay control open to any device on the network
+- **File:** `esp32/firmware/rj_pisowifi/web_server.cpp`
+- **Problem:** `/relay/on`/`/relay/off` had no restriction — any device on the customer WiFi could toggle the coin acceptor relay directly, griefing other customers' coin windows or interfering with the mechanism.
+- **Fix:** restricted to requests whose source IP matches `config.server_ip` (the backend server, already known to the firmware, is the only legitimate caller — it proxies the portal's "Insert Coin" button here).
+
+#### Bug #70 (HIGH): Vendo registration/heartbeat has always silently failed
+- **Files:** `server/routes/admin.js`
+- **Problem:** `POST /api/admin/vendo/register` requires `adminAuth`, but it's called directly by the ESP32 on boot and every ~60s as a heartbeat — the firmware has no admin password and was never built to send one. Every single call has always been rejected with 401. In practice, this meant the Devices page and the Dashboard's "Coin Slot" status (added earlier this week) could never show a real vendo as online, no matter how correctly the hardware was working.
+- **Fix:** removed `adminAuth`, matching the same unauthenticated-trusted-LAN-hardware pattern already used for `POST /api/coin` (also called directly by the ESP32). Added a lightweight compensating check: since removing auth means anyone could otherwise hijack the `vendo_ip` setting (which `portal.js`'s relay proxy sends every "Insert Coin" trigger to) by POSTing a fake `ip`, only private LAN-range IPs (`10.x`, `172.16-31.x`, `192.168.x`) are accepted for that field — confines a hijack attempt on-network rather than redirecting relay calls to an arbitrary external address.
+
+#### Bug #71 (MEDIUM): A network hiccup during payment loses the customer's money
+- **File:** `esp32/firmware/rj_pisowifi/coin.cpp`
+- **Problem:** by the time `postCoin()` runs, the coin has already physically dropped and been counted. If the POST to the server fails for a network reason (brief WiFi hiccup, server mid-restart, timeout), nothing gets credited and there's no recovery path short of the customer complaining to staff.
+- **Fix:** retries up to 3 times, but *only* on a clear network-level failure (HTTPClient returns a negative code for those). Never retries after getting any real HTTP response from the server, even a rejection (400/429), since retrying an ambiguous case where a real success's response was merely lost in transit would risk double-crediting instead. Not a complete fix — a fully idempotent version would need a client-generated request ID the server dedupes against — but turns "any hiccup loses the payment" into "only a sustained outage does."
+
+#### Noted, not changed: blocking WiFi reconnect
+`connectWiFi()`'s retry loop blocks the main `loop()` for up to ~10 seconds (20 attempts × 500ms) whenever WiFi drops and reconnects, during which `server.handleClient()` isn't serviced. Minor and expected-ish for a single-threaded Arduino sketch; a real fix would mean rewriting the reconnect logic as a non-blocking state machine, which is a bigger architectural change than this pass warranted. Flagging so it isn't mistaken for an oversight if revisited later.
+
+**Verification status:** manually reviewed for correctness (brace balance, valid ESP32 Arduino API usage per `WebServer`/`HTTPClient`/`Preferences` library conventions) but not compiled — no toolchain available in this environment. Real verification (matching how `zencafe-server`'s migration runner was verified with an actual Qt6/CMake toolchain) would need `arduino-cli` + the ESP32 board package installed.
+
+---
+
 **Generated:** 2026-07-04  
 **System:** R&J PisoWifi v1.0.1  
 **Status:** PRODUCTION-READY ✅

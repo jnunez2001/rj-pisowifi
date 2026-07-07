@@ -45,13 +45,9 @@ async function loadSettings() {
     document.getElementById('coinWaitMs').value = s.coin_wait_ms || 1500;
     document.getElementById('minCoins').value = s.min_coins || 1;
 
-    // Free Minutes
-    setToggle('freeMinutesEnabled', 'freeMinutesEnabledLabel', s.free_minutes_enabled === '1');
-    document.getElementById('freeMinutesAmount').value = s.free_minutes_amount || 5;
-
     // Network Mode
-    const mode = s.network_mode || 'nodogsplash';
-    document.getElementById('modeNodogsplash').checked = mode === 'nodogsplash';
+    const mode = s.network_mode || 'standalone';
+    document.getElementById('modeStandalone').checked = mode !== 'mikrotik';
     document.getElementById('modeMikrotik').checked = mode === 'mikrotik';
     document.getElementById('mikrotikIp').value = s.mikrotik_ip || '';
     document.getElementById('mikrotikUser').value = s.mikrotik_user || 'admin';
@@ -142,17 +138,6 @@ async function saveCoinSettings() {
   } catch(e) { showToast('Server error.', 'error'); }
 }
 
-async function saveFreeMinutesSettings() {
-  try {
-    const data = await apiCall('POST', '/api/admin/settings', {
-      free_minutes_enabled: document.getElementById('freeMinutesEnabled').checked ? '1' : '0',
-      free_minutes_amount: document.getElementById('freeMinutesAmount').value,
-    });
-    if (data.success) showToast('Free minutes settings saved!');
-    else showToast(data.message || 'Failed to save.', 'error');
-  } catch(e) { showToast('Server error.', 'error'); }
-}
-
 async function backupSystem() {
   try {
     const data = await apiCall('GET', '/api/admin/backup');
@@ -209,10 +194,10 @@ function onNetworkModeChange() {
 }
 
 function updateNetworkModeCards(mode) {
-  const nodogsCard = document.getElementById('modeNodogsplashCard');
+  const standaloneCard = document.getElementById('modeStandaloneCard');
   const mikrotikCard = document.getElementById('modeMikrotikCard');
-  if (!nodogsCard || !mikrotikCard) return;
-  nodogsCard.style.borderColor = mode === 'nodogsplash' ? 'var(--accent-green)' : 'var(--border-color)';
+  if (!standaloneCard || !mikrotikCard) return;
+  standaloneCard.style.borderColor = mode !== 'mikrotik' ? 'var(--accent-green)' : 'var(--border-color)';
   mikrotikCard.style.borderColor = mode === 'mikrotik' ? 'var(--accent-blue)' : 'var(--border-color)';
 }
 

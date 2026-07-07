@@ -21,7 +21,12 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     const type = req.params.type;
     const ext = path.extname(file.originalname);
-    cb(null, `${type}${ext}`);
+    // logo/banner are singular settings, always the same filename by design
+    // (overwrite the one global image). Voucher-group logos are per-group,
+    // so they need a unique filename or every group would overwrite the
+    // same "voucher.png" and all print with whichever was uploaded last.
+    const suffix = type === 'voucher' ? `-${Date.now()}` : '';
+    cb(null, `${type}${suffix}${ext}`);
   }
 });
 
@@ -40,22 +45,44 @@ const upload = multer({
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
-const { getActiveSessions, expireSession } = require('../services/sessionService');
+const { getActiveSessions, expireSession, pauseSession, resumeSession } = require('../services/sessionService');
 const { getRates } = require('../services/voucherService');
+const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
 const os = require('os');
 const { exec, execSync, execFile } = require('child_process');
+
+// No reverse proxy sits in front of this server (setup/nginx.conf is an
+// unused empty placeholder), so the raw socket address is the real client IP.
+function getRealClientIp(req) {
+  const raw = req.connection.remoteAddress || req.socket.remoteAddress || '';
+  return raw.replace('::ffff:', '').trim();
+}
 
 // Admin auth middleware
 // NOTE: Passwords stored in plaintext (Bug #10). Acceptable for offline single-admin deployments.
 // For wider deployment, consider: bcrypt hashing, OAuth2, or certificate-based auth.
+//
+// Bug: there was no rate limiting at all here — with a plaintext password
+// and no dedicated /login route (the admin panel authenticates by sending
+// the password header on every request, starting with GET /settings), an
+// attacker could brute-force the admin password with unlimited requests.
+// Reuses the same spamService already used for coin/session-action abuse.
 function adminAuth(req, res, next) {
+  const ip = getRealClientIp(req);
+  const spamCheck = checkSpam(`admin-auth:${ip}`);
+  if (spamCheck.blocked) {
+    return res.status(429).json({ success: false, message: spamCheck.message });
+  }
+
   const { password } = req.headers;
   const settings = db.prepare(
     "SELECT value FROM settings WHERE key = 'admin_password'"
   ).get();
-  if (!password || password !== settings.value) {
+  if (!password || !settings || password !== settings.value) {
+    recordAttempt(`admin-auth:${ip}`);
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
+  clearAttempts(`admin-auth:${ip}`);
   next();
 }
 
@@ -67,7 +94,18 @@ router.get('/sessions', adminAuth, (req, res) => {
       ...s,
       minutes_remaining: Math.max(0, Math.floor((new Date(s.expires_at) - new Date()) / 60000))
     }));
-    return res.json({ success: true, sessions: sessionsWithTime, count: sessionsWithTime.length });
+    // Bug: `count` included paused sessions, but the dashboard/sidebar/
+    // sessions-page all label this "Currently Connected"/"connected" —
+    // a paused session has its internet blocked, so it isn't connected.
+    // `count` is kept as the total row count (the table shows paused rows
+    // too, correctly marked); `active_count` is the real "connected" number.
+    const activeCount = sessionsWithTime.filter(s => s.is_paused !== 1).length;
+    return res.json({
+      success: true,
+      sessions: sessionsWithTime,
+      count: sessionsWithTime.length,
+      active_count: activeCount
+    });
   } catch (err) {
     console.error('Admin sessions error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -141,6 +179,40 @@ router.post('/session/:code/addtime', adminAuth, async (req, res) => {
   }
 });
 
+// POST /api/admin/session/:code/pause — staff-initiated pause (e.g. a
+// customer at the counter asks to pause while they step out), reusing the
+// exact same pauseSession() the customer-facing portal uses.
+router.post('/session/:code/pause', adminAuth, async (req, res) => {
+  try {
+    const { code } = req.params;
+    const session = await pauseSession(code);
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Session not found or already paused' });
+    }
+    console.log(`⏸️ Admin paused: ${code}`);
+    return res.json({ success: true, message: `Session ${code} paused`, minutes_remaining: session.minutes_remaining });
+  } catch (err) {
+    console.error('Admin pause error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/session/:code/resume
+router.post('/session/:code/resume', adminAuth, async (req, res) => {
+  try {
+    const { code } = req.params;
+    const session = await resumeSession(code);
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'Session not found, not paused, or hard expiration passed' });
+    }
+    console.log(`▶️ Admin resumed: ${code}`);
+    return res.json({ success: true, message: `Session ${code} resumed`, minutes_remaining: session.minutes_remaining });
+  } catch (err) {
+    console.error('Admin resume error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/sales
 router.get('/sales', adminAuth, (req, res) => {
   try {
@@ -169,6 +241,45 @@ router.get('/sales', adminAuth, (req, res) => {
       GROUP BY date(created_at) ORDER BY date DESC
     `).all();
 
+    // Bug: the admin UI showed "Monthly Sales" as weekTotal * 4 — a rough
+    // guess, not real data (wrong the moment revenue isn't perfectly flat
+    // week to week, and dashboard.html didn't even label it an estimate).
+    // Compute the real month-to-date total instead.
+    const monthSales = db.prepare(`
+      SELECT SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as total
+      FROM transactions WHERE date(created_at) >= date('now', 'start of month')
+    `).get();
+
+    // Bug: the dashboard's Daily/Weekly/Monthly chart-range buttons never
+    // actually changed what was charted — every click re-rendered the same
+    // fixed 7-day view. `range` now genuinely changes the granularity;
+    // `week` above is kept as-is for the "This Week" stat card, which
+    // should stay accurate regardless of which chart range is selected.
+    const range = ['daily', 'weekly', 'monthly'].includes(req.query.range) ? req.query.range : 'weekly';
+    let chart, chartFormat;
+    if (range === 'daily') {
+      chart = db.prepare(`
+        SELECT strftime('%H:00', created_at) as label,
+          SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as total,
+          COUNT(*) as transactions
+        FROM transactions WHERE date(created_at) = date('now')
+        GROUP BY strftime('%H', created_at) ORDER BY label ASC
+      `).all();
+      chartFormat = 'hour';
+    } else if (range === 'monthly') {
+      chart = db.prepare(`
+        SELECT date(created_at) as label,
+          SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as total,
+          COUNT(*) as transactions
+        FROM transactions WHERE date(created_at) >= date('now', '-30 days')
+        GROUP BY date(created_at) ORDER BY label ASC
+      `).all();
+      chartFormat = 'date';
+    } else {
+      chart = [...weekSales].reverse().map(d => ({ label: d.date, total: d.total, transactions: d.transactions }));
+      chartFormat = 'date';
+    }
+
     const recent = db.prepare(`
       SELECT * FROM transactions ORDER BY created_at DESC LIMIT 20
     `).all();
@@ -185,11 +296,29 @@ router.get('/sales', adminAuth, (req, res) => {
         free_minutes: todayFree.free_minutes || 0
       },
       week: weekSales,
+      month: { total_income: monthSales.total || 0 },
+      chart,
+      chart_format: chartFormat,
       recent_transactions: recent
     });
 
   } catch (err) {
     console.error('Admin sales error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/transactions/export — full transaction history for CSV
+// export. /sales' recent_transactions is capped at 20 for the dashboard
+// preview table; this returns everything for bookkeeping purposes.
+router.get('/transactions/export', adminAuth, (req, res) => {
+  try {
+    const transactions = db.prepare(
+      'SELECT * FROM transactions ORDER BY created_at DESC'
+    ).all();
+    return res.json({ success: true, transactions });
+  } catch (err) {
+    console.error('Admin transactions export error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -243,6 +372,144 @@ router.delete('/promos/:id', adminAuth, (req, res) => {
     db.prepare('DELETE FROM promo_vouchers WHERE id = ?').run(req.params.id);
     return res.json({ success: true, message: 'Promo deleted' });
   } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ===== VOUCHER GROUPS (batch creation, configurable code format) =====
+
+function generateCustomVoucherCode(length, charset, caseOption) {
+  const sets = {
+    letters: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+    numbers: '0123456789',
+    mixed: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+  };
+  const pool = sets[charset] || sets.mixed;
+
+  for (let attempt = 0; attempt < 50; attempt++) {
+    let code = '';
+    for (let i = 0; i < length; i++) {
+      code += pool.charAt(Math.floor(Math.random() * pool.length));
+    }
+    if (caseOption === 'lower') {
+      code = code.toLowerCase();
+    } else if (caseOption === 'mixed') {
+      code = code.split('').map(c => Math.random() < 0.5 ? c.toLowerCase() : c.toUpperCase()).join('');
+    }
+    // Bug-avoidance: promo.js's redeem normalization treats a code starting
+    // with the literal prefixes "PROMO" or "RJ" specially (inserts a dash).
+    // A custom-format code that happens to start with one of those would
+    // get silently mangled on redemption. Regenerate rather than risk it.
+    if (/^(PROMO|RJ)/.test(code)) continue;
+    const exists = db.prepare('SELECT id FROM promo_vouchers WHERE code = ?').get(code);
+    if (!exists) return code;
+  }
+  throw new Error('Could not generate a unique code — try a longer length or wider character set');
+}
+
+// POST /api/admin/vouchers/groups — batch-create N vouchers at once with a
+// configurable code format (length/charset/case), tagged together so they
+// can be viewed and printed as one batch later.
+router.post('/vouchers/groups', adminAuth, (req, res) => {
+  try {
+    const { name, quantity, duration_minutes, price, code_length, code_charset, code_case, print_caption, print_logo_url } = req.body;
+
+    const qty = parseInt(quantity, 10);
+    const minutes = parseFloat(duration_minutes);
+    const p = parseInt(price, 10);
+    const length = parseInt(code_length, 10);
+    const charset = ['letters', 'numbers', 'mixed'].includes(code_charset) ? code_charset : 'mixed';
+    const caseOption = ['upper', 'lower', 'mixed'].includes(code_case) ? code_case : 'upper';
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'Group name is required' });
+    }
+    if (!Number.isFinite(qty) || qty < 1 || qty > 500) {
+      return res.status(400).json({ success: false, message: 'Quantity must be between 1 and 500' });
+    }
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      return res.status(400).json({ success: false, message: 'Duration must be a positive number' });
+    }
+    if (!Number.isFinite(p) || p < 0) {
+      return res.status(400).json({ success: false, message: 'Price must be a non-negative number' });
+    }
+    if (!Number.isFinite(length) || length < 6 || length > 20) {
+      return res.status(400).json({ success: false, message: 'Code length must be between 6 and 20' });
+    }
+
+    const insertGroup = db.prepare(`
+      INSERT INTO voucher_groups (name, quantity, duration_minutes, price, print_caption, print_logo_url)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const groupResult = insertGroup.run(name.trim(), qty, minutes, p, print_caption || null, print_logo_url || null);
+    const groupId = groupResult.lastInsertRowid;
+
+    const durationDays = minutes / 1440;
+    const insertVoucher = db.prepare(`
+      INSERT INTO promo_vouchers (code, duration_days, price, group_id) VALUES (?, ?, ?, ?)
+    `);
+
+    const codes = [];
+    const insertBatch = db.transaction(() => {
+      for (let i = 0; i < qty; i++) {
+        const code = generateCustomVoucherCode(length, charset, caseOption);
+        insertVoucher.run(code, durationDays, p, groupId);
+        codes.push(code);
+      }
+    });
+    insertBatch();
+
+    console.log(`🎫 Voucher group created: "${name}" — ${qty} codes, ${minutes} mins each`);
+    return res.json({ success: true, group_id: groupId, codes });
+  } catch (err) {
+    console.error('Admin create voucher group error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Server error' });
+  }
+});
+
+// GET /api/admin/vouchers/groups — list all groups with usage counts
+router.get('/vouchers/groups', adminAuth, (req, res) => {
+  try {
+    const groups = db.prepare(`
+      SELECT g.*,
+        COUNT(v.id) as actual_count,
+        SUM(CASE WHEN v.status = 'unused' THEN 1 ELSE 0 END) as unused_count,
+        SUM(CASE WHEN v.status != 'unused' THEN 1 ELSE 0 END) as used_count
+      FROM voucher_groups g
+      LEFT JOIN promo_vouchers v ON v.group_id = g.id
+      GROUP BY g.id
+      ORDER BY g.created_at DESC
+    `).all();
+    return res.json({ success: true, groups });
+  } catch (err) {
+    console.error('Admin list voucher groups error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/vouchers/groups/:id — a group's vouchers, for printing
+router.get('/vouchers/groups/:id', adminAuth, (req, res) => {
+  try {
+    const group = db.prepare('SELECT * FROM voucher_groups WHERE id = ?').get(req.params.id);
+    if (!group) {
+      return res.status(404).json({ success: false, message: 'Voucher group not found' });
+    }
+    const vouchers = db.prepare('SELECT * FROM promo_vouchers WHERE group_id = ? ORDER BY id ASC').all(req.params.id);
+    return res.json({ success: true, group, vouchers });
+  } catch (err) {
+    console.error('Admin get voucher group error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// DELETE /api/admin/vouchers/groups/:id — deletes the group and its vouchers
+router.delete('/vouchers/groups/:id', adminAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM promo_vouchers WHERE group_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM voucher_groups WHERE id = ?').run(req.params.id);
+    return res.json({ success: true, message: 'Voucher group deleted' });
+  } catch (err) {
+    console.error('Admin delete voucher group error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -409,13 +676,21 @@ router.post('/spam-settings', adminAuth, (req, res) => {
 router.post('/upload/:type', adminAuth, upload.single('image'), (req, res) => {
   try {
     const { type } = req.params;
-    if (!['logo', 'banner'].includes(type)) {
-      return res.status(400).json({ success: false, message: 'Type must be logo or banner' });
+    if (!['logo', 'banner', 'voucher'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'Type must be logo, banner, or voucher' });
     }
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
     }
     const fileUrl = `/portal/assets/${req.file.filename}`;
+
+    // 'voucher' logos belong to a specific voucher_groups row (passed in by
+    // the caller when creating the group), not a single global setting.
+    if (type === 'voucher') {
+      console.log(`📸 Uploaded voucher logo: ${fileUrl}`);
+      return res.json({ success: true, url: fileUrl, message: 'Logo uploaded successfully' });
+    }
+
     const key = type === 'logo' ? 'logo_url' : 'banner_url';
     const existing = db.prepare('SELECT key FROM settings WHERE key = ?').get(key);
     if (existing) {
@@ -551,19 +826,63 @@ router.post('/restore', adminAuth, (req, res) => {
   }
 });
 
+// Bug: the Dashboard's "WiFi AP" status badge was hardcoded HTML
+// ("Online", no id, nothing ever touches it) — it would say Online even
+// if the AP interface were physically down. Checks the actual LAN
+// interface link state (same interface bandwidth shaping already targets).
+function getWifiApStatus() {
+  try {
+    const lanIf = db.prepare("SELECT value FROM settings WHERE key = 'lan_interface'").get()?.value || 'enp0s8';
+    const output = execSync(`ip link show ${lanIf}`, { timeout: 2000 }).toString();
+    if (/state UP/.test(output)) return 'up';
+    if (/state DOWN/.test(output)) return 'down';
+    return 'unknown';
+  } catch (e) {
+    return 'unknown';
+  }
+}
+
+// Bug: os.cpus()[i].times are cumulative tick counts since the system
+// booted, not since the last check — computing usage from a single
+// snapshot gives "average load since boot" (barely moves, and on a
+// server that's been up for weeks looks nothing like current load).
+// Real usage needs two samples with a delay and the delta between them.
+async function getCpuUsagePercents(cpusBefore, sampleMs = 300) {
+  await new Promise(resolve => setTimeout(resolve, sampleMs));
+  const cpusAfter = os.cpus();
+  return cpusBefore.map((before, i) => {
+    const after = cpusAfter[i].times;
+    const idleDelta = after.idle - before.times.idle;
+    const totalDelta = Object.keys(after).reduce(
+      (sum, key) => sum + (after[key] - before.times[key]), 0
+    );
+    return totalDelta > 0 ? Math.round((1 - idleDelta / totalDelta) * 100) : 0;
+  });
+}
+
+// Bug: os.freemem() counts reclaimable page cache/buffers as "used" —
+// on Linux that overstates real memory pressure (this project's docs
+// elsewhere are explicit about caring about accurate RAM usage on
+// low-spec hardware). /proc/meminfo's MemAvailable is the real figure
+// `free -m`'s "available" column uses; fall back to os.freemem() where
+// that file doesn't exist (non-Linux, or old kernels pre-3.14).
+function getAvailableMem() {
+  try {
+    const meminfo = fs.readFileSync('/proc/meminfo', 'utf8');
+    const match = meminfo.match(/MemAvailable:\s+(\d+)\s+kB/);
+    if (match) return parseInt(match[1], 10) * 1024;
+  } catch (e) {}
+  return os.freemem();
+}
+
 // GET /api/admin/sysinfo
-router.get('/sysinfo', adminAuth, (req, res) => {
+router.get('/sysinfo', adminAuth, async (req, res) => {
   try {
     const cpus = os.cpus();
-
-    const cpuUsage = cpus.map(cpu => {
-      const total = Object.values(cpu.times).reduce((a, b) => a + b, 0);
-      const idle = cpu.times.idle;
-      return Math.round((1 - idle / total) * 100);
-    });
+    const cpuUsage = await getCpuUsagePercents(cpus);
 
     const totalMem = os.totalmem();
-    const freeMem = os.freemem();
+    const freeMem = getAvailableMem();
     const usedMem = totalMem - freeMem;
 
     const uptimeSecs = os.uptime();
@@ -571,6 +890,11 @@ router.get('/sysinfo', adminAuth, (req, res) => {
     const hours = Math.floor((uptimeSecs % 86400) / 3600);
     const mins = Math.floor((uptimeSecs % 3600) / 60);
     const uptime = `${days}d ${hours}h ${mins}m`;
+    // Bug: the Dashboard's "Server Uptime" widget never called this endpoint
+    // at all — it ran its own client-side timer starting from page load, so
+    // every browser refresh reset it to 00:00:00 regardless of how long the
+    // actual server had been running. Raw seconds let it seed a real base.
+    const uptimeSeconds = Math.floor(uptimeSecs);
 
     const nets = os.networkInterfaces();
     let ipAddress = 'N/A';
@@ -615,6 +939,7 @@ router.get('/sysinfo', adminAuth, (req, res) => {
       "SELECT value FROM settings WHERE key = 'license'"
     ).get();
     const license = licenseSetting ? licenseSetting.value : 'Private';
+    const wifiApStatus = getWifiApStatus();
 
     return res.json({
       success: true,
@@ -628,6 +953,8 @@ router.get('/sysinfo', adminAuth, (req, res) => {
         free_mem: freeMem,
         mem_percent: Math.round((usedMem / totalMem) * 100),
         uptime,
+        wifi_ap_status: wifiApStatus,
+        uptime_seconds: uptimeSeconds,
         ip_address: ipAddress,
         gateway,
         machine_id: machineId,
@@ -643,8 +970,16 @@ router.get('/sysinfo', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/vendo/register — REQUIRES ADMIN AUTH
-router.post('/vendo/register', adminAuth, (req, res) => {
+// POST /api/vendo/register
+// Bug: this required adminAuth, but it's called by the ESP32 vendo
+// hardware itself (on boot, and every ~60s as a heartbeat) — the firmware
+// has no admin password and was never built to send one, so every single
+// registration/heartbeat call has always been silently rejected with 401.
+// In practice this meant the Devices page and the Dashboard's "Coin Slot"
+// status could never show a real vendo as online. Matches the existing
+// unauthenticated-trusted-LAN-hardware pattern already used for POST
+// /api/coin (also called directly by the ESP32, also no admin password).
+router.post('/vendo/register', (req, res) => {
   try {
     const { name, ip, version } = req.body;
 
@@ -666,7 +1001,14 @@ router.post('/vendo/register', adminAuth, (req, res) => {
         last_seen = CURRENT_TIMESTAMP
     `).run(mac, name, ip || '', version || '');
 
-    if (ip) {
+    // No auth on this route (see note above) means anyone on the LAN could
+    // otherwise POST a fake ip here and hijack vendo_ip — the address
+    // portal.js's /relay/:action route sends every "Insert Coin" relay
+    // trigger to. Confining it to private LAN ranges at least keeps a
+    // hijack attempt on-network rather than redirecting relay calls to an
+    // arbitrary external address.
+    const isPrivateLanIp = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip || '');
+    if (ip && isPrivateLanIp) {
       db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
         .run('vendo_ip', ip);
     }
@@ -792,6 +1134,40 @@ router.post('/install-update', adminAuth, (req, res) => {
 router.get('/version', adminAuth, (req, res) => {
   const pkg = require('../../package.json');
   res.json({ success: true, version: pkg.version });
+});
+
+// POST /api/admin/system/reboot — the admin panel requires typing "REBOOT"
+// before this fires, but the server checks the exact same word again
+// server-side too, since a client-side-only check is trivially bypassable
+// by anyone calling the API directly (this is a real power action, not a
+// cosmetic one). Uses execFile (Bug #22 pattern) — no shell interpolation.
+router.post('/system/reboot', adminAuth, (req, res) => {
+  if (req.body.confirm !== 'REBOOT') {
+    return res.status(400).json({ success: false, message: 'Confirmation text did not match' });
+  }
+  console.log('🔄 Admin triggered server reboot');
+  res.json({ success: true, message: 'Rebooting now — this may take a minute.' });
+  setTimeout(() => {
+    execFile('sudo', ['reboot'], (err) => {
+      if (err) console.error('Reboot command failed:', err.message);
+    });
+  }, 500);
+});
+
+// POST /api/admin/system/shutdown — same server-side confirmation
+// requirement as reboot above. Unlike reboot, this does NOT come back on
+// its own — flagged clearly in the confirmation dialog on the frontend.
+router.post('/system/shutdown', adminAuth, (req, res) => {
+  if (req.body.confirm !== 'SHUTDOWN') {
+    return res.status(400).json({ success: false, message: 'Confirmation text did not match' });
+  }
+  console.log('🛑 Admin triggered server shutdown');
+  res.json({ success: true, message: 'Shutting down now.' });
+  setTimeout(() => {
+    execFile('sudo', ['shutdown', '-h', 'now'], (err) => {
+      if (err) console.error('Shutdown command failed:', err.message);
+    });
+  }, 500);
 });
 
 // POST /api/admin/network (Bug #22 - use execFile for safer execution)

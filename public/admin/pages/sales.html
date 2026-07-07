@@ -19,7 +19,7 @@
     <div class="stat-icon"><i class="fas fa-calendar-alt"></i></div>
     <div class="stat-label">This Month</div>
     <div class="stat-value" id="salesMonthTotal">₱0</div>
-    <div class="stat-desc">Estimated</div>
+    <div class="stat-desc">Month to Date</div>
   </div>
   <div class="stat-card red">
     <div class="stat-icon"><i class="fas fa-clock"></i></div>
@@ -63,11 +63,16 @@
   <div class="card-header">
     <div>
       <div class="card-title">Transaction History</div>
-      <div class="card-subtitle">All coin insertions, promo redemptions and free claims</div>
+      <div class="card-subtitle">Most recent 20, use Export CSV for full history</div>
     </div>
-    <button class="btn btn-sm btn-secondary" onclick="loadSales()">
-      <i class="fas fa-sync-alt"></i> Refresh
-    </button>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-sm btn-secondary" onclick="exportTransactionsCsv()">
+        <i class="fas fa-file-csv"></i> Export CSV
+      </button>
+      <button class="btn btn-sm btn-secondary" onclick="loadSales()">
+        <i class="fas fa-sync-alt"></i> Refresh
+      </button>
+    </div>
   </div>
   <div class="table-wrapper">
     <table>

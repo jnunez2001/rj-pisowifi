@@ -37,11 +37,11 @@
     <div class="card-header">
       <div>
         <div class="card-title">Revenue Analytics</div>
-        <div class="card-subtitle">Last 7 days performance</div>
+        <div class="card-subtitle" id="chartRangeSubtitle">Last 7 days performance</div>
       </div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-sm btn-secondary" onclick="setChartRange('daily')" id="btnDaily">Daily</button>
-        <button class="btn btn-sm btn-secondary" onclick="setChartRange('weekly')" id="btnWeekly">Weekly</button>
+        <button class="btn btn-sm btn-primary" onclick="setChartRange('weekly')" id="btnWeekly">Weekly</button>
         <button class="btn btn-sm btn-secondary" onclick="setChartRange('monthly')" id="btnMonthly">Monthly</button>
       </div>
     </div>
@@ -73,8 +73,8 @@
         <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
           <i class="fas fa-wifi" style="margin-right:6px;"></i>WiFi AP
         </span>
-        <span class="badge badge-green">
-          <span class="status-dot online"></span>Online
+        <span class="badge badge-orange" id="wifiApStatus">
+          Unknown
         </span>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;">

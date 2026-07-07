@@ -118,9 +118,9 @@
       <div class="form-group">
         <label class="form-label">Subnet Prefix</label>
         <select id="staticSubnet" class="form-control">
-          <option value="24">/24 — 255.255.255.0 (most common)</option>
-          <option value="16">/16 — 255.255.0.0</option>
-          <option value="8">/8 — 255.0.0.0</option>
+          <option value="24">/24, 255.255.255.0 (most common)</option>
+          <option value="16">/16, 255.255.0.0</option>
+          <option value="8">/8, 255.0.0.0</option>
         </select>
       </div>
       <div class="form-group">
@@ -251,23 +251,22 @@
     <label class="form-label">Select Mode</label>
     <div style="display:flex;flex-direction:column;gap:12px;margin-top:8px;">
 
-      <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:var(--bg-primary);padding:14px;border-radius:10px;border:2px solid var(--border-color);" id="modeNodogsplashCard">
-        <input type="radio" name="networkMode" id="modeNodogsplash" value="nodogsplash" onchange="onNetworkModeChange()" style="margin-top:3px;accent-color:var(--accent-green);">
+      <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:var(--bg-primary);padding:14px;border-radius:10px;border:2px solid var(--border-color);" id="modeStandaloneCard">
+        <input type="radio" name="networkMode" id="modeStandalone" value="standalone" onchange="onNetworkModeChange()" style="margin-top:3px;accent-color:var(--accent-green);">
         <div>
-          <div style="font-weight:700;font-size:14px;">Nodogsplash</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Open-source captive portal solution. Runs directly on the server and manages
-client authentication via a dedicated network interface. Ideal for standalone
-deployments without additional routing hardware.</div>
+          <div style="font-weight:700;font-size:14px;">Standalone Mode</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">No external router needed. This server manages client access and bandwidth
+directly. Best for simple setups without additional networking hardware.</div>
         </div>
       </label>
 
       <label style="display:flex;align-items:flex-start;gap:12px;cursor:pointer;background:var(--bg-primary);padding:14px;border-radius:10px;border:2px solid var(--border-color);" id="modeMikrotikCard">
         <input type="radio" name="networkMode" id="modeMikrotik" value="mikrotik" onchange="onNetworkModeChange()" style="margin-top:3px;accent-color:var(--accent-blue);">
         <div>
-          <div style="font-weight:700;font-size:14px;">MikroTik</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">Enterprise-grade network management via MikroTik RouterOS API. Offloads 
-client authentication and bandwidth control to the router. Recommended for 
-scalable deployments with full traffic management capabilities.</div>
+          <div style="font-weight:700;font-size:14px;">External Router</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:3px;">You already have a compatible router (e.g. MikroTik) handling your network.
+Offloads client access and bandwidth control to it. Recommended for larger
+setups with dedicated networking hardware.</div>
         </div>
       </label>
 
@@ -282,9 +281,9 @@ scalable deployments with full traffic management capabilities.</div>
       <strong> Before switching to MikroTik mode:</strong>
       <ul style="margin:6px 0 0 18px;padding:0;">
         <li>Router must run <strong>RouterOS 7+</strong> with the REST API enabled (IP &rarr; Services &rarr; <code>www</code>, port 80 by default).</li>
-        <li>The Hotspot service must already be set up on the interface below, with a DHCP server bound to it (bandwidth limits are applied by IP, looked up from the client's DHCP lease — a device that hasn't received an IP yet can't be shaped).</li>
-        <li>This mode grants access by adding a bypass <strong>IP binding</strong> for the paying device's MAC, not by logging it into MikroTik's own Hotspot page — customers never see MikroTik's login screen.</li>
-        <li>Session timing is still enforced by this server, not the router — the router only reflects allow/block state when told to.</li>
+        <li>The Hotspot service must already be set up on the interface below, with a DHCP server bound to it (bandwidth limits are applied by IP, looked up from the client's DHCP lease, so a device that hasn't received an IP yet can't be shaped).</li>
+        <li>This mode grants access by adding a bypass <strong>IP binding</strong> for the paying device's MAC, not by logging it into MikroTik's own Hotspot page, so customers never see MikroTik's login screen.</li>
+        <li>Session timing is still enforced by this server, not the router, which only reflects allow/block state when told to.</li>
       </ul>
     </div>
 
@@ -351,34 +350,4 @@ scalable deployments with full traffic management capabilities.</div>
 
   <!-- RESTORE STATUS -->
   <div id="restoreStatus" style="display:none;margin-top:16px;padding:12px;border-radius:6px;font-size:13px;"></div>
-</div>
-<!-- FREE MINUTES -->
-<div class="card" style="margin-top:20px;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-gift" style="margin-right:8px;color:#7c3aed;"></i>Free Minutes
-    </div>
-    <span style="font-size:12px;color:var(--text-muted);">Daily free time for new customers</span>
-  </div>
-  <div class="grid-2">
-    <div class="form-group">
-      <label class="form-label">Enable Free Minutes</label>
-      <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
-        <label class="toggle-switch">
-          <input type="checkbox" id="freeMinutesEnabled" onchange="updateToggleLabel('freeMinutesEnabled','freeMinutesEnabledLabel')">
-          <span class="toggle-slider"></span>
-        </label>
-        <span id="freeMinutesEnabledLabel" style="font-size:13px;color:var(--text-muted);">Disabled</span>
-      </div>
-      <small style="color:var(--text-muted);">Show free claim button on portal for new customers.</small>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Free Minutes Amount</label>
-      <input type="number" id="freeMinutesAmount" class="form-control" placeholder="5" min="1" max="60">
-      <small style="color:var(--text-muted);">How many free minutes per customer per day.</small>
-    </div>
-  </div>
-  <button class="btn btn-primary" onclick="saveFreeMinutesSettings()">
-    <i class="fas fa-save"></i> Save Free Minutes Settings
-  </button>
 </div>

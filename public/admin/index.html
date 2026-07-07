@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>R&J PisoWifi — Admin</title>
+  <title>R&J PisoWifi - Admin</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="css/themes.css">
   <link rel="stylesheet" href="css/admin.css">
@@ -146,9 +146,9 @@
             border-radius: 10px;
           ">0</span>
         </div>
-        <div class="nav-item" onclick="navigateTo('promos')">
+        <div class="nav-item" onclick="navigateTo('vouchers')">
           <span class="nav-icon"><i class="fas fa-ticket-alt"></i></span>
-          Promo Vouchers
+          Vouchers
         </div>
       </div>
 
@@ -185,6 +185,18 @@
         <div class="nav-item" onclick="navigateTo('about')">
           <span class="nav-icon"><i class="fas fa-info-circle"></i></span>
           About
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-section-title">Power</div>
+        <div class="nav-item" onclick="openPowerConfirm('reboot')" style="color:var(--accent-orange, #ff9800);">
+          <span class="nav-icon"><i class="fas fa-sync-alt"></i></span>
+          Reboot Server
+        </div>
+        <div class="nav-item" onclick="openPowerConfirm('shutdown')" style="color:var(--accent-red, #e94560);">
+          <span class="nav-icon"><i class="fas fa-power-off"></i></span>
+          Shutdown Server
         </div>
       </div>
 
@@ -244,12 +256,35 @@
   z-index: 99;
 "></div>
 
+<!-- POWER CONFIRM MODAL -->
+<div class="modal-overlay" id="powerConfirmModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="powerConfirmTitle">Confirm</div>
+      <button class="modal-close" onclick="closePowerConfirm()">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;" id="powerConfirmMessage"></p>
+    <div class="form-group">
+      <label class="form-label">Type <strong id="powerConfirmWord"></strong> to confirm</label>
+      <input type="text" id="powerConfirmInput" class="form-control" oninput="checkPowerConfirmInput()" autocomplete="off" autocapitalize="off">
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closePowerConfirm()">Cancel</button>
+      <button class="btn btn-danger" id="powerConfirmBtn" onclick="executePowerAction()" disabled>
+        <i class="fas fa-exclamation-triangle"></i> <span id="powerConfirmBtnLabel">Confirm</span>
+      </button>
+    </div>
+  </div>
+</div>
+
 <script src="js/app.js"></script>
 <script src="js/dashboard.js"></script>
 <script src="js/sessions.js"></script>
 <script src="js/sales.js"></script>
 <script src="js/rates.js"></script>
-<script src="js/promos.js"></script>
+<script src="js/vouchers.js"></script>
 <script src="js/settings.js"></script>
 <script src="js/security.js"></script>
 <script src="js/branding.js"></script>

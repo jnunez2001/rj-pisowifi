@@ -15,7 +15,9 @@ async function loadSales() {
 
     const weekTotal = data.week.reduce((s, d) => s + (d.total || 0), 0);
     document.getElementById('salesWeekTotal').textContent = `₱${weekTotal.toFixed(2)}`;
-    document.getElementById('salesMonthTotal').textContent = `₱${(weekTotal * 4).toFixed(2)}`;
+    // Bug: this used to be weekTotal * 4, a rough guess, not real data.
+    // The server now computes an actual month-to-date total.
+    document.getElementById('salesMonthTotal').textContent = `₱${(data.month?.total_income || 0).toFixed(2)}`;
 
     // Free claims card
     const freeClaimsEl = document.getElementById('salesFreeClaims');
@@ -137,7 +139,7 @@ function buildTransactionTable(transactions) {
     }
 
     const coinValue = t.type === 'free'
-      ? '<span style="color:var(--text-muted);">—</span>'
+      ? '<span style="color:var(--text-muted);">--</span>'
       : `<span class="badge badge-green">₱${t.coin_value}</span>`;
 
     return `
@@ -162,4 +164,38 @@ function formatSalesMins(mins) {
   if (mins >= 1440) return `${Math.round(mins/1440)} days`;
   if (mins >= 60) return `${Math.round(mins/60)} hrs`;
   return `${Math.round(mins)} mins`;
+}
+
+// Improvement: the only way to get transaction data out of this system was
+// the full JSON backup (settings + rates + promos + everything else mixed
+// together) — no quick way for an admin to open sales in Excel/Sheets for
+// bookkeeping. Exports the complete history (not just the 20-row preview).
+function csvEscape(value) {
+  const str = String(value ?? '');
+  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+}
+
+async function exportTransactionsCsv() {
+  try {
+    const data = await apiCall('GET', '/api/admin/transactions/export');
+    if (!data.success) { showToast('Export failed.', 'error'); return; }
+
+    const rows = [['Voucher Code', 'Amount (₱)', 'Minutes Added', 'Type', 'Date & Time']];
+    data.transactions.forEach(t => {
+      rows.push([t.voucher_code, t.coin_value, t.minutes_added, t.type, t.created_at]);
+    });
+
+    const csv = rows.map(row => row.map(csvEscape).join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const date = new Date().toISOString().split('T')[0];
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `rj-pisowifi-transactions-${date}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast(`Exported ${data.transactions.length} transactions!`, 'success');
+  } catch (e) {
+    showToast('Export error.', 'error');
+  }
 }

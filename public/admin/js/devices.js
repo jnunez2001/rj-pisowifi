@@ -59,7 +59,7 @@ async function loadDevices() {
               style="color:var(--accent-blue);text-decoration:none;font-family:monospace;font-size:13px;">
              ${v.ip_address}
            </a>`
-        : '—';
+        : '--';
 
       return `
         <tr>
@@ -71,7 +71,7 @@ async function loadDevices() {
           </td>
           <td>${ipLink}</td>
           <td>
-            <span class="badge badge-blue">${v.firmware || '—'}</span>
+            <span class="badge badge-blue">${v.firmware || '--'}</span>
           </td>
           <td>${statusBadge}</td>
           <td style="font-size:13px;color:var(--text-muted);">

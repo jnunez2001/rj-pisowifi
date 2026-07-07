@@ -13,8 +13,12 @@ async function loadSessions() {
     }
 
     const sessions = data.sessions || [];
-    summary.textContent = `${sessions.length} client${sessions.length !== 1 ? 's' : ''} connected`;
-    document.getElementById('sessionCount').textContent = sessions.length;
+    // Bug: this counted paused sessions as "connected" too (their internet
+    // is blocked while paused) — both here and in the sidebar badge, which
+    // this same code was also overwriting with the wrong number.
+    const activeCount = data.active_count ?? sessions.filter(s => s.is_paused !== 1).length;
+    summary.textContent = `${activeCount} client${activeCount !== 1 ? 's' : ''} connected`;
+    document.getElementById('sessionCount').textContent = activeCount;
 
     if (sessions.length === 0) {
       tbody.innerHTML = `
@@ -64,9 +68,21 @@ async function loadSessions() {
             <div style="display:flex;gap:6px;">
               <button class="btn btn-sm btn-primary btn-icon"
                       onclick="openAddTime('${s.voucher_code}')"
-                      title="Add Time">
+                      title="Add/Reduce Time">
                 <i class="fas fa-plus"></i>
               </button>
+              ${isPaused
+                ? `<button class="btn btn-sm btn-secondary btn-icon"
+                           onclick="adminResumeSession('${s.voucher_code}')"
+                           title="Resume">
+                     <i class="fas fa-play"></i>
+                   </button>`
+                : `<button class="btn btn-sm btn-secondary btn-icon"
+                           onclick="adminPauseSession('${s.voucher_code}')"
+                           title="Pause">
+                     <i class="fas fa-pause"></i>
+                   </button>`
+              }
               <button class="btn btn-sm btn-danger btn-icon"
                       onclick="cutSession('${s.voucher_code}')"
                       title="Cut Session">
@@ -103,8 +119,11 @@ function setMinutes(mins) {
 
 async function confirmAddTime() {
   const minutes = parseInt(document.getElementById('addTimeMinutes').value);
-  if (!minutes || minutes < 1) {
-    showToast('Please enter valid minutes', 'error');
+  // Bug: `minutes < 1` rejected every negative number, so "reduce time"
+  // was never actually reachable through this form even though the backend
+  // (POST /addtime) has always accepted negative deltas.
+  if (!Number.isFinite(minutes) || minutes === 0) {
+    showToast('Enter a non-zero number of minutes', 'error');
     return;
   }
 
@@ -116,11 +135,43 @@ async function confirmAddTime() {
     );
 
     if (data.success) {
-      showToast(`Added ${minutes} minutes to ${selectedVoucher}`, 'success');
+      showToast(`${minutes > 0 ? 'Added' : 'Removed'} ${Math.abs(minutes)} minutes ${minutes > 0 ? 'to' : 'from'} ${selectedVoucher}`, 'success');
       closeModal('addTimeModal');
       loadSessions();
     } else {
-      showToast(data.message || 'Failed to add time', 'error');
+      showToast(data.message || 'Failed to update time', 'error');
+    }
+  } catch(e) {
+    showToast('Server error', 'error');
+  }
+}
+
+// Previously pause/resume only existed as customer self-service actions on
+// the portal — staff had no way to pause a client's session on their behalf
+// (e.g. a customer asks to pause while they step out) without asking the
+// customer to do it themselves on their own device.
+async function adminPauseSession(voucherCode) {
+  try {
+    const data = await apiCall('POST', `/api/admin/session/${voucherCode}/pause`);
+    if (data.success) {
+      showToast(`Paused ${voucherCode}`, 'success');
+      loadSessions();
+    } else {
+      showToast(data.message || 'Failed to pause session', 'error');
+    }
+  } catch(e) {
+    showToast('Server error', 'error');
+  }
+}
+
+async function adminResumeSession(voucherCode) {
+  try {
+    const data = await apiCall('POST', `/api/admin/session/${voucherCode}/resume`);
+    if (data.success) {
+      showToast(`Resumed ${voucherCode}`, 'success');
+      loadSessions();
+    } else {
+      showToast(data.message || 'Failed to resume session', 'error');
     }
   } catch(e) {
     showToast('Server error', 'error');
