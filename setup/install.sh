@@ -85,6 +85,36 @@ systemctl stop nodogsplash >> $LOG 2>&1 || true
 # Remove UFW completely — we use nftables directly
 apt purge ufw -y >> $LOG 2>&1 || true
 
+# Bug: iptables-persistent auto-loads /etc/iptables/rules.v[46] at every boot,
+# BEFORE rj-network-setup.service runs (confirmed via systemctl status
+# timestamps - netfilter-persistent finished ~13s before rj-network-setup
+# started on a live box). If anyone ever runs `netfilter-persistent save` or
+# `iptables-save > /etc/iptables/rules.v4` mid-troubleshooting (easy to do
+# by habit), that snapshot gets silently replayed on every future boot ahead
+# of this project's own network setup - the same class of bug as two DHCP
+# servers fighting each other, just with stale firewall rules instead. This
+# project already re-applies its own iptables/nftables rules from scratch on
+# every boot (setup-network.sh + rj-nftables-restore.service), so
+# netfilter-persistent has no job here - disable and mask it so it can't
+# load anything even if a rules.v4 file reappears later, and remove any
+# snapshot that already exists.
+systemctl disable netfilter-persistent >> $LOG 2>&1 || true
+systemctl mask netfilter-persistent >> $LOG 2>&1 || true
+rm -f /etc/iptables/rules.v4 /etc/iptables/rules.v6
+
+# Bug #80: rj-fix-iptables.service (created by hand on past installs, not by
+# this script) waits for a legacy nodogsplash "ndsRTR" iptables chain that
+# setup-network.sh has deleted on every run for a long time now - it's been
+# silently failing all 5 of its rule inserts on every boot. What it tried to
+# allow (DHCP/DNS/portal ports on the LAN interface) is already covered by
+# the current nftables rj_piso table, so it's dead weight, not a safety net.
+# Clean it up if a past manual setup left it behind.
+systemctl disable rj-fix-iptables >> $LOG 2>&1 || true
+systemctl stop rj-fix-iptables >> $LOG 2>&1 || true
+rm -f /etc/systemd/system/rj-fix-iptables.service
+rm -f $APP_DIR/setup/fix-iptables.sh
+systemctl daemon-reload >> $LOG 2>&1 || true
+
 # ─── 7. CREATE NEEDED FOLDERS ────────────────────────────────
 echo "Creating folders..." | tee -a $LOG
 mkdir -p $APP_DIR/server/database

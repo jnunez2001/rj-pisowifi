@@ -1241,6 +1241,34 @@ Superseded the single "LAN VLAN ID" field above with a proper VLAN manager, afte
 
 ---
 
-**Generated:** 2026-07-04  
-**System:** R&J PisoWifi v1.0.1  
+## Investigation: "clients always obtaining IP" (2026-07-08, live diagnostic session)
+
+Reported symptom traced back to right after running `install.sh`. Debugged live against the actual VM (`sudo` log/journal/ruleset output pasted in real time), not just code review. Summary for whoever picks this up next:
+
+**Ruled out, with evidence, each a real check against the live box:**
+- dnsmasq config/DHCP pool — `journalctl -u dnsmasq` showed clean DISCOVER→OFFER→REQUEST→ACK handshakes (<1s) for two real devices on `enp0s8`.
+- The LAN VLAN feature — user confirmed no VLAN 13 tagging remains on the AP's own SSID/port config, and the DB-side VLAN row was removed.
+- nftables ruleset (`nft list ruleset`) — clean, matches what `setup-network.sh` writes, correctly accepts `udp dport 67` inbound on `enp0s8`.
+- Legacy `iptables` rules — clean (`policy ACCEPT` on all chains, only the two expected FORWARD rules from `setup-network.sh`).
+- `iptables-persistent`'s saved snapshot (`/etc/iptables/rules.v4`, dated Jun 29) — turned out to be empty (all-ACCEPT, zero rules), so not currently live-loading anything harmful.
+
+**Confirmed root-cause boundary:** reproduced live with the affected phone while tailing `journalctl -u dnsmasq -f` — **zero DHCPDISCOVER packets arrived at the server** during the failed connection attempt (the phone self-assigned `169.254.x.x`, i.e. its own DHCP client gave up waiting for any response). This proves the failure is upstream of every piece of software this repo controls — the broadcast never reaches `enp0s8` in the first place. Likely candidates from here are physical/AP-layer: the TP-Link EAP225-Outdoor's own settings (client isolation, band steering, per-SSID DHCP relay behavior) or the USB LAN adapter already flagged as a known-flaky component in `README.md`'s "Known recurring issues" section. Neither is something a code change in this repo can fix — next step if this recurs is testing with the USB LAN adapter swapped/bypassed and checking the AP's own client/association logs for that phone's MAC at the moment of failure.
+
+**Two real bugs found and fixed along the way (not the root cause, but confirmed broken):**
+
+#### Bug #80 (LOW): `rj-fix-iptables.service` has been dead code for a while
+- **Files:** `setup/install.sh` (new cleanup step)
+- **Cause:** this service (created by hand on past installs, never part of this repo) waits up to 30s for a legacy nodogsplash `ndsRTR` iptables chain, then inserts DHCP/DNS/portal-port ACCEPT rules into it. `setup-network.sh` deletes `ndsRTR` on every run as part of its nodogsplash cleanup, so this chain hasn't existed in a while — every insert has been silently failing. What it was trying to allow is already covered by the current nftables `rj_piso` table's `input` chain, so it wasn't a safety net being lost, just 30+ seconds of wasted boot time and stale tribal-knowledge risk for whoever reads `README.md`'s services list and trusts it's still doing something.
+- **Fix:** `install.sh` now disables/removes this service and its script (`setup/fix-iptables.sh`) if present, so a re-run cleans it up on existing installs.
+
+#### Bug #81 (LOW, preventive): `iptables-persistent` was a live landmine even though currently harmless
+- **Files:** `setup/install.sh`
+- **Cause:** `netfilter-persistent.service` (from the `iptables-persistent`/`netfilter-persistent` packages `install.sh` installs) auto-loads `/etc/iptables/rules.v4`/`rules.v6` at boot — confirmed via `systemctl status` timestamps that it runs *before* `rj-network-setup.service`. The current saved snapshot happens to be empty, so it's not causing today's symptom, but this project already re-applies its own iptables/nftables rules from scratch on every boot (`setup-network.sh` + `rj-nftables-restore.service`) — if anyone ever runs `netfilter-persistent save` or `iptables-save > rules.v4` mid-troubleshooting (an easy habit to fall into), that snapshot would silently replay ahead of this project's own setup on every future boot, which is exactly the "two things fighting over the network config at boot" bug class as Bug #75, just with firewall rules instead of DHCP servers.
+- **Fix:** `install.sh` now disables and masks `netfilter-persistent` and removes any existing `rules.v4`/`rules.v6`, so it can't load anything even if a snapshot reappears later.
+- **Verification status:** `bash -n` passes. Not yet re-run against the live box — please re-run `install.sh` and confirm `systemctl status netfilter-persistent` shows masked, and that the original stuck-phone symptom is retested (with the AP/USB-adapter angle in mind, per the investigation above) since neither of these two fixes were the confirmed root cause.
+
+---
+
+**Generated:** 2026-07-04
+**System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅
