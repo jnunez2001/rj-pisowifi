@@ -1478,6 +1478,17 @@ Context: EAP225 (Bug #78) can't reliably self-tag a second SSID onto its own VLA
 
 ---
 
+#### Bug #97 (HIGH, found during first real-hardware install): `localhost` refused the admin panel over IPv6, even though the app and nginx were both healthy
+
+- **File:** `setup/nginx.conf`
+- **Reported:** during the owner's first real router-mode field test, the admin panel appeared completely unreachable - not just from other devices on the network (a separate, real network-topology issue being worked through separately), but even directly on the server itself. `curl -I http://localhost:3000/admin` and `curl -I http://localhost/admin` both succeeded from the SSH session, `systemctl status rj-pisowifi` showed the app healthy, yet opening `https://localhost/admin` in an actual browser on the same machine failed instantly with `ERR_CONNECTION_REFUSED` - not a timeout, not a certificate warning, an immediate refusal, which didn't match either "app is down" or "self-signed cert" explanations already ruled out.
+- **Cause:** `nginx.conf` only had `listen 80 default_server;` and `listen 443 ssl default_server;` - no IPv6 equivalents. Many systems (and most modern browsers) resolve `localhost` to the IPv6 loopback address (`::1`) before falling back to IPv4 (`127.0.0.1`). With no IPv6 listener configured, the OS refuses the connection on `::1` instantly, before nginx ever sees it - explaining the instant refusal instead of a timeout. `curl` succeeded because it was effectively hitting the IPv4 side either by default resolution order or environment, masking the bug entirely from the command-line checks that had already ruled out every other explanation.
+- **Fix:** added `listen [::]:80 default_server;` and `listen [::]:443 ssl default_server;` alongside the existing IPv4 listen directives, so both address families are served identically.
+- **Immediate workaround** (before this fix is deployed): use `127.0.0.1` instead of `localhost` in the browser, which forces IPv4 and sidesteps the bug entirely.
+- **Verification status:** config change only, not yet reloaded on the real server as of this entry - apply via `sudo cp setup/nginx.conf /etc/nginx/sites-available/rj-pisowifi && sudo nginx -t && sudo systemctl reload nginx` after `git pull`, then confirm `https://localhost/admin` loads directly in a browser on the server itself (past the expected self-signed certificate warning).
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅
