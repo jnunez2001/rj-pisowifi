@@ -94,16 +94,6 @@ function parseRouterOsMajor(versionString) {
   return match ? parseInt(match[1], 10) : null;
 }
 
-// Every distinct physical port referenced by any lane (regardless of
-// vlan_id - a port used only via a VLAN tag still needs its raw self
-// freed from any pre-existing bridge membership, since a MikroTik VLAN
-// interface sits on top of the raw port). Used to know which ports need
-// freeing before Configure claims them (see apply()).
-function getAllLanePhysicalPorts() {
-  const lanePorts = db.prepare("SELECT DISTINCT port_name FROM router_ports WHERE role IN ('gated','open')").all();
-  return lanePorts.map((p) => p.port_name);
-}
-
 // Builds the full ordered list of RouterOS commands. Returns
 // [{ description, words }] - description is what the preview UI shows,
 // words is what actually gets sent via client.talk(words).
@@ -161,6 +151,34 @@ function buildPlan(routerOsMajor) {
     });
   }
 
+  // Bug (found on the first real-hardware run, not just theoretical): a
+  // brand-new router isn't actually blank - MikroTik's own factory-default
+  // config usually already bridges most LAN ports together, and a port can
+  // only belong to one bridge at a time, so each port needs freeing from
+  // whatever bridge currently holds it before it can join one of ours.
+  // This USED to run as one global pass freeing every port before building
+  // ANY new bridge - which meant a port could sit completely disconnected
+  // for the entire rest of that pass, and worse, if the very server running
+  // this app is reachable through one of those ports (a very real topology,
+  // not an edge case - a laptop plugged straight into the port it's also
+  // configuring), freeing it early cut this app's own connection to the
+  // router before the run could finish, stranding that port indefinitely
+  // and aborting the whole Configure with no way to recover except a manual
+  // fix on the router itself. Fixed by freeing each port immediately before
+  // its own bridge attachment, interleaved per-lane, so the gap between
+  // "disconnected" and "back on a working bridge" is a couple of API calls,
+  // not the rest of the entire run. freedPorts tracks what's already been
+  // freed this run so a port used by two different lanes (its own untagged
+  // lane plus a VLAN-tagged lane on the same wire) only gets freed once -
+  // freeing it again after it's already a member of its first bridge would
+  // rip it right back out.
+  const freedPorts = new Set();
+  function freeStepFor(portName) {
+    if (freedPorts.has(portName)) return null;
+    freedPorts.add(portName);
+    return { type: 'free-port', portName, description: `Free ${portName} from any existing bridge (factory default or a previous run)` };
+  }
+
   primaryLanes.forEach((lane, index) => {
     const { network, gateway, cidr } = subnetFor(index);
     const laneLabel = lane.lane_name || `${lane.port_name}${lane.vlan_id ? ` (VLAN ${lane.vlan_id})` : ''}`;
@@ -169,6 +187,9 @@ function buildPlan(routerOsMajor) {
     const dhcpName = `${bridgeName}-dhcp`;
     const members = membersByPrimaryId[lane.id] || [];
     const allMembers = [lane, ...members];
+
+    const freeSteps = allMembers.map((m) => freeStepFor(m.port_name)).filter(Boolean);
+    steps.push(...freeSteps);
 
     steps.push({
       description: `[${laneLabel}] Create bridge for ${allMembers.map((m) => m.vlan_id ? `${m.port_name} VLAN ${m.vlan_id}` : m.port_name).join(' + ')}`,
@@ -303,34 +324,28 @@ async function apply() {
 
     ({ steps, warnings, apiPassword } = buildPlan(routerOsMajor));
 
-    // Bug fix: a brand-new router isn't actually blank - MikroTik's own
+    // Port-freeing (a brand-new router isn't actually blank - MikroTik's
     // factory-default config usually already bridges most LAN ports
-    // together. A port can only belong to one bridge at a time, so without
-    // this, claiming a port for one of our own bridges (or creating a VLAN
-    // interface on top of it) could fail or behave unexpectedly if it's
-    // still a member of that default bridge (or, on a re-run, a bridge
-    // from a previous Configure). Free every physical port we're about to
-    // use from whatever bridge currently holds it, first - safe and
-    // idempotent either way, since a port with no existing membership
-    // simply has nothing to remove.
-    const lanePortNames = getAllLanePhysicalPorts();
-    for (const portName of lanePortNames) {
-      try {
-        const existing = await client.talk(['/interface/bridge/port/print', `?interface=${portName}`]);
-        for (const row of existing.re) {
-          await client.talk(['/interface/bridge/port/remove', `=.id=${row['.id']}`]);
-        }
-        log.push({ step: `Free ${portName} from any existing bridge (factory default or a previous run)`, ok: true, detail: `${existing.re.length} removed` });
-      } catch (err) {
-        log.push({ step: `Free ${portName} from any existing bridge`, ok: false, detail: err.message });
-        throw Object.assign(new Error(`Provisioning stopped freeing "${portName}": ${err.message}`), { log, warnings, backedUp });
-      }
-    }
-
+    // together, and a port can only belong to one bridge at a time) is now
+    // interleaved into `steps` itself, immediately before each port's own
+    // bridge attachment - see buildPlan()'s freeStepFor(). That keeps any
+    // gap between "freed" and "back on a working bridge" to a couple of API
+    // calls instead of a whole separate pass across every port first, which
+    // used to be able to strand this app's own connection (if it happens to
+    // reach the router through one of the ports being freed) for the entire
+    // rest of that pass before anything got rebuilt.
     for (const step of steps) {
       try {
-        await client.talk(step.words);
-        log.push({ step: step.description, ok: true });
+        if (step.type === 'free-port') {
+          const existing = await client.talk(['/interface/bridge/port/print', `?interface=${step.portName}`]);
+          for (const row of existing.re) {
+            await client.talk(['/interface/bridge/port/remove', `=.id=${row['.id']}`]);
+          }
+          log.push({ step: step.description, ok: true, detail: `${existing.re.length} removed` });
+        } else {
+          await client.talk(step.words);
+          log.push({ step: step.description, ok: true });
+        }
       } catch (err) {
         log.push({ step: step.description, ok: false, detail: err.message });
         throw Object.assign(new Error(`Provisioning stopped at "${step.description}": ${err.message}`), { log, warnings, backedUp });
@@ -349,4 +364,4 @@ async function apply() {
   return { log, warnings, backedUp };
 }
 
-module.exports = { preview, apply, buildPlan, listLocalInterfaces, getAllLanePhysicalPorts };
+module.exports = { preview, apply, buildPlan, listLocalInterfaces };
