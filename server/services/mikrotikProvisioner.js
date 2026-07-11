@@ -100,7 +100,10 @@ function parseRouterOsMajor(versionString) {
 // routerOsMajor: pass 6 or 7 if known (detected live in apply(), or
 // best-effort in preview()) - null means unknown, and CAKE is assumed
 // (documented as an assumption in a warning, not silently guessed).
-function buildPlan(routerOsMajor) {
+// ownPortName: the physical port this server's own connection is currently
+// arriving through, if known (detected live in apply()/preview() via
+// detectOwnPort()) - see the reordering below for why this matters.
+function buildPlan(routerOsMajor, ownPortName) {
   const allLanes = db.prepare('SELECT * FROM router_ports WHERE role != ? ORDER BY id').all('unused');
   const wanLanes = allLanes.filter((l) => l.role === 'wan');
   const laneCandidates = allLanes.filter((l) => l.role === 'gated' || l.role === 'open');
@@ -113,6 +116,31 @@ function buildPlan(routerOsMajor) {
     if (l.bridge_with_id) {
       (membersByPrimaryId[l.bridge_with_id] = membersByPrimaryId[l.bridge_with_id] || []).push(l);
     }
+  }
+
+  // Bug #98 follow-up: freeing+rebuilding a port that happens to carry this
+  // app's own connection to the router (a real topology - the server
+  // plugged straight into the port it's also reconfiguring) is inherently
+  // risky, since the control connection issuing every subsequent command
+  // travels over that same wire. Freeing it can't be avoided entirely (it's
+  // still part of the plan), but the *risk window* can be minimized: process
+  // whichever lane owns that port dead last, after every other lane has
+  // already been fully built and confirmed working. That way, if anything
+  // in this run is going to fail, it fails on some other port first, before
+  // ever touching the one this app itself depends on - and that port's own
+  // brief disconnection happens right at the very end, with nothing left
+  // afterward that could be aborted by losing it early.
+  if (ownPortName) {
+    // A single physical port can anchor more than one lane at once (its
+    // own untagged lane plus a VLAN-tagged lane sharing the same wire, e.g.
+    // ether2 carrying both a plain lane and a VLAN 13 lane) - every lane
+    // touching that port needs to move, not just the first one found.
+    const ownsPort = (l) => l.port_name === ownPortName
+      || (membersByPrimaryId[l.id] || []).some((m) => m.port_name === ownPortName);
+    const notOwning = primaryLanes.filter((l) => !ownsPort(l));
+    const owning = primaryLanes.filter(ownsPort);
+    primaryLanes.length = 0;
+    primaryLanes.push(...notOwning, ...owning);
   }
 
   const steps = [];
@@ -281,9 +309,34 @@ async function detectRouterOsMajor() {
   }
 }
 
+// Finds which physical port this server's own MAC is currently arriving
+// through, via the router's bridge host table (which port last saw traffic
+// from that MAC) - so buildPlan() can deliberately save that lane for last.
+// Falls back to null (buildPlan() then just uses natural DB order, same as
+// before this existed) if ownMac is unknown or the router can't answer.
+async function detectOwnPort(client, ownMac) {
+  if (!ownMac) return null;
+  try {
+    const res = await client.talk(['/interface/bridge/host/print', `?mac-address=${ownMac}`]);
+    return (res.re[0] || {})['on-interface'] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
 async function preview() {
   const routerOsMajor = await detectRouterOsMajor();
-  const { steps, warnings } = buildPlan(routerOsMajor);
+  let ownPortName = null;
+  try {
+    const config = getMikrotikConfig();
+    if (config.ip) {
+      ownPortName = await withMikrotik(config, (client) => detectOwnPort(client, getOwnMac()));
+    }
+  } catch (e) {
+    // Best-effort, same as detectRouterOsMajor() above - Preview should
+    // still work even if this specific lookup fails.
+  }
+  const { steps, warnings } = buildPlan(routerOsMajor, ownPortName);
   return { steps: steps.map((s) => s.description), warnings };
 }
 
@@ -322,7 +375,15 @@ async function apply() {
       log.push({ step: 'Detect RouterOS version', ok: false, detail: err.message + ' - assuming RouterOS 7+ (CAKE)' });
     }
 
-    ({ steps, warnings, apiPassword } = buildPlan(routerOsMajor));
+    // Bug #98 follow-up: find which physical port this app's own connection
+    // is arriving through (if its MAC is known), so buildPlan() can process
+    // that lane dead last - see the reordering logic there for why.
+    const ownPortName = await detectOwnPort(client, getOwnMac());
+    if (ownPortName) {
+      log.push({ step: `This app's own connection is arriving via ${ownPortName} - that lane will be configured last`, ok: true });
+    }
+
+    ({ steps, warnings, apiPassword } = buildPlan(routerOsMajor, ownPortName));
 
     // Port-freeing (a brand-new router isn't actually blank - MikroTik's
     // factory-default config usually already bridges most LAN ports
