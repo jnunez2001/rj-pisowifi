@@ -1,5 +1,6 @@
 // ===== MIKROTIK SERVICE =====
-// Handles MikroTik RouterOS API calls (REST API, RouterOS 7+)
+// Handles MikroTik router control via the native binary API (RouterOS 6 and
+// 7 — see mikrotikApiClient.js for why the binary API instead of REST).
 // Used when network_mode = 'mikrotik'
 //
 // IMPORTANT: allowClient/blockClient use /ip/hotspot/ip-binding, NOT
@@ -10,46 +11,28 @@
 // through without going through the login page at all," which is what a
 // coin-slot-triggers-access flow actually needs.
 //
-// RouterOS REST API method mapping (official):
-//   GET    = print   (list/filter records)
-//   PUT    = add     (create new record)
-//   PATCH  = set     (update existing record by .id)
-//   DELETE = remove  (delete existing record by .id)
-// DELETE requires the record's .id — you can't delete by matching fields
-// in the body, so allowClient/blockClient always GET first to find the .id.
+// Command shape mirrors the CLI menu path ("/ip/hotspot/ip-binding/print"),
+// with parameters as "=key=value" words and query filters as "?key=value".
+// "remove"/"set" need the record's ".id" — always look it up first, same
+// pattern as the old REST GET-before-DELETE/PATCH.
 
 const db = require('../config/database');
-
-function getMikrotikConfig() {
-  const getSetting = (key, def) => {
-    const s = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
-    return s ? s.value : def;
-  };
-  return {
-    ip: getSetting('mikrotik_ip', ''),
-    user: getSetting('mikrotik_user', 'admin'),
-    pass: getSetting('mikrotik_pass', ''),
-    interface: getSetting('mikrotik_interface', 'ether1'),
-  };
-}
-
-function authHeader(config) {
-  return 'Basic ' + Buffer.from(`${config.user}:${config.pass}`).toString('base64');
-}
+const { withMikrotik } = require('./mikrotikApiClient');
+const { getMikrotikConfig } = require('./mikrotikConfigHelper');
 
 /**
  * Looks up the existing ip-binding record for a MAC, if any.
- * Returns the full record (including its .id) or null if not found.
+ * Returns the full record (including its .id), or null if genuinely not
+ * found. A lookup failure (network error, timeout, router error) throws —
+ * client.talk() rejects on those — rather than resolving as "not found",
+ * so callers can't mistake a transient failure for "nothing exists yet"
+ * (that mistake used to create duplicate ip-bindings under the old REST
+ * client; the binary client's reject-on-failure behavior preserves the fix
+ * automatically).
  */
-async function findIpBinding(config, mac) {
-  const url = `http://${config.ip}/rest/ip/hotspot/ip-binding?mac-address=${encodeURIComponent(mac)}`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { 'Authorization': authHeader(config) },
-  });
-  if (!res.ok) return null;
-  const records = await res.json();
-  return records.length > 0 ? records[0] : null;
+async function findIpBinding(client, mac) {
+  const res = await client.talk(['/ip/hotspot/ip-binding/print', `?mac-address=${mac}`]);
+  return res.re.length > 0 ? res.re[0] : null;
 }
 
 // Allow a client MAC address (bypass Hotspot login entirely via ip-binding).
@@ -62,41 +45,21 @@ async function allowClient(mac) {
     return false;
   }
   try {
-    const existing = await findIpBinding(config, mac);
+    return await withMikrotik(config, async (client) => {
+      const existing = await findIpBinding(client, mac);
 
-    if (existing) {
-      // Already bound — just refresh the comment so we can see when it was renewed
-      const url = `http://${config.ip}/rest/ip/hotspot/ip-binding/${existing['.id']}`;
-      const res = await fetch(url, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': authHeader(config),
-        },
-        body: JSON.stringify({
-          comment: `rj-piso-${Date.now()}`,
-        }),
-      });
-      console.log(`✅ MikroTik refreshed existing binding: ${mac}`);
-      return res.ok;
-    }
+      if (existing) {
+        // Already bound — just refresh the comment so we can see when it was renewed
+        await client.talk(['/ip/hotspot/ip-binding/set', `=.id=${existing['.id']}`, `=comment=rj-piso-${Date.now()}`]);
+        console.log(`✅ MikroTik refreshed existing binding: ${mac}`);
+        return true;
+      }
 
-    // No existing binding — create one
-    const url = `http://${config.ip}/rest/ip/hotspot/ip-binding`;
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authHeader(config),
-      },
-      body: JSON.stringify({
-        'mac-address': mac,
-        'type': 'bypassed',
-        'comment': `rj-piso-${Date.now()}`,
-      }),
+      // No existing binding — create one
+      await client.talk(['/ip/hotspot/ip-binding/add', `=mac-address=${mac}`, '=type=bypassed', `=comment=rj-piso-${Date.now()}`]);
+      console.log(`✅ MikroTik allowed: ${mac}`);
+      return true;
     });
-    console.log(`✅ MikroTik allowed: ${mac}`);
-    return res.ok;
   } catch (err) {
     console.error('MikroTik allowClient error:', err.message);
     return false;
@@ -109,33 +72,20 @@ async function blockClient(mac) {
   const config = getMikrotikConfig();
   if (!config.ip) return false;
   try {
-    // Remove the ip-binding that was granting bypass access
-    const binding = await findIpBinding(config, mac);
-    if (binding) {
-      const url = `http://${config.ip}/rest/ip/hotspot/ip-binding/${binding['.id']}`;
-      await fetch(url, {
-        method: 'DELETE',
-        headers: { 'Authorization': authHeader(config) },
-      });
-    }
-
-    // Also kick any currently-active hotspot session for this MAC, so access
-    // is cut immediately instead of waiting for the connection to naturally drop
-    const activeUrl = `http://${config.ip}/rest/ip/hotspot/active?mac-address=${encodeURIComponent(mac)}`;
-    const activeRes = await fetch(activeUrl, {
-      method: 'GET',
-      headers: { 'Authorization': authHeader(config) },
-    });
-    if (activeRes.ok) {
-      const activeSessions = await activeRes.json();
-      for (const session of activeSessions) {
-        await fetch(`http://${config.ip}/rest/ip/hotspot/active/${session['.id']}`, {
-          method: 'DELETE',
-          headers: { 'Authorization': authHeader(config) },
-        });
+    await withMikrotik(config, async (client) => {
+      // Remove the ip-binding that was granting bypass access
+      const binding = await findIpBinding(client, mac);
+      if (binding) {
+        await client.talk(['/ip/hotspot/ip-binding/remove', `=.id=${binding['.id']}`]);
       }
-    }
 
+      // Also kick any currently-active hotspot session for this MAC, so access
+      // is cut immediately instead of waiting for the connection to naturally drop
+      const activeRes = await client.talk(['/ip/hotspot/active/print', `?mac-address=${mac}`]);
+      for (const session of activeRes.re) {
+        await client.talk(['/ip/hotspot/active/remove', `=.id=${session['.id']}`]);
+      }
+    });
     console.log(`🚫 MikroTik blocked: ${mac}`);
     return true;
   } catch (err) {
@@ -151,62 +101,54 @@ function queueNameFor(mac) {
 // Deletes any existing simple queue(s) for this client's queue name.
 // Shared by setClientBandwidth (avoid duplicates before re-adding) and
 // removeClientBandwidth (session end — no queue should linger).
-async function deleteQueue(config, mac) {
+async function deleteQueue(client, mac) {
   const queueName = queueNameFor(mac);
-  const url = `http://${config.ip}/rest/queue/simple?name=${encodeURIComponent(queueName)}`;
-  const res = await fetch(url, {
-    method: 'GET',
-    headers: { 'Authorization': authHeader(config) },
-  });
-  if (!res.ok) return;
-  const queues = await res.json();
-  for (const q of queues) {
-    await fetch(`http://${config.ip}/rest/queue/simple/${q['.id']}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': authHeader(config) },
-    });
+  const res = await client.talk(['/queue/simple/print', `?name=${queueName}`]);
+  for (const q of res.re) {
+    await client.talk(['/queue/simple/remove', `=.id=${q['.id']}`]);
   }
 }
 
-// Set bandwidth limit for a client
+// Set bandwidth limit for a client.
 // NOTE: RouterOS simple queues target an IP address or address range, not a
 // MAC directly. We need the DHCP lease for this MAC to know its current IP.
-async function setClientBandwidth(mac, mbps) {
+//
+// Bug (ROUTER_MODE_PLAN.md §12): this used to take a single mbps value and
+// apply it to both directions - bandwidth_cap_upload_mbps existed as a
+// setting and was editable from the admin UI, but nothing ever actually
+// read it. RouterOS's own max-limit parameter is upload/download order, so
+// that ordering is preserved here to match what an admin reading a
+// RouterOS export would expect. uploadMbps defaults to downloadMbps when
+// omitted, so any caller still passing one argument keeps its old behavior
+// instead of silently breaking.
+async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps) {
   const config = getMikrotikConfig();
   if (!config.ip) return false;
+
+  const download = parseInt(downloadMbps, 10);
+  const upload = parseInt(uploadMbps, 10);
+  if (!Number.isFinite(download) || download <= 0 || !Number.isFinite(upload) || upload <= 0) {
+    console.error(`[MikroTik] Invalid bandwidth for ${mac}: down=${downloadMbps} up=${uploadMbps}`);
+    return false;
+  }
+
   try {
-    // Find the client's current IP via its DHCP lease
-    const leaseUrl = `http://${config.ip}/rest/ip/dhcp-server/lease?mac-address=${encodeURIComponent(mac)}`;
-    const leaseRes = await fetch(leaseUrl, {
-      method: 'GET',
-      headers: { 'Authorization': authHeader(config) },
-    });
-    if (!leaseRes.ok) return false;
-    const leases = await leaseRes.json();
-    if (leases.length === 0) {
-      console.log(`MikroTik: no DHCP lease found yet for ${mac}, skipping bandwidth`);
-      return false;
-    }
-    const ip = leases[0].address;
+    return await withMikrotik(config, async (client) => {
+      // Find the client's current IP via its DHCP lease
+      const leaseRes = await client.talk(['/ip/dhcp-server/lease/print', `?mac-address=${mac}`]);
+      if (leaseRes.re.length === 0) {
+        console.log(`MikroTik: no DHCP lease found yet for ${mac}, skipping bandwidth`);
+        return false;
+      }
+      const ip = leaseRes.re[0].address;
 
-    // Remove any existing queue for this client first (avoid duplicates)
-    await deleteQueue(config, mac);
+      // Remove any existing queue for this client first (avoid duplicates)
+      await deleteQueue(client, mac);
 
-    const url = `http://${config.ip}/rest/queue/simple`;
-    const res = await fetch(url, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': authHeader(config),
-      },
-      body: JSON.stringify({
-        'name': queueNameFor(mac),
-        'target': `${ip}/32`,
-        'max-limit': `${mbps}M/${mbps}M`,
-      }),
+      await client.talk(['/queue/simple/add', `=name=${queueNameFor(mac)}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`]);
+      console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up`);
+      return true;
     });
-    console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${mbps}Mbps`);
-    return res.ok;
   } catch (err) {
     console.error('MikroTik bandwidth error:', err.message);
     return false;
@@ -220,7 +162,7 @@ async function removeClientBandwidth(mac) {
   const config = getMikrotikConfig();
   if (!config.ip) return false;
   try {
-    await deleteQueue(config, mac);
+    await withMikrotik(config, (client) => deleteQueue(client, mac));
     console.log(`MikroTik: removed bandwidth queue for ${mac}`);
     return true;
   } catch (err) {
@@ -236,4 +178,64 @@ function isMikrotikModeEnabled() {
   return s && s.value === 'mikrotik';
 }
 
-module.exports = { allowClient, blockClient, setClientBandwidth, removeClientBandwidth, isMikrotikModeEnabled };
+// ROUTER_MODE_PLAN.md Stage 3 — live port discovery. Queries the router
+// itself for its actual physical ethernet ports rather than assuming a
+// fixed model/port-count, so the same code works on any MikroTik hardware
+// (ROUTER_MODE_PLAN.md §2/§7 — no hardcoded router-model list).
+async function getRouterPorts() {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const res = await client.talk(['/interface/ethernet/print']);
+    return res.re.map((r) => ({
+      name: r.name,
+      mac: r['mac-address'] || '',
+      running: r.running === 'true',
+      disabled: r.disabled === 'true',
+    }));
+  });
+}
+
+// Live status card (ROUTER_MODE_PLAN.md §4.7) — read straight from the
+// router, not our own database, so it reflects what's actually true right
+// now rather than what we last told it to be.
+async function getLiveStatus() {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const resourceRes = await client.talk(['/system/resource/print']);
+    const identityRes = await client.talk(['/system/identity/print']);
+    const activeRes = await client.talk(['/ip/hotspot/active/print']);
+    const r = resourceRes.re[0] || {};
+    return {
+      model: r['board-name'] || 'Unknown',
+      routerosVersion: r['version'] || 'Unknown',
+      uptime: r['uptime'] || 'Unknown',
+      cpuLoad: r['cpu-load'] || '0',
+      identity: (identityRes.re[0] || {}).name || '',
+      activeDevices: activeRes.re.length,
+    };
+  });
+}
+
+// "Test connection" button — just needs to prove login succeeds, doesn't
+// need the full status payload.
+async function testConnection() {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  await withMikrotik(config, async (client) => {
+    await client.talk(['/system/identity/print']);
+  });
+  return true;
+}
+
+module.exports = {
+  allowClient,
+  blockClient,
+  setClientBandwidth,
+  removeClientBandwidth,
+  isMikrotikModeEnabled,
+  getRouterPorts,
+  getLiveStatus,
+  testConnection,
+};

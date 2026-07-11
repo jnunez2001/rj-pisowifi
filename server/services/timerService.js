@@ -11,8 +11,15 @@ async function restoreActiveSessions() {
     const db = require('../config/database');
     const { allowClient, setClientBandwidth } = require('./networkService');
 
+    // Bug: this used to select ALL sessions, including paused ones, and
+    // called allowClient() for every row — so a customer who had paused
+    // their session (internet deliberately blocked, per pauseSession())
+    // got un-paused for free on every reboot, since the fresh nftables
+    // table setup-network.sh creates on boot has no memory of who was
+    // paused. Only restore sessions that were actually active.
     const activeSessions = db.prepare(`
       SELECT * FROM sessions
+      WHERE is_paused = 0
     `).all();
 
     if (activeSessions.length === 0) {
@@ -31,8 +38,9 @@ async function restoreActiveSessions() {
         await allowClient(session.mac_address);
         if (isBandwidthCapEnabled) {
           const maxMbps = db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_download_mbps'").get()?.value || '5';
-          await setClientBandwidth(session.mac_address, parseInt(maxMbps, 10) || 5);
-          console.log(`✅ Restored: ${session.voucher_code} → ${session.mac_address} (${maxMbps} Mbps)`);
+          const maxUploadMbps = db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_upload_mbps'").get()?.value || '5';
+          await setClientBandwidth(session.mac_address, parseInt(maxMbps, 10) || 5, parseInt(maxUploadMbps, 10) || 5);
+          console.log(`✅ Restored: ${session.voucher_code} → ${session.mac_address} (${maxMbps}Mbps down / ${maxUploadMbps}Mbps up)`);
         } else {
           console.log(`✅ Restored: ${session.voucher_code} → ${session.mac_address} (no cap)`);
         }
@@ -43,6 +51,36 @@ async function restoreActiveSessions() {
 
   } catch(err) {
     console.error('Restore error:', err.message);
+  }
+}
+
+// Re-applies every trusted device's bypass on startup, same reasoning as
+// restoreActiveSessions() above — a router reboot/reconfigure or a fresh
+// setup-network.sh run has no memory of who was trusted before, so this
+// needs reapplying every time the server starts, not just once when the
+// device was originally trusted.
+async function restoreTrustedDevices() {
+  try {
+    const db = require('../config/database');
+    const { allowClient } = require('./networkService');
+
+    const devices = db.prepare('SELECT * FROM trusted_devices').all();
+    if (devices.length === 0) {
+      console.log('ℹ️ No trusted devices to restore');
+      return;
+    }
+
+    console.log(`🔄 Restoring ${devices.length} trusted device(s)...`);
+    for (const device of devices) {
+      try {
+        await allowClient(device.mac_address);
+        console.log(`✅ Trusted device restored: ${device.mac_address} (${device.label || 'no label'})`);
+      } catch (e) {
+        console.error(`❌ Failed to restore trusted device ${device.mac_address}:`, e.message);
+      }
+    }
+  } catch (err) {
+    console.error('Restore trusted devices error:', err.message);
   }
 }
 
@@ -75,6 +113,11 @@ async function startTimer() {
       await restoreActiveSessions();
     } catch(e) {
       console.error('Failed to restore sessions on startup:', e.message);
+    }
+    try {
+      await restoreTrustedDevices();
+    } catch(e) {
+      console.error('Failed to restore trusted devices on startup:', e.message);
     }
   }, 3000);
 

@@ -5,3 +5,4 @@ server/database/
 *.db-wal
 .env
 public/uploads/
+server/logs/

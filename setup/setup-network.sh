@@ -98,6 +98,36 @@ if [ -n "$WAN_VLAN_ID" ] && [ "$WAN_VLAN_BASE" = "$WAN_IF" ]; then
     fi
 fi
 
+# Bug: a LAN-mode VLAN (admin panel > Network > VLAN Management) only ever
+# got created when network_mode=standalone, as part of that mode's own full
+# network stack setup below. In mikrotik/router mode, the row sat in the
+# database completely unused - the UI promises "no need to SSH in and run
+# anything manually," but nothing ever actually tagged this server's own
+# traffic, silently breaking any shared-wire VLAN setup (e.g. a server VM
+# tagging its own traffic to share one cable with another lane, per
+# ROUTER_MODE_PLAN.md's flexible-VLAN topology). Interface creation now
+# always runs when a LAN VLAN row exists, regardless of mode; each mode
+# then does its own thing with that same interface below.
+LAN_VIF="$LAN_IF"
+if [ -n "$LAN_VLAN_ID" ] && [ "$LAN_VLAN_BASE" = "$LAN_IF" ]; then
+    LAN_VIF="${LAN_IF}.${LAN_VLAN_ID}"
+    ip link set $LAN_IF up
+    ip link add link $LAN_IF name $LAN_VIF type vlan id $LAN_VLAN_ID 2>/dev/null || true
+    ip link set $LAN_VIF up
+    echo "VLAN: $LAN_VIF (id $LAN_VLAN_ID) on $LAN_IF" >> $LOG
+fi
+
+if [ "$NETWORK_MODE" = "mikrotik" ] && [ "$LAN_VIF" != "$LAN_IF" ]; then
+    # Router mode: this server is just another device on the MikroTik's
+    # network - it doesn't run its own gateway/DHCP/firewall (the MikroTik
+    # does all of that, see the mikrotik-mode branch further below). All it
+    # needs on the tagged interface is an address, the same way WAN_VIF gets
+    # one above when the ISP requires a tagged uplink.
+    pkill -f "dhclient.*$LAN_VIF" 2>/dev/null || true
+    dhclient -nw $LAN_VIF >> $LOG 2>&1 || true
+    echo "LAN VLAN ($LAN_VIF): requesting DHCP from router" >> $LOG
+fi
+
 # ── STOP NODOGSPLASH COMPLETELY ───────────────────────────────
 pkill nodogsplash 2>/dev/null || true
 systemctl stop nodogsplash 2>/dev/null || true
@@ -132,23 +162,12 @@ echo "nodogsplash chains cleaned" >> $LOG
 # our own address the normal way.
 if [ "$NETWORK_MODE" = "standalone" ]; then
 
-  # Bug: some setups run the ISP modem, this board, and the WiFi access
-  # point(s) all off one shared unmanaged switch, with the AP(s) tagging
-  # customer traffic with an 802.1Q VLAN ID to keep it separate from the
-  # ISP's untagged traffic on the same wire. Previously this script only
-  # ever bound everything to the raw physical interface, which can't tell
-  # tagged customer frames apart from the ISP's — with a VLAN ID configured,
-  # create a VLAN sub-interface and bind the gateway IP/dnsmasq/nftables/tc
-  # to that instead, leaving the physical interface itself untagged and
-  # unassigned (so the ISP's own untagged traffic is never touched by any
-  # of this).
-  LAN_VIF="$LAN_IF"
-  if [ -n "$LAN_VLAN_ID" ] && [ "$LAN_VLAN_BASE" = "$LAN_IF" ]; then
-    LAN_VIF="${LAN_IF}.${LAN_VLAN_ID}"
-    ip link set $LAN_IF up
-    ip link add link $LAN_IF name $LAN_VIF type vlan id $LAN_VLAN_ID 2>/dev/null || true
-    echo "VLAN: $LAN_VIF (id $LAN_VLAN_ID) on $LAN_IF" >> $LOG
-  fi
+  # LAN_VIF (and its VLAN sub-interface, if a LAN VLAN row exists) was
+  # already created above, ahead of the mode branches - some setups run the
+  # ISP modem, this board, and the WiFi access point(s) all off one shared
+  # unmanaged switch, with the AP(s) tagging customer traffic with an
+  # 802.1Q VLAN ID to keep it separate from the ISP's untagged traffic on
+  # the same wire.
 
   # ── CONFIGURE LAN ─────────────────────────────────────────────
   ip addr flush dev $LAN_VIF 2>/dev/null
@@ -167,11 +186,17 @@ if [ "$NETWORK_MODE" = "standalone" ]; then
   iptables -A FORWARD -i $WAN_VIF -o $LAN_VIF -m state \
       --state RELATED,ESTABLISHED -j ACCEPT
 
-  # Port 80 → 3000 for WAN side (admin access)
+  # Bug: WAN admin access used to be a straight port 80 -> 3000 redirect
+  # here, meaning the admin panel (default password, no TLS) was reachable
+  # in plaintext from the internet. nginx now owns ports 80/443 directly on
+  # all interfaces (setup/nginx.conf, installed by install.sh) — 80 redirects
+  # to 443, which terminates TLS and proxies to 127.0.0.1:3000. No PREROUTING
+  # redirect needed for WAN anymore; removing this rule doesn't affect the
+  # LAN captive portal, which reaches this app through the separate nftables
+  # DNAT rule below (LAN_VIF-scoped, still plain HTTP as required for
+  # captive-portal auto-detection).
   iptables -t nat -F PREROUTING 2>/dev/null
-  iptables -t nat -A PREROUTING -i $WAN_VIF -p tcp --dport 80 \
-      -j REDIRECT --to-port 3000
-  echo "iptables NAT configured" >> $LOG
+  echo "iptables NAT configured (WAN admin access now via nginx TLS, see nginx.conf)" >> $LOG
 
   # ── START DNSMASQ ─────────────────────────────────────────────
   sleep 1
@@ -277,6 +302,14 @@ NFTEOF
     tc qdisc add dev $LAN_VIF root handle 1: htb default 999 r2q 1
     tc class add dev $LAN_VIF parent 1: classid 1:999 htb rate 100mbit ceil 100mbit
     echo "tc root qdisc configured on $LAN_VIF" >> $LOG
+
+    # Ingress qdisc for per-client upload shaping (ROUTER_MODE_PLAN.md §12 -
+    # the root htb qdisc above only ever shaped download; per-client upload
+    # caps are enforced via police filters on this ingress qdisc, added by
+    # networkService.js's setClientBandwidth()/removeClientBandwidth()).
+    tc qdisc del dev $LAN_VIF ingress 2>/dev/null || true
+    tc qdisc add dev $LAN_VIF ingress
+    echo "tc ingress qdisc configured on $LAN_VIF" >> $LOG
 
 elif [ "$NETWORK_MODE" = "mikrotik" ]; then
     echo "MikroTik mode" >> $LOG

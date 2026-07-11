@@ -10,6 +10,7 @@ async function loadSecurity() {
     // Changing "Max Speed" here previously had zero real effect.
     setToggle('enableBandwidthCap', 'enableBandwidthCapLabel', data.enable_bandwidth_cap === '1');
     document.getElementById('maxMbps').value = data.bandwidth_cap_download_mbps || 5;
+    document.getElementById('maxUploadMbps').value = data.bandwidth_cap_upload_mbps || 5;
   } catch(e) {
     console.error('Security error:', e);
   }
@@ -42,15 +43,17 @@ function setMbps(val) {
 
 async function saveBandwidthSettings() {
   const maxMbps = parseInt(document.getElementById('maxMbps').value);
-  if (!maxMbps) {
-    showToast('Please enter valid Mbps', 'error');
+  const maxUploadMbps = parseInt(document.getElementById('maxUploadMbps').value);
+  if (!maxMbps || !maxUploadMbps) {
+    showToast('Please enter valid Mbps for both download and upload', 'error');
     return;
   }
   const enabled = document.getElementById('enableBandwidthCap').checked;
   try {
     const data = await apiCall('POST', '/api/admin/spam-settings', {
       enable_bandwidth_cap: enabled ? '1' : '0',
-      bandwidth_cap_download_mbps: maxMbps
+      bandwidth_cap_download_mbps: maxMbps,
+      bandwidth_cap_upload_mbps: maxUploadMbps
     });
     if (data.success) showToast('Bandwidth settings saved!', 'success');
     else showToast('Failed to save', 'error');

@@ -59,13 +59,23 @@
       </div>
       <small style="color:var(--text-muted);">When off, clients get full unshaped speed.</small>
     </div>
-    <div class="form-group">
-      <label class="form-label">Max Speed Per Client (Mbps)</label>
-      <input type="number" id="maxMbps" class="form-control"
-             placeholder="5" min="1" max="100">
-      <small style="color:var(--text-muted);font-size:12px;">
-        Maximum speed per WiFi client while the cap above is enabled (default: 5 Mbps)
-      </small>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Download Speed Per Client (Mbps)</label>
+        <input type="number" id="maxMbps" class="form-control"
+               placeholder="5" min="1" max="100">
+        <small style="color:var(--text-muted);font-size:12px;">
+          Maximum download speed per WiFi client while the cap above is enabled (default: 5 Mbps)
+        </small>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Upload Speed Per Client (Mbps)</label>
+        <input type="number" id="maxUploadMbps" class="form-control"
+               placeholder="5" min="1" max="100">
+        <small style="color:var(--text-muted);font-size:12px;">
+          Maximum upload speed per WiFi client while the cap above is enabled (default: 5 Mbps)
+        </small>
+      </div>
     </div>
     <div style="background:var(--bg-primary);border-radius:10px;padding:14px;margin-bottom:16px;">
       <div style="font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px;">RECOMMENDED LIMITS</div>

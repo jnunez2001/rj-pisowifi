@@ -5,11 +5,13 @@ const {
   getSessionByMac,
   createSession
 } = require('../services/sessionService');
+const { logFinancialEvent } = require('../services/financialLogService');
 
-// No reverse proxy sits in front of this server (setup/nginx.conf is an
-// unused empty placeholder), so the real client IP is the raw socket
-// address — the portal always sent '' as req.body.ip, which made every
-// promo-redeemed session's stored ip_address useless.
+// Promo redemption is a LAN-only flow — nftables DNATs it straight to this
+// app, bypassing nginx (setup/nginx.conf, WAN admin access only) entirely —
+// so the real client IP is the raw socket address. The portal always sent
+// '' as req.body.ip, which made every promo-redeemed session's stored
+// ip_address useless.
 function getRealClientIp(req) {
   const raw = req.connection.remoteAddress || req.socket.remoteAddress || '';
   return raw.replace('::ffff:', '').trim();
@@ -105,10 +107,11 @@ router.post('/redeem', async (req, res) => {
 
     // Log transaction
     db.prepare(`
-      INSERT INTO transactions 
+      INSERT INTO transactions
       (voucher_code, coin_value, minutes_added, type)
       VALUES (?, ?, ?, 'promo')
     `).run(session.voucher_code, promo.price || 0, minutes);
+    logFinancialEvent({ voucher_code: session.voucher_code, coin_value: promo.price || 0, minutes_added: minutes, type: 'promo', mac, promo_code: normalized });
 
     console.log(`🎫 Promo redeemed: ${normalized} for ${mac}`);
 

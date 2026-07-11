@@ -8,6 +8,7 @@ const {
   expireSession
 } = require('../services/sessionService');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
+const { logFinancialEvent } = require('../services/financialLogService');
 const sseService = require('../services/sseService');
 
 // This server has no reverse proxy in front of it (confirmed: setup/nginx.conf
@@ -380,6 +381,7 @@ router.post('/free-claim', async (req, res) => {
       INSERT INTO transactions (voucher_code, coin_value, minutes_added, type)
       VALUES (?, 0, ?, 'free')
     `).run(session.voucher_code, freeMinutes);
+    logFinancialEvent({ voucher_code: session.voucher_code, coin_value: 0, minutes_added: freeMinutes, type: 'free', mac });
 
     console.log(`🎁 Free ${freeMinutes} mins claimed by ${mac} → ${session.voucher_code}`);
 

@@ -95,12 +95,14 @@ function isAuthenticated(ip) {
 }
 
 function getClientIp(req) {
-  // No reverse proxy sits in front of this server (setup/nginx.conf is an
-  // unused empty placeholder) — clients hit Express directly, so
-  // x-forwarded-for is a client-suppliable header, not a trustworthy one.
-  // Any device could spoof it to another device's IP and have this resolve
-  // to that device's MAC via getMacFromIp() below. Use the raw socket
-  // address, which the client cannot set.
+  // LAN captive-portal traffic (what this function is for) never passes
+  // through nginx — nftables DNATs it straight to this app (setup-network.sh)
+  // before any other process on the box sees it. Only WAN admin access goes
+  // through nginx now (setup/nginx.conf). So for these LAN-only routes,
+  // x-forwarded-for is still a client-suppliable header, not a trustworthy
+  // one — any device could spoof it to another device's IP and have this
+  // resolve to that device's MAC via getMacFromIp() below. Use the raw
+  // socket address, which the client cannot set.
   const raw = req.connection.remoteAddress ||
               req.socket.remoteAddress || '';
   return raw.replace('::ffff:', '').trim();
@@ -110,6 +112,31 @@ function getClientIp(req) {
 
 app.get('/', (req, res) => {
   res.redirect('/portal/');
+});
+
+// Router mode's "Configure" step (mikrotikProvisioner.js) makes the
+// MikroTik fetch this page and use it as the Hotspot's own login.html,
+// replacing MikroTik's default built-in login screen. Bug this fixes:
+// without it, a newly-connected customer would see MikroTik's generic
+// login page first, not this app's portal — contradicting the explicit
+// design (customers should never see MikroTik's own login screen). Uses a
+// relative redirect target on purpose: the browser loaded this page from
+// whatever host/port actually served it, so "/portal/" resolves correctly
+// without needing to bake a specific IP into the file.
+app.get('/hotspot-login', (req, res) => {
+  res.set('Content-Type', 'text/html');
+  res.send(`<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta http-equiv="refresh" content="0;url=/portal/">
+<title>Redirecting...</title>
+<script>window.location.href = "/portal/";</script>
+</head>
+<body>
+<p>Redirecting to the portal... <a href="/portal/">Click here if nothing happens</a>.</p>
+</body>
+</html>`);
 });
 
 app.get('/generate_204', (req, res) => {

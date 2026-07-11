@@ -37,6 +37,38 @@
   </div>
 </div>
 
+<!-- TRUSTED DEVICES -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-shield-alt" style="margin-right:8px;color:var(--accent-blue);"></i>Trusted Devices
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Always online, never gated behind payment</span>
+    <button class="btn btn-sm btn-primary" style="margin-left:auto;" onclick="addTrustedDevice()">
+      <i class="fas fa-plus"></i> Add Trusted Device
+    </button>
+  </div>
+  <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
+    <i class="fas fa-info-circle"></i>
+    Use this for hardware that needs internet access at all times, like a coin-slot device sharing WiFi with paying
+    customers. A trusted device skips the payment screen completely and this stays in effect even after a reboot.
+  </div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Label</th>
+          <th>MAC Address</th>
+          <th style="text-align:right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="trustedDevicesTable">
+        <tr><td colspan="3" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 <!-- DEVICE STATS -->
 <div class="grid-2" style="margin-top:20px;">
   <div class="card">

@@ -45,6 +45,8 @@ const upload = multer({
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const { hashPassword, verifyPassword } = require('../utils/passwordHash');
+const { encryptSecret } = require('../utils/secretCrypto');
 const { getActiveSessions, expireSession, pauseSession, resumeSession } = require('../services/sessionService');
 const { getRates } = require('../services/voucherService');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
@@ -54,8 +56,20 @@ const { exec, execSync, execFile } = require('child_process');
 // No reverse proxy sits in front of this server (setup/nginx.conf is an
 // unused empty placeholder), so the raw socket address is the real client IP.
 function getRealClientIp(req) {
-  const raw = req.connection.remoteAddress || req.socket.remoteAddress || '';
-  return raw.replace('::ffff:', '').trim();
+  const raw = (req.connection.remoteAddress || req.socket.remoteAddress || '')
+    .replace('::ffff:', '').trim();
+  // WAN admin access now goes through nginx (setup/nginx.conf), which always
+  // connects from loopback and sets X-Forwarded-For to the real client IP.
+  // Only trust that header when the TCP connection itself is from loopback —
+  // a remote attacker can set whatever X-Forwarded-For they like, but they
+  // cannot make their own raw socket connection originate from 127.0.0.1,
+  // so this can't be spoofed by anyone except nginx itself. LAN clients
+  // (never proxied — DNAT'd straight to this app) fall through to raw below.
+  if (raw === '127.0.0.1' || raw === '::1') {
+    const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (forwarded) return forwarded;
+  }
+  return raw;
 }
 
 // Admin auth middleware
@@ -78,7 +92,7 @@ function adminAuth(req, res, next) {
   const settings = db.prepare(
     "SELECT value FROM settings WHERE key = 'admin_password'"
   ).get();
-  if (!password || !settings || password !== settings.value) {
+  if (!password || !settings || !verifyPassword(password, settings.value)) {
     recordAttempt(`admin-auth:${ip}`);
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
@@ -616,6 +630,24 @@ router.post('/settings', adminAuth, (req, res) => {
     const updates = req.body;
     const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
     for (const [key, value] of Object.entries(updates)) {
+      if (key === 'admin_password') {
+        // Never store the raw password (Bug: was plaintext at rest).
+        // Setting a new one always counts as satisfying the forced-change
+        // requirement, whether this is the first change or a routine one.
+        upsert.run('admin_password', hashPassword(String(value)));
+        upsert.run('must_change_password', '0');
+        continue;
+      }
+      if (key === 'mikrotik_pass') {
+        // Router credentials have real resale value here — never store raw
+        // (Bug: was plaintext at rest, same class as admin_password above).
+        // Blank means "leave current value alone" (matches the frontend's
+        // "leave blank to keep current" pattern for admin_password).
+        if (String(value) !== '') {
+          upsert.run('mikrotik_pass', encryptSecret(String(value)));
+        }
+        continue;
+      }
       upsert.run(key, String(value));
     }
     console.log('⚙️ Settings updated:', Object.keys(updates).join(', '));
@@ -1032,6 +1064,85 @@ router.get('/vendos', adminAuth, (req, res) => {
   }
 });
 
+// ===== TRUSTED DEVICES =====
+// Devices that should always have internet access, never gated behind
+// payment (see database.js's trusted_devices table comment for why this
+// exists — a coin-slot ESP32 sharing WiFi with paying customers because
+// the access point can't reliably tag a second SSID onto its own VLAN,
+// bugslog.md Bug #78). Trusting a device calls the same allowClient()
+// bypass a paid session uses, works identically in both standalone and
+// router mode since networkService.js already picks the right backend.
+
+// GET /api/admin/trusted-devices
+router.get('/trusted-devices', adminAuth, (req, res) => {
+  try {
+    const devices = db.prepare('SELECT * FROM trusted_devices ORDER BY created_at DESC').all();
+    return res.json({ success: true, devices });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/trusted-devices
+router.post('/trusted-devices', adminAuth, async (req, res) => {
+  try {
+    const { mac_address, label } = req.body;
+    const mac = String(mac_address || '').trim().toLowerCase();
+    if (!/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac)) {
+      return res.status(400).json({ success: false, message: 'Invalid MAC address' });
+    }
+
+    const existing = db.prepare('SELECT id FROM trusted_devices WHERE mac_address = ?').get(mac);
+    if (existing) {
+      return res.status(409).json({ success: false, message: 'This device is already trusted' });
+    }
+
+    const result = db.prepare(
+      'INSERT INTO trusted_devices (mac_address, label) VALUES (?, ?)'
+    ).run(mac, String(label || '').trim());
+
+    const { allowClient } = require('../services/networkService');
+    try {
+      await allowClient(mac);
+    } catch (err) {
+      // Row is saved either way — timerService.js's boot-time restore will
+      // retry the actual bypass later (e.g. router unreachable right now).
+      console.error('Trusted device saved but bypass failed to apply immediately:', err.message);
+    }
+
+    console.log(`🔓 Trusted device added: ${mac} (${label || 'no label'})`);
+    return res.json({ success: true, id: result.lastInsertRowid });
+  } catch (err) {
+    console.error('Trusted device add error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// DELETE /api/admin/trusted-devices/:id
+router.delete('/trusted-devices/:id', adminAuth, async (req, res) => {
+  try {
+    const device = db.prepare('SELECT * FROM trusted_devices WHERE id = ?').get(req.params.id);
+    if (!device) {
+      return res.status(404).json({ success: false, message: 'Trusted device not found' });
+    }
+
+    db.prepare('DELETE FROM trusted_devices WHERE id = ?').run(req.params.id);
+
+    const { blockClient } = require('../services/networkService');
+    try {
+      await blockClient(device.mac_address);
+    } catch (err) {
+      console.error('Trusted device removed from list but revoking access failed:', err.message);
+    }
+
+    console.log(`🔒 Trusted device removed: ${device.mac_address}`);
+    return res.json({ success: true, message: 'Trusted device removed' });
+  } catch (err) {
+    console.error('Trusted device remove error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/check-update
 router.get('/check-update', adminAuth, async (req, res) => {
   try {
@@ -1376,6 +1487,218 @@ router.delete('/network/vlans/:id', adminAuth, (req, res) => {
   } catch (err) {
     console.error('VLAN delete error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ===== ROUTER MODE (MikroTik) — ROUTER_MODE_PLAN.md Stage 3 =====
+
+// GET /api/admin/router/ports — live-scans the router's actual physical
+// ports (no hardcoded model list) and returns every saved lane definition
+// alongside them. A physical port can carry more than one lane (an
+// untagged one plus any number of VLAN-tagged ones sharing the same
+// wire), so this returns two separate lists rather than merging them into
+// one row per port the way earlier versions did.
+router.get('/router/ports', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    const livePorts = await mikrotikService.getRouterPorts();
+    const physical_ports = livePorts.map((p) => ({
+      name: p.name, mac: p.mac, running: p.running, disabled: p.disabled,
+    }));
+
+    const lanes = db.prepare('SELECT * FROM router_ports ORDER BY port_name, vlan_id').all().map((l) => ({
+      id: l.id,
+      port_name: l.port_name,
+      vlan_id: l.vlan_id || 0,
+      role: l.role,
+      lane_name: l.lane_name,
+      speed_mbps: l.speed_mbps,
+      burst_mbps: l.burst_mbps,
+      isolate_clients: !!l.isolate_clients,
+      bridge_with_id: l.bridge_with_id,
+    }));
+
+    const planSetting = db.prepare("SELECT value FROM settings WHERE key = 'isp_plan_mbps'").get();
+    // A lane joined to another one (bridge_with_id set) doesn't carry its
+    // own speed - it inherits the primary's - so it must not be counted
+    // a second time here.
+    const guaranteedTotal = lanes.reduce((sum, l) => sum + (l.role !== 'unused' && l.role !== 'wan' && !l.bridge_with_id ? (l.speed_mbps || 0) : 0), 0);
+
+    return res.json({
+      success: true,
+      physical_ports,
+      lanes,
+      isp_plan_mbps: planSetting ? parseInt(planSetting.value, 10) || 0 : 0,
+      guaranteed_total_mbps: guaranteedTotal,
+    });
+  } catch (err) {
+    console.error('Router ports scan error:', err.message);
+    res.status(500).json({ success: false, message: err.message || 'Failed to reach router' });
+  }
+});
+
+// POST /api/admin/router/ports — replaces the full set of saved lane
+// definitions with exactly what's submitted (so removing a lane in the UI
+// actually removes it here too, not just orphans it).
+// Body: { lanes: [{ port_name, vlan_id, role, lane_name, speed_mbps,
+// burst_mbps, isolate_clients, bridge_with_port, bridge_with_vlan }, ...] }
+// bridge_with_port/vlan identifies another lane in the SAME request this
+// one joins (e.g. a VLAN-tagged lane on one port joining an untagged lane
+// on a different port) - kept flat on purpose, a lane can join a primary,
+// but a primary that's itself joining something else isn't allowed, so
+// there's never a chain to resolve.
+router.post('/router/ports', adminAuth, (req, res) => {
+  try {
+    const { lanes } = req.body;
+    if (!Array.isArray(lanes)) {
+      return res.status(400).json({ success: false, message: 'lanes array required' });
+    }
+    const validRoles = ['wan', 'gated', 'open', 'unused'];
+    const keyOf = (l) => `${l.port_name}::${parseInt(l.vlan_id, 10) || 0}`;
+    const byKey = new Map(lanes.map((l) => [keyOf(l), l]));
+
+    for (const l of lanes) {
+      if (!l.port_name || !validRoles.includes(l.role)) {
+        return res.status(400).json({ success: false, message: `Invalid lane entry: ${JSON.stringify(l)}` });
+      }
+      if (l.bridge_with_port) {
+        const targetKey = `${l.bridge_with_port}::${parseInt(l.bridge_with_vlan, 10) || 0}`;
+        if (targetKey === keyOf(l)) {
+          return res.status(400).json({ success: false, message: `${l.port_name} (VLAN ${l.vlan_id || 'none'}) can't join its own lane` });
+        }
+        const target = byKey.get(targetKey);
+        if (!target) {
+          return res.status(400).json({ success: false, message: `${l.port_name} can't join ${l.bridge_with_port} (VLAN ${l.bridge_with_vlan || 'none'}): that lane isn't in this request` });
+        }
+        if (target.role === 'wan' || target.role === 'unused') {
+          return res.status(400).json({ success: false, message: `${l.port_name} can't join ${l.bridge_with_port}: that lane has no role (${target.role})` });
+        }
+        if (target.bridge_with_port) {
+          return res.status(400).json({ success: false, message: `${l.port_name} can't join ${l.bridge_with_port}: that lane is itself joined to another one. Join the other lane's primary instead.` });
+        }
+      }
+    }
+
+    const submittedKeys = lanes.map((l) => keyOf(l));
+    const deleteStale = db.prepare(`DELETE FROM router_ports WHERE (port_name || '::' || vlan_id) NOT IN (${submittedKeys.map(() => '?').join(',') || "''"})`);
+    if (submittedKeys.length > 0) deleteStale.run(...submittedKeys);
+    else db.prepare('DELETE FROM router_ports').run();
+
+    const upsert = db.prepare(`
+      INSERT INTO router_ports (port_name, vlan_id, role, lane_name, speed_mbps, burst_mbps, isolate_clients, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(port_name, vlan_id) DO UPDATE SET
+        role = excluded.role,
+        lane_name = excluded.lane_name,
+        speed_mbps = excluded.speed_mbps,
+        burst_mbps = excluded.burst_mbps,
+        isolate_clients = excluded.isolate_clients,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+    // First pass: every lane exists as a real row before any bridge_with_id
+    // can be resolved to a real id.
+    for (const l of lanes) {
+      upsert.run(
+        l.port_name,
+        parseInt(l.vlan_id, 10) || 0,
+        l.role,
+        String(l.lane_name || ''),
+        parseInt(l.speed_mbps, 10) || 0,
+        parseInt(l.burst_mbps, 10) || 0,
+        l.isolate_clients === false ? 0 : 1
+      );
+    }
+    // Second pass: resolve bridge_with_port/vlan into a real row id now
+    // that every lane in this batch definitely has one.
+    const findId = db.prepare('SELECT id FROM router_ports WHERE port_name = ? AND vlan_id = ?');
+    const setBridge = db.prepare('UPDATE router_ports SET bridge_with_id = ? WHERE port_name = ? AND vlan_id = ?');
+    for (const l of lanes) {
+      const vlanId = parseInt(l.vlan_id, 10) || 0;
+      if (l.bridge_with_port) {
+        const target = findId.get(l.bridge_with_port, parseInt(l.bridge_with_vlan, 10) || 0);
+        setBridge.run(target ? target.id : null, l.port_name, vlanId);
+      } else {
+        setBridge.run(null, l.port_name, vlanId);
+      }
+    }
+
+    return res.json({ success: true, message: 'Port roles saved' });
+  } catch (err) {
+    console.error('Router ports save error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/router/status — live status card, read straight from the
+// router (ROUTER_MODE_PLAN.md §4.7), not our own database.
+router.get('/router/status', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    const status = await mikrotikService.getLiveStatus();
+    return res.json({ success: true, status });
+  } catch (err) {
+    console.error('Router status error:', err.message);
+    res.status(500).json({ success: false, message: err.message || 'Failed to reach router' });
+  }
+});
+
+// POST /api/admin/router/test-connection
+router.post('/router/test-connection', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    await mikrotikService.testConnection();
+    return res.json({ success: true, message: 'Connected' });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message || 'Connection failed' });
+  }
+});
+
+// GET /api/admin/router/local-interfaces — this server's own network
+// connections, so the admin can pick which one is on the gated lane
+// (Bug: auto-guessing this on a multi-NIC machine could reserve the wrong
+// device's address, silently breaking the walled-garden fixed-address
+// guarantee — see mikrotikProvisioner.js's getOwnMac()).
+router.get('/router/local-interfaces', adminAuth, (req, res) => {
+  try {
+    const provisioner = require('../services/mikrotikProvisioner');
+    const interfaces = provisioner.listLocalInterfaces();
+    return res.json({ success: true, interfaces });
+  } catch (err) {
+    console.error('Local interfaces list error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/router/provision/preview — shows exactly what "Configure"
+// would run, without touching the router (ROUTER_MODE_PLAN.md §4.6).
+router.get('/router/provision/preview', adminAuth, async (req, res) => {
+  try {
+    const provisioner = require('../services/mikrotikProvisioner');
+    const preview = await provisioner.preview();
+    return res.json({ success: true, ...preview });
+  } catch (err) {
+    console.error('Provision preview error:', err.message);
+    res.status(500).json({ success: false, message: err.message || 'Failed to build preview' });
+  }
+});
+
+// POST /api/admin/router/provision/apply — the actual "Configure" action.
+// Always backs up the router's current config first, stops immediately on
+// the first failed step rather than pushing a half-applied config further.
+router.post('/router/provision/apply', adminAuth, async (req, res) => {
+  try {
+    const provisioner = require('../services/mikrotikProvisioner');
+    const result = await provisioner.apply();
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('Provision apply error:', err.message);
+    res.status(500).json({
+      success: false,
+      message: err.message || 'Provisioning failed',
+      log: err.log || [],
+      warnings: err.warnings || [],
+      backedUp: !!err.backedUp,
+    });
   }
 });
 

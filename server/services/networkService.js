@@ -129,7 +129,21 @@ function getLanInterface() {
   }
 }
 
-function setClientBandwidth(mac, mbps) {
+// Bug (ROUTER_MODE_PLAN.md §12): this only ever shaped one direction -
+// the root htb qdisc + dst_mac filter below caps traffic going TO the
+// client (download), but nothing capped traffic FROM the client (upload).
+// bandwidth_cap_upload_mbps existed as a setting with its own admin UI
+// field, but nothing ever read it or enforced it - a customer's real
+// upload speed was silently whatever the download cap said.
+//
+// Fix: upload is capped separately via an ingress qdisc + police filter on
+// the same LAN interface (setup-network.sh creates the ingress qdisc once;
+// per-client, this file adds/replaces a police filter matched by src_mac -
+// preserved because this is still the LAN segment, before any routing
+// rewrites it). "police... drop" simply drops packets over the rate rather
+// than queueing them (ingress traffic can't be queued the way htb queues
+// egress), which is the standard way to rate-limit inbound traffic with tc.
+function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps) {
   let normalizedMac;
   try {
     normalizedMac = normalizeMac(mac);
@@ -138,27 +152,29 @@ function setClientBandwidth(mac, mbps) {
     return Promise.resolve();
   }
 
-  const speed = parseInt(mbps, 10);
-  if (!Number.isFinite(speed) || speed <= 0) {
-    console.error(`[TC] Invalid bandwidth for ${normalizedMac}: ${mbps}`);
+  const download = parseInt(downloadMbps, 10);
+  const upload = parseInt(uploadMbps, 10);
+  if (!Number.isFinite(download) || download <= 0 || !Number.isFinite(upload) || upload <= 0) {
+    console.error(`[TC] Invalid bandwidth for ${normalizedMac}: down=${downloadMbps} up=${uploadMbps}`);
     return Promise.resolve();
   }
 
   if (isMikrotikMode()) {
-    return require('./mikrotikService').setClientBandwidth(normalizedMac, speed);
+    return require('./mikrotikService').setClientBandwidth(normalizedMac, download, upload);
   }
 
   return new Promise((resolve) => {
     const classId = macToClassId(normalizedMac);
     const lanIf = getLanInterface();
     const cmds = [
-      `sudo tc class replace dev ${lanIf} parent 1: classid 1:${classId} htb rate ${speed}mbit ceil ${speed}mbit burst 32k cburst 32k quantum 15000`,
-      `sudo tc filter replace dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_mac ${normalizedMac} classid 1:${classId}`
+      `sudo tc class replace dev ${lanIf} parent 1: classid 1:${classId} htb rate ${download}mbit ceil ${download}mbit burst 32k cburst 32k quantum 15000`,
+      `sudo tc filter replace dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_mac ${normalizedMac} classid 1:${classId}`,
+      `sudo tc filter replace dev ${lanIf} parent ffff: protocol ip prio 1 flower src_mac ${normalizedMac} action police rate ${upload}mbit burst 32k drop`
     ];
 
     exec(cmds.join(' && '), (error) => {
       if (error) console.error(`[TC] Failed to shape ${normalizedMac}:`, error.message);
-      else console.log(`[TC] Shaped ${normalizedMac} to ${speed}mbit (class 1:${classId})`);
+      else console.log(`[TC] Shaped ${normalizedMac} to ${download}mbit down / ${upload}mbit up (class 1:${classId})`);
       resolve();
     });
   });
@@ -182,7 +198,8 @@ function removeClientBandwidth(mac) {
     const lanIf = getLanInterface();
     exec(
       `sudo tc filter del dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_mac ${normalizedMac} classid 1:${classId}; ` +
-      `sudo tc class del dev ${lanIf} classid 1:${classId}`,
+      `sudo tc class del dev ${lanIf} classid 1:${classId}; ` +
+      `sudo tc filter del dev ${lanIf} parent ffff: protocol ip prio 1 flower src_mac ${normalizedMac}`,
       (error, stdout, stderr) => {
         // Log errors instead of suppressing (Bug #38)
         if (error) {

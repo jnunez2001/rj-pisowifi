@@ -36,6 +36,7 @@ apt install -y \
   iptables iptables-persistent netfilter-persistent \
   avahi-daemon avahi-utils \
   python3 \
+  nginx openssl \
   >> $LOG 2>&1
 
 # ─── 4. NODE.JS 20 ───────────────────────────────────────────
@@ -117,9 +118,22 @@ systemctl daemon-reload >> $LOG 2>&1 || true
 
 # ─── 7. CREATE NEEDED FOLDERS ────────────────────────────────
 echo "Creating folders..." | tee -a $LOG
-mkdir -p $APP_DIR/server/database
 mkdir -p $APP_DIR/public/uploads
 chown -R $USER:$USER $APP_DIR
+
+# Data storage lives outside $APP_DIR on purpose (Bug: DB used to sit inside
+# the app's own repo tree — an OS reflash or a careless `git clean` in the
+# app dir could take live customer/session data with it). One-time migration
+# below moves an existing DB from the old in-repo location if this is a
+# re-run of install.sh on a box that predates this change; safe/idempotent
+# on fresh installs since there's nothing to move.
+DATA_DIR="/var/lib/rj-pisowifi"
+mkdir -p $DATA_DIR/database $DATA_DIR/logs
+if [ -f "$APP_DIR/server/database/rjpisowifi.db" ] && [ ! -f "$DATA_DIR/database/rjpisowifi.db" ]; then
+  echo "Migrating existing database to $DATA_DIR/database ..." | tee -a $LOG
+  mv $APP_DIR/server/database/rjpisowifi.db* $DATA_DIR/database/ 2>/dev/null || true
+fi
+chown -R $USER:$USER $DATA_DIR
 
 # ─── 8. NPM INSTALL ──────────────────────────────────────────
 echo "[6/8] Installing Node packages..." | tee -a $LOG
@@ -144,6 +158,8 @@ ExecStart=/usr/bin/node server/app.js
 Restart=always
 RestartSec=5
 Environment=NODE_ENV=production
+Environment=DB_PATH=$DATA_DIR/database/rjpisowifi.db
+Environment=FINANCIAL_LOG_DIR=$DATA_DIR/logs
 
 [Install]
 WantedBy=multi-user.target
@@ -167,6 +183,31 @@ systemctl daemon-reload >> $LOG 2>&1
 systemctl enable rj-pisowifi >> $LOG 2>&1
 systemctl enable rj-network-setup >> $LOG 2>&1
 echo "Services installed" | tee -a $LOG
+
+# ─── 9b. NGINX + TLS (WAN admin access) ──────────────────────
+echo "Configuring nginx TLS front door..." | tee -a $LOG
+
+mkdir -p /etc/rj-pisowifi/tls
+# Self-signed — there's no public domain for this box. Still strictly
+# better than the plaintext admin access this replaces (see setup-network.sh
+# comment on the removed WAN port80->3000 redirect). Only generated once;
+# re-running install.sh doesn't churn the cert or invalidate a browser's
+# saved exception for it.
+if [ ! -f /etc/rj-pisowifi/tls/fullchain.pem ]; then
+  openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+    -keyout /etc/rj-pisowifi/tls/privkey.pem \
+    -out /etc/rj-pisowifi/tls/fullchain.pem \
+    -subj "/CN=rjcyberzone.local" >> $LOG 2>&1
+fi
+chmod 600 /etc/rj-pisowifi/tls/privkey.pem
+
+cp $SETUP_DIR/nginx.conf /etc/nginx/sites-available/rj-pisowifi
+ln -sf /etc/nginx/sites-available/rj-pisowifi /etc/nginx/sites-enabled/rj-pisowifi
+rm -f /etc/nginx/sites-enabled/default
+nginx -t >> $LOG 2>&1
+systemctl enable nginx >> $LOG 2>&1
+systemctl restart nginx >> $LOG 2>&1
+echo "nginx configured" | tee -a $LOG
 
 # ─── 10. SUDOERS + AVAHI ─────────────────────────────────────
 echo "[8/8] Final setup..." | tee -a $LOG
@@ -221,6 +262,7 @@ systemctl start rj-pisowifi
 echo "" | tee -a $LOG
 echo "=============================================" | tee -a $LOG
 echo " R&J PisoWifi installed successfully!" | tee -a $LOG
-echo " Admin: http://rjcyberzone.local/admin" | tee -a $LOG
+echo " LAN admin access: http://rjcyberzone.local/admin" | tee -a $LOG
 echo " Or: http://$(hostname -I | awk '{print $1}')/admin" | tee -a $LOG
+echo " WAN admin access (TLS, self-signed cert): https://<this box's WAN IP>/admin" | tee -a $LOG
 echo "=============================================" | tee -a $LOG

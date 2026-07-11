@@ -15,6 +15,7 @@ const sseService = require('./sseService');
 let settingCache = {
   enable_bandwidth_cap: null,
   bandwidth_cap_download_mbps: null,
+  bandwidth_cap_upload_mbps: null,
   last_check: 0
 };
 const SETTING_CACHE_TTL = 60000; // 1 minute
@@ -37,6 +38,21 @@ function getMaxMbps() {
     settingCache.last_check = now;
   }
   return settingCache.bandwidth_cap_download_mbps;
+}
+
+// Bug (ROUTER_MODE_PLAN.md §12): bandwidth_cap_upload_mbps existed as a
+// setting and was editable from the admin UI, but nothing ever read it -
+// every setClientBandwidth() call only ever passed the download number,
+// applied to both directions. Customers' actual upload speed was silently
+// whatever the download cap said, not what the upload field promised.
+function getMaxUploadMbps() {
+  const now = Date.now();
+  if (settingCache.bandwidth_cap_upload_mbps === null || now - settingCache.last_check > SETTING_CACHE_TTL) {
+    const value = db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_upload_mbps'").get()?.value || '5';
+    settingCache.bandwidth_cap_upload_mbps = parseInt(value, 10) || 5;
+    settingCache.last_check = now;
+  }
+  return settingCache.bandwidth_cap_upload_mbps;
 }
 
 // Bug: mac_address is looked up with a case-sensitive exact match, but
@@ -96,8 +112,8 @@ async function createSession(mac, ip, minutes, expirationMinutes) {
     await allowClient(mac);
     console.log(`[Network] Internet unlocked for ${mac}`);
     if (isBandwidthCapEnabled()) {
-      await setClientBandwidth(mac, getMaxMbps());
-      console.log(`[Network] Bandwidth cap applied to ${mac}: ${getMaxMbps()} Mbps`);
+      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps());
+      console.log(`[Network] Bandwidth cap applied to ${mac}: ${getMaxMbps()}Mbps down / ${getMaxUploadMbps()}Mbps up`);
     } else {
       console.log(`[Network] Bandwidth cap disabled - allowing full speed for ${mac}`);
     }
@@ -142,7 +158,7 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
   try {
     await allowClient(mac);
     if (isBandwidthCapEnabled()) {
-      await setClientBandwidth(mac, getMaxMbps());
+      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps());
     }
   } catch(e) {}
 
@@ -213,8 +229,8 @@ async function resumeSession(voucherCode) {
     await allowClient(session.mac_address);
     console.log(`[Network] Internet unlocked for ${session.mac_address} (resumed)`);
     if (isBandwidthCapEnabled()) {
-      await setClientBandwidth(session.mac_address, getMaxMbps());
-      console.log(`[Network] Bandwidth cap reapplied to ${session.mac_address}: ${getMaxMbps()} Mbps`);
+      await setClientBandwidth(session.mac_address, getMaxMbps(), getMaxUploadMbps());
+      console.log(`[Network] Bandwidth cap reapplied to ${session.mac_address}: ${getMaxMbps()}Mbps down / ${getMaxUploadMbps()}Mbps up`);
     } else {
       console.log(`[Network] Bandwidth cap disabled - allowing full speed for ${session.mac_address}`);
     }

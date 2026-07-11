@@ -38,12 +38,12 @@ setups with dedicated networking hardware.</div>
 
     <div style="background:#fff8e1;border:1px solid #ffa000;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#e65100;">
       <i class="fas fa-exclamation-triangle"></i>
-      <strong> Before switching to MikroTik mode:</strong>
+      <strong> A few things to know before turning this on:</strong>
       <ul style="margin:6px 0 0 18px;padding:0;">
-        <li>Router must run <strong>RouterOS 7+</strong> with the REST API enabled (IP &rarr; Services &rarr; <code>www</code>, port 80 by default).</li>
-        <li>The Hotspot service must already be set up on the interface below, with a DHCP server bound to it (bandwidth limits are applied by IP, looked up from the client's DHCP lease, so a device that hasn't received an IP yet can't be shaped).</li>
-        <li>This mode grants access by adding a bypass <strong>IP binding</strong> for the paying device's MAC, not by logging it into MikroTik's own Hotspot page, so customers never see MikroTik's login screen.</li>
-        <li>Session timing is still enforced by this server, not the router, which only reflects allow/block state when told to.</li>
+        <li>Supports MikroTik routers on either RouterOS 6 or 7, including older or budget friendly models. More router brands may be supported in the future.</li>
+        <li>Your router's Hotspot service and DHCP server need to already be set up on the network you're connecting to. Bandwidth limits are applied per device once it has an IP address.</li>
+        <li>Customers go straight to your portal to pay and connect. They will never see the router's own login page.</li>
+        <li>This server still keeps track of session time and expiry. The router only reflects whether a device is currently allowed online.</li>
       </ul>
     </div>
 
@@ -66,11 +66,99 @@ setups with dedicated networking hardware.</div>
         <small style="color:var(--text-muted);">The interface EAP225 is connected to on MikroTik.</small>
       </div>
     </div>
+
+    <div class="form-group" style="display:flex;align-items:center;gap:8px;">
+      <input type="checkbox" id="mikrotikSsl" style="width:auto;">
+      <label for="mikrotikSsl" style="margin:0;">Use encrypted connection (requires api-ssl enabled on the router)</label>
+    </div>
+
+    <div class="form-group" id="serverLanMacGroup" style="display:none;">
+      <label class="form-label">Server's Network Connection</label>
+      <select id="serverLanMac" class="form-control"></select>
+      <small style="color:var(--text-muted);">This machine has more than one network connection. Pick the one that's plugged into your gated lane (for example, WiFi rental), so this server stays reachable at a fixed address and your portal link keeps working.</small>
+    </div>
+
+    <button type="button" class="btn btn-secondary" onclick="testMikrotikConnection()">
+      <i class="fas fa-plug"></i> Test Connection
+    </button>
+    <span id="mikrotikConnStatus" style="margin-left:10px;font-size:13px;"></span>
   </div>
 
   <button class="btn btn-primary" onclick="saveNetworkSettings()">
     <i class="fas fa-save"></i> Save Network Settings
   </button>
+</div>
+
+<!-- ROUTER MODE: YOUR INTERNET PLAN (mikrotik mode only) -->
+<div class="card" id="ispPlanCard" style="margin-top:20px;display:none;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-gauge-high" style="margin-right:8px;color:var(--accent-blue);"></i>Your Internet Plan
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Every warning below scales off this number, not a fixed default</span>
+  </div>
+  <div class="form-group" style="max-width:220px;">
+    <label class="form-label">Total Plan Speed (Mbps)</label>
+    <input type="number" id="ispPlanMbps" class="form-control" placeholder="e.g. 50" min="0">
+  </div>
+  <button class="btn btn-primary" onclick="saveIspPlan()">
+    <i class="fas fa-save"></i> Save
+  </button>
+</div>
+
+<!-- ROUTER MODE: PORTS AND ROLES (mikrotik mode only) -->
+<div class="card" id="routerPortsCard" style="margin-top:20px;display:none;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-ethernet" style="margin-right:8px;color:var(--accent-green);"></i>Ports and Roles
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Live-scanned from your router</span>
+    <button class="btn btn-primary" style="margin-left:auto;" onclick="loadRouterPorts()">
+      <i class="fas fa-rotate"></i> Rescan
+    </button>
+  </div>
+  <div id="routerPortsList">
+    <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+  </div>
+  <p id="routerPortsTotal" style="font-size:13px;margin-top:10px;"></p>
+  <button class="btn btn-primary" onclick="saveRouterPorts()">
+    <i class="fas fa-save"></i> Save Port Roles
+  </button>
+</div>
+
+<!-- ROUTER MODE: PROVISION (mikrotik mode only) -->
+<div class="card" id="routerProvisionCard" style="margin-top:20px;display:none;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-bolt" style="margin-right:8px;color:var(--accent-yellow);"></i>Provision This Router
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Backs up current config first, always</span>
+  </div>
+  <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+    Save your port roles above first. This applies everything to the router live, so preview what will happen before running it.
+  </p>
+  <div style="display:flex;gap:10px;">
+    <button class="btn btn-secondary" onclick="previewProvisioning()">
+      <i class="fas fa-eye"></i> Preview Changes
+    </button>
+    <button class="btn btn-primary" onclick="applyProvisioning()">
+      <i class="fas fa-bolt"></i> Configure
+    </button>
+  </div>
+  <div id="provisionResult" style="margin-top:16px;"></div>
+</div>
+
+<!-- ROUTER MODE: LIVE STATUS (mikrotik mode only) -->
+<div class="card" id="routerStatusCard" style="margin-top:20px;display:none;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-heart-pulse" style="margin-right:8px;color:var(--accent-red);"></i>Live Status
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Read directly from the router</span>
+  </div>
+  <div id="routerStatusGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
+    <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+  </div>
 </div>
 
 <!-- PHYSICAL INTERFACES -->
@@ -99,9 +187,8 @@ setups with dedicated networking hardware.</div>
   </div>
   <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
     <i class="fas fa-info-circle"></i>
-    Only needed if your ISP requires a VLAN-tagged connection, or your access point(s) tag customer WiFi traffic to
-    share one switch with your internet connection. Saving takes effect immediately, no need to SSH in and run
-    anything manually.
+    Use this if your ISP requires a VLAN tagged connection, or if you're sharing one cable between your internet
+    connection and an access point's customer WiFi traffic. Changes take effect right away after saving.
   </div>
   <div class="table-wrapper">
     <table>

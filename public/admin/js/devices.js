@@ -17,6 +17,7 @@ function isOnline(lastSeen) {
 }
 
 async function loadDevices() {
+  loadTrustedDevices();
   try {
     const data = await apiCall('GET', '/api/admin/vendos');
     const tbody = document.getElementById('devicesTable');
@@ -90,5 +91,64 @@ async function loadDevices() {
   }
 }
 
-// Auto refresh every 30 seconds
+async function loadTrustedDevices() {
+  try {
+    const data = await apiCall('GET', '/api/admin/trusted-devices');
+    const tbody = document.getElementById('trustedDevicesTable');
+    if (!tbody) return;
+
+    if (!data.success || !data.devices.length) {
+      tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">No trusted devices yet.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = data.devices.map(d => `
+      <tr>
+        <td>${escapeHtml(d.label || '--')}</td>
+        <td style="font-family:monospace;font-size:12px;color:var(--text-muted);">${escapeHtml(d.mac_address)}</td>
+        <td style="text-align:right;">
+          <button class="btn btn-sm btn-danger" onclick="removeTrustedDevice(${d.id})">
+            <i class="fas fa-trash"></i>
+          </button>
+        </td>
+      </tr>`).join('');
+  } catch (e) {
+    console.error('Trusted devices error:', e);
+  }
+}
+
+async function addTrustedDevice() {
+  const mac = prompt('MAC address of the device to trust (e.g. AA:BB:CC:DD:EE:FF):');
+  if (!mac) return;
+  const label = prompt('Label for this device (e.g. "Coin slot ESP32"):') || '';
+
+  try {
+    const data = await apiCall('POST', '/api/admin/trusted-devices', { mac_address: mac.trim(), label: label.trim() });
+    if (data.success) {
+      showToast('Device trusted!', 'success');
+      loadTrustedDevices();
+    } else {
+      showToast(data.message || 'Failed to add device', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
+  }
+}
+
+async function removeTrustedDevice(id) {
+  if (!confirm('Remove this trusted device? It will need to pay like any other customer afterward.')) return;
+  try {
+    const data = await apiCall('DELETE', `/api/admin/trusted-devices/${id}`);
+    if (data.success) {
+      showToast('Trusted device removed', 'success');
+      loadTrustedDevices();
+    } else {
+      showToast(data.message || 'Failed to remove device', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
+  }
+}
+
+// Auto refresh every 30 seconds (loadDevices also refreshes trusted devices)
 setInterval(loadDevices, 30000);

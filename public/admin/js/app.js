@@ -36,6 +36,21 @@ async function doLogin() {
     sessionStorage.setItem('rj_admin_user', username);
 
     showAdmin();
+
+    // Bug: default admin123 password shipped with no forced-change flow.
+    // must_change_password is set on first install (or migrated from an
+    // unchanged default) — send the admin straight to Settings to pick a
+    // real password instead of leaving it silently flagged in the DB.
+    if (data.settings?.must_change_password === '1') {
+      navigateTo('settings');
+      setTimeout(() => {
+        if (typeof showToast === 'function') {
+          showToast('Please set a new admin password before continuing.', 'error');
+        } else {
+          alert('Please set a new admin password before continuing.');
+        }
+      }, 300);
+    }
   } catch(e) {
     showLoginError('Cannot connect to server.');
   }

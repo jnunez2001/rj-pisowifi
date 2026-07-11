@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
+const { logFinancialEvent } = require('../services/financialLogService');
 
 // MAC address validation helper (Bug #27)
 function isValidMac(mac) {
@@ -149,10 +150,11 @@ router.post('/', async (req, res) => {
       const updated = await addTimeToSession(mac, totalMinutes, totalExpirationMinutes);
 
       db.prepare(`
-        INSERT INTO transactions 
+        INSERT INTO transactions
         (voucher_code, coin_value, minutes_added, type)
         VALUES (?, ?, ?, 'coin')
       `).run(existingSession.voucher_code, coin_value, totalMinutes);
+      logFinancialEvent({ voucher_code: existingSession.voucher_code, coin_value, minutes_added: totalMinutes, type: 'coin', mac });
 
       console.log(`💰 Added ${totalMinutes} mins to ${existingSession.voucher_code}`);
 
@@ -171,10 +173,11 @@ router.post('/', async (req, res) => {
       const session = await createSession(mac, ip || '', totalMinutes, totalExpirationMinutes);
 
       db.prepare(`
-        INSERT INTO transactions 
+        INSERT INTO transactions
         (voucher_code, coin_value, minutes_added, type)
         VALUES (?, ?, ?, 'coin')
       `).run(session.voucher_code, coin_value, totalMinutes);
+      logFinancialEvent({ voucher_code: session.voucher_code, coin_value, minutes_added: totalMinutes, type: 'coin', mac });
 
       console.log(`🆕 New session: ${session.voucher_code} for ${mac}`);
 
