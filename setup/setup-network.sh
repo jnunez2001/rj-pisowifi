@@ -1,6 +1,19 @@
 #!/bin/bash
 LOG="/var/log/rj-network-setup.log"
-DB="/home/rjcyberzone/rj-pisowifi/server/database/rjpisowifi.db"
+# Bug (found on real hardware, root cause of a whole night of "network mode
+# keeps reverting to standalone" confusion): this used to be hardcoded to
+# the app's old in-repo database path. The database was moved outside the
+# app directory a while back (server/config/database.js reads DB_PATH from
+# the environment, set by install.sh to /var/lib/rj-pisowifi/database/... for
+# the app's own systemd service) - but this script is invoked separately
+# (its own systemd service at boot, or a direct sudo call from the admin
+# panel), neither of which ever passed DB_PATH through. Every query below
+# was silently hitting an empty/nonexistent file the entire time, meaning
+# NETWORK_MODE always fell back to "standalone" and LAN_VLAN_ROW was always
+# empty, no matter what was actually saved in the real, correct database.
+# $DB_PATH here still respects the env var if it's ever actually passed
+# through in the future, falling back to the known real production path.
+DB="${DB_PATH:-/var/lib/rj-pisowifi/database/rjpisowifi.db}"
 GATEWAY_IP="10.0.0.1"
 
 echo "=== R&J Network Setup $(date) ===" >> $LOG
