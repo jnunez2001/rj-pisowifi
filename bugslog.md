@@ -1620,6 +1620,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #108 (HIGH, found on real hardware): per-client bandwidth cap was silently overridden by its own lane's wider queue
+
+- **File:** `server/services/mikrotikService.js`
+- **Reported:** with Bandwidth Control enabled (5Mbps down/up) and the MAC-case fix (Bug #107) deployed, the app correctly logged `📶 MikroTik bandwidth set` and the router showed a real `rj-<mac>` queue with `max-limit=5M/5M` - but the client's actual speed still wasn't capped.
+- **Cause:** `setClientBandwidth()` always added the per-client queue with no explicit ordering relative to its own lane's smart queue (`mikrotikProvisioner.js`'s `<bridge>-queue`, covering the whole subnet, e.g. `10.50.1.0/24`). RouterOS Simple Queues apply only the *first* matching queue in list order whenever two queues' targets overlap and aren't explicitly parent/child-linked. Since the lane's queue is created once during Configure (so it's always earlier in the list) and its /24 target already covers every client's individual /32 address, it always won the match - the per-client queue existed, looked correct, and was completely inert. This meant per-client bandwidth caps have never actually taken effect for anyone, in any session, the entire time router mode has existed.
+- **Fix:** look up the client's own lane queue (derived from the DHCP server name on their lease, `<bridge>-dhcp` → `<bridge>-queue`, matching `mikrotikProvisioner.js`'s own naming convention) and add the per-client queue with `place-before=<lane queue .id>`, so RouterOS evaluates the narrower per-client limit first.
+- **Verification status:** confirmed on real hardware that the underlying cause was correct (queue existed with the right numbers, but a speed test still hit full lane speed) and that `/queue/simple/print` on real hardware showed the exact list-order relationship (lane queue at index 1, per-client queue appended after at index 2) this fix addresses. Not yet re-confirmed end to end after deploying - the next session with bandwidth cap enabled, followed by an actual speed test, is what will finally prove the per-client limit is now the one being enforced.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

@@ -182,13 +182,39 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps) 
         console.log(`MikroTik: no DHCP lease found yet for ${mac}, skipping bandwidth`);
         return false;
       }
-      const ip = leaseRes.re[0].address;
+      const lease = leaseRes.re[0];
+      const ip = lease.address;
+
+      // Bug found on real hardware: this per-client queue was always added
+      // with no explicit ordering relative to its lane's own smart queue
+      // (mikrotikProvisioner.js's "<bridge>-queue", covering the whole
+      // subnet). RouterOS Simple Queues apply only the FIRST matching
+      // queue in list order when two queues' targets overlap and aren't
+      // explicitly parent/child-linked - since the lane queue already
+      // exists (created during Configure, so it's earlier in the list) and
+      // its /24 target already covers this client's /32 address, it always
+      // won, and the per-client cap silently never took effect for anyone,
+      // in any session, ever. Insert the per-client queue directly above
+      // its own lane's queue (via place-before) so the narrower per-client
+      // limit is what actually gets evaluated first. Lane name is derived
+      // from the DHCP server name on this lease ("<bridge>-dhcp"), matching
+      // mikrotikProvisioner.js's own naming convention exactly.
+      let placeBeforeId = null;
+      if (lease.server) {
+        const laneQueueName = lease.server.replace(/-dhcp$/, '-queue');
+        const laneQueueRes = await client.talk(['/queue/simple/print', `?name=${laneQueueName}`]);
+        if (laneQueueRes.re.length > 0) {
+          placeBeforeId = laneQueueRes.re[0]['.id'];
+        }
+      }
 
       // Remove any existing queue for this client first (avoid duplicates)
       await deleteQueue(client, mac);
 
-      await client.talk(['/queue/simple/add', `=name=${queueNameFor(mac)}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`]);
-      console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up`);
+      const words = ['/queue/simple/add', `=name=${queueNameFor(mac)}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`];
+      if (placeBeforeId) words.push(`=place-before=${placeBeforeId}`);
+      await client.talk(words);
+      console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up${placeBeforeId ? '' : ' (WARNING: could not find lane queue to place before - lane-wide limit may take priority)'}`);
       return true;
     });
   } catch (err) {
