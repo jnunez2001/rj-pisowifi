@@ -1590,6 +1590,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #105 (CRITICAL, found on real hardware): a gated lane's customers could never be MAC-detected at all, blocking both free minutes and the coin slot
+
+- **Files:** `server/app.js`, `server/routes/portal.js`, `server/services/mikrotikService.js`
+- **Reported:** on the WiFi-Rental lane, once the portal itself finally loaded, "Free Time" never appeared and coin insertion couldn't be tested - both features need a resolved client MAC before they'll do anything, and it was never arriving.
+- **Cause:** `getMacFromIp()` (duplicated in both `app.js` and `portal.js`) only ever checked this server's own local `ip neigh`/`arp` table and `dnsmasq.leases` file - both of which only have entries for devices on the *same Layer 2 segment* as this server. That's true for a lane sharing this server's own bridge (PC-Rental, which is why that lane "worked phenomenal" all night), but a gated lane on its own separate bridge (WiFi-Rental's VLAN) is a different broadcast domain entirely, reachable only by routing through the MikroTik - this server has zero L2 visibility into it, and local ARP/dnsmasq lookups could never find those clients' MACs no matter how many times a customer retried. Router mode also disables dnsmasq outright, removing that fallback for every lane, not just gated ones. Separately, `app.js`'s `isAuthenticated()` checked a local nftables set (`rj_piso allowed_macs`) that only ever exists in standalone mode - in router mode this always threw, was silently swallowed, and reported every client as unauthenticated regardless of real status.
+- **Fix:** added `mikrotikService.getMacFromIp(ip)`, which asks the router itself - as the actual gateway for every lane, its own DHCP lease table (`/ip/dhcp-server/lease/print`) always has the true IP-to-MAC mapping, regardless of which bridge the client is on. Both `app.js` and `portal.js`'s `getMacFromIp()` now check `network_mode` and route through the MikroTik in router mode instead of local lookups. Added `mikrotikService.isClientAllowed(mac)` (checks for a bypassed ip-binding) so `isAuthenticated()` has a real router-mode check instead of silently failing closed.
+- **Verification status:** confirmed on real hardware - a WiFi-Rental customer's MAC now resolves correctly through the router's lease table, and Free Time/coin-slot flows depend only on that resolution succeeding.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

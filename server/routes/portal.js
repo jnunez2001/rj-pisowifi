@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const { getRates } = require('../services/voucherService');
 const { execSync } = require('child_process');
+const mikrotikService = require('../services/mikrotikService');
 
 // Rate limiting for /detect endpoint (Bug #32)
 const detectRateLimit = new Map();
@@ -12,8 +13,18 @@ const DETECT_RATE_LIMIT_MS = 5000; // Allow 1 request per 5 seconds per IP
 const macResolutionCache = new Map();
 const MAC_CACHE_TTL_MS = 10000; // 10 seconds
 
-// Detect client MAC from IP using ARP table (with caching)
-function getMacFromIp(ip) {
+// Detect client MAC from IP (with caching).
+//
+// Bug found on real hardware: this used to always read this server's own
+// local dnsmasq.leases file / ARP table, which only ever has entries for
+// devices on the same Layer 2 segment as this server. Router mode disables
+// dnsmasq entirely, and a gated lane on its own separate bridge (e.g.
+// WiFi-Rental's VLAN) is a different broadcast domain this server has no L2
+// visibility into at all — local lookups could never find those clients,
+// no matter how many times a customer retried. In router mode, ask the
+// MikroTik itself instead: as the actual gateway for every lane, its own
+// DHCP lease table always has the true IP-to-MAC mapping.
+async function getMacFromIp(ip) {
   // Check cache first (Bug #33 — cache MAC resolution)
   const cached = macResolutionCache.get(ip);
   if (cached && Date.now() - cached.time < MAC_CACHE_TTL_MS) {
@@ -21,27 +32,32 @@ function getMacFromIp(ip) {
   }
 
   let mac = null;
-  try {
-    // Read dnsmasq leases file
-    const leases = require('fs').readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
-    const lines = leases.trim().split('\n');
-    for (const line of lines) {
-      const parts = line.split(' ');
-      // Format: timestamp MAC IP hostname client-id
-      if (parts[2] === ip) {
-        mac = parts[1].toLowerCase();
-        break;
-      }
-    }
-  } catch (e) {}
 
-  if (!mac) {
+  if (mikrotikService.isMikrotikModeEnabled()) {
+    mac = await mikrotikService.getMacFromIp(ip);
+  } else {
     try {
-      // Fallback: use ARP table
-      const arp = execSync(`arp -n ${ip} 2>/dev/null`).toString();
-      const match = arp.match(/([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2})/i);
-      if (match) mac = match[1].toLowerCase();
+      // Read dnsmasq leases file
+      const leases = require('fs').readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
+      const lines = leases.trim().split('\n');
+      for (const line of lines) {
+        const parts = line.split(' ');
+        // Format: timestamp MAC IP hostname client-id
+        if (parts[2] === ip) {
+          mac = parts[1].toLowerCase();
+          break;
+        }
+      }
     } catch (e) {}
+
+    if (!mac) {
+      try {
+        // Fallback: use ARP table
+        const arp = execSync(`arp -n ${ip} 2>/dev/null`).toString();
+        const match = arp.match(/([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2})/i);
+        if (match) mac = match[1].toLowerCase();
+      } catch (e) {}
+    }
   }
 
   // Cache the result (even null, to avoid repeated lookups)
@@ -50,7 +66,7 @@ function getMacFromIp(ip) {
 }
 
 // GET /api/portal/detect — detect client MAC from IP
-router.get('/detect', (req, res) => {
+router.get('/detect', async (req, res) => {
   // No reverse proxy sits in front of this server (setup/nginx.conf is an
   // unused empty placeholder) — x-forwarded-for is fully client-suppliable
   // here, so trusting it let one device resolve (and act as) another
@@ -72,7 +88,7 @@ router.get('/detect', (req, res) => {
   }
   detectRateLimit.set(ip, Date.now());
 
-  const mac = getMacFromIp(ip);
+  const mac = await getMacFromIp(ip);
 
   return res.json({
     success: !!mac,

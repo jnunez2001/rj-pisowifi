@@ -35,6 +35,24 @@ async function findIpBinding(client, mac) {
   return res.re.length > 0 ? res.re[0] : null;
 }
 
+// Whether a MAC is currently allowed through (bypassed ip-binding exists).
+// Used by app.js's captive-portal-detection routes (generate_204,
+// hotspot-detect.html, etc.) in router mode, since those used to check a
+// local nftables set that only ever exists in standalone mode.
+async function isClientAllowed(mac) {
+  const config = getMikrotikConfig();
+  if (!config.ip) return false;
+  try {
+    return await withMikrotik(config, async (client) => {
+      const existing = await findIpBinding(client, mac);
+      return !!existing;
+    });
+  } catch (err) {
+    console.error('MikroTik isClientAllowed error:', err.message);
+    return false;
+  }
+}
+
 // Allow a client MAC address (bypass Hotspot login entirely via ip-binding).
 // Time enforcement stays with our own DB/cron (timerService) — the router
 // never tracks minutes itself, so this only needs the MAC, not a duration.
@@ -229,13 +247,41 @@ async function testConnection() {
   return true;
 }
 
+// Bug found on real hardware: app.js/portal.js resolved a client's MAC from
+// its IP by reading this server's own local ARP table / dnsmasq.leases —
+// both of which only ever have entries for devices on the same Layer 2
+// segment as this server. That's true for any lane sharing this server's
+// own bridge (e.g. PC-Rental), but a gated lane on its own separate bridge
+// (e.g. WiFi-Rental's VLAN) is a different broadcast domain entirely,
+// reachable only by routing through the MikroTik — this server has zero L2
+// visibility into it, so local ARP lookups can never find those clients'
+// MACs, no matter how many times you retry. The router itself, as the
+// actual gateway for every lane, always knows the true IP-to-MAC mapping —
+// its own DHCP lease table is the reliable source of truth in router mode.
+async function getMacFromIp(ip) {
+  const config = getMikrotikConfig();
+  if (!config.ip) return null;
+  try {
+    return await withMikrotik(config, async (client) => {
+      const res = await client.talk(['/ip/dhcp-server/lease/print', `?address=${ip}`]);
+      const lease = res.re[0];
+      return lease && lease['mac-address'] ? lease['mac-address'].toLowerCase() : null;
+    });
+  } catch (err) {
+    console.error('MikroTik getMacFromIp error:', err.message);
+    return null;
+  }
+}
+
 module.exports = {
   allowClient,
   blockClient,
+  isClientAllowed,
   setClientBandwidth,
   removeClientBandwidth,
   isMikrotikModeEnabled,
   getRouterPorts,
   getLiveStatus,
   testConnection,
+  getMacFromIp,
 };

@@ -14,6 +14,7 @@ const adminRoute = require('./routes/admin');
 const portalRoute = require('./routes/portal');
 
 const { startTimer } = require('./services/timerService');
+const mikrotikService = require('./services/mikrotikService');
 
 // Cache package.json on startup (Bug #47)
 const packageJson = require('../package.json');
@@ -36,11 +37,26 @@ const CACHE_TTL = 30000; // 30 seconds (re-enabled, was 0)
 const MAC_CACHE_TTL = 10000; // 10 seconds for IP→MAC mapping (Bug #45)
 
 // ── Helper: get MAC from IP (cached) ──────────────────────────
-function getMacFromIp(ip) {
+// Bug found on real hardware: this used to only ever check this server's
+// own local `ip neigh`/dnsmasq.leases, which only has entries for devices
+// on the same Layer 2 segment as this server. That covers a lane sharing
+// this server's own bridge (e.g. PC-Rental) but not a gated lane on its own
+// separate bridge (e.g. WiFi-Rental's VLAN) — a different broadcast domain
+// this server has no L2 visibility into, reachable only by routing through
+// the MikroTik. In router mode, ask the router itself instead: as the
+// actual gateway for every lane, its own DHCP lease table always has the
+// true IP-to-MAC mapping.
+async function getMacFromIp(ip) {
   // Check MAC cache first (Bug #45)
   const cachedMac = macCache.get(ip);
   if (cachedMac && Date.now() - cachedMac.time < MAC_CACHE_TTL) {
     return cachedMac.mac;
+  }
+
+  if (mikrotikService.isMikrotikModeEnabled()) {
+    const mac = await mikrotikService.getMacFromIp(ip);
+    macCache.set(ip, { mac, time: Date.now() });
+    return mac;
   }
 
   try {
@@ -68,7 +84,14 @@ function getMacFromIp(ip) {
 }
 
 // ── Helper: check if IP is authenticated (cached) ────────────
-function isAuthenticated(ip) {
+// Bug found on real hardware: the nftables set this checked
+// (`rj_piso allowed_macs`) is a standalone-mode-only concept — router mode
+// never creates it, so this always threw, was swallowed by the catch, and
+// silently reported every router-mode client as unauthenticated regardless
+// of real status. Router mode tracks authentication via MikroTik's own
+// ip-binding/hotspot active list (mikrotikService.allowClient/blockClient),
+// not a local nftables set, so it needs its own check here.
+async function isAuthenticated(ip) {
   try {
     // Check cache first
     const cached = authCache.get(ip);
@@ -76,16 +99,21 @@ function isAuthenticated(ip) {
       return cached.result;
     }
 
-    const mac = getMacFromIp(ip);
+    const mac = await getMacFromIp(ip);
     if (!mac) {
       authCache.set(ip, { result: false, time: Date.now() });
       return false;
     }
 
-    const result = execSync(
-      'sudo nft list set ip rj_piso allowed_macs 2>/dev/null'
-    ).toString();
-    const isAuth = result.includes(mac);
+    let isAuth;
+    if (mikrotikService.isMikrotikModeEnabled()) {
+      isAuth = await mikrotikService.isClientAllowed(mac);
+    } else {
+      const result = execSync(
+        'sudo nft list set ip rj_piso allowed_macs 2>/dev/null'
+      ).toString();
+      isAuth = result.includes(mac);
+    }
 
     authCache.set(ip, { result: isAuth, time: Date.now() });
     return isAuth;
@@ -152,43 +180,43 @@ app.get('/hotspot-login', (req, res) => {
 </html>`);
 });
 
-app.get('/generate_204', (req, res) => {
+app.get('/generate_204', async (req, res) => {
   const ip = getClientIp(req);
-  if (isAuthenticated(ip)) return res.status(204).send();
+  if (await isAuthenticated(ip)) return res.status(204).send();
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
-app.get('/gen_204', (req, res) => {
+app.get('/gen_204', async (req, res) => {
   const ip = getClientIp(req);
-  if (isAuthenticated(ip)) return res.status(204).send();
+  if (await isAuthenticated(ip)) return res.status(204).send();
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
-app.get('/hotspot-detect.html', (req, res) => {
+app.get('/hotspot-detect.html', async (req, res) => {
   const ip = getClientIp(req);
-  if (isAuthenticated(ip)) {
+  if (await isAuthenticated(ip)) {
     return res.send('<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>');
   }
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
-app.get('/library/test/success.html', (req, res) => {
+app.get('/library/test/success.html', async (req, res) => {
   const ip = getClientIp(req);
-  if (isAuthenticated(ip)) {
+  if (await isAuthenticated(ip)) {
     return res.send('<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>');
   }
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
-app.get('/ncsi.txt', (req, res) => {
+app.get('/ncsi.txt', async (req, res) => {
   const ip = getClientIp(req);
-  if (isAuthenticated(ip)) return res.send('Microsoft NCSI');
+  if (await isAuthenticated(ip)) return res.send('Microsoft NCSI');
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
-app.get('/connecttest.txt', (req, res) => {
+app.get('/connecttest.txt', async (req, res) => {
   const ip = getClientIp(req);
-  if (isAuthenticated(ip)) return res.send('Microsoft Connect Test');
+  if (await isAuthenticated(ip)) return res.send('Microsoft Connect Test');
   res.redirect('http://10.0.0.1:3000/portal/');
 });
 
