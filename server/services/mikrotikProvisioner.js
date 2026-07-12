@@ -103,7 +103,10 @@ function parseRouterOsMajor(versionString) {
 // ownPortName: the physical port this server's own connection is currently
 // arriving through, if known (detected live in apply()/preview() via
 // detectOwnPort()) - see the reordering below for why this matters.
-function buildPlan(routerOsMajor, ownPortName) {
+// cakeAvailable: true/false if actually confirmed live (detectCakeAvailable()
+// below), null if unknown - see the bug note near useCake for why this
+// can't just be inferred from routerOsMajor alone.
+function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
   const allLanes = db.prepare('SELECT * FROM router_ports WHERE role != ? ORDER BY id').all('unused');
   const wanLanes = allLanes.filter((l) => l.role === 'wan');
   const laneCandidates = allLanes.filter((l) => l.role === 'gated' || l.role === 'open');
@@ -157,17 +160,30 @@ function buildPlan(routerOsMajor, ownPortName) {
     }
   }
 
-  // CAKE (ROUTER_MODE_PLAN.md §9) only exists as a queue type starting in
-  // RouterOS 7 - on RouterOS 6 it falls back to PCQ (a much older, still
-  // widely-used MikroTik fairness queue, built in on every version), which
-  // shares bandwidth fairly between clients but doesn't specifically fight
-  // bufferbloat the way CAKE does. Unknown version (router unreachable
-  // during Preview) assumes CAKE and says so, rather than silently guessing.
-  const useCake = routerOsMajor !== 6;
-  if (routerOsMajor == null) {
-    warnings.push('Could not confirm the router\'s RouterOS version, so this preview assumes CAKE (RouterOS 7+) for the smart queue. If this router is actually on RouterOS 6, Configure will detect that live and use the RouterOS 6 fallback (PCQ) automatically instead.');
+  // CAKE (ROUTER_MODE_PLAN.md §9) was assumed to exist on any RouterOS 7+
+  // router, falling back to PCQ only on RouterOS 6. Bug (found on real
+  // hardware, not theoretical): that assumption is wrong - a RouterOS 7
+  // router can still not actually have the CAKE queue type available (seen
+  // directly on this project's own test router: RouterOS 7 detected, but
+  // "cake" never appeared in the queue type list at all). The version
+  // number alone can't be trusted for this; cakeAvailable is a live check
+  // (detectCakeAvailable() queries /queue/type/print directly) and always
+  // wins when we actually have an answer. Version-based guessing is now
+  // only a fallback for Preview when the live check itself couldn't run
+  // (e.g. router briefly unreachable) - PCQ (works everywhere, always
+  // exists) is now the safer default guess when truly unknown, not CAKE.
+  let useCake;
+  if (cakeAvailable === true) {
+    useCake = true;
+  } else if (cakeAvailable === false) {
+    useCake = false;
+    warnings.push('This router doesn\'t actually have the CAKE queue type available (confirmed live), even though it may be running RouterOS 7 - using PCQ instead for the smart queue. It still shares bandwidth fairly between clients, but doesn\'t fight bufferbloat as specifically as CAKE does.');
   } else if (routerOsMajor === 6) {
-    warnings.push('This router is on RouterOS 6, which doesn\'t have the CAKE queue type - using PCQ instead for the smart queue. It still shares bandwidth fairly between clients, but doesn\'t fight bufferbloat as specifically as CAKE does on RouterOS 7.');
+    useCake = false;
+    warnings.push('This router is on RouterOS 6, which doesn\'t have the CAKE queue type - using PCQ instead for the smart queue.');
+  } else {
+    useCake = false;
+    warnings.push('Could not confirm live whether this router actually has the CAKE queue type available, so this preview assumes PCQ (works on every router) for the smart queue. Configure will check live and use CAKE automatically instead if it\'s genuinely available.');
   }
 
   // WAN: NAT masquerade out each WAN-role port (WAN lanes are always
@@ -247,7 +263,7 @@ function buildPlan(routerOsMajor, ownPortName) {
       const maxMbps = lane.speed_mbps + (lane.burst_mbps || 0);
       const queueType = useCake ? 'cake/cake' : 'pcq-upload-default/pcq-download-default';
       steps.push({
-        description: `[${laneLabel}] Smart queue (lag protection${useCake ? '' : ', RouterOS 6 fallback'}): ${lane.speed_mbps}Mbps guaranteed, up to ${maxMbps}Mbps burst`,
+        description: `[${laneLabel}] Smart queue (lag protection${useCake ? '' : ', PCQ fallback'}): ${lane.speed_mbps}Mbps guaranteed, up to ${maxMbps}Mbps burst`,
         words: ['/queue/simple/add', `=name=${bridgeName}-queue`, `=target=${network}/${cidr}`, `=max-limit=${maxMbps}M/${maxMbps}M`, `=burst-limit=${maxMbps}M/${maxMbps}M`, `=queue=${queueType}`],
       });
     }
@@ -324,19 +340,36 @@ async function detectOwnPort(client, ownMac) {
   }
 }
 
+// Bug (found on real hardware): CAKE was assumed to exist whenever
+// RouterOS 7 was detected, but that's not actually reliable - a real
+// RouterOS 7 router can still not have "cake" in its queue type list at
+// all. Query the actual list instead of guessing from the version number.
+async function detectCakeAvailable(client) {
+  try {
+    const res = await client.talk(['/queue/type/print']);
+    return res.re.some((r) => r.name === 'cake' || r.kind === 'cake');
+  } catch (e) {
+    return null;
+  }
+}
+
 async function preview() {
   const routerOsMajor = await detectRouterOsMajor();
   let ownPortName = null;
+  let cakeAvailable = null;
   try {
     const config = getMikrotikConfig();
     if (config.ip) {
-      ownPortName = await withMikrotik(config, (client) => detectOwnPort(client, getOwnMac()));
+      await withMikrotik(config, async (client) => {
+        ownPortName = await detectOwnPort(client, getOwnMac());
+        cakeAvailable = await detectCakeAvailable(client);
+      });
     }
   } catch (e) {
     // Best-effort, same as detectRouterOsMajor() above - Preview should
     // still work even if this specific lookup fails.
   }
-  const { steps, warnings } = buildPlan(routerOsMajor, ownPortName);
+  const { steps, warnings } = buildPlan(routerOsMajor, ownPortName, cakeAvailable);
   return { steps: steps.map((s) => s.description), warnings };
 }
 
@@ -372,8 +405,14 @@ async function apply() {
       routerOsMajor = parseRouterOsMajor((resourceRes.re[0] || {}).version);
       log.push({ step: `Detected RouterOS ${routerOsMajor || 'version (unrecognized)'}`, ok: true });
     } catch (err) {
-      log.push({ step: 'Detect RouterOS version', ok: false, detail: err.message + ' - assuming RouterOS 7+ (CAKE)' });
+      log.push({ step: 'Detect RouterOS version', ok: false, detail: err.message });
     }
+
+    // Bug (found on real hardware): RouterOS 7 doesn't guarantee CAKE is
+    // actually available - check the router's real queue type list instead
+    // of assuming from the version number alone.
+    const cakeAvailable = await detectCakeAvailable(client);
+    log.push({ step: `Smart queue type: ${cakeAvailable ? 'CAKE (confirmed available)' : 'PCQ fallback (CAKE not available on this router)'}`, ok: true });
 
     // Bug #98 follow-up: find which physical port this app's own connection
     // is arriving through (if its MAC is known), so buildPlan() can process
@@ -383,7 +422,7 @@ async function apply() {
       log.push({ step: `This app's own connection is arriving via ${ownPortName} - that lane will be configured last`, ok: true });
     }
 
-    ({ steps, warnings, apiPassword } = buildPlan(routerOsMajor, ownPortName));
+    ({ steps, warnings, apiPassword } = buildPlan(routerOsMajor, ownPortName, cakeAvailable));
 
     // Port-freeing (a brand-new router isn't actually blank - MikroTik's
     // factory-default config usually already bridges most LAN ports
