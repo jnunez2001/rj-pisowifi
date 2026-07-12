@@ -94,6 +94,68 @@ function parseRouterOsMajor(versionString) {
   return match ? parseInt(match[1], 10) : null;
 }
 
+// Makes Configure resumable after any partial failure, without the admin
+// having to manually delete leftover objects or reset the router first
+// (real pain point - every retry tonight needed manual cleanup or a full
+// factory reset first). For a given "/x/y/add" step, returns how to check
+// whether that object already exists (a live /x/y/print query + filter on
+// whatever property actually identifies that object type - not every
+// RouterOS "add" command uses =name=, some are identified by address,
+// interface, dst-host, etc. instead). Returns null for commands with no
+// known existence check (currently just /tool/fetch, which already
+// overwrites its destination file every time, so re-running it is safe on
+// its own without needing this).
+function existenceCheckFor(words) {
+  const cmd = words[0];
+  const getAttr = (key) => {
+    const w = words.find((w) => w.startsWith(`=${key}=`));
+    return w ? w.slice(key.length + 2) : null;
+  };
+
+  const byName = (printCmd) => {
+    const name = getAttr('name');
+    return name ? { printCmd, filter: `?name=${name}` } : null;
+  };
+
+  switch (cmd) {
+    case '/interface/bridge/add': return byName('/interface/bridge/print');
+    case '/interface/vlan/add': return byName('/interface/vlan/print');
+    case '/ip/pool/add': return byName('/ip/pool/print');
+    case '/ip/dhcp-server/add': return byName('/ip/dhcp-server/print');
+    case '/queue/simple/add': return byName('/queue/simple/print');
+    case '/ip/hotspot/profile/add': return byName('/ip/hotspot/profile/print');
+    case '/ip/hotspot/add': return byName('/ip/hotspot/print');
+    case '/user/group/add': return byName('/user/group/print');
+    case '/user/add': return byName('/user/print');
+    case '/interface/bridge/port/add': {
+      const iface = getAttr('interface');
+      return iface ? { printCmd: '/interface/bridge/port/print', filter: `?interface=${iface}` } : null;
+    }
+    case '/ip/address/add': {
+      const address = getAttr('address');
+      return address ? { printCmd: '/ip/address/print', filter: `?address=${address}` } : null;
+    }
+    case '/ip/dhcp-server/network/add': {
+      const address = getAttr('address');
+      return address ? { printCmd: '/ip/dhcp-server/network/print', filter: `?address=${address}` } : null;
+    }
+    case '/ip/dhcp-server/lease/add': {
+      const address = getAttr('address');
+      return address ? { printCmd: '/ip/dhcp-server/lease/print', filter: `?address=${address}` } : null;
+    }
+    case '/ip/hotspot/walled-garden/add': {
+      const dstHost = getAttr('dst-host');
+      return dstHost ? { printCmd: '/ip/hotspot/walled-garden/print', filter: `?dst-host=${dstHost}` } : null;
+    }
+    case '/ip/firewall/nat/add': {
+      const comment = getAttr('comment');
+      return comment ? { printCmd: '/ip/firewall/nat/print', filter: `?comment=${comment}` } : null;
+    }
+    default:
+      return null;
+  }
+}
+
 // Builds the full ordered list of RouterOS commands. Returns
 // [{ description, words }] - description is what the preview UI shows,
 // words is what actually gets sent via client.talk(words).
@@ -452,10 +514,26 @@ async function apply() {
             await client.talk(['/interface/bridge/port/remove', `=.id=${row['.id']}`]);
           }
           log.push({ step: step.description, ok: true, detail: `${existing.re.length} removed` });
-        } else {
-          await client.talk(step.words);
-          log.push({ step: step.description, ok: true });
+          continue;
         }
+
+        // Idempotency check (see existenceCheckFor() above) - if this exact
+        // object already exists, from an earlier partial run that failed
+        // partway through, skip creating it again instead of erroring on
+        // "already have X with such name". This is what makes retrying
+        // Configure after any failure safe to just click again, no manual
+        // cleanup or router reset needed first.
+        const check = existenceCheckFor(step.words);
+        if (check) {
+          const existing = await client.talk([check.printCmd, check.filter]);
+          if (existing.re.length > 0) {
+            log.push({ step: step.description, ok: true, detail: 'already exists from a previous run, skipped' });
+            continue;
+          }
+        }
+
+        await client.talk(step.words);
+        log.push({ step: step.description, ok: true });
       } catch (err) {
         log.push({ step: step.description, ok: false, detail: err.message });
         throw Object.assign(new Error(`Provisioning stopped at "${step.description}": ${err.message}`), { log, warnings, backedUp });

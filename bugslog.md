@@ -1512,6 +1512,16 @@ ed a bridge (which would have ripped it back out). This shrinks the "disconnecte
 
 ---
 
+## New: Configure is now resumable after any partial failure (2026-07-11)
+
+Context: every single failure tonight (bridge-name collisions, the CAKE bug, the burst-limit bug) required the owner to either manually delete leftover objects in Winbox or fully factory-reset the router before retrying Configure, since re-running the same plan from scratch hit "already have X with such name" errors on anything a previous attempt had already created. On a live router mid-business-hours, needing a manual cleanup pass (or worse, a full reset disconnecting paying customers) just to retry after a hiccup is a real, serious usability problem, not a one-off inconvenience.
+
+- **Files:** `server/services/mikrotikProvisioner.js` (`existenceCheckFor()`, updated `apply()` step loop)
+- **What it is:** before running any `/x/y/add` step, `apply()` now live-checks whether that exact object already exists (a `/x/y/print` query filtered on whichever property actually identifies that object type - name for most things, but address for IP/DHCP-network/lease entries, interface for bridge-port membership, dst-host for walled-garden rules, comment for the NAT rule). If it already exists, the step is skipped with `"already exists from a previous run, skipped"` in the log, not treated as an error. This makes any Configure run naturally resumable: if it fails partway through for any reason, clicking Configure again just picks up from wherever it actually left off, correctly skipping everything already built and creating only what's still missing, no manual cleanup, no router reset, ever required.
+- **Verification status:** field-tested against a fake router pre-seeded with a bridge, pool, and DHCP server already existing (simulating exactly tonight's real partial-failure state) - confirmed all three were correctly detected and skipped, confirmed everything still missing (port attachment, IP address, DHCP network, queue, dedicated API user) was still created fresh, and confirmed the full run completed successfully end to end with zero manual intervention. Not yet confirmed on the real hEX E50UG - the owner's next retry, which will be a genuine test of this exact scenario, confirms it on real hardware.
+
+---
+
 #### Bug #100 (HIGH, found on real hardware immediately after Bug #99's fix): queue creation failed with "no download-burst-time"
 
 - **File:** `server/services/mikrotikProvisioner.js`
