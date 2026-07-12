@@ -20,6 +20,20 @@ const db = require('../config/database');
 const { withMikrotik } = require('./mikrotikApiClient');
 const { getMikrotikConfig } = require('./mikrotikConfigHelper');
 
+// Bug found on real hardware: every MAC-based print filter in this file
+// (?mac-address=...) is an exact string match against whatever RouterOS
+// actually has stored - and RouterOS always stores/displays MACs uppercase,
+// regardless of the case used when the record was created. This app
+// normalizes MACs to lowercase everywhere else (networkService.js's
+// normalizeMac), so every one of these filters was silently matching
+// nothing: findIpBinding() never found the binding it just created,
+// blockClient() logged "blocked" and returned success having removed
+// nothing (the binding stayed on the router), and the DHCP-lease-based
+// bandwidth lookup in setClientBandwidth() had the same silent-miss bug.
+// Uppercase right at the boundary to RouterOS's own API calls, without
+// touching this app's own lowercase convention anywhere else.
+const mikMac = (mac) => String(mac).toUpperCase();
+
 /**
  * Looks up the existing ip-binding record for a MAC, if any.
  * Returns the full record (including its .id), or null if genuinely not
@@ -31,7 +45,7 @@ const { getMikrotikConfig } = require('./mikrotikConfigHelper');
  * automatically).
  */
 async function findIpBinding(client, mac) {
-  const res = await client.talk(['/ip/hotspot/ip-binding/print', `?mac-address=${mac}`]);
+  const res = await client.talk(['/ip/hotspot/ip-binding/print', `?mac-address=${mikMac(mac)}`]);
   return res.re.length > 0 ? res.re[0] : null;
 }
 
@@ -74,7 +88,7 @@ async function allowClient(mac) {
       }
 
       // No existing binding — create one
-      await client.talk(['/ip/hotspot/ip-binding/add', `=mac-address=${mac}`, '=type=bypassed', `=comment=rj-piso-${Date.now()}`]);
+      await client.talk(['/ip/hotspot/ip-binding/add', `=mac-address=${mikMac(mac)}`, '=type=bypassed', `=comment=rj-piso-${Date.now()}`]);
       console.log(`✅ MikroTik allowed: ${mac}`);
       return true;
     });
@@ -90,7 +104,7 @@ async function blockClient(mac) {
   const config = getMikrotikConfig();
   if (!config.ip) return false;
   try {
-    await withMikrotik(config, async (client) => {
+    const removedBinding = await withMikrotik(config, async (client) => {
       // Remove the ip-binding that was granting bypass access
       const binding = await findIpBinding(client, mac);
       if (binding) {
@@ -99,12 +113,22 @@ async function blockClient(mac) {
 
       // Also kick any currently-active hotspot session for this MAC, so access
       // is cut immediately instead of waiting for the connection to naturally drop
-      const activeRes = await client.talk(['/ip/hotspot/active/print', `?mac-address=${mac}`]);
+      const activeRes = await client.talk(['/ip/hotspot/active/print', `?mac-address=${mikMac(mac)}`]);
       for (const session of activeRes.re) {
         await client.talk(['/ip/hotspot/active/remove', `=.id=${session['.id']}`]);
       }
+
+      return !!binding;
     });
-    console.log(`🚫 MikroTik blocked: ${mac}`);
+    // Bug found on real hardware: this used to log success unconditionally,
+    // even when findIpBinding() found nothing and there was genuinely
+    // nothing to remove — masking the MAC-case mismatch bug above entirely,
+    // since every call "succeeded" whether or not it actually did anything.
+    if (removedBinding) {
+      console.log(`🚫 MikroTik blocked: ${mac}`);
+    } else {
+      console.warn(`⚠️ MikroTik blockClient: no ip-binding found for ${mac} - nothing to remove`);
+    }
     return true;
   } catch (err) {
     console.error('MikroTik blockClient error:', err.message);
@@ -153,7 +177,7 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps) 
   try {
     return await withMikrotik(config, async (client) => {
       // Find the client's current IP via its DHCP lease
-      const leaseRes = await client.talk(['/ip/dhcp-server/lease/print', `?mac-address=${mac}`]);
+      const leaseRes = await client.talk(['/ip/dhcp-server/lease/print', `?mac-address=${mikMac(mac)}`]);
       if (leaseRes.re.length === 0) {
         console.log(`MikroTik: no DHCP lease found yet for ${mac}, skipping bandwidth`);
         return false;

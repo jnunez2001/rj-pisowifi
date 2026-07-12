@@ -1610,6 +1610,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #107 (CRITICAL, found on real hardware): blocking a client on the router silently did nothing - customers kept internet access after their time ran out
+
+- **File:** `server/services/mikrotikService.js`
+- **Reported:** a free-minutes session expired right on schedule (confirmed in the app's own log - timer fired, `blockClient` logged success), but the phone still had working internet afterward. Checking the router directly (`/ip hotspot ip-binding print`) showed the customer's MAC still sitting there as a live bypassed binding - the block had never actually reached the router.
+- **Cause:** every MAC-based RouterOS query in this file (`?mac-address=...` filters on `/ip/hotspot/ip-binding/print`, `/ip/hotspot/active/print`, `/ip/dhcp-server/lease/print`, plus the `=mac-address=...` on `/ip/hotspot/ip-binding/add`) is an exact string match against whatever RouterOS has stored - and RouterOS always stores and displays MAC addresses uppercase, regardless of the case used when the record was created. This app normalizes MACs to lowercase everywhere else in the codebase (`networkService.js`'s `normalizeMac`), so every one of these filters was silently matching nothing: `findIpBinding()` never found the binding it had just created, `blockClient()` had nothing to remove and logged success anyway (its success log was unconditional, not gated on anything actually being found), and the DHCP-lease-based IP lookup in `setClientBandwidth()` had the exact same silent-miss bug.
+- **Fix:** added a single `mikMac()` helper that uppercases right at the boundary to RouterOS's API calls, applied to all four affected call sites, without touching this app's own lowercase convention anywhere else in the codebase. Also made `blockClient()`'s logging honest - it now logs a warning when there was genuinely nothing to remove, instead of claiming success unconditionally, so a silent-miss like this can't hide behind a misleading success line again.
+- **Verification status:** confirmed on real hardware - this is the exact bug that explained the reported symptom (session expired, app logged "blocked," router still showed the binding live). Not yet re-confirmed end to end after deploying - the next free-minutes or coin session reaching its expiry is what will finally prove the router-side removal now succeeds.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅
