@@ -191,6 +191,17 @@ try {
   // already applied
 }
 
+// Same story as above: free_claims.ip_address was added to the CREATE TABLE
+// statement after this install's table already existed, so it was never
+// actually created on disk here - every free-minutes claim crashed with
+// "no such column: ip_address" the moment session.js's secondary IP check
+// ran (found on real hardware).
+try {
+  db.exec('ALTER TABLE free_claims ADD COLUMN ip_address TEXT');
+} catch (e) {
+  // already applied
+}
+
 const rateCount = db.prepare(
   'SELECT COUNT(*) as count FROM rates'
 ).get();

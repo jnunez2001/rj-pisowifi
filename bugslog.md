@@ -1600,6 +1600,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #106 (HIGH, found on real hardware): free-minutes claims crashed with "no such column: ip_address"
+
+- **File:** `server/config/database.js`
+- **Reported:** after Bug #105's fix, MAC detection succeeded but claiming free minutes still failed with a generic "Server error"; the real log showed `SqliteError: no such column: ip_address` at `server/routes/session.js:342`.
+- **Cause:** `free_claims`'s `CREATE TABLE IF NOT EXISTS` statement includes an `ip_address` column, but that's a no-op on an install where the table already existed from before that column was added - `CREATE TABLE IF NOT EXISTS` never retroactively adds columns to an existing table. This install's `free_claims` table predated the column, so it was simply never there on disk, even though every fresh install's schema has always included it.
+- **Fix:** added an `ALTER TABLE free_claims ADD COLUMN ip_address TEXT` migration, matching the existing pattern already used for `promo_vouchers.group_id` just above it in the same file.
+- **Verification status:** traced against the real error - confirmed the crashing query (`session.js:342`) reads exactly this column, and the migration follows the exact working pattern already used and running for the `promo_vouchers.group_id` case. Not yet re-confirmed on the real server after deploying.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅
