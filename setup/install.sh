@@ -239,6 +239,21 @@ echo "$USER ALL=(ALL) NOPASSWD: /sbin/reboot, /usr/sbin/reboot" \
 echo "$USER ALL=(ALL) NOPASSWD: /sbin/shutdown, /usr/sbin/shutdown" \
   >> /etc/sudoers.d/rj-pisowifi
 
+# Bug found on real hardware: the admin panel's Network > Network
+# Configuration card (server/routes/admin.js POST /network) calls
+# `sudo cp ... /etc/netplan/50-cloud-init.yaml` and `sudo netplan apply`
+# directly, but no sudoers entry for either was ever added here either -
+# same failure mode as the reboot/shutdown bug just above, except this one
+# surfaces immediately ("Failed to apply config") instead of silently, since
+# this route waits for the command result before responding. Scoped tightly
+# to the one destination file this app ever writes, rather than a blanket
+# grant on cp (which could otherwise overwrite any file on the system as
+# root).
+echo "$USER ALL=(ALL) NOPASSWD: /bin/cp * /etc/netplan/50-cloud-init.yaml" \
+  >> /etc/sudoers.d/rj-pisowifi
+echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/netplan apply" \
+  >> /etc/sudoers.d/rj-pisowifi
+
 # avahi mDNS — rjcyberzone.local
 cat > /etc/avahi/services/rjcyberzone.service << EOF
 <?xml version="1.0" standalone='no'?>

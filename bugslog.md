@@ -1640,6 +1640,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #110 (HIGH, found on real hardware): admin panel's static-IP feature has likely never worked on any real install
+
+- **File:** `setup/install.sh`
+- **Reported:** Network > Network Configuration's "Apply Network Settings" button (switching to Static IP) failed with "Failed to apply config"; the app log showed `sudo cp ... /etc/netplan/50-cloud-init.yaml` failing outright.
+- **Cause:** `server/routes/admin.js`'s `POST /network` route runs `sudo cp` and `sudo netplan apply` directly, but `install.sh`'s sudoers setup never granted passwordless sudo for either command - only for `setup-network.sh`, `nft`, `tc`, `ip`, `reboot`, and `shutdown`. Since the app runs as a systemd service with no TTY, `sudo` can't prompt for a password and just fails immediately. This is the same failure class as the earlier (already-fixed) reboot/shutdown sudoers gap, except this one surfaces visibly as an error instead of a silently-ignored button.
+- **Fix:** added two tightly-scoped sudoers entries - `cp` restricted to only ever writing `/etc/netplan/50-cloud-init.yaml` (not a blanket grant, which could otherwise overwrite any file on the system as root), and `netplan apply`.
+- **Verification status:** confirmed the missing sudoers entry directly explains the reported failure. This only fixes *future* installs via `install.sh` - an already-installed server needs the same sudoers line added by hand (`echo` into `/etc/sudoers.d/rj-pisowifi`) since `git pull` never re-runs the installer. Not yet re-confirmed end to end after deploying.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅
