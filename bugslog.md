@@ -1562,6 +1562,34 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #103 verification note: the fix was correct, but the field-test verification method was flawed
+
+- After deploying Bug #103's fix, repeated live checks (`sudo systemctl stop rj-pisowifi` → `node -e` query → `start`) still showed `network_mode: 'standalone'` and no LAN VLAN row, seeming to prove the fix hadn't worked.
+- **Cause:** the verification command itself never set `DB_PATH`, so it fell into the exact same stale-default-path trap Bug #103 describes - `better-sqlite3` silently created a brand-new, empty database at the old deleted path the instant the check ran, and `database.js`'s first-run seed logic populated it with defaults (`network_mode: 'standalone'`, no VLANs). Every "still broken" result was reading a disposable decoy file, not the real production database.
+- **Confirmed:** querying the real path directly (`/var/lib/rj-pisowifi/database/rjpisowifi.db`, matching the systemd service's actual `DB_PATH`) showed `network_mode: 'mikrotik'` and the real VLAN 13 row, exactly as saved through the admin panel. Bug #103's fix was correct from the start.
+
+---
+
+#### Bug #104 (HIGH, found on real hardware): Hotspot's replacement login page redirected to a URL that only worked if a browser loaded it live from this app - which it never does
+
+- **File:** `server/app.js` (`/hotspot-login` route)
+- **Reported:** WiFi-Rental customer's phone reached a captive portal page but it spun forever ("just always loading"), at the router's own hotspot address (`10.50.1.1`), never reaching this app's actual portal.
+- **Cause:** the redirect stub this route served used a relative URL (`/portal/`), on the assumption a browser always loads this page live from the app itself. That's not how MikroTik Hotspot actually uses it: Configure's `/tool fetch` step downloads this page **once** and saves it as a static `login.html` file on the router. A customer's phone later loads that static copy directly from the router's own hotspot address, not from this app - so the relative `/portal/` resolved to a nonexistent page on the router, not this app's real portal.
+- **Fix:** build an absolute URL from the request's own `Host` header instead. Since the only request that ever hits this route is the router's own `/tool fetch` at Configure time, that request's Host header is exactly the address/port the fetch command was told to use - the one address the router already knows how to reach this app at. Bakes correctly into the static file with no hardcoded IP.
+- **Verification status:** confirmed on real hardware - re-fetching the login page after this fix produced a working redirect from the router's static copy to the app's real portal at its LAN address.
+
+---
+
+#### Field-test note (not a code bug, an environment limitation): VirtualBox Bridged Networking on this specific Windows host does not reliably pass 802.1Q VLAN-tagged frames through
+
+- **Symptom:** the WiFi-Rental VM's own tagged interface (`enp0s3.13`) never received a DHCP lease from the router, confirmed via a MikroTik `/tool sniffer` capture on `ether2` showing zero frames from the VM's MAC arriving at all, across multiple attempts.
+- **Ruled out:** the router-side config (DHCP server present, enabled, bound to the right bridge), RouterOS device-mode restrictions, and the host physical NIC's own "Packet Priority & VLAN" driver setting (disabled it, no change) plus VirtualBox's own bridged-adapter Promiscuous Mode (already set to Allow All).
+- **Conclusion:** this is a known class of issue with some VirtualBox versions on Windows hosts - the Bridged Networking driver (`vboxnetflt`) can drop VLAN-tagged frames at the hypervisor level regardless of guest, host-driver, or promiscuous-mode settings. Not fixable from this app's side.
+- **Workaround used for tonight's test:** the app server doesn't strictly need its own address on the WiFi-Rental VLAN to serve those customers - the MikroTik routes between subnets by default. Manually added a walled-garden allow rule and re-ran the Hotspot login fetch pointing at the server's actual reachable address on its existing subnet instead of the (never-claimed) reserved VLAN address.
+- **Real fix, not urgent tonight:** either update VirtualBox to a version without this bug, or give the WiFi-Rental VM its own physical/USB NIC instead of relying on VM-side VLAN tagging over a shared bridged adapter.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

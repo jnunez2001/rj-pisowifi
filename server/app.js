@@ -119,22 +119,35 @@ app.get('/', (req, res) => {
 // replacing MikroTik's default built-in login screen. Bug this fixes:
 // without it, a newly-connected customer would see MikroTik's generic
 // login page first, not this app's portal — contradicting the explicit
-// design (customers should never see MikroTik's own login screen). Uses a
-// relative redirect target on purpose: the browser loaded this page from
-// whatever host/port actually served it, so "/portal/" resolves correctly
-// without needing to bake a specific IP into the file.
+// design (customers should never see MikroTik's own login screen).
+//
+// Bug found on real hardware: this used to redirect to a relative
+// "/portal/" path, on the assumption the browser always loads this page
+// live from this app. That's wrong for how MikroTik's Hotspot actually
+// serves it — Configure's /tool fetch step downloads this page ONCE and
+// saves it as a static login.html on the router itself. A customer's phone
+// then loads that static copy directly from the router's own hotspot
+// address (e.g. 10.50.1.1), not from this app, so a relative "/portal/"
+// resolved to a page that doesn't exist on the router (endless spinner, no
+// error). Baking in an absolute URL fixes it. Building that URL from the
+// request's own Host header (rather than a hardcoded IP) keeps it correct
+// automatically: the Host header on THIS request — made by the router's
+// own /tool fetch — is exactly the address/port that fetch was told to
+// use, which is the one address the router already knows how to reach
+// this app at.
 app.get('/hotspot-login', (req, res) => {
+  const portalUrl = `${req.protocol}://${req.get('host')}/portal/`;
   res.set('Content-Type', 'text/html');
   res.send(`<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
-<meta http-equiv="refresh" content="0;url=/portal/">
+<meta http-equiv="refresh" content="0;url=${portalUrl}">
 <title>Redirecting...</title>
-<script>window.location.href = "/portal/";</script>
+<script>window.location.href = "${portalUrl}";</script>
 </head>
 <body>
-<p>Redirecting to the portal... <a href="/portal/">Click here if nothing happens</a>.</p>
+<p>Redirecting to the portal... <a href="${portalUrl}">Click here if nothing happens</a>.</p>
 </body>
 </html>`);
 });
