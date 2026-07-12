@@ -256,6 +256,25 @@ async function expireSession(voucherCode) {
     sseService.notify(session.mac_address);
   }
 
+  // Bug found on real hardware: promo.js's /redeem route sets a redeemed
+  // voucher's status to 'active' the moment it's used, but nothing ever
+  // moved it out of that state once the session it created actually ended
+  // - the admin Vouchers page showed "Active" forever for every redeemed
+  // code, long after the customer's time (and internet access) was gone.
+  // expireSession() is the one place every session-ending path (timer
+  // expiry, admin cut, customer cancel) already funnels through, so it's
+  // the right single spot to close this out. 'used' (not 'unused'/'active')
+  // is what the admin UI already renders as "Expired".
+  if (session && session.mac_address) {
+    try {
+      db.prepare(
+        "UPDATE promo_vouchers SET status = 'used' WHERE mac_address = ? AND status = 'active'"
+      ).run(session.mac_address);
+    } catch (e) {
+      console.error(`[Promo] Failed to mark voucher used for ${session.mac_address}:`, e.message);
+    }
+  }
+
   // Block internet access
   if (session && session.mac_address) {
     try {

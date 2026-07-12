@@ -1630,6 +1630,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #109 (MEDIUM, found on real hardware): a redeemed voucher showed "Active" in the admin panel forever, even long after the session ended
+
+- **Files:** `server/services/sessionService.js`, `server/routes/promo.js`
+- **Reported:** the Vouchers admin page kept showing a redeemed promo code as "✅ Active" well after its session had expired and internet access was cut.
+- **Cause:** `promo.js`'s `/redeem` route sets `promo_vouchers.status = 'active'` the moment a code is used, but nothing anywhere in the codebase ever moved it out of that state once the session it created actually ended - not on timer expiry, not on an admin cutting the session, not on a customer cancelling. The admin UI (`public/admin/js/vouchers.js`) treats any status other than `unused`/`active` as "❌ Expired", so this was a real, visible, permanent-looking discrepancy for every promo redemption, not a cosmetic one-off.
+- **Fix:** `expireSession()` - the single function every session-ending path (timer expiry, admin cut, customer cancel) already funnels through - now also marks any `active` promo voucher for that MAC as `used`, closing the loop regardless of which path ended the session.
+- **Verification status:** traced against the real reported symptom (voucher genuinely stuck on "Active" after its session ended) and confirmed no code path anywhere previously updated this status at all. Not yet re-confirmed on the real server after deploying - the next promo redemption reaching its own expiry is what will finally prove the admin panel now reflects it correctly.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅
