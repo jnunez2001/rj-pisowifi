@@ -1542,6 +1542,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #102 (HIGH, found on real hardware): a stale `lan_interface` setting silently overrode VLAN Management, freezing a LAN VLAN at whatever it was the first time they happened to agree
+
+- **File:** `setup/setup-network.sh`
+- **Reported:** on the WiFi-rental VM, deleting and recreating the LAN VLAN entry (`enp0s3.13`) in VLAN Management, twice, had zero effect - it kept coming back with the exact same stale `10.0.0.1` address and `down` status from a much earlier standalone-mode test, even after Network Mode was correctly switched to External Router and confirmed working (the *untagged* interface, `enp0s3` itself, correctly picked up a real `10.50.0.x` DHCP address in the same run, proving the mode switch itself was fine).
+- **Cause:** `LAN_IF` was set from the older, separate `lan_interface` setting first, and only fell back to the VLAN row's own `base_interface` when that setting was completely empty. If `lan_interface` held any stale value at all (leftover from earlier standalone-mode testing, never explicitly cleared), it silently won every time, regardless of what was actually configured in VLAN Management. The LAN VLAN block just below requires `base_interface` to exactly match `LAN_IF` before touching anything, so with a mismatched stale value in place, that block quietly skipped on every single run, no error, no warning, the interface just never got rebuilt no matter how many times the VLAN row itself was deleted and recreated.
+- **Fix:** a configured LAN VLAN row now always sets `LAN_IF` to its own `base_interface`, unconditionally, instead of only when `lan_interface` happens to be empty. A LAN VLAN is a more specific, more recently-configured declaration of intent than the older setting underneath it, so it should always take priority when one exists.
+- **Verification status:** traced the exact fixed logic against the real failure scenario (stale `lan_interface=enp0s8`, real VLAN row with `base_interface=enp0s3`) - confirmed `LAN_IF` now correctly resolves to `enp0s3`, confirmed the VLAN creation block now correctly triggers instead of skipping, and confirmed the mikrotik-mode `dhclient` branch now correctly runs on the tagged interface afterward. Not yet re-confirmed against the actual real VM that hit this bug - the owner's next VLAN save (or a manual `setup-network.sh` re-run) is what will confirm it end to end.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

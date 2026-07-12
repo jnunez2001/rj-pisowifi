@@ -49,7 +49,21 @@ fi
 # single-NIC setup with a VLAN configured would never find one and the
 # script would abort with "No LAN interface found" - even though the LAN
 # VLAN row it needs is sitting right there in the DB.
-if [ -z "$LAN_IF" ] && [ -n "$LAN_VLAN_BASE" ]; then
+#
+# Bug (found on real hardware): this only kicked in when $LAN_IF was
+# already empty, i.e. only when the separate, older "lan_interface"
+# setting had never been set at all. If that setting held any stale value
+# (leftover from earlier standalone-mode testing, or just never cleared),
+# it silently won every time, even though it disagreed with what the admin
+# had actually configured in VLAN Management - the VLAN row's own
+# base_interface never got a chance to matter, and the LAN VLAN block
+# below (which requires an exact match) kept skipping every single run,
+# freezing that interface at whatever state it was in the one time the
+# two settings happened to agree. A configured LAN VLAN is a more specific,
+# more recent declaration of intent than the older lan_interface setting,
+# so it should always win when one exists, not just when the other is
+# empty.
+if [ -n "$LAN_VLAN_BASE" ]; then
     LAN_IF="$LAN_VLAN_BASE"
 fi
 if [ -z "$LAN_IF" ]; then
