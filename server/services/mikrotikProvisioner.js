@@ -257,14 +257,24 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
     steps.push({ description: `[${laneLabel}] Configure DHCP network`, words: ['/ip/dhcp-server/network/add', `=address=${network}/${cidr}`, `=gateway=${gateway}`, '=dns-server=8.8.8.8'] });
 
     // Smart queue (ROUTER_MODE_PLAN.md §9) - always on, per lane, using the
-    // guaranteed/burst caps saved for this lane. CAKE on RouterOS 7+, PCQ
-    // fallback on RouterOS 6 (see useCake above).
+    // guaranteed/burst caps saved for this lane. CAKE when actually
+    // confirmed available, PCQ fallback otherwise (see useCake above).
+    //
+    // Bug (found on real hardware): burst-limit was being set to the same
+    // value as max-limit, which never provided any real extra headroom
+    // (burst-limit only does something when it's *higher* than max-limit),
+    // and RouterOS rejects burst-limit outright unless burst-time (and
+    // effectively burst-threshold) are also set - "no download-burst-time".
+    // Since the redundant burst-limit wasn't adding real functionality
+    // anyway, simplest correct fix is to drop it and use max-limit alone as
+    // one combined ceiling (guaranteed + burst added together), matching
+    // what the admin UI has been describing as "up to X Mbps" all along.
     if (lane.speed_mbps > 0) {
       const maxMbps = lane.speed_mbps + (lane.burst_mbps || 0);
       const queueType = useCake ? 'cake/cake' : 'pcq-upload-default/pcq-download-default';
       steps.push({
         description: `[${laneLabel}] Smart queue (lag protection${useCake ? '' : ', PCQ fallback'}): ${lane.speed_mbps}Mbps guaranteed, up to ${maxMbps}Mbps burst`,
-        words: ['/queue/simple/add', `=name=${bridgeName}-queue`, `=target=${network}/${cidr}`, `=max-limit=${maxMbps}M/${maxMbps}M`, `=burst-limit=${maxMbps}M/${maxMbps}M`, `=queue=${queueType}`],
+        words: ['/queue/simple/add', `=name=${bridgeName}-queue`, `=target=${network}/${cidr}`, `=max-limit=${maxMbps}M/${maxMbps}M`, `=queue=${queueType}`],
       });
     }
 
