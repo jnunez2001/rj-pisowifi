@@ -1532,6 +1532,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #101 (HIGH, found the same night as Bug #97): the raw app port had the exact same IPv6 bug nginx did, never actually fixed there
+
+- **File:** `server/app.js`
+- **Reported:** while diagnosing an unrelated network-mode issue on the WiFi-rental VM, tried reaching the admin panel directly at `http://localhost:3000/admin` (bypassing nginx) from a browser on that same machine and got "This site can't be reached" - despite `curl -I http://localhost:3000/admin` succeeding moments earlier from the same box. That mismatch (curl works, browser doesn't, same machine, same URL) is the exact signature already diagnosed once tonight for nginx (Bug #97) - it just turned out nginx wasn't the only thing with this bug.
+- **Cause:** `app.listen(PORT, '0.0.0.0', ...)` explicitly binds to IPv4 only. A browser resolving `localhost` to the IPv6 loopback (`::1`) gets an instant connection refusal, never even reaching the app, while `curl` (and a direct `127.0.0.1` URL) use IPv4 and work fine, masking the bug from exactly the checks that would normally catch it. Bug #97's fix only touched `nginx.conf`, this deeper layer (the raw Node app, reachable directly on port 3000 without going through nginx at all) was never checked for the same issue.
+- **Fix:** removed the explicit `'0.0.0.0'` host argument from `app.listen()`. With no host specified, Node listens on the IPv6 wildcard (`::`) by default, which also accepts IPv4 connections via dual-stack on every realistic deployment target for this project, covering both address families with one listener instead of just one.
+- **Verification status:** confirmed the app boots cleanly with this change (no crash, same startup log as always) and confirmed `http://localhost:3000/admin` loads correctly in this dev environment after the fix. Not yet re-confirmed on the real server that hit this bug - please confirm `http://localhost:3000/admin` (and `https://localhost/admin` through nginx) both load cleanly after pulling this fix.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

@@ -201,7 +201,16 @@ app.get('/api/health', (req, res) => {
 
 startTimer();
 
-const server = app.listen(PORT, '0.0.0.0', () => {
+// Bug (same root cause as the nginx IPv6 fix, one level deeper): binding
+// explicitly to '0.0.0.0' only accepts IPv4 connections. A browser
+// resolving "localhost" to the IPv6 loopback (::1) gets an instant refusal
+// instead of reaching the app at all, even though curl (defaulting to
+// IPv4) or a direct http://127.0.0.1:PORT request work fine - exactly
+// masking this the same way it masked the nginx version of the bug.
+// Omitting the host argument lets Node listen on both address families
+// (dual-stack '::', which also accepts IPv4 on virtually every real
+// deployment target for this project) instead of IPv4 only.
+const server = app.listen(PORT, () => {
   console.log('');
   console.log('🚀 R&J PisoWifi Server Started!');
   console.log(`📡 Running on port ${PORT}`);
