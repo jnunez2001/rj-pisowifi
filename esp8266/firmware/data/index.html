@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RJ Vendo Setup</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:Arial;background:#1a1a2e;color:#fff;padding:20px;max-width:420px;margin:0 auto;}
+    h2{color:#00c853;text-align:center;margin-bottom:20px;letter-spacing:2px;}
+    .section{background:#16213e;border-radius:12px;padding:16px;margin-bottom:14px;}
+    .section h3{color:#888;font-size:12px;letter-spacing:2px;margin-bottom:12px;}
+    label{font-size:13px;color:#aaa;display:block;margin-bottom:4px;}
+    input[type=text],input[type=password],input[type=number]{
+      width:100%;padding:10px 12px;border-radius:8px;border:1px solid #0f3460;
+      background:#0f3460;color:#fff;font-size:14px;margin-bottom:12px;
+    }
+    .info-row{display:flex;justify-content:space-between;padding:8px 0;
+      border-bottom:1px solid #0f3460;font-size:13px;}
+    .info-row:last-child{border-bottom:none;}
+    .info-label{color:#888;}
+    .info-value{color:#00c853;font-weight:bold;}
+    .toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+    .toggle-row input{width:auto;margin:0;}
+    .btn{width:100%;padding:14px;border:none;border-radius:10px;
+      font-size:15px;font-weight:700;cursor:pointer;margin-bottom:10px;letter-spacing:1px;}
+    .btn-save{background:linear-gradient(135deg,#00c853,#009624);color:#fff;}
+    .btn-reboot{background:linear-gradient(135deg,#2196f3,#1565c0);color:#fff;}
+    .btn-reset{background:linear-gradient(135deg,#e94560,#c62828);color:#fff;}
+    #staticFields{display:none;}
+    .toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+      background:#00c853;color:#fff;padding:12px 24px;border-radius:10px;
+      font-weight:700;display:none;z-index:999;}
+  </style>
+</head>
+<body>
+  <h2>🛜 R&J VENDO SETUP</h2>
+
+  <div class="section">
+    <h3>DEVICE INFO</h3>
+    <div class="info-row">
+      <span class="info-label">MAC Address</span>
+      <span class="info-value" id="infoMac">...</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Firmware</span>
+      <span class="info-value" id="infoFw">...</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Mode</span>
+      <span class="info-value">Setup Mode</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <h3>DEVICE NAME</h3>
+    <label>Vendo Name</label>
+    <input type="text" id="vendo_name" placeholder="Vendo 1">
+  </div>
+
+  <div class="section">
+    <h3>WIFI SETTINGS</h3>
+    <label>WiFi SSID</label>
+    <input type="text" id="wifi_ssid" placeholder="Your WiFi Name">
+    <label>WiFi Password</label>
+    <input type="password" id="wifi_pass" placeholder="Your WiFi Password">
+  </div>
+
+  <div class="section">
+    <h3>SERVER SETTINGS</h3>
+    <label>Server IP</label>
+    <input type="text" id="server_ip" placeholder="192.168.0.x">
+    <label>Server Port</label>
+    <input type="number" id="server_port" placeholder="3000">
+  </div>
+
+  <div class="section">
+    <h3>STATIC IP (optional)</h3>
+    <div class="toggle-row">
+      <input type="checkbox" id="static_ip" onchange="toggleStatic()">
+      <label for="static_ip" style="margin:0;">Enable Static IP</label>
+    </div>
+    <div id="staticFields">
+      <label>Device IP</label>
+      <input type="text" id="device_ip" placeholder="192.168.0.30">
+      <label>Gateway</label>
+      <input type="text" id="gateway" placeholder="192.168.0.1">
+      <label>Subnet Mask</label>
+      <input type="text" id="subnet" placeholder="255.255.255.0">
+    </div>
+  </div>
+
+  <button class="btn btn-save" onclick="saveConfig()">💾 SAVE & CONNECT</button>
+  <button class="btn btn-reboot" onclick="reboot()">🔄 REBOOT</button>
+  <button class="btn btn-reset" onclick="factoryReset()">⚠️ FACTORY RESET</button>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    function showToast(msg, color) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.style.background = color || '#00c853';
+      t.style.display = 'block';
+      setTimeout(() => t.style.display = 'none', 3000);
+    }
+
+    async function loadConfig() {
+      try {
+        const res = await fetch('/config');
+        const d = await res.json();
+        document.getElementById('infoMac').textContent = d.mac;
+        document.getElementById('infoFw').textContent = d.firmware;
+        document.getElementById('vendo_name').value = d.vendo_name;
+        document.getElementById('wifi_ssid').value = d.wifi_ssid;
+        document.getElementById('server_ip').value = d.server_ip;
+        document.getElementById('server_port').value = d.server_port;
+        document.getElementById('static_ip').checked = d.static_ip;
+        document.getElementById('device_ip').value = d.device_ip;
+        document.getElementById('gateway').value = d.gateway;
+        document.getElementById('subnet').value = d.subnet;
+        if (d.static_ip) document.getElementById('staticFields').style.display = 'block';
+      } catch(e) { showToast('Failed to load config', '#e94560'); }
+    }
+
+    function toggleStatic() {
+      const checked = document.getElementById('static_ip').checked;
+      document.getElementById('staticFields').style.display = checked ? 'block' : 'none';
+    }
+
+    async function saveConfig() {
+      const body = new URLSearchParams({
+        vendo_name:  document.getElementById('vendo_name').value,
+        wifi_ssid:   document.getElementById('wifi_ssid').value,
+        wifi_pass:   document.getElementById('wifi_pass').value,
+        server_ip:   document.getElementById('server_ip').value,
+        server_port: document.getElementById('server_port').value,
+        static_ip:   document.getElementById('static_ip').checked ? 'true' : 'false',
+        device_ip:   document.getElementById('device_ip').value,
+        gateway:     document.getElementById('gateway').value,
+        subnet:      document.getElementById('subnet').value,
+      });
+      try {
+        const res = await fetch('/save', { method: 'POST', body });
+        const d = await res.json();
+        showToast(d.message);
+      } catch(e) { showToast('Error saving', '#e94560'); }
+    }
+
+    async function reboot() {
+      if (!confirm('Reboot the device?')) return;
+      await fetch('/reboot', { method: 'POST' });
+      showToast('Rebooting...');
+    }
+
+    async function factoryReset() {
+      if (!confirm('Erase all settings?')) return;
+      await fetch('/reset', { method: 'POST' });
+      showToast('Reset! Rebooting...', '#e94560');
+    }
+
+    loadConfig();
+  </script>
+</body>
+</html>

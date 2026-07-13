@@ -1732,6 +1732,22 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### New: full ESP8266 port of the vendo firmware, as a cheaper alternative to ESP32
+
+- **Files:** `esp8266/firmware/rj_pisowifi_esp8266/*` (new), `README.md`
+- **Why:** ESP32 boards proved too expensive and too easy to brick during bench work (two lost already) - ESP8266 (NodeMCU/Wemos D1 Mini style boards) is cheaper and more available, and this firmware doesn't use anything ESP32-specific hardware-wise (no BLE, no touch, no exotic peripherals) - just WiFi, HTTP, GPIO interrupts, all fully supported on ESP8266 too.
+- **What changed porting it:**
+  - `Preferences` (ESP32's NVS-backed config library) doesn't exist on ESP8266 - replaced with a plain flat text file on `LittleFS`, one setting per line, functionally identical from the outside (same setup hotspot, same save/reset behavior).
+  - ESP32's per-mutex critical sections (`portMUX_TYPE`/`portENTER_CRITICAL_ISR`) don't exist on ESP8266 (single-core) - replaced with plain `noInterrupts()`/`interrupts()` in `coin.cpp`, the standard ESP8266 pattern for protecting a variable shared with an ISR.
+  - `WiFi.h`→`ESP8266WiFi.h`, `HTTPClient.h`→`ESP8266HTTPClient.h`, `WebServer`→`ESP8266WebServer`, `SPIFFS`→`LittleFS`, `Update.h`→`Updater.h` (same `Update` global object, same method names on both platforms), `WIFI_AUTH_OPEN`→`ENC_TYPE_NONE` (ESP8266's equivalent open-network enum value). ESP8266's `HTTPClient.begin()` additionally needs an explicit `WiFiClient` passed in, unlike ESP32's single-argument form.
+  - Pin selection respects ESP8266's real boot-mode constraints (far fewer safe GPIOs than ESP32): coin/relay on plain GPIO4/GPIO5 (no boot role), LED and setup-button reused from GPIO2/GPIO0 specifically *because* those are the same pins nearly every ESP8266 board already wires its own onboard LED and FLASH button to - safe once past the boot-mode window, and needs no extra wiring on most boards.
+  - All non-platform-specific logic (relay timing, LCD/Serial-stub output) ported unchanged.
+- **Feature parity:** includes everything built this session for the ESP32 version - the 400ms coin debounce, the auto-recovery setup hotspot after sustained WiFi failure, and OTA updates from the admin panel's Devices page.
+- **Docs:** updated `README.md`'s two stale "do not build ESP8266 support" notes (from an earlier session, when the cost/effort tradeoff didn't justify it) to reflect that it's now built and why the calculus changed.
+- **Verification status:** ported carefully against the real ESP32 source file by file, matching documented ESP8266 Arduino core API differences, but not yet compiled or flashed on real ESP8266 hardware - the next actual compile + flash + coin test is what will confirm the port is correct end to end.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

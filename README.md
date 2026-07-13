@@ -75,7 +75,7 @@ Relay activation goes through the Node server — `POST /api/portal/relay/:actio
 1. Relay-at-boot grounding issue — traced to multiple GND wires landing on separate pins instead of a common ground junction.
 2. ESP32 coin pulse race condition (noise / phantom credits) — also traced to grounding.
 3. A bench ESP32 was shorted/damaged; a replacement DevKitC has been ordered (recommend ordering two, since bench work tends to kill boards).
-4. Do not substitute ESP8266 — different libraries, requires a full firmware rewrite for minimal savings. Stick with ESP32 DevKitC form factor.
+4. **Update:** ESP8266 support now exists (`esp8266/firmware/rj_pisowifi_esp8266/`) — after bricking multiple ESP32 boards, the cost/reliability tradeoff flipped. Full feature parity (coin detection, relay control, setup hotspot, WiFi auto-recovery, OTA updates), just on cheaper, more available hardware. See its own README for the (few) wiring/pin differences.
 
 ---
 
@@ -352,9 +352,11 @@ Not a bulletproof/uncrackable system (nothing client-side ever is), but fits the
 
 ---
 
-## ESP8266 as alternative hardware (considered, not planned)
+## ESP8266 as alternative hardware (built)
 
-Technically possible to run coin/relay/WiFi logic on ESP8266 (NodeMCU/Wemos D1 Mini), but **not currently planned** — would require a full firmware rewrite (different WiFi library, different GPIO/interrupt handling, fewer safely-usable pins than ESP32, current pinout doesn't map cleanly), for only a marginal per-unit cost saving. Decision: stick with ESP32 as the standard hardware target. Could be revisited later as a "budget tier" hardware option once WiFi rental core is stable — but not before, since it would mean re-validating the grounding/coin-pulse-race fixes on a second board.
+Originally deferred (see history below) — built once the actual cost/reliability tradeoff on the ground made it worth it (multiple ESP32 boards bricked, ESP32 pricing too high for a budget tier). Full feature parity with the ESP32 firmware: coin detection, relay control, setup hotspot, WiFi auto-recovery, OTA updates from the admin panel. Lives at `esp8266/firmware/rj_pisowifi_esp8266/`, own README covers the pin/wiring differences (fewer safely-usable GPIOs than ESP32, different config storage mechanism under the hood — LittleFS instead of ESP32's Preferences/NVS, functionally identical from the outside).
+
+*Original note, kept for history: "Technically possible... but not currently planned — would require a full firmware rewrite... for only a marginal per-unit cost saving." That calculus changed once real hardware got bricked in the field.*
 
 ---
 
