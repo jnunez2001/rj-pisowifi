@@ -1,4 +1,32 @@
 const { exec } = require('child_process');
+const fs = require('fs');
+
+// Bug found via a comparable project's own production stabilization notes
+// (not yet hit here, fixed proactively): tc flower's MAC-based matching
+// (dst_mac/src_mac) has been observed to be inconsistently supported
+// across different tc/kernel builds, while IP-based matching (dst_ip/
+// src_ip) is natively supported and reliable everywhere. Standalone mode's
+// own DHCP server (dnsmasq) already writes exactly this MAC-to-IP mapping
+// to leases file for every connected client - same source app.js/
+// portal.js already read for the reverse (IP-to-MAC) direction.
+function getIpFromMac(mac) {
+  try {
+    const leases = fs.readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
+    // Format: timestamp MAC IP hostname client-id
+    for (const line of leases.trim().split('\n')) {
+      const parts = line.split(' ');
+      if (parts[1] && parts[1].toLowerCase() === mac) return parts[2] || null;
+    }
+  } catch (e) {}
+  return null;
+}
+
+// Remembers which IP a client's tc filters were actually created against,
+// so removeClientBandwidth() can target that exact IP even if the DHCP
+// lease has since renewed to something else - a fresh getIpFromMac() at
+// removal time could otherwise miss the original filter (or worse, later
+// match some other device that inherits the now-recycled old IP).
+const lastShapedIp = new Map();
 
 // Network backend is selectable per-deployment (Settings > Network Mode).
 // Default ('nodogsplash') drives nftables/tc directly on this box, below.
@@ -167,18 +195,28 @@ function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst 
     return require('./mikrotikService').setClientBandwidth(normalizedMac, download, upload, burst);
   }
 
+  const clientIp = getIpFromMac(normalizedMac);
+  if (!clientIp) {
+    console.log(`[TC] No DHCP lease found yet for ${normalizedMac}, skipping bandwidth`);
+    return Promise.resolve();
+  }
+
   return new Promise((resolve) => {
     const classId = macToClassId(normalizedMac);
     const lanIf = getLanInterface();
     const cmds = [
       `sudo tc class replace dev ${lanIf} parent 1: classid 1:${classId} htb rate ${download}mbit ceil ${download}mbit burst 32k cburst 32k quantum 15000`,
-      `sudo tc filter replace dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_mac ${normalizedMac} classid 1:${classId}`,
-      `sudo tc filter replace dev ${lanIf} parent ffff: protocol ip prio 1 flower src_mac ${normalizedMac} action police rate ${upload}mbit burst 32k drop`
+      `sudo tc filter replace dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_ip ${clientIp} classid 1:${classId}`,
+      `sudo tc filter replace dev ${lanIf} parent ffff: protocol ip prio 1 flower src_ip ${clientIp} action police rate ${upload}mbit burst 32k drop`
     ];
 
     exec(cmds.join(' && '), (error) => {
-      if (error) console.error(`[TC] Failed to shape ${normalizedMac}:`, error.message);
-      else console.log(`[TC] Shaped ${normalizedMac} to ${download}mbit down / ${upload}mbit up (class 1:${classId})`);
+      if (error) {
+        console.error(`[TC] Failed to shape ${normalizedMac} (${clientIp}):`, error.message);
+      } else {
+        console.log(`[TC] Shaped ${normalizedMac} (${clientIp}) to ${download}mbit down / ${upload}mbit up (class 1:${classId})`);
+        lastShapedIp.set(normalizedMac, clientIp);
+      }
       resolve();
     });
   });
@@ -197,13 +235,24 @@ function removeClientBandwidth(mac) {
     return require('./mikrotikService').removeClientBandwidth(normalizedMac);
   }
 
+  // Prefer the exact IP the filters were created against - the DHCP lease
+  // may have since renewed to something else, and a fresh lookup at
+  // removal time could miss the original filter entirely (or worse, later
+  // match a different device that inherits the now-recycled old IP).
+  const clientIp = lastShapedIp.get(normalizedMac) || getIpFromMac(normalizedMac);
+  lastShapedIp.delete(normalizedMac);
+  if (!clientIp) {
+    console.log(`[TC] No known IP for ${normalizedMac}, nothing to clean up`);
+    return Promise.resolve();
+  }
+
   return new Promise((resolve) => {
     const classId = macToClassId(normalizedMac);
     const lanIf = getLanInterface();
     exec(
-      `sudo tc filter del dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_mac ${normalizedMac} classid 1:${classId}; ` +
+      `sudo tc filter del dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_ip ${clientIp} classid 1:${classId}; ` +
       `sudo tc class del dev ${lanIf} classid 1:${classId}; ` +
-      `sudo tc filter del dev ${lanIf} parent ffff: protocol ip prio 1 flower src_mac ${normalizedMac}`,
+      `sudo tc filter del dev ${lanIf} parent ffff: protocol ip prio 1 flower src_ip ${clientIp}`,
       (error, stdout, stderr) => {
         // Log errors instead of suppressing (Bug #38)
         if (error) {

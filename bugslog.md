@@ -1768,6 +1768,15 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Proactive fix: standalone-mode bandwidth shaping used MAC-based tc matching, same reliability issue found in a comparable project's real production incident
+
+- **File:** `server/services/networkService.js`
+- **Why:** while comparing rj-pisowifi against the user's first shipped product (FastFi, an OpenWrt/Orange-Pi-based system, see `FASTFI_COMPARISON_PLAN.md`), that project's own stabilization notes documented a real incident - `tc flower`'s MAC-based matching (`match ether dst`) was inconsistently supported across different `tc` builds, switched to IP-based matching as the fix. rj-pisowifi's standalone-mode shaping had the exact same MAC-based pattern (`flower dst_mac`/`src_mac`), not yet hit as a real bug here, but the same latent risk.
+- **Fix:** added `getIpFromMac()` (reads the same `dnsmasq.leases` file already used for the reverse IP-to-MAC direction elsewhere) and switched both `setClientBandwidth()` and `removeClientBandwidth()` to `flower dst_ip`/`src_ip` matching instead. Also fixes a related edge case this change could otherwise introduce: a client's DHCP lease can renew to a different IP between when shaping was applied and when it's removed, so a fresh IP lookup at removal time could miss the original filter (or worse, later match a different device that inherits the now-recycled old IP) - a small `lastShapedIp` map remembers the exact IP filters were created against, so cleanup always targets the right one.
+- **Verification status:** proactive fix based on a comparable project's documented real-world lesson, not yet hit as an actual bug here. `node --check` passes. Not yet field-tested - the next standalone-mode session with bandwidth cap enabled is what will confirm shaping still applies correctly with IP-based matching.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅
