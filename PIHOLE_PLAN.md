@@ -26,13 +26,29 @@ Pi-hole becomes a single point of failure for DNS if it's the *only* resolver ev
 
 ## Admin integration (better than a second, separate admin panel)
 
-Rather than making the owner learn and check a whole separate Pi-hole UI, surface the useful bits inside the existing admin panel via Pi-hole's own API: total queries, percentage blocked, an enable/disable toggle, maybe a manual whitelist field for when a legitimate site gets over-blocked (a real, common Pi-hole annoyance - default blocklists occasionally catch something a customer actually needs, and the admin needs a fast way to un-block it without touching a second system).
+Rather than making the owner learn and check a whole separate Pi-hole UI, surface the useful bits inside the existing admin panel via Pi-hole's own API: total queries, percentage blocked, **an Enable/Disable toggle**, and a manual whitelist field for when a legitimate site gets over-blocked (a real, common Pi-hole annoyance - default blocklists occasionally catch something a customer actually needs, and the admin needs a fast way to un-block it without touching a second system). Confirmed: yes, this is planned as a real toggle in the admin panel, not just a one-time install-and-forget.
+
+## Branding - customers must never see "Pi-hole" anywhere
+
+Explicit requirement, matching this project's standing rule that admin/customer-facing copy never exposes internal implementation details (same reasoning as the Devices page's firmware-update card copy earlier tonight). "Pi-hole" is purely an internal implementation detail - the underlying open-source software choice, not a name to appear anywhere a customer or even the admin-panel UI (as opposed to server logs, which are fine) can see it.
+
+- **Admin panel display name**: needs its own branded label instead of "Pi-hole" - not decided yet, this is a naming/vision call for the owner, not something to pick without asking. Candidates to consider when this gets built: something consistent with the existing "Zen" branding direction (e.g. "ZenShield," "Zen Filter") or a plain functional name ("Ad & Tracker Blocker," "Content Filter"). Whatever's picked, used consistently in the admin UI, never "Pi-hole."
+- **Customer-facing block behavior**: when Pi-hole blocks a domain, it can either return NXDOMAIN silently (page just fails to load, nothing shown at all - the safe default) or show a "blocked" landing page for certain query types. If a block page is ever shown to a customer, it must be re-skinned to match this app's own portal branding (or just kept silent/NXDOMAIN) - never Pi-hole's own default block page or logo.
+- **Process/service names on the box itself** (`pihole-FTL`, log entries, etc.) can stay as-is - those are only ever visible to whoever SSHes into the server, not to admin-panel users or customers, so there's no real disclosure risk there worth engineering around.
+
+## Reliability and no-conflict confirmation, explicitly for BOTH modes
+
+Re-stated per explicit request - this isn't optional or "should be fine," it's a hard requirement before this ships in either mode:
+
+- **Standalone mode**: `dnsmasq` currently owns both DHCP and DNS on port 53. Pi-hole's own DNS resolver (`pihole-FTL`) also wants port 53 - this is a real conflict that must be resolved by reconfiguring `dnsmasq` to DHCP-only (no DNS of its own) and forwarding its DNS responsibility to Pi-hole, verified with an actual conflict-free `systemctl status` on both services and a real DNS resolution test from a connected client before considering this done.
+- **Router mode**: no port conflict on the Ubuntu server side at all in this mode (MikroTik handles DHCP/DNS-serving to clients, not this server) - Pi-hole here just needs to be reachable *from* the router as an upstream resolver, and the router's own DNS forwarding (already built for `portal_hostname`) points at it with the secondary-DNS fallback from above. Verified by confirming router mode's existing DNS/hostname feature still works correctly with Pi-hole inserted as the upstream, not just tested in isolation.
+- **Cross-mode rule**: whichever mode is active, the *other* mode's Pi-hole wiring must stay inert (no port conflicts, no dangling config) so switching Network Mode later doesn't leave a broken half-configured DNS setup behind - matches how the rest of this app already keeps standalone/router-mode logic cleanly separated (`networkService.js`'s `isMikrotikMode()` branch pattern).
 
 ## Suggested build order
 
 1. Install Pi-hole on the server, configure it DHCP-independent (DNS only, no DHCP - this app's own DHCP/dnsmasq or the MikroTik keeps doing that job).
 2. Build the watchdog timer (mirrors the existing app watchdog exactly).
-3. Wire secondary-DNS fallback into both standalone (`dnsmasq` forwarding) and router mode (`portal_hostname`-style per-lane `dns-server` field extended to carry two addresses).
+3. Wire secondary-DNS fallback into both standalone (`dnsmasq` forwarding) and router mode (`portal_hostname`-style per-lane `dns-server` field extended to carry two addresses), verifying no port/service conflict in either mode per the section above.
 4. Resolve the port 80 conflict - move Pi-hole's UI off 80, or skip exposing it and go straight to step 5.
-5. Add the admin panel integration card (stats + toggle + whitelist), so this never needs its own separately-bookmarked URL for daily use.
+5. Add the admin panel integration card (stats + Enable/Disable toggle + whitelist) under its final branded name (owner to decide), so this never needs its own separately-bookmarked URL for daily use, and customers never see "Pi-hole" anywhere.
 6. Enable per lane - Home first (lowest risk, no paying customers affected if something's off), then WiFi-Rental/PC-Rental once confirmed solid.
