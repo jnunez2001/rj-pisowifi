@@ -2,6 +2,8 @@
 
 **Status:** Planning only, nothing built yet. Build later, not blocking anything currently in progress.
 
+**Pricing (owner's decision, for when this is commercialized):** free for the first year, then part of a paid **Pro plan** at **₱300/year** afterward. This means whenever this actually gets built, it needs a licensing/tier gate around it (ties into the still-unbuilt device-licensing work noted in `SECURITY_PLAN.md`/`FASTFI_COMPARISON_PLAN.md` - this feature can't be cleanly gated by plan tier until that licensing layer exists), not just a plain on/off toggle with no accounting for who's entitled to it.
+
 ## What it gives every lane
 
 Pi-hole is a DNS-level ad/tracker/malware-domain blocker. Point a network's DNS at it instead of a plain public resolver (8.8.8.8), and every device on that network gets ad-blocking automatically - no per-device app, no per-device setup, works the same on phones, PCs, smart TVs, everything.
