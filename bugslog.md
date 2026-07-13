@@ -1680,6 +1680,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### New: game-traffic prioritization to reduce lag on shared/capped connections
+
+- **Files:** `server/services/mikrotikProvisioner.js`, `server/services/mikrotikService.js`
+- **Why:** a flat per-client bandwidth cap treats a customer's own real-time game packets identically to their own (or other customers') bulk traffic - downloads, video, other flows all compete equally, which is what actually causes gaming lag on a shared connection, not just the raw Mbps number.
+- **How it works:** Configure now adds one global mangle rule (`chain=forward protocol=udp action=mark-packet new-packet-mark=rj-game-priority`, comment `rj-piso-game-priority`) marking UDP traffic - what most real-time games use for gameplay data. Each client's bandwidth queue is now a parent (the overall cap, unchanged) plus two priority children: one matching `packet-marks=rj-game-priority` at `priority=1` (highest), one catching everything else at `priority=8` (lowest). Total throughput still never exceeds the parent's `max-limit` - this changes which traffic gets served first when a client's own capped bandwidth is contended, not the cap itself.
+- **Cleanup:** `deleteQueue()` now matches by substring (`?name~<base>`) instead of an exact name, so it catches the parent and both children (and cleanly upgrades any lingering flat single-queue from before this existed) in one pass, removing children before the parent since RouterOS won't remove a queue that still has children referencing it.
+- **Verification status:** implemented and wired end to end, matching documented RouterOS parent/child Simple Queue + mangle packet-mark behavior, and using the exact `packet-marks` field name confirmed from this router's own real `/queue/simple/print` output earlier tonight. Not yet field-tested on real hardware - the next Configure run plus a fresh capped session with a game actually running is what will confirm both the mangle rule and the priority split behave as expected together.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

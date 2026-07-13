@@ -151,6 +151,10 @@ function existenceCheckFor(words) {
       const comment = getAttr('comment');
       return comment ? { printCmd: '/ip/firewall/nat/print', filter: `?comment=${comment}` } : null;
     }
+    case '/ip/firewall/mangle/add': {
+      const comment = getAttr('comment');
+      return comment ? { printCmd: '/ip/firewall/mangle/print', filter: `?comment=${comment}` } : null;
+    }
     default:
       return null;
   }
@@ -270,6 +274,19 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
   // configured correctly. Disabling it is required for any bandwidth
   // shaping in this build to mean anything at all.
   steps.push({ type: 'disable-fasttrack', description: 'Disable the router\'s factory-default fasttrack rule (it bypasses all bandwidth shaping)' });
+
+  // Game-traffic prioritization (ROUTER_MODE_PLAN.md-style QoS): marks UDP
+  // traffic - what most real-time games use for gameplay data - so each
+  // client's bandwidth queue (mikrotikService.js's setClientBandwidth) can
+  // give it priority over that same client's own/other bulk traffic
+  // (downloads, video) without raising anyone's overall cap. One rule,
+  // applied globally, not per-lane - marking is harmless on lanes that
+  // never end up using it (Home/PC-Rental lanes with no per-client queue
+  // at all just never reference this mark).
+  steps.push({
+    description: 'Mark UDP traffic for game-priority queueing',
+    words: ['/ip/firewall/mangle/add', '=chain=forward', '=protocol=udp', '=action=mark-packet', '=new-packet-mark=rj-game-priority', '=passthrough=no', '=comment=rj-piso-game-priority'],
+  });
 
   // Bug (found on the first real-hardware run, not just theoretical): a
   // brand-new router isn't actually blank - MikroTik's own factory-default

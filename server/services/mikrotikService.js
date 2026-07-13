@@ -140,13 +140,21 @@ function queueNameFor(mac) {
   return `rj-${mac.replace(/:/g, '')}`;
 }
 
-// Deletes any existing simple queue(s) for this client's queue name.
-// Shared by setClientBandwidth (avoid duplicates before re-adding) and
-// removeClientBandwidth (session end — no queue should linger).
+// Deletes any existing simple queue(s) for this client. A client's
+// bandwidth is now a parent queue (rj-<mac>, the overall cap) plus two
+// priority children (rj-<mac>-udp, rj-<mac>-other) for game-traffic
+// prioritization (see setClientBandwidth) - "~" is a substring match on
+// name, so this catches all three (and the old flat single-queue shape
+// from before this existed, for a clean upgrade on existing sessions) in
+// one query instead of needing to know the exact child names up front.
+// Children must be removed before their parent (RouterOS won't remove a
+// queue that still has children referencing it) - reversing the print
+// order (children were added after the parent, so this list is
+// parent-first) guarantees that.
 async function deleteQueue(client, mac) {
   const queueName = queueNameFor(mac);
-  const res = await client.talk(['/queue/simple/print', `?name=${queueName}`]);
-  for (const q of res.re) {
+  const res = await client.talk(['/queue/simple/print', `?name~${queueName}`]);
+  for (const q of res.re.slice().reverse()) {
     await client.talk(['/queue/simple/remove', `=.id=${q['.id']}`]);
   }
 }
@@ -232,18 +240,44 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
       // Remove any existing queue for this client first (avoid duplicates)
       await deleteQueue(client, mac);
 
-      const words = ['/queue/simple/add', `=name=${queueNameFor(mac)}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`];
-      if (placeBeforeId) words.push(`=place-before=${placeBeforeId}`);
+      const baseName = queueNameFor(mac);
+
+      // New: game-traffic prioritization. A flat single queue treats a
+      // customer's own game packets and their own/other customers' bulk
+      // traffic (downloads, video) identically - on a shared, capped
+      // connection, that's the real source of gaming lag, not just the raw
+      // Mbps number. Splitting into a parent (the overall cap, unchanged
+      // from before) plus two priority children fixes this: UDP traffic
+      // (what most real-time games use) is marked by a one-time mangle
+      // rule during Configure (mikrotikProvisioner.js's
+      // "Mark UDP traffic for game-priority queueing" step) and always
+      // gets served first via priority=1 when this client's own traffic is
+      // contending for their own capped bandwidth, while everything else
+      // shares what's left at priority=8. Total throughput still never
+      // exceeds the parent's max-limit - this changes ordering under
+      // contention, not the cap itself.
+      const parentWords = ['/queue/simple/add', `=name=${baseName}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`];
+      if (placeBeforeId) parentWords.push(`=place-before=${placeBeforeId}`);
       if (burstMbps) {
         // burst-threshold = the sustained cap itself: bursting is allowed
         // only while this client's own average stays at/below what they're
         // already paying for, not above it.
-        words.push(`=burst-limit=${burstMbps}M/${burstMbps}M`);
-        words.push(`=burst-threshold=${upload}M/${download}M`);
-        words.push(`=burst-time=${burstSeconds}s/${burstSeconds}s`);
+        parentWords.push(`=burst-limit=${burstMbps}M/${burstMbps}M`);
+        parentWords.push(`=burst-threshold=${upload}M/${download}M`);
+        parentWords.push(`=burst-time=${burstSeconds}s/${burstSeconds}s`);
       }
-      await client.talk(words);
-      console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up${burstMbps ? ` (burst ${burstMbps}Mbps for ${burstSeconds}s)` : ''}${placeBeforeId ? '' : ' (WARNING: could not find lane queue to place before - lane-wide limit may take priority)'}`);
+      await client.talk(parentWords);
+
+      await client.talk([
+        '/queue/simple/add', `=name=${baseName}-udp`, `=parent=${baseName}`,
+        '=packet-marks=rj-game-priority', `=max-limit=${upload}M/${download}M`, '=priority=1/1',
+      ]);
+      await client.talk([
+        '/queue/simple/add', `=name=${baseName}-other`, `=parent=${baseName}`,
+        `=max-limit=${upload}M/${download}M`, '=priority=8/8',
+      ]);
+
+      console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up, game traffic prioritized${burstMbps ? ` (burst ${burstMbps}Mbps for ${burstSeconds}s)` : ''}${placeBeforeId ? '' : ' (WARNING: could not find lane queue to place before - lane-wide limit may take priority)'}`);
       return true;
     });
   } catch (err) {
