@@ -27,8 +27,9 @@ Beyond the coin-slot/voucher model already live, there's a real opportunity to i
 ### Phase 2 — Depends on you setting something up first
 
 4. **E-wallet cash-in (GCash/Maya)**
-   - You said nothing is set up yet — this needs a real payment gateway account before any code can process real money. The usual path for a small PH business is **PayMongo** or **Xendit**, both of which support GCash/Maya and have straightforward KYC (valid ID, business info, bank/GCash account to receive payouts)
-   - Once you have API keys from one of those, I build the integration against them — this is a business step on your end that has to happen first, not something I can build around blind
+   - **Update: a much simpler path exists, no payment gateway/KYC needed.** Confirmed working in FastFi's own router builds (`gcash.lua`, `FASTFI-NEWIFI-D2-V2.1.5` and others): customer picks a package, gets shown a GCash QR code + the exact peso amount to send, pays manually via any personal GCash account, and a spare Android phone running a generic SMS-forwarding app detects GCash's own payment-received SMS and forwards the amount to the server, which matches it against the oldest pending order for that exact price and auto-credits it. No PayMongo/Xendit account, no business KYC, no formal merchant relationship - just a GCash account (personal is fine) and one cheap Android phone dedicated to SMS forwarding.
+   - **Known limitation, inherited from this approach:** matches by amount only, not a unique per-order reference - if two customers pick the exact same price at the same moment, the credit could land on the wrong pending order. FastFi accepts this tradeoff for simplicity; worth deciding whether to accept it here too or add a reference-number step (e.g. last 4 digits of the sender's GCash-registered mobile, which `gcash.lua` already collects) to disambiguate.
+   - Formal payment gateway (PayMongo/Xendit) is still the more "official" path if wanted later, but is no longer a prerequisite to start - this can ship much sooner than originally planned.
    - Adds balance to a customer's points/account, which they then spend the same way as coin-credited points
 
 5. **Game top-up reselling** (ML diamonds, Free Fire diamonds, PUBG UC, etc.)
@@ -45,7 +46,7 @@ Beyond the coin-slot/voucher model already live, there's a real opportunity to i
 ## What I need from you before each phase
 
 - **Phase 1**: nothing — can start once you say go
-- **Phase 2, e-wallet**: PayMongo or Xendit account + API keys (I can walk you through picking one when we get there)
+- **Phase 2, e-wallet**: a GCash account + QR code (personal is fine, already have this) and a spare Android phone for SMS forwarding - much lower barrier than originally planned, see the update above
 - **Phase 2, game top-ups**: your existing (or new) supplier/reseller relationship details
 
 ## Design principle carried through all of it
