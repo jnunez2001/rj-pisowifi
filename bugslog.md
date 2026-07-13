@@ -1690,6 +1690,18 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Improvement: coin credit felt delayed on the portal - ESP32 pulse debounce was far more conservative than needed
+
+- **File:** `esp32/firmware/rj_pisowifi/config.h`
+- **Reported:** the portal's credit display felt delayed right after inserting a coin.
+- **Investigated first:** the app side was already correct - `sseService.notify()` fires the instant a coin credits, and the portal opens its SSE connection on page load (before any coin flow starts), so there was no polling-lag bug in the software update path.
+- **Real source of the delay:** the ESP32's `COIN_WAIT_MS` (how long it waits after the last coin pulse before deciding the pulse train is finished and reporting the total) was set to 1500ms - a very conservative value. Most mechanical coin acceptors finish their entire pulse train for one coin in well under 300ms, so 1.5 full seconds of that delay was pure unnecessary lag between money-in-hand and credit-on-screen.
+- **Fix:** reduced to 400ms - still a healthy multiple of a typical real pulse train's duration, so multi-pulse coins (e.g. a coin sending 5 pulses for ₱5) still get counted correctly, just without over a second of needless waiting on top of that.
+- **Caveat, explicitly flagged in the code comment:** this assumes typical coin-acceptor pulse timing. If a specific coin acceptor model has unusually large gaps between its own pulses, this value may need to go back up for that hardware - test with real coins of every denomination this cafe accepts before trusting it in production, since undercounting would mean a customer getting less time than they paid for. Requires reflashing the ESP32 (not a `git pull` - this is firmware, not the Node.js server).
+- **Verification status:** not yet field-tested on real hardware - the next real coin insertion after reflashing is what will confirm both the faster credit and that multi-pulse coins still count correctly.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

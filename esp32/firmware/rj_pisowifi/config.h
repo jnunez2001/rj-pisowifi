@@ -48,7 +48,21 @@
 #define RELAY_TIMEOUT_MS  35000
 #define SETUP_HOLD_MS     5000
 #define WIFI_RETRY_COUNT  20
-#define COIN_WAIT_MS      1500
+
+// How long to wait after the LAST pulse before deciding a coin's pulse
+// train is finished and reporting its total value (coin.cpp's
+// processCoinPulses()). Needs to be longer than the real gap between
+// pulses of the SAME coin (most mechanical coin acceptors finish their
+// whole pulse train in well under 300ms), but every extra millisecond here
+// is money-in-hand-to-credit-on-screen delay the customer directly feels.
+// 1500ms was far more conservative than any real coin acceptor needs -
+// dropped to 400ms, still a healthy multiple of a typical pulse train's
+// real duration. If a specific coin acceptor model turns out to have
+// unusually large gaps between pulses (undercounting a multi-pulse coin's
+// value would show up as a customer getting less credit than they paid
+// for), raise this - don't drop it further without testing that
+// specific hardware's actual pulse timing first.
+#define COIN_WAIT_MS      400
 
 // ===== CONFIG STRUCT =====
 struct Config {
