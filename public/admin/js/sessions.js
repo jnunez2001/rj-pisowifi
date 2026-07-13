@@ -96,6 +96,26 @@ async function loadSessions() {
   } catch(e) {
     console.error('Sessions error:', e);
   }
+
+  // Bug found on real hardware: this page had a `sessionsRefreshInterval`
+  // variable declared but nothing ever actually set it - the table only
+  // ever loaded once, when the page was opened, and never updated again
+  // until the admin manually left and came back. A coin landing (or a
+  // session ending) never showed up here until then, even though the
+  // customer's own portal updates instantly via SSE. Poll every 5s while
+  // this page is open instead, matching the existing about.js pattern
+  // (destroyAbout/sysInfoInterval) - cleared by destroySessions() below,
+  // called from navigateTo() the same way destroyAbout() already is.
+  if (!sessionsRefreshInterval) {
+    sessionsRefreshInterval = setInterval(loadSessions, 5000);
+  }
+}
+
+function destroySessions() {
+  if (sessionsRefreshInterval) {
+    clearInterval(sessionsRefreshInterval);
+    sessionsRefreshInterval = null;
+  }
 }
 
 function formatSessionTime(minutes) {

@@ -1650,6 +1650,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #111 (MEDIUM, found on real hardware): Active Sessions admin page never auto-refreshed at all
+
+- **Files:** `public/admin/js/sessions.js`, `public/admin/js/app.js`
+- **Reported:** the admin panel's coin count/active sessions felt delayed compared to how instantly the customer's own portal updates.
+- **Cause:** the customer-facing portal genuinely does update instantly (`sessionService.js` already calls `sseService.notify()` on every coin/time change, and the portal holds an open SSE connection for it). The admin Active Sessions page has no such push mechanism and, worse, had no polling either - a `sessionsRefreshInterval` variable was declared but never actually assigned anywhere. The table only ever loaded once, when the page was opened, and sat frozen until the admin manually navigated away and back.
+- **Fix:** poll `loadSessions()` every 5 seconds while the page is open, matching the exact existing pattern `about.js` already uses for its own live system-info refresh (`destroyAbout`/`sysInfoInterval`). Added `destroySessions()` and wired it into `navigateTo()` the same way `destroyAbout()` already is, so the interval doesn't keep running once the admin leaves the page.
+- **Verification status:** traced against the real reported symptom and confirmed the refresh interval genuinely never existed before this fix. Not yet re-confirmed on the real server after deploying.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅
