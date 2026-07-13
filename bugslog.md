@@ -1660,6 +1660,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #112 (CRITICAL, found on real hardware): a factory-default firewall rule silently bypassed every bandwidth cap this app ever configures
+
+- **File:** `server/services/mikrotikProvisioner.js`
+- **Reported:** with Bug #108's queue-ordering fix confirmed deployed (per-client queue correctly placed before its lane queue, correct max-limit, real traffic visible in its byte counters), a capped phone still measured 200+ Mbps on real speed tests - far beyond even the lane-wide ceiling, let alone the 5Mbps per-client cap.
+- **Cause:** every fresh MikroTik ships with a factory-default firewall rule (`;;; defconf: fasttrack`, `chain=forward action=fasttrack-connection`) that sends established connections through an accelerated kernel fast-path, skipping the rest of firewall/queue processing entirely for the life of that connection. Only the initial connection-setup packets ever reach the queue tree - the actual bulk of any real transfer (a video, a download, a speed test) silently bypasses Simple Queues altogether. This wasn't specific to tonight's setup; it's present on every unmodified MikroTik and would have made per-client bandwidth caps meaningless on any router this app is ever pointed at, not just this one. Confirmed directly on real hardware: the rule's own counters showed 280+ MiB and 1.4 million packets already processed through it.
+- **Fix:** Configure now disables this rule automatically as a normal step in the provisioning plan (`disable-fasttrack`), the same way `free-port` is handled - looked up by its default comment, `.id`-based `/set =disabled=yes`, safe to re-run (skips already-disabled rules). No longer something the admin needs to know to find and disable by hand on every new router.
+- **Verification status:** confirmed on real hardware - disabling this exact rule via Winbox was what finally made the 5Mbps per-client cap hold under a real speed test, immediately following Bug #108's ordering fix. The automated Configure step itself (this fix) has not yet been re-run end to end on a fresh router, but it performs the exact same action just confirmed to work manually.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

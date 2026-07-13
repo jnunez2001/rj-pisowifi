@@ -257,6 +257,20 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
     });
   }
 
+  // Bug found on real hardware: a factory-default router's own "defconf:
+  // fasttrack" firewall filter rule (chain=forward,
+  // action=fasttrack-connection) sends any established connection through
+  // an accelerated kernel path that completely bypasses Simple Queues for
+  // the rest of that connection's life - only the initial connection-setup
+  // packets ever hit the queue tree, so a per-client bandwidth cap looked
+  // like it existed (correct max-limit, correctly ordered) but never
+  // actually held under real load, since almost all of a customer's real
+  // traffic silently skipped it. This is the single biggest reason a smart
+  // queue or per-client cap can appear completely inert despite being
+  // configured correctly. Disabling it is required for any bandwidth
+  // shaping in this build to mean anything at all.
+  steps.push({ type: 'disable-fasttrack', description: 'Disable the router\'s factory-default fasttrack rule (it bypasses all bandwidth shaping)' });
+
   // Bug (found on the first real-hardware run, not just theoretical): a
   // brand-new router isn't actually blank - MikroTik's own factory-default
   // config usually already bridges most LAN ports together, and a port can
@@ -514,6 +528,19 @@ async function apply() {
             await client.talk(['/interface/bridge/port/remove', `=.id=${row['.id']}`]);
           }
           log.push({ step: step.description, ok: true, detail: `${existing.re.length} removed` });
+          continue;
+        }
+
+        if (step.type === 'disable-fasttrack') {
+          const existing = await client.talk(['/ip/firewall/filter/print', '?comment=defconf: fasttrack']);
+          let disabledCount = 0;
+          for (const row of existing.re) {
+            if (row.disabled !== 'true') {
+              await client.talk(['/ip/firewall/filter/set', `=.id=${row['.id']}`, '=disabled=yes']);
+              disabledCount++;
+            }
+          }
+          log.push({ step: step.description, ok: true, detail: existing.re.length === 0 ? 'no fasttrack rule found (already removed, or never present)' : `${disabledCount} disabled` });
           continue;
         }
 
