@@ -42,6 +42,30 @@ const upload = multer({
   }
 });
 
+// ESP32 vendo firmware (.bin) storage — same reasoning as DB_PATH/
+// FINANCIAL_LOG_DIR living outside the app directory (server/config/
+// database.js, server/services/financialLogService.js): a re-clone or
+// reset of the app directory shouldn't be able to wipe out the currently-
+// deployed firmware.
+const firmwareDir = process.env.VENDO_FIRMWARE_DIR || path.join(__dirname, '../../data/firmware');
+try {
+  fs.mkdirSync(firmwareDir, { recursive: true });
+} catch(e) {
+  console.warn('Warning: could not create firmware directory:', e.message);
+}
+const firmwarePath = path.join(firmwareDir, 'latest.bin');
+const firmwareUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, firmwareDir),
+    filename: (req, file, cb) => cb(null, 'latest.bin'),
+  }),
+  limits: { fileSize: 4 * 1024 * 1024 }, // ESP32 flash partitions are well under this
+  fileFilter: (req, file, cb) => {
+    if (path.extname(file.originalname).toLowerCase() === '.bin') cb(null, true);
+    else cb(new Error('Firmware must be a .bin file'));
+  }
+});
+
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
@@ -1058,6 +1082,74 @@ router.post('/vendo/register', (req, res) => {
     console.error('Vendo register error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
+});
+
+// GET /api/admin/vendo/firmware — current pushed version, for the Devices
+// page's own display (admin-authenticated, this one's a UI read, not
+// something the ESP32 itself needs to call).
+router.get('/vendo/firmware', adminAuth, (req, res) => {
+  try {
+    const version = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value || null;
+    const uploadedAt = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_uploaded_at'").get()?.value || null;
+    const hasFile = fs.existsSync(firmwarePath);
+    return res.json({ success: true, version, uploaded_at: uploadedAt, has_file: hasFile });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/vendo/firmware — push a new firmware .bin (compiled via
+// Arduino IDE's Sketch > Export Compiled Binary) for every ESP32 vendo to
+// pick up over its next OTA check (esp32/firmware/rj_pisowifi/ota.cpp),
+// instead of needing a USB cable and Arduino IDE on-site for every update.
+router.post('/vendo/firmware', adminAuth, firmwareUpload.single('firmware'), (req, res) => {
+  try {
+    const { version } = req.body;
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No firmware file uploaded' });
+    }
+    if (!version || !String(version).trim()) {
+      return res.status(400).json({ success: false, message: 'Version is required (must match FIRMWARE_VERSION in config.h)' });
+    }
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    upsert.run('vendo_firmware_version', String(version).trim());
+    // devices.js's timeAgo() expects SQLite's own CURRENT_TIMESTAMP shape
+    // ("YYYY-MM-DD HH:MM:SS", space-separated, no "Z") - a plain
+    // toISOString() has a "T" and trailing "Z" already, which timeAgo()'s
+    // own "add a Z" step would double up into an unparseable string.
+    upsert.run('vendo_firmware_uploaded_at', new Date().toISOString().slice(0, 19).replace('T', ' '));
+    console.log(`📦 Vendo firmware updated: ${version}`);
+    return res.json({ success: true, message: 'Firmware uploaded — vendos will pick it up on their next check-in' });
+  } catch (err) {
+    console.error('Vendo firmware upload error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/vendo/firmware/version — unauthenticated, same reasoning
+// as /vendo/register above: called directly by ESP32 firmware with no
+// admin password. Just the version string so a device can cheaply decide
+// whether it needs to bother downloading the actual binary.
+router.get('/vendo/firmware/version', (req, res) => {
+  try {
+    const version = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value || '';
+    return res.json({ version });
+  } catch (err) {
+    res.status(500).json({ version: '' });
+  }
+});
+
+// GET /api/admin/vendo/firmware/download — unauthenticated, same reasoning
+// as above. Serves the raw .bin an ESP32 flashes itself with via ota.cpp.
+router.get('/vendo/firmware/download', (req, res) => {
+  if (!fs.existsSync(firmwarePath)) {
+    return res.status(404).json({ success: false, message: 'No firmware uploaded yet' });
+  }
+  res.sendFile(firmwarePath, (err) => {
+    if (err && !res.headersSent) {
+      res.status(500).json({ success: false, message: 'Failed to send firmware' });
+    }
+  });
 });
 
 // GET /api/admin/vendos

@@ -160,6 +160,7 @@ RestartSec=5
 Environment=NODE_ENV=production
 Environment=DB_PATH=$DATA_DIR/database/rjpisowifi.db
 Environment=FINANCIAL_LOG_DIR=$DATA_DIR/logs
+Environment=VENDO_FIRMWARE_DIR=$DATA_DIR/firmware
 
 [Install]
 WantedBy=multi-user.target

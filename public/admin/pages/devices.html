@@ -37,6 +37,46 @@
   </div>
 </div>
 
+<!-- VENDO FIRMWARE -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-microchip" style="margin-right:8px;color:var(--accent-purple);"></i>Vendo Firmware Update
+    </div>
+  </div>
+  <div class="alert alert-info">
+    <i class="fas fa-info-circle"></i>
+    Push a new firmware version to every vendo device over WiFi — no USB cable needed. Compile in the Arduino IDE
+    (Sketch &gt; Export Compiled Binary) and upload the resulting .bin file here.
+  </div>
+  <div class="sysinfo-table" style="margin-bottom:16px;">
+    <div class="sysinfo-row">
+      <span class="sysinfo-label">Currently Pushed Version</span>
+      <span class="sysinfo-value" id="firmwareCurrentVersion">--</span>
+    </div>
+    <div class="sysinfo-row">
+      <span class="sysinfo-label">Uploaded</span>
+      <span class="sysinfo-value" id="firmwareUploadedAt">--</span>
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label">Version</label>
+      <input type="text" id="firmwareVersion" class="form-control" placeholder="e.g. v1.0.1">
+      <small style="color:var(--text-muted);font-size:12px;">
+        Must match FIRMWARE_VERSION in esp32/firmware/rj_pisowifi/config.h for this exact build
+      </small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Firmware File (.bin)</label>
+      <input type="file" id="firmwareFile" class="form-control" accept=".bin">
+    </div>
+  </div>
+  <button class="btn btn-primary" onclick="uploadFirmware()">
+    <i class="fas fa-upload"></i> Push Firmware Update
+  </button>
+</div>
+
 <!-- TRUSTED DEVICES -->
 <div class="card" style="margin-top:20px;">
   <div class="card-header">

@@ -1712,6 +1712,17 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### New: push ESP32 vendo firmware updates from the admin panel, no USB cable needed
+
+- **Files:** `esp32/firmware/rj_pisowifi/ota.cpp`, `esp32/firmware/rj_pisowifi/config.h`, `esp32/firmware/rj_pisowifi/config.cpp`, `esp32/firmware/rj_pisowifi/rj_pisowifi.ino`, `server/routes/admin.js`, `public/admin/pages/devices.html`, `public/admin/js/devices.js`, `setup/install.sh`
+- **Why:** the coin-debounce firmware fix (400ms) earlier tonight needs a USB cable + Arduino IDE to actually reach the device - fine for a one-off, but every future firmware update would hit the same friction. Mirrors the main app's own "System Update" button, for the ESP32 side.
+- **How it works:** admin compiles the firmware in Arduino IDE (Sketch > Export Compiled Binary) and uploads the resulting `.bin` + a version string through a new Devices page card. Two new unauthenticated routes (`GET /api/admin/vendo/firmware/version`, `GET /api/admin/vendo/firmware/download`) mirror the existing `/vendo/register` pattern - called directly by ESP32 firmware, which has no admin password. Each vendo checks in every 10 minutes (`OTA_CHECK_INTERVAL_MS`), skipping the check entirely while a coin is being processed or the relay is armed so an update never lands mid-transaction, and flashes itself via the ESP32's native `Update` library on a version mismatch, then reboots.
+- **Chicken-and-egg note:** this OTA capability doesn't exist in currently-deployed firmware, so the very first push still needs one manual USB flash to install it - every push after that can go through the admin panel.
+- **Storage:** the uploaded `.bin` lives outside the app directory (`VENDO_FIRMWARE_DIR`, defaults under `DATA_DIR`), same reasoning as `DB_PATH`/`FINANCIAL_LOG_DIR` already living outside `server/` - a re-clone or reset of the app code shouldn't be able to wipe the currently-deployed firmware.
+- **Verification status:** implemented and syntax-checked (`node --check` clean), matching the existing `/vendo/register` unauthenticated-LAN-hardware pattern and the existing image-upload `FormData` pattern on the frontend. Not yet field-tested - the first real OTA push (after this session's manual USB flash installs the capability) is what will confirm the full loop works end to end.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

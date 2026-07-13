@@ -64,6 +64,13 @@
 // specific hardware's actual pulse timing first.
 #define COIN_WAIT_MS      400
 
+// How often to ask the server whether newer firmware is available
+// (ota.cpp). Every boot already tells the server this device's current
+// FIRMWARE_VERSION via registerVendo(), so this only needs to catch a
+// version bump pushed *after* boot - not urgent, no need to check more
+// than every few minutes.
+#define OTA_CHECK_INTERVAL_MS  600000
+
 // ===== CONFIG STRUCT =====
 struct Config {
   String vendo_name;
@@ -90,6 +97,7 @@ extern volatile unsigned long lastPulseTime;
 extern bool processingCoin;
 extern bool btnHeld;
 extern unsigned long btnPressStart;
+extern unsigned long lastOTACheck;
 
 // ===== FUNCTION DECLARATIONS =====
 
@@ -122,5 +130,8 @@ void postCoin(int coinValue);
 void activateRelay();
 void deactivateRelay();
 void checkRelayTimeout();
+
+// ota.cpp
+void checkForFirmwareUpdate();
 
 #endif

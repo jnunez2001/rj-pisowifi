@@ -73,5 +73,14 @@ void loop() {
   if (!setupMode) checkRelayTimeout();
   if (!setupMode) checkWiFiReconnect();
 
+  // Skip while a coin is actively being processed or the relay is armed -
+  // an OTA update mid-insertion would be bad timing for a customer paying
+  // right now, and this check can safely wait for the next interval.
+  if (!setupMode && !relayActive && !processingCoin &&
+      millis() - lastOTACheck >= OTA_CHECK_INTERVAL_MS) {
+    lastOTACheck = millis();
+    checkForFirmwareUpdate();
+  }
+
   delay(10);
 }

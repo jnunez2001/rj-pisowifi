@@ -16,7 +16,57 @@ function isOnline(lastSeen) {
   return diff < 180; // online if seen within 3 minutes
 }
 
+async function loadFirmwareInfo() {
+  try {
+    const data = await apiCall('GET', '/api/admin/vendo/firmware');
+    if (!data.success) return;
+    document.getElementById('firmwareCurrentVersion').textContent = data.version || 'None uploaded yet';
+    document.getElementById('firmwareUploadedAt').textContent = data.uploaded_at ? timeAgo(data.uploaded_at) : '--';
+  } catch (e) {
+    console.error('Firmware info error:', e);
+  }
+}
+
+async function uploadFirmware() {
+  const fileInput = document.getElementById('firmwareFile');
+  const version = document.getElementById('firmwareVersion').value.trim();
+  const file = fileInput.files[0];
+
+  if (!version) {
+    showToast('Enter the firmware version first', 'error');
+    return;
+  }
+  if (!file) {
+    showToast('Select a .bin firmware file first', 'error');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('firmware', file);
+  formData.append('version', version);
+
+  try {
+    const res = await fetch('/api/admin/vendo/firmware', {
+      method: 'POST',
+      headers: { 'password': authToken },
+      body: formData
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      showToast('Firmware pushed! Vendos will update on their next check-in.', 'success');
+      fileInput.value = '';
+      loadFirmwareInfo();
+    } else {
+      showToast(data.message || 'Upload failed', 'error');
+    }
+  } catch (e) {
+    showToast('Upload error', 'error');
+  }
+}
+
 async function loadDevices() {
+  loadFirmwareInfo();
   loadTrustedDevices();
   try {
     const data = await apiCall('GET', '/api/admin/vendos');
