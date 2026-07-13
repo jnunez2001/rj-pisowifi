@@ -283,9 +283,17 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
   // applied globally, not per-lane - marking is harmless on lanes that
   // never end up using it (Home/PC-Rental lanes with no per-client queue
   // at all just never reference this mark).
+  //
+  // Excludes port 443: modern YouTube/Chrome/Google traffic increasingly
+  // uses QUIC, which - unlike classic HTTPS - runs over UDP, not TCP.
+  // Without this exclusion, a plain "all UDP" rule would also mark that
+  // bulk video traffic as game-priority, defeating the entire point of
+  // separating real-time gameplay data from bulk streaming/downloads.
+  // "port" (not "dst-port") matches either side of the connection, so this
+  // excludes QUIC traffic in both directions through chain=forward.
   steps.push({
-    description: 'Mark UDP traffic for game-priority queueing',
-    words: ['/ip/firewall/mangle/add', '=chain=forward', '=protocol=udp', '=action=mark-packet', '=new-packet-mark=rj-game-priority', '=passthrough=no', '=comment=rj-piso-game-priority'],
+    description: 'Mark UDP traffic for game-priority queueing (excluding QUIC/port 443)',
+    words: ['/ip/firewall/mangle/add', '=chain=forward', '=protocol=udp', '=port=!443', '=action=mark-packet', '=new-packet-mark=rj-game-priority', '=passthrough=no', '=comment=rj-piso-game-priority'],
   });
 
   // Bug (found on the first real-hardware run, not just theoretical): a
