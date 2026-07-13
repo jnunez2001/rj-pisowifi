@@ -179,9 +179,44 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
+chmod +x $APP_DIR/setup/watchdog.sh
+
+# Bug class this prevents: Restart=always above only fires when the Node
+# process actually exits - a hang (process alive, event loop stuck, no
+# longer answering any request) gets no automatic recovery at all without
+# this. Real-hardware incident: the app became unreachable from every
+# device on the network for an extended period with no crash in the
+# service log, and only a manual VM power-cycle fixed it - exactly the gap
+# a plain Restart=always can't cover. This polls the app's own health
+# endpoint every 30s with a hard timeout and force-restarts the service if
+# it ever stops answering, whether or not the process itself is still
+# technically running.
+cat > /etc/systemd/system/rj-pisowifi-watchdog.service << EOF
+[Unit]
+Description=R&J PisoWifi Health Watchdog
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $APP_DIR/setup/watchdog.sh
+EOF
+
+cat > /etc/systemd/system/rj-pisowifi-watchdog.timer << EOF
+[Unit]
+Description=Run R&J PisoWifi Health Watchdog every 30s
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=30
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload >> $LOG 2>&1
 systemctl enable rj-pisowifi >> $LOG 2>&1
 systemctl enable rj-network-setup >> $LOG 2>&1
+systemctl enable rj-pisowifi-watchdog.timer >> $LOG 2>&1
+systemctl start rj-pisowifi-watchdog.timer >> $LOG 2>&1
 echo "Services installed" | tee -a $LOG
 
 # ─── 9b. NGINX + TLS (WAN admin access) ──────────────────────

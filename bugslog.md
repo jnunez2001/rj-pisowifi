@@ -1702,6 +1702,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### New: health watchdog to recover from hangs, not just crashes
+
+- **Files:** `setup/watchdog.sh`, `setup/install.sh`
+- **Why:** a real-hardware incident during launch day - the app became unreachable from every device on the network for an extended period, with nothing in the service log indicating a crash, and only a manual VM power-cycle fixed it. `rj-pisowifi.service` already had `Restart=always`, but that only fires when the Node process actually *exits* - it does nothing for a process that's still technically running but stuck (a hang, a blocked event loop, a wedged connection), which is what this incident's evidence pointed to (the router could ping the server the whole time; only the app itself stopped responding).
+- **Fix:** a new `rj-pisowifi-watchdog.timer` runs every 30 seconds, checking the app's own `/api/health` endpoint with a 5-second timeout. Any failure to answer in time (whether the process crashed or is just stuck) triggers `systemctl restart rj-pisowifi`, extending the same automatic recovery a crash already gets to cover a hang too. Logged to `/var/log/rj-pisowifi-watchdog.log` so a pattern of repeated restarts would show up for later investigation instead of looking like isolated one-offs.
+- **Scope:** new installs get this automatically via `install.sh`. An already-running install needs the two systemd unit files created and enabled by hand (not something `git pull` alone applies, same as the earlier sudoers-only fixes tonight).
+- **Verification status:** not yet field-tested - the next time the app actually hangs (rather than crashes) is what will confirm this catches it within 30-60 seconds instead of requiring a manual power-cycle.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅
