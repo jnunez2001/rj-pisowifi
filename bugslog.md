@@ -1670,6 +1670,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### New: real, router-enforced speed burst for bandwidth-capped clients
+
+- **Files:** `public/admin/pages/security.html`, `public/admin/js/security.js`, `server/routes/admin.js`, `server/config/database.js`, `server/services/mikrotikService.js`, `server/services/networkService.js`, `server/services/sessionService.js`
+- **Why:** with the fasttrack fix (Bug #112) making bandwidth caps genuinely hold, a flat 5Mbps cap makes speed tests and page loads feel slow even though real sustained usage (video, downloads) is exactly what the cap is meant to manage. A short, honest burst above the cap for light/idle usage is standard, real ISP-style QoS - not something that hides itself from a speed test or lies about the plan a customer is on.
+- **How it works:** uses RouterOS Simple Queue's native `burst-limit`/`burst-threshold`/`burst-time` - a client can run at the higher burst speed as long as their own average usage over the burst window stays at or below the sustained cap they're actually paying for; real sustained usage pushes that average up and the router drops them back to the plain cap on its own, no polling or app-side logic required. New Security > Bandwidth Control fields: "Allow Speed Burst" toggle, "Burst Speed (Mbps)" (must exceed the cap), "Burst Duration (seconds)". Off by default.
+- **Scope:** router mode only (External Router) - standalone mode's tc/htb shaping has no equivalent time-windowed burst mechanism here and silently ignores the burst setting rather than pretending to honor it.
+- **Verification status:** implemented and wired end to end (settings → sessionService → networkService → mikrotikService → RouterOS queue words), matching the exact burst-limit/burst-threshold/burst-time pattern RouterOS documents. Not yet field-tested on real hardware - the next session started with burst enabled is what will confirm the queue actually gets created with these three extra fields and behaves as expected.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

@@ -669,6 +669,9 @@ router.get('/spam-settings', adminAuth, (req, res) => {
       enable_bandwidth_cap: getSetting('enable_bandwidth_cap', '0'),
       bandwidth_cap_download_mbps: getSetting('bandwidth_cap_download_mbps', '5'),
       bandwidth_cap_upload_mbps: getSetting('bandwidth_cap_upload_mbps', '5'),
+      enable_bandwidth_burst: getSetting('enable_bandwidth_burst', '0'),
+      bandwidth_burst_mbps: getSetting('bandwidth_burst_mbps', '20'),
+      bandwidth_burst_seconds: getSetting('bandwidth_burst_seconds', '8'),
       max_mbps: getSetting('max_mbps', '5'),
       spam_max_attempts: getSetting('spam_max_attempts', '3'),
       spam_block_minutes: getSetting('spam_block_minutes', '1')
@@ -681,7 +684,7 @@ router.get('/spam-settings', adminAuth, (req, res) => {
 // POST /api/admin/spam-settings
 router.post('/spam-settings', adminAuth, (req, res) => {
   try {
-    const { enable_bandwidth_cap, bandwidth_cap_download_mbps, bandwidth_cap_upload_mbps, max_mbps, spam_max_attempts, spam_block_minutes } = req.body;
+    const { enable_bandwidth_cap, bandwidth_cap_download_mbps, bandwidth_cap_upload_mbps, enable_bandwidth_burst, bandwidth_burst_mbps, bandwidth_burst_seconds, max_mbps, spam_max_attempts, spam_block_minutes } = req.body;
     const updateSetting = (key, value) => {
       if (value === undefined) return;
       const existing = db.prepare('SELECT key FROM settings WHERE key = ?').get(key);
@@ -694,6 +697,9 @@ router.post('/spam-settings', adminAuth, (req, res) => {
     updateSetting('enable_bandwidth_cap', enable_bandwidth_cap);
     updateSetting('bandwidth_cap_download_mbps', bandwidth_cap_download_mbps);
     updateSetting('bandwidth_cap_upload_mbps', bandwidth_cap_upload_mbps);
+    updateSetting('enable_bandwidth_burst', enable_bandwidth_burst);
+    updateSetting('bandwidth_burst_mbps', bandwidth_burst_mbps);
+    updateSetting('bandwidth_burst_seconds', bandwidth_burst_seconds);
     updateSetting('max_mbps', max_mbps);
     updateSetting('spam_max_attempts', spam_max_attempts);
     updateSetting('spam_block_minutes', spam_block_minutes);

@@ -16,6 +16,9 @@ let settingCache = {
   enable_bandwidth_cap: null,
   bandwidth_cap_download_mbps: null,
   bandwidth_cap_upload_mbps: null,
+  enable_bandwidth_burst: null,
+  bandwidth_burst_mbps: null,
+  bandwidth_burst_seconds: null,
   last_check: 0
 };
 const SETTING_CACHE_TTL = 60000; // 1 minute
@@ -53,6 +56,28 @@ function getMaxUploadMbps() {
     settingCache.last_check = now;
   }
   return settingCache.bandwidth_cap_upload_mbps;
+}
+
+// Real, router-enforced burst (RouterOS Simple Queue burst-limit) - not
+// something that hides itself from a speed test, a genuine short-lived
+// higher rate that settles back to the paid-for cap under sustained use.
+// Router-mode only (see networkService.js's setClientBandwidth comment);
+// returns null when disabled so callers pass burst=null and get plain
+// max-limit-only shaping, same as before this existed.
+function getBurstConfig() {
+  const now = Date.now();
+  if (settingCache.enable_bandwidth_burst === null || now - settingCache.last_check > SETTING_CACHE_TTL) {
+    const enabled = db.prepare("SELECT value FROM settings WHERE key = 'enable_bandwidth_burst'").get()?.value === '1';
+    const mbps = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_burst_mbps'").get()?.value || '20', 10) || 20;
+    const seconds = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_burst_seconds'").get()?.value || '8', 10) || 8;
+    settingCache.enable_bandwidth_burst = enabled;
+    settingCache.bandwidth_burst_mbps = mbps;
+    settingCache.bandwidth_burst_seconds = seconds;
+    settingCache.last_check = now;
+  }
+  return settingCache.enable_bandwidth_burst
+    ? { mbps: settingCache.bandwidth_burst_mbps, seconds: settingCache.bandwidth_burst_seconds }
+    : null;
 }
 
 // Bug: mac_address is looked up with a case-sensitive exact match, but
@@ -112,7 +137,7 @@ async function createSession(mac, ip, minutes, expirationMinutes) {
     await allowClient(mac);
     console.log(`[Network] Internet unlocked for ${mac}`);
     if (isBandwidthCapEnabled()) {
-      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps());
+      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
       console.log(`[Network] Bandwidth cap applied to ${mac}: ${getMaxMbps()}Mbps down / ${getMaxUploadMbps()}Mbps up`);
     } else {
       console.log(`[Network] Bandwidth cap disabled - allowing full speed for ${mac}`);
@@ -158,7 +183,7 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
   try {
     await allowClient(mac);
     if (isBandwidthCapEnabled()) {
-      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps());
+      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
     }
   } catch(e) {}
 
@@ -229,7 +254,7 @@ async function resumeSession(voucherCode) {
     await allowClient(session.mac_address);
     console.log(`[Network] Internet unlocked for ${session.mac_address} (resumed)`);
     if (isBandwidthCapEnabled()) {
-      await setClientBandwidth(session.mac_address, getMaxMbps(), getMaxUploadMbps());
+      await setClientBandwidth(session.mac_address, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
       console.log(`[Network] Bandwidth cap reapplied to ${session.mac_address}: ${getMaxMbps()}Mbps down / ${getMaxUploadMbps()}Mbps up`);
     } else {
       console.log(`[Network] Bandwidth cap disabled - allowing full speed for ${session.mac_address}`);

@@ -143,7 +143,11 @@ function getLanInterface() {
 // rewrites it). "police... drop" simply drops packets over the rate rather
 // than queueing them (ingress traffic can't be queued the way htb queues
 // egress), which is the standard way to rate-limit inbound traffic with tc.
-function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps) {
+// burst is optional: { mbps, seconds } - only meaningful in router mode
+// (RouterOS Simple Queue burst-limit/burst-threshold/burst-time). Standalone
+// mode's tc/htb shaping has no equivalent time-windowed burst concept here,
+// so it's silently ignored there rather than pretended to work.
+function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst = null) {
   let normalizedMac;
   try {
     normalizedMac = normalizeMac(mac);
@@ -160,7 +164,7 @@ function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps) {
   }
 
   if (isMikrotikMode()) {
-    return require('./mikrotikService').setClientBandwidth(normalizedMac, download, upload);
+    return require('./mikrotikService').setClientBandwidth(normalizedMac, download, upload, burst);
   }
 
   return new Promise((resolve) => {

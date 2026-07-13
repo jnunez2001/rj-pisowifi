@@ -11,6 +11,9 @@ async function loadSecurity() {
     setToggle('enableBandwidthCap', 'enableBandwidthCapLabel', data.enable_bandwidth_cap === '1');
     document.getElementById('maxMbps').value = data.bandwidth_cap_download_mbps || 5;
     document.getElementById('maxUploadMbps').value = data.bandwidth_cap_upload_mbps || 5;
+    setToggle('enableBurst', 'enableBurstLabel', data.enable_bandwidth_burst === '1');
+    document.getElementById('burstMbps').value = data.bandwidth_burst_mbps || 20;
+    document.getElementById('burstSeconds').value = data.bandwidth_burst_seconds || 8;
   } catch(e) {
     console.error('Security error:', e);
   }
@@ -49,11 +52,29 @@ async function saveBandwidthSettings() {
     return;
   }
   const enabled = document.getElementById('enableBandwidthCap').checked;
+
+  const burstEnabled = document.getElementById('enableBurst').checked;
+  const burstMbps = parseInt(document.getElementById('burstMbps').value);
+  const burstSeconds = parseInt(document.getElementById('burstSeconds').value);
+  if (burstEnabled) {
+    if (!burstMbps || !burstSeconds) {
+      showToast('Please enter valid burst speed and duration', 'error');
+      return;
+    }
+    if (burstMbps <= Math.max(maxMbps, maxUploadMbps)) {
+      showToast('Burst speed must be higher than the download/upload cap', 'error');
+      return;
+    }
+  }
+
   try {
     const data = await apiCall('POST', '/api/admin/spam-settings', {
       enable_bandwidth_cap: enabled ? '1' : '0',
       bandwidth_cap_download_mbps: maxMbps,
-      bandwidth_cap_upload_mbps: maxUploadMbps
+      bandwidth_cap_upload_mbps: maxUploadMbps,
+      enable_bandwidth_burst: burstEnabled ? '1' : '0',
+      bandwidth_burst_mbps: burstMbps || 20,
+      bandwidth_burst_seconds: burstSeconds || 8
     });
     if (data.success) showToast('Bandwidth settings saved!', 'success');
     else showToast('Failed to save', 'error');

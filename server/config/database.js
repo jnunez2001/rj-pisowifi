@@ -266,6 +266,9 @@ if (settingCount.count === 0) {
   insertSetting.run('enable_bandwidth_cap', '0');
   insertSetting.run('bandwidth_cap_download_mbps', '5');
   insertSetting.run('bandwidth_cap_upload_mbps', '5');
+  insertSetting.run('enable_bandwidth_burst', '0');
+  insertSetting.run('bandwidth_burst_mbps', '20');
+  insertSetting.run('bandwidth_burst_seconds', '8');
 
   // Network mode ('standalone' = built-in nftables/tc, no external router needed)
   insertSetting.run('network_mode', 'standalone');

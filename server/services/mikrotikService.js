@@ -163,7 +163,16 @@ async function deleteQueue(client, mac) {
 // RouterOS export would expect. uploadMbps defaults to downloadMbps when
 // omitted, so any caller still passing one argument keeps its old behavior
 // instead of silently breaking.
-async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps) {
+// burst is optional: { mbps, seconds } - a genuine, RouterOS-native burst
+// (real router-enforced QoS, not anything that fakes or hides itself from
+// a speed test). RouterOS allows a client to run at burst-limit as long as
+// their own average rate over the last burst-time seconds stays below
+// burst-threshold; once real sustained usage pushes that average up to the
+// threshold, the router drops them back to max-limit on its own. threshold
+// is set to the sustained cap itself, so a client bursts freely from an
+// idle/light-use starting point (a page load, a short speed test) but
+// settles back to the honest cap the moment they're actually using it.
+async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst = null) {
   const config = getMikrotikConfig();
   if (!config.ip) return false;
 
@@ -172,6 +181,18 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps) 
   if (!Number.isFinite(download) || download <= 0 || !Number.isFinite(upload) || upload <= 0) {
     console.error(`[MikroTik] Invalid bandwidth for ${mac}: down=${downloadMbps} up=${uploadMbps}`);
     return false;
+  }
+
+  let burstMbps = null;
+  let burstSeconds = null;
+  if (burst && Number.isFinite(parseInt(burst.mbps, 10)) && Number.isFinite(parseInt(burst.seconds, 10))) {
+    burstMbps = parseInt(burst.mbps, 10);
+    burstSeconds = parseInt(burst.seconds, 10);
+    if (burstMbps <= Math.max(download, upload)) {
+      console.warn(`[MikroTik] Burst speed (${burstMbps}Mbps) must exceed the cap - ignoring burst for ${mac}`);
+      burstMbps = null;
+      burstSeconds = null;
+    }
   }
 
   try {
@@ -213,8 +234,16 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps) 
 
       const words = ['/queue/simple/add', `=name=${queueNameFor(mac)}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`];
       if (placeBeforeId) words.push(`=place-before=${placeBeforeId}`);
+      if (burstMbps) {
+        // burst-threshold = the sustained cap itself: bursting is allowed
+        // only while this client's own average stays at/below what they're
+        // already paying for, not above it.
+        words.push(`=burst-limit=${burstMbps}M/${burstMbps}M`);
+        words.push(`=burst-threshold=${upload}M/${download}M`);
+        words.push(`=burst-time=${burstSeconds}s/${burstSeconds}s`);
+      }
       await client.talk(words);
-      console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up${placeBeforeId ? '' : ' (WARNING: could not find lane queue to place before - lane-wide limit may take priority)'}`);
+      console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up${burstMbps ? ` (burst ${burstMbps}Mbps for ${burstSeconds}s)` : ''}${placeBeforeId ? '' : ' (WARNING: could not find lane queue to place before - lane-wide limit may take priority)'}`);
       return true;
     });
   } catch (err) {
