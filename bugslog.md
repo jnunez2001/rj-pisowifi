@@ -1723,6 +1723,15 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### New: ESP32 auto-opens its own setup hotspot after a sustained WiFi failure
+
+- **Files:** `esp32/firmware/rj_pisowifi/config.h`, `esp32/firmware/rj_pisowifi/config.cpp`, `esp32/firmware/rj_pisowifi/wifi_manager.cpp`
+- **Why:** a device whose saved WiFi credentials went bad (store WiFi password changed, SSID renamed) used to retry those exact same broken credentials forever, silently - the only recovery was someone physically walking over and holding the setup button on the device itself. Same gap applies whether WiFi drops after being connected, or the saved credentials are already stale at boot - either way the device just sat there endlessly retrying nothing.
+- **Fix:** `checkWiFiReconnect()` now tracks how long WiFi has actually been unreachable. Past `WIFI_RECONNECT_TIMEOUT_MS` (5 minutes - long enough that a real but temporary outage, like the router itself rebooting, won't falsely trigger this), it calls `startSetupMode()` automatically, the same setup hotspot (`RJ-Vendo-Setup`) a brand-new device broadcasts. No physical access to the device required to recover from a changed password - just reconnect to the hotspot and re-enter the new WiFi info, from any phone or laptop nearby.
+- **Verification status:** traced against both failure paths (lost after connecting, and stale-at-boot) - `checkWiFiReconnect()` runs unconditionally every loop iteration regardless of which one occurred, and `startSetupMode()` re-initializes the web server itself either way. Not yet field-tested on real hardware - the next real WiFi credential change is what will confirm the 5-minute auto-recovery actually fires as expected.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

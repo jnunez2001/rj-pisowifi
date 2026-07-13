@@ -14,6 +14,7 @@ bool processingCoin = false;
 bool btnHeld = false;
 unsigned long btnPressStart = 0;
 unsigned long lastOTACheck = 0;
+unsigned long wifiLostAt = 0;
 
 // ===== LOAD CONFIG =====
 void loadConfig() {

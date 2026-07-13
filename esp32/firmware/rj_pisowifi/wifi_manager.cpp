@@ -76,15 +76,34 @@ void registerVendo() {
 
 void checkWiFiReconnect() {
   if (WiFi.status() != WL_CONNECTED) {
+    // Bug this fixes: a device whose saved WiFi credentials had gone bad
+    // (the store's WiFi password changed, the SSID renamed) used to retry
+    // those exact same broken credentials forever, silently - the only
+    // recovery was someone physically walking over and holding the setup
+    // button on the device itself. Track how long WiFi has actually been
+    // down and, past a long-enough timeout to rule out just a temporary
+    // outage (the router itself rebooting, a brief blip), open this
+    // device's own setup hotspot automatically so it can be reconfigured
+    // from any phone/laptop nearby, same as a brand-new device.
+    if (wifiLostAt == 0) {
+      wifiLostAt = millis();
+    } else if (millis() - wifiLostAt >= WIFI_RECONNECT_TIMEOUT_MS) {
+      Serial.println("WiFi still unreachable after " + String(WIFI_RECONNECT_TIMEOUT_MS / 60000) + " min - opening setup hotspot automatically");
+      startSetupMode();
+      return;
+    }
+
     Serial.println("WiFi lost — reconnecting...");
     lcdPrint(2, "WiFi lost...");
     lcdPrint(3, "Reconnecting...");
     connectWiFi();
     if (WiFi.status() == WL_CONNECTED) {
+      wifiLostAt = 0;
       registerVendo();
       lastHeartbeat = millis();
     }
   } else {
+    wifiLostAt = 0;
     // Send heartbeat every 60 seconds to stay Online in admin panel
     if (millis() - lastHeartbeat >= 60000) {
       Serial.println("Sending heartbeat...");

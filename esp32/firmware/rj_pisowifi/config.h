@@ -71,6 +71,16 @@
 // than every few minutes.
 #define OTA_CHECK_INTERVAL_MS  600000
 
+// How long WiFi can stay disconnected before this device gives up on the
+// saved credentials and opens its own setup hotspot automatically
+// (wifi_manager.cpp's checkWiFiReconnect()). Long enough that a real but
+// temporary outage (the router itself rebooting, a brief power blip) won't
+// falsely trigger it - this only fires for a genuinely broken connection
+// (the store's WiFi password changed, the SSID renamed), the exact
+// scenario that used to require someone physically holding the setup
+// button on the device itself.
+#define WIFI_RECONNECT_TIMEOUT_MS  300000
+
 // ===== CONFIG STRUCT =====
 struct Config {
   String vendo_name;
@@ -98,6 +108,7 @@ extern bool processingCoin;
 extern bool btnHeld;
 extern unsigned long btnPressStart;
 extern unsigned long lastOTACheck;
+extern unsigned long wifiLostAt;
 
 // ===== FUNCTION DECLARATIONS =====
 
