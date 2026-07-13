@@ -1748,6 +1748,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### Bug #113 (HIGH, found on real hardware): the admin login page was reachable by any customer who guessed the URL
+
+- **File:** `server/app.js`
+- **Reported:** while explaining how to reach the portal's LAN address, the owner asked what would stop a customer from trying `/admin/` instead of `/portal/` at that same address.
+- **Cause:** `nginx.conf`'s own comment states admin access is meant to go exclusively through its WAN-facing TLS front door, but nothing on the app side ever actually enforced that - `/admin` (the login page and every admin UI asset) and `/api/admin/*` were served identically whether a request arrived through nginx or hit the raw LAN port 3000 directly. Any customer on PC-Rental or WiFi-Rental who typed the server's own LAN IP followed by `/admin` would see the real admin login page, with only the password (not network access at all) standing between them and it.
+- **Fix:** added `restrictAdminToLocalhost` middleware ahead of both `/admin` (static files) and `/api/admin` (API). nginx always proxies to `127.0.0.1:3000` specifically regardless of who the original external client was, so checking the raw TCP socket's own remote address (not any client-suppliable header) reliably distinguishes "arrived via nginx" from "hit this port directly." A small allowlist keeps the specific endpoints the ESP32 vendo hardware calls directly (`/vendo/register`, `/vendo/firmware/version`, `/vendo/firmware/download`) reachable from the LAN, since that hardware has no admin password to send. Blocked requests get a 404, not a 403, so a LAN probe doesn't even get confirmation that an admin panel exists at this address.
+- **Verification status:** confirmed via local browser testing that localhost access (the legitimate nginx-proxied path) still works correctly - admin panel and all its assets load normally. The actual block (a real LAN client hitting the raw port directly) can't be exercised from a same-machine dev environment, since any local request is inherently `127.0.0.1` from the server's own point of view - the next real customer device probing this URL on the real network is what will finally confirm the block itself.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

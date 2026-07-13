@@ -28,6 +28,39 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Bug: /admin (the login page and every admin UI asset) and /api/admin/*
+// were reachable by anyone on any lane who guessed the URL - nginx.conf's
+// own comment states admin access is meant to go exclusively through its
+// WAN-facing TLS front door, but nothing on this side ever actually
+// enforced that. A customer on PC-Rental or WiFi-Rental typing this
+// server's own LAN IP followed by "/admin" would see the real admin login
+// page, with only the password (not network access at all) standing
+// between them and it - reduced security-in-depth, and no reason a
+// customer should even know an admin panel exists at a guessable URL.
+// nginx always proxies to 127.0.0.1:3000 specifically, regardless of who
+// the original external client was, so checking the raw socket's own
+// remote address (not any client-suppliable header) reliably tells apart
+// "arrived via nginx" from "hit this port directly". A few specific paths
+// are still LAN-reachable on purpose - the ESP32 vendo hardware calls
+// these directly and has no admin password to send.
+const ADMIN_LAN_ALLOWED_PATHS = new Set([
+  '/api/admin/vendo/register',
+  '/api/admin/vendo/firmware/version',
+  '/api/admin/vendo/firmware/download',
+]);
+function isLocalRequest(req) {
+  const addr = req.socket.remoteAddress || '';
+  return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
+}
+function restrictAdminToLocalhost(req, res, next) {
+  if (isLocalRequest(req) || ADMIN_LAN_ALLOWED_PATHS.has(req.path)) return next();
+  // 404, not 403 - a direct LAN probe shouldn't even get confirmation
+  // that an admin panel exists here at all.
+  return res.status(404).end();
+}
+app.use('/admin', restrictAdminToLocalhost);
+app.use('/api/admin', restrictAdminToLocalhost);
+
 app.use(express.static(path.join(__dirname, '../public')));
 
 // ── Caching ──────────────────────────────────────────────────────
