@@ -26,6 +26,31 @@ async function saveIspPlan() {
   } catch(e) { showToast('Server error.', 'error'); }
 }
 
+// ===== ROUTER MODE: PORTAL ADDRESS =====
+
+async function loadPortalHostname() {
+  try {
+    const data = await apiCall('GET', '/api/admin/settings');
+    if (data.success) {
+      document.getElementById('portalHostname').value = data.settings.portal_hostname || '';
+    }
+  } catch(e) {
+    console.error('Portal hostname load error:', e);
+  }
+}
+
+async function savePortalHostname() {
+  const hostname = document.getElementById('portalHostname').value.trim();
+  try {
+    const data = await apiCall('POST', '/api/admin/settings', { portal_hostname: hostname });
+    if (data.success) {
+      showToast(hostname ? 'Portal address saved! Run Configure to apply it.' : 'Portal address cleared.');
+    } else {
+      showToast(data.message || 'Failed to save.', 'error');
+    }
+  } catch(e) { showToast('Server error.', 'error'); }
+}
+
 // ===== ROUTER MODE: PORTS AND ROLES =====
 //
 // A physical port can carry more than one lane: one untagged lane plus any
@@ -396,11 +421,12 @@ async function loadNetworkPage() {
 }
 
 function showRouterModeCards(show) {
-  ['ispPlanCard', 'routerPortsCard', 'routerProvisionCard', 'routerStatusCard'].forEach(id => {
+  ['ispPlanCard', 'portalAddressCard', 'routerPortsCard', 'routerProvisionCard', 'routerStatusCard'].forEach(id => {
     document.getElementById(id).style.display = show ? 'block' : 'none';
   });
   if (show) {
     loadIspPlan();
+    loadPortalHostname();
     loadRouterPorts();
     loadRouterStatus();
   }

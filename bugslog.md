@@ -1758,6 +1758,16 @@ Context: every single failure tonight (bridge-name collisions, the CAKE bug, the
 
 ---
 
+#### New: custom portal hostname for gated lanes, so customers don't need to know a raw IP
+
+- **Files:** `public/admin/pages/network.html`, `public/admin/js/network.js`, `server/config/database.js`, `server/services/mikrotikProvisioner.js`
+- **Why:** with the admin panel now blocked from direct LAN access (Bug #113), the owner asked how already-paid WiFi-Rental customers could easily get back to the portal to check/add time without typing a raw IP - one mistyped character away from something like the (now-hidden) admin address.
+- **How it works:** a new "Portal Address" card in Network settings (router mode only) lets the admin set a custom hostname (e.g. `rjcyberzone.wifi`), saved as the plain `portal_hostname` setting (empty by default - fully opt-in, no behavior change for anyone who doesn't set one). On the next Configure run, for any gated lane: the router's own DNS server gets enabled for LAN clients (forwarding everything else upstream, so normal browsing is unaffected), that lane's DHCP clients get pointed at the router's own DNS instead of straight to 8.8.8.8 (needed so they can actually resolve the custom hostname at all), and a static DNS entry maps the hostname to the portal server's reserved address on that lane.
+- **Scope:** PC-Rental (an open, ungated lane) is deliberately untouched - open lanes don't get Hotspot/DNS changes regardless of this setting, matching the owner's explicit "leave PC-Rental alone" - this whole feature only ever applies to gated lanes.
+- **Verification status:** implemented and manually reviewed for syntax/logic correctness (automated `node --check` was temporarily unavailable at build time due to a transient tool outage). Not yet field-tested - the next Configure run with a hostname set, followed by an already-connected customer actually typing it, is what will confirm the DNS resolution and redirect work end to end.
+
+---
+
 **Generated:** 2026-07-04
 **System:** R&J PisoWifi v1.0.1
 **Status:** PRODUCTION-READY ✅

@@ -127,6 +127,7 @@ function existenceCheckFor(words) {
     case '/ip/hotspot/add': return byName('/ip/hotspot/print');
     case '/user/group/add': return byName('/user/group/print');
     case '/user/add': return byName('/user/print');
+    case '/ip/dns/static/add': return byName('/ip/dns/static/print');
     case '/interface/bridge/port/add': {
       const iface = getAttr('interface');
       return iface ? { printCmd: '/interface/bridge/port/print', filter: `?interface=${iface}` } : null;
@@ -296,6 +297,24 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
     words: ['/ip/firewall/mangle/add', '=chain=forward', '=protocol=udp', '=port=!443', '=action=mark-packet', '=new-packet-mark=rj-game-priority', '=passthrough=no', '=comment=rj-piso-game-priority'],
   });
 
+  // Custom portal hostname (e.g. "rjcyberzone.wifi") - gives already-paid
+  // customers on a gated lane an easy, memorable address to return to for
+  // checking/adding time, instead of a raw IP they could easily mistype
+  // into something else entirely (the admin panel's own address, for
+  // instance). Opt-in via Network > Portal Address - empty (the default)
+  // means no DNS changes at all, matching every deployment before this
+  // existed. Needs the router's own DNS server enabled for LAN clients
+  // (so it can actually answer this custom hostname), forwarding
+  // everything else upstream so normal internet browsing is unaffected -
+  // that's a one-time, router-wide setting, not per-lane.
+  const portalHostname = (db.prepare("SELECT value FROM settings WHERE key = 'portal_hostname'").get()?.value || '').trim();
+  if (portalHostname) {
+    steps.push({
+      description: `Enable the router's own DNS server for LAN clients (so "${portalHostname}" can resolve)`,
+      words: ['/ip/dns/set', '=allow-remote-requests=yes', '=servers=8.8.8.8,1.1.1.1'],
+    });
+  }
+
   // Bug (found on the first real-hardware run, not just theoretical): a
   // brand-new router isn't actually blank - MikroTik's own factory-default
   // config usually already bridges most LAN ports together, and a port can
@@ -355,7 +374,13 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
     steps.push({ description: `[${laneLabel}] Assign ${gateway}/${cidr} to the bridge`, words: ['/ip/address/add', `=address=${gateway}/${cidr}`, `=interface=${bridgeName}`] });
     steps.push({ description: `[${laneLabel}] Create DHCP address pool`, words: ['/ip/pool/add', `=name=${poolName}`, `=ranges=10.50.${index}.10-10.50.${index}.250`] });
     steps.push({ description: `[${laneLabel}] Start DHCP server on the bridge`, words: ['/ip/dhcp-server/add', `=name=${dhcpName}`, `=interface=${bridgeName}`, `=address-pool=${poolName}`, '=lease-time=2h', '=disabled=no'] });
-    steps.push({ description: `[${laneLabel}] Configure DHCP network`, words: ['/ip/dhcp-server/network/add', `=address=${network}/${cidr}`, `=gateway=${gateway}`, '=dns-server=8.8.8.8'] });
+    // A gated lane with a custom portal hostname configured needs its
+    // clients pointed at the router's own DNS (enabled above) instead of
+    // straight to 8.8.8.8, or they'd never be able to resolve that custom
+    // hostname at all - the router's own resolver still forwards every
+    // other query upstream, so this doesn't change normal browsing.
+    const lanePointsAtRouterDns = lane.role === 'gated' && portalHostname;
+    steps.push({ description: `[${laneLabel}] Configure DHCP network`, words: ['/ip/dhcp-server/network/add', `=address=${network}/${cidr}`, `=gateway=${gateway}`, `=dns-server=${lanePointsAtRouterDns ? gateway : '8.8.8.8'}`] });
 
     // Smart queue (ROUTER_MODE_PLAN.md §9) - always on, per lane, using the
     // guaranteed/burst caps saved for this lane. CAKE when actually
@@ -391,6 +416,13 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
         // fetch step below tries to reach it.
         steps.push({ description: `[${laneLabel}] Reserve a fixed address for this server`, words: ['/ip/dhcp-server/lease/add', `=address=${serverIp}`, `=mac-address=${ownMac}`, `=server=${dhcpName}`, '=comment=rj-piso-server'] });
         steps.push({ description: `[${laneLabel}] Allow the portal page through the walled garden (always)`, words: ['/ip/hotspot/walled-garden/add', `=dst-host=${serverIp}`, '=action=allow', '=comment=rj-piso-portal'] });
+
+        if (portalHostname) {
+          steps.push({
+            description: `[${laneLabel}] Point "${portalHostname}" at the portal server (custom portal address)`,
+            words: ['/ip/dns/static/add', `=name=${portalHostname}`, `=address=${serverIp}`, '=comment=rj-piso-portal-hostname'],
+          });
+        }
       }
 
       // Bug fix: without this, MikroTik shows its own generic built-in

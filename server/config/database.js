@@ -279,6 +279,9 @@ if (settingCount.count === 0) {
   // Router mode: real ISP plan speed, never hardcoded — every port-role
   // speed warning scales off this (ROUTER_MODE_PLAN.md §4.1).
   insertSetting.run('isp_plan_mbps', '0');
+  // Memorable address for gated-lane customers to return to (check/add
+  // time) instead of a raw IP - opt-in, empty means disabled.
+  insertSetting.run('portal_hostname', '');
   // Which of this server's own network connections is plugged into the
   // gated lane, for the DHCP reservation that keeps the server's own
   // address fixed. Empty = auto-detect only if there's exactly one
