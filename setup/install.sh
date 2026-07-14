@@ -15,6 +15,19 @@ echo "=============================================" | tee -a $LOG
 echo " R&J PisoWifi Installer $(date)" | tee -a $LOG
 echo "=============================================" | tee -a $LOG
 
+# ─── 0. GET THE CODE (fresh machines only) ───────────────────
+# If $APP_DIR already exists, this is a dev/test machine managing its own
+# clone (full history, git pull for updates) - leave it completely alone.
+# A genuinely fresh install, with nothing there yet, gets a SHALLOW clone
+# (--depth 1) instead - only the current state, not the full commit
+# history, since a customer's own installed copy has no reason to carry
+# every past commit with it.
+if [ ! -d "$APP_DIR/.git" ]; then
+  echo "[0/8] Fetching application code (shallow clone, no history)..." | tee -a $LOG
+  REPO_URL="${RJ_PISOWIFI_REPO_URL:-https://github.com/jnunez2001/rj-pisowifi.git}"
+  git clone --depth 1 "$REPO_URL" "$APP_DIR" >> $LOG 2>&1
+fi
+
 # ─── 1. CHECK ROOT ───────────────────────────────────────────
 if [ "$EUID" -ne 0 ]; then
   echo "Please run as root: sudo bash setup/install.sh"
