@@ -291,6 +291,12 @@ const server = app.listen(PORT, () => {
   console.log(`🌐 Admin: http://localhost:${PORT}/admin`);
   console.log(`📱 Portal: http://localhost:${PORT}/portal`);
   console.log('');
+
+  // Re-apply the saved static IP (if any) on every boot - closes the gap
+  // where the setting only ever took effect the moment someone clicked
+  // "Apply Network Settings," so a reboot silently drifted back to
+  // whatever cloud-init/DHCP handed the box.
+  require('./services/hostNetworkService').reapplyStaticNetworkOnBoot(require('./config/database'));
 });
 
 // Graceful shutdown on SIGTERM (Bug #46)
