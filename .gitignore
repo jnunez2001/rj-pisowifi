@@ -6,3 +6,26 @@ server/database/
 .env
 public/uploads/
 server/logs/
+
+# Internal planning/business docs - kept locally for reference, never
+# committed (would ship to client devices via install.sh's git clone
+# otherwise)
+ACCOUNT_REVENUE_PLAN.md
+DEVICE_COMPATIBILITY_PLAN.md
+ESP32_FIRMWARE_PLAN.md
+FASTFI_COMPARISON_PLAN.md
+FREEMIUM_PLAN.md
+PIHOLE_PLAN.md
+PISOWIFI_REFERENCE_NOTES.md
+ROUTER_MODE_PLAN.md
+SECURITY_PLAN.md
+SETUP_GUIDE.md
+WISP_EXPANSION_PLAN.md
+ZENCAFE_ENTERPRISE_PROPOSAL.md
+ZENTRY_SYSTEMS_PROPOSAL.md
+bugslog.md
+zencafe-os/*.md
+zencafe-os/docs/
+zencafe-server/*.md
+zencafe-server/docs/
+LICENSING_AND_ZENCAFE_PLAN.md
