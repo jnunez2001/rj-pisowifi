@@ -46,8 +46,18 @@ function detect() {
     isX86,
     // Per-feature gates, kept here in one place rather than scattered
     // threshold checks throughout the codebase.
+    //
+    // Bug in the original design: CAKE was gated off Minimal tier on the
+    // assumption fq_codel is "lighter." That's only true comparing them in
+    // isolation at unshaped/native line rate - this app always shapes
+    // traffic (per-client bandwidth caps are the whole product), and for
+    // shaped traffic CAKE beats the older htb+fq_codel combo even on weak
+    // hardware, since it does shaping and queuing in one integrated pass
+    // instead of two stacked mechanisms. A weak dual-core ARM chip at
+    // 650MHz handles up to 200Mbps under CAKE - far above the 2-20Mbps
+    // per-client caps typical in this market. CAKE runs on every tier.
     features: {
-      cake: tier !== TIERS.MINIMAL,
+      cake: true,
       wireguard: tier !== TIERS.MINIMAL,
       multiWanFailover: tier === TIERS.FULL,
       maxVlanLanes: tier === TIERS.MINIMAL ? 2 : tier === TIERS.STANDARD ? 6 : 16,
