@@ -259,6 +259,15 @@ server=8.8.8.8
 server=8.8.4.4
 EOF
 
+  # Static DHCP leases (admin panel > Network > Static DHCP Leases) - one
+  # dhcp-host line per reserved MAC, appended after the base config above so
+  # a stale reservation from a prior run never lingers past this rewrite.
+  sqlite3 -separator '|' "$DB" "SELECT mac_address, ip_address FROM static_leases;" 2>/dev/null | \
+    while IFS='|' read -r LEASE_MAC LEASE_IP; do
+      [ -n "$LEASE_MAC" ] && echo "dhcp-host=$LEASE_MAC,$LEASE_IP" >> /etc/dnsmasq.d/rj-pisowifi.conf
+    done
+  echo "static leases applied" >> $LOG
+
   systemctl restart dnsmasq >> $LOG 2>&1
   echo "dnsmasq started" >> $LOG
 
@@ -276,6 +285,17 @@ if [ "$NETWORK_MODE" = "standalone" ]; then
 
     nft delete table ip rj_piso 2>/dev/null || true
     sleep 1
+
+    # Port forwarding (admin panel > Network > Port Forwarding, standalone
+    # mode only - in mikrotik mode the router owns NAT, this table isn't
+    # read there). One dnat rule per enabled row, scoped to WAN_VIF so a
+    # forward never accidentally matches traffic arriving on the LAN side.
+    PORT_FORWARD_RULES=""
+    while IFS='|' read -r FWD_PROTO FWD_EXT FWD_IP FWD_INT; do
+        [ -z "$FWD_PROTO" ] && continue
+        PORT_FORWARD_RULES="${PORT_FORWARD_RULES}
+        iifname \"$WAN_VIF\" $FWD_PROTO dport $FWD_EXT dnat to $FWD_IP:$FWD_INT"
+    done <<< "$(sqlite3 -separator '|' "$DB" "SELECT protocol, external_port, internal_ip, internal_port FROM port_forwards WHERE enabled=1;" 2>/dev/null)"
 
     cat > /tmp/rj-piso.nft << NFTEOF
 table ip rj_piso {
@@ -317,6 +337,7 @@ table ip rj_piso {
         iifname "$LAN_VIF" ether saddr != @allowed_macs udp dport 53 dnat to $GATEWAY_IP:53
         iifname "$LAN_VIF" ether saddr != @allowed_macs tcp dport 53 dnat to $GATEWAY_IP:53
         iifname "$LAN_VIF" ether saddr != @allowed_macs tcp dport 80 dnat to $GATEWAY_IP:3000
+$PORT_FORWARD_RULES
     }
 }
 NFTEOF

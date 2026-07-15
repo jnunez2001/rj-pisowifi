@@ -151,6 +151,41 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(port_name, vlan_id)
   );
+
+  -- Standalone-mode Tier 1 networking features (Network tab). Reserving an
+  -- IP for a MAC means "always the same IP" (printers, cameras, staff
+  -- laptops) - dnsmasq gets a dhcp-host line per row, re-emitted on every
+  -- setup-network.sh run the same way VLAN rows already are.
+  CREATE TABLE IF NOT EXISTS static_leases (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac_address TEXT UNIQUE NOT NULL,
+    ip_address TEXT NOT NULL,
+    label TEXT DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Standalone mode only - this box is the router/NAT boundary there, so
+  -- port forwarding is a real nftables DNAT rule on WAN_VIF. In mikrotik
+  -- mode the MikroTik owns NAT and this table isn't used.
+  CREATE TABLE IF NOT EXISTS port_forwards (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT DEFAULT '',
+    protocol TEXT NOT NULL DEFAULT 'tcp', -- 'tcp' or 'udp'
+    external_port INTEGER NOT NULL,
+    internal_ip TEXT NOT NULL,
+    internal_port INTEGER NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Friendly names for MACs, independent of static_leases (a client can be
+  -- named without reserving an IP for it) - shown wherever a MAC address
+  -- would otherwise be the only identifier (Sessions, Network diagnostics).
+  CREATE TABLE IF NOT EXISTS client_labels (
+    mac_address TEXT PRIMARY KEY,
+    label TEXT NOT NULL DEFAULT '',
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // router_ports' shape changed from "one row per port" to "one row per lane

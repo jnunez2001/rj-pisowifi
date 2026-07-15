@@ -1636,6 +1636,198 @@ router.delete('/network/vlans/:id', adminAuth, (req, res) => {
   }
 });
 
+// ===== TIER 1 STANDALONE FEATURES: static DHCP leases, client naming,
+// port forwarding, diagnostics (STANDALONE_ARCHITECTURE_PLAN.md) =====
+
+const MAC_REGEX = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i;
+const IP_REGEX = /^(\d{1,3}\.){3}\d{1,3}$/;
+function isValidPort(n) {
+  const p = parseInt(n, 10);
+  return Number.isInteger(p) && p >= 1 && p <= 65535;
+}
+
+// ── Static DHCP leases ──────────────────────────────────────────
+router.get('/network/leases', adminAuth, (req, res) => {
+  try {
+    const leases = db.prepare('SELECT * FROM static_leases ORDER BY id DESC').all();
+    res.json({ success: true, leases });
+  } catch (err) {
+    console.error('Leases list error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/network/leases', adminAuth, (req, res) => {
+  try {
+    const { mac_address, ip_address, label } = req.body;
+    const mac = String(mac_address || '').trim().toLowerCase();
+    const ip = String(ip_address || '').trim();
+    if (!MAC_REGEX.test(mac)) {
+      return res.status(400).json({ success: false, message: 'Invalid MAC address' });
+    }
+    if (!IP_REGEX.test(ip)) {
+      return res.status(400).json({ success: false, message: 'Invalid IP address' });
+    }
+    const existing = db.prepare('SELECT id FROM static_leases WHERE mac_address = ?').get(mac);
+    if (existing) {
+      return res.status(409).json({ success: false, message: 'This device already has a reserved IP' });
+    }
+    const result = db.prepare(
+      'INSERT INTO static_leases (mac_address, ip_address, label) VALUES (?, ?, ?)'
+    ).run(mac, ip, String(label || '').trim());
+    console.log(`📌 Static lease created: ${mac} → ${ip}`);
+    applyNetworkSetup();
+    res.json({ success: true, id: result.lastInsertRowid });
+  } catch (err) {
+    console.error('Lease create error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/network/leases/:id', adminAuth, (req, res) => {
+  try {
+    const lease = db.prepare('SELECT * FROM static_leases WHERE id = ?').get(req.params.id);
+    if (!lease) {
+      return res.status(404).json({ success: false, message: 'Lease not found' });
+    }
+    db.prepare('DELETE FROM static_leases WHERE id = ?').run(req.params.id);
+    console.log(`📌 Static lease deleted: ${lease.mac_address}`);
+    applyNetworkSetup();
+    res.json({ success: true, message: 'Lease deleted' });
+  } catch (err) {
+    console.error('Lease delete error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── Client naming ───────────────────────────────────────────────
+router.get('/network/client-labels', adminAuth, (req, res) => {
+  try {
+    const labels = db.prepare('SELECT * FROM client_labels ORDER BY updated_at DESC').all();
+    res.json({ success: true, labels });
+  } catch (err) {
+    console.error('Client labels list error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/network/client-labels', adminAuth, (req, res) => {
+  try {
+    const { mac_address, label } = req.body;
+    const mac = String(mac_address || '').trim().toLowerCase();
+    const lbl = String(label || '').trim();
+    if (!MAC_REGEX.test(mac)) {
+      return res.status(400).json({ success: false, message: 'Invalid MAC address' });
+    }
+    if (!lbl) {
+      db.prepare('DELETE FROM client_labels WHERE mac_address = ?').run(mac);
+      return res.json({ success: true, message: 'Label cleared' });
+    }
+    db.prepare(`
+      INSERT INTO client_labels (mac_address, label, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(mac_address) DO UPDATE SET label = excluded.label, updated_at = CURRENT_TIMESTAMP
+    `).run(mac, lbl);
+    res.json({ success: true, message: 'Label saved' });
+  } catch (err) {
+    console.error('Client label save error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── Port forwarding (standalone mode only — MikroTik owns NAT in router mode) ──
+router.get('/network/port-forwards', adminAuth, (req, res) => {
+  try {
+    const forwards = db.prepare('SELECT * FROM port_forwards ORDER BY id DESC').all();
+    res.json({ success: true, forwards });
+  } catch (err) {
+    console.error('Port forwards list error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/network/port-forwards', adminAuth, (req, res) => {
+  try {
+    const { label, protocol, external_port, internal_ip, internal_port } = req.body;
+    const proto = protocol === 'udp' ? 'udp' : 'tcp';
+    if (!isValidPort(external_port) || !isValidPort(internal_port)) {
+      return res.status(400).json({ success: false, message: 'Ports must be between 1 and 65535' });
+    }
+    const ip = String(internal_ip || '').trim();
+    if (!IP_REGEX.test(ip)) {
+      return res.status(400).json({ success: false, message: 'Invalid internal IP address' });
+    }
+    const result = db.prepare(`
+      INSERT INTO port_forwards (label, protocol, external_port, internal_ip, internal_port, enabled)
+      VALUES (?, ?, ?, ?, ?, 1)
+    `).run(String(label || '').trim(), proto, parseInt(external_port, 10), ip, parseInt(internal_port, 10));
+    console.log(`↪️  Port forward created: ${proto}/${external_port} → ${ip}:${internal_port}`);
+    applyNetworkSetup();
+    res.json({ success: true, id: result.lastInsertRowid });
+  } catch (err) {
+    console.error('Port forward create error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.put('/network/port-forwards/:id/toggle', adminAuth, (req, res) => {
+  try {
+    const fwd = db.prepare('SELECT * FROM port_forwards WHERE id = ?').get(req.params.id);
+    if (!fwd) {
+      return res.status(404).json({ success: false, message: 'Port forward not found' });
+    }
+    db.prepare('UPDATE port_forwards SET enabled = ? WHERE id = ?').run(fwd.enabled ? 0 : 1, req.params.id);
+    applyNetworkSetup();
+    res.json({ success: true, enabled: !fwd.enabled });
+  } catch (err) {
+    console.error('Port forward toggle error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/network/port-forwards/:id', adminAuth, (req, res) => {
+  try {
+    const fwd = db.prepare('SELECT * FROM port_forwards WHERE id = ?').get(req.params.id);
+    if (!fwd) {
+      return res.status(404).json({ success: false, message: 'Port forward not found' });
+    }
+    db.prepare('DELETE FROM port_forwards WHERE id = ?').run(req.params.id);
+    console.log(`↪️  Port forward deleted: ${fwd.protocol}/${fwd.external_port}`);
+    applyNetworkSetup();
+    res.json({ success: true, message: 'Port forward deleted' });
+  } catch (err) {
+    console.error('Port forward delete error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── In-panel diagnostics ────────────────────────────────────────
+// Target validated as a hostname or IP only (no flags/spaces) before ever
+// reaching execFile — execFile itself doesn't go through a shell, but a
+// value like "-c 100" would still be accepted as a legitimate-looking ping
+// argument and let a caller turn a 4-packet ping into a flood, so the
+// format is restricted regardless.
+const DIAG_TARGET_REGEX = /^[a-zA-Z0-9.-]{1,253}$/;
+
+router.post('/network/diagnostics/ping', adminAuth, (req, res) => {
+  const target = String(req.body.target || '').trim();
+  if (!DIAG_TARGET_REGEX.test(target)) {
+    return res.status(400).json({ success: false, message: 'Invalid target' });
+  }
+  execFile('ping', ['-c', '4', '-W', '2', target], { timeout: 15000 }, (err, stdout, stderr) => {
+    res.json({ success: true, output: (stdout || '') + (stderr || '') || (err ? err.message : '') });
+  });
+});
+
+router.post('/network/diagnostics/traceroute', adminAuth, (req, res) => {
+  const target = String(req.body.target || '').trim();
+  if (!DIAG_TARGET_REGEX.test(target)) {
+    return res.status(400).json({ success: false, message: 'Invalid target' });
+  }
+  execFile('traceroute', ['-m', '15', '-w', '2', target], { timeout: 30000 }, (err, stdout, stderr) => {
+    res.json({ success: true, output: (stdout || '') + (stderr || '') || (err ? err.message : '') });
+  });
+});
+
 // ===== ROUTER MODE (MikroTik) — ROUTER_MODE_PLAN.md Stage 3 =====
 
 // GET /api/admin/router/ports — live-scans the router's actual physical

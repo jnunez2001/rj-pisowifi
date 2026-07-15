@@ -615,6 +615,7 @@ async function loadNetworkPage() {
   await loadAdminHostname();
   await loadInterfaces();
   await loadVlans();
+  await loadClientLabels();
 }
 
 function showRouterModeCards(show) {
@@ -626,6 +627,19 @@ function showRouterModeCards(show) {
     loadPortalHostname();
     loadRouterPorts();
     loadRouterStatus();
+  }
+}
+
+// Static DHCP leases and port forwarding only apply in standalone mode -
+// this server is the DHCP/NAT boundary there. In mikrotik mode the router
+// owns both, so these cards would just be dead UI.
+function showStandaloneModeCards(show) {
+  ['staticLeasesCard', 'portForwardCard'].forEach(id => {
+    document.getElementById(id).style.display = show ? 'block' : 'none';
+  });
+  if (show) {
+    loadStaticLeases();
+    loadPortForwards();
   }
 }
 
@@ -661,6 +675,7 @@ async function loadNetworkModeSettings() {
 
     updateNetworkModeCards(mode);
     showRouterModeCards(mode === 'mikrotik');
+    showStandaloneModeCards(mode !== 'mikrotik');
     if (mode === 'mikrotik') {
       await loadLocalInterfaces(s.server_lan_mac || '');
       if (s.mikrotik_ip) testMikrotikConnection();
@@ -735,6 +750,7 @@ function onNetworkModeChange() {
   document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
   updateNetworkModeCards(mode);
   showRouterModeCards(mode === 'mikrotik');
+  showStandaloneModeCards(mode !== 'mikrotik');
   if (mode === 'mikrotik') {
     loadLocalInterfaces('');
     const ip = document.getElementById('mikrotikIp').value.trim();
@@ -981,5 +997,233 @@ async function deleteVlan(id, ifName) {
     }
   } catch(e) {
     showToast('Server error.', 'error');
+  }
+}
+
+// ===== STATIC DHCP LEASES (standalone mode) =====
+
+async function loadStaticLeases() {
+  const tbody = document.getElementById('staticLeasesTableBody');
+  try {
+    const data = await apiCall('GET', '/api/admin/network/leases');
+    if (!data.success) throw new Error(data.message);
+    if (data.leases.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);">No reserved IPs yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.leases.map(l => `
+      <tr>
+        <td>${escapeHtml(l.mac_address)}</td>
+        <td>${escapeHtml(l.ip_address)}</td>
+        <td>${escapeHtml(l.label || '')}</td>
+        <td style="text-align:right;">
+          <button class="btn btn-sm btn-danger" onclick="deleteStaticLease(${l.id}, '${escapeHtml(l.mac_address)}')">
+            <i class="fas fa-trash"></i>
+          </button>
+        </td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--accent-red);">Failed to load.</td></tr>';
+  }
+}
+
+async function addStaticLease() {
+  const mac = document.getElementById('newLeaseMac').value.trim();
+  const ip = document.getElementById('newLeaseIp').value.trim();
+  const label = document.getElementById('newLeaseLabel').value.trim();
+  try {
+    const data = await apiCall('POST', '/api/admin/network/leases', { mac_address: mac, ip_address: ip, label });
+    if (data.success) {
+      showToast('IP reserved.');
+      document.getElementById('newLeaseMac').value = '';
+      document.getElementById('newLeaseIp').value = '';
+      document.getElementById('newLeaseLabel').value = '';
+      await loadStaticLeases();
+    } else {
+      showToast(data.message || 'Failed to reserve IP.', 'error');
+    }
+  } catch(e) {
+    showToast('Server error.', 'error');
+  }
+}
+
+async function deleteStaticLease(id, mac) {
+  if (!confirm(`Remove the reserved IP for ${mac}?`)) return;
+  try {
+    const data = await apiCall('DELETE', `/api/admin/network/leases/${id}`);
+    if (data.success) {
+      showToast('Reservation removed.');
+      await loadStaticLeases();
+    } else {
+      showToast(data.message || 'Failed to remove.', 'error');
+    }
+  } catch(e) {
+    showToast('Server error.', 'error');
+  }
+}
+
+// ===== PORT FORWARDING (standalone mode) =====
+
+async function loadPortForwards() {
+  const tbody = document.getElementById('portForwardsTableBody');
+  try {
+    const data = await apiCall('GET', '/api/admin/network/port-forwards');
+    if (!data.success) throw new Error(data.message);
+    if (data.forwards.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No port forwards yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.forwards.map(f => `
+      <tr>
+        <td>${escapeHtml(f.label || '')}</td>
+        <td>${f.protocol.toUpperCase()}</td>
+        <td>${f.external_port}</td>
+        <td>${escapeHtml(f.internal_ip)}:${f.internal_port}</td>
+        <td>
+          <label style="display:inline-flex;align-items:center;cursor:pointer;">
+            <input type="checkbox" ${f.enabled ? 'checked' : ''} onchange="togglePortForward(${f.id})">
+          </label>
+        </td>
+        <td style="text-align:right;">
+          <button class="btn btn-sm btn-danger" onclick="deletePortForward(${f.id}, '${escapeHtml(f.label || (f.protocol + '/' + f.external_port))}')">
+            <i class="fas fa-trash"></i>
+          </button>
+        </td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--accent-red);">Failed to load.</td></tr>';
+  }
+}
+
+async function addPortForward() {
+  const label = document.getElementById('newFwdLabel').value.trim();
+  const protocol = document.getElementById('newFwdProtocol').value;
+  const external_port = document.getElementById('newFwdExternalPort').value;
+  const internal_ip = document.getElementById('newFwdInternalIp').value.trim();
+  const internal_port = document.getElementById('newFwdInternalPort').value;
+  try {
+    const data = await apiCall('POST', '/api/admin/network/port-forwards', { label, protocol, external_port, internal_ip, internal_port });
+    if (data.success) {
+      showToast('Port forward added.');
+      document.getElementById('newFwdLabel').value = '';
+      document.getElementById('newFwdExternalPort').value = '';
+      document.getElementById('newFwdInternalIp').value = '';
+      document.getElementById('newFwdInternalPort').value = '';
+      await loadPortForwards();
+    } else {
+      showToast(data.message || 'Failed to add port forward.', 'error');
+    }
+  } catch(e) {
+    showToast('Server error.', 'error');
+  }
+}
+
+async function togglePortForward(id) {
+  try {
+    const data = await apiCall('PUT', `/api/admin/network/port-forwards/${id}/toggle`);
+    if (data.success) {
+      showToast(data.enabled ? 'Port forward enabled.' : 'Port forward disabled.');
+    } else {
+      showToast(data.message || 'Failed to update.', 'error');
+      await loadPortForwards();
+    }
+  } catch(e) {
+    showToast('Server error.', 'error');
+    await loadPortForwards();
+  }
+}
+
+async function deletePortForward(id, label) {
+  if (!confirm(`Delete the port forward "${label}"?`)) return;
+  try {
+    const data = await apiCall('DELETE', `/api/admin/network/port-forwards/${id}`);
+    if (data.success) {
+      showToast('Port forward deleted.');
+      await loadPortForwards();
+    } else {
+      showToast(data.message || 'Failed to delete.', 'error');
+    }
+  } catch(e) {
+    showToast('Server error.', 'error');
+  }
+}
+
+// ===== CLIENT NAMING =====
+
+async function loadClientLabels() {
+  const tbody = document.getElementById('clientLabelsTableBody');
+  if (!tbody) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/network/client-labels');
+    if (!data.success) throw new Error(data.message);
+    if (data.labels.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);">No named devices yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.labels.map(l => `
+      <tr>
+        <td>${escapeHtml(l.mac_address)}</td>
+        <td>${escapeHtml(l.label)}</td>
+        <td style="text-align:right;">
+          <button class="btn btn-sm btn-danger" onclick="deleteClientLabel('${escapeHtml(l.mac_address)}')">
+            <i class="fas fa-trash"></i>
+          </button>
+        </td>
+      </tr>
+    `).join('');
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--accent-red);">Failed to load.</td></tr>';
+  }
+}
+
+async function addClientLabel() {
+  const mac = document.getElementById('newClientLabelMac').value.trim();
+  const label = document.getElementById('newClientLabelName').value.trim();
+  try {
+    const data = await apiCall('POST', '/api/admin/network/client-labels', { mac_address: mac, label });
+    if (data.success) {
+      showToast('Name saved.');
+      document.getElementById('newClientLabelMac').value = '';
+      document.getElementById('newClientLabelName').value = '';
+      await loadClientLabels();
+    } else {
+      showToast(data.message || 'Failed to save name.', 'error');
+    }
+  } catch(e) {
+    showToast('Server error.', 'error');
+  }
+}
+
+async function deleteClientLabel(mac) {
+  try {
+    const data = await apiCall('POST', '/api/admin/network/client-labels', { mac_address: mac, label: '' });
+    if (data.success) {
+      showToast('Name removed.');
+      await loadClientLabels();
+    } else {
+      showToast(data.message || 'Failed to remove.', 'error');
+    }
+  } catch(e) {
+    showToast('Server error.', 'error');
+  }
+}
+
+// ===== NETWORK DIAGNOSTICS =====
+
+async function runDiagnostic(type) {
+  const target = document.getElementById('diagTarget').value.trim();
+  const out = document.getElementById('diagOutput');
+  if (!target) {
+    showToast('Enter a target first.', 'error');
+    return;
+  }
+  out.textContent = `Running ${type} ${target}...`;
+  try {
+    const data = await apiCall('POST', `/api/admin/network/diagnostics/${type}`, { target });
+    out.textContent = data.success ? (data.output || '(no output)') : (data.message || 'Failed.');
+  } catch(e) {
+    out.textContent = 'Server error.';
   }
 }
