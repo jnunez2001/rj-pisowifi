@@ -97,13 +97,13 @@
     <input type="radio" name="networkMode" id="modeStandalone" value="standalone" onchange="onNetworkModeChange()" style="display:none;">
     <input type="radio" name="networkMode" id="modeMikrotik" value="mikrotik" onchange="onNetworkModeChange()" style="display:none;">
 
-    <div id="networkModeSwitch" style="display:inline-flex;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:999px;padding:4px;gap:4px;">
+    <div id="networkModeSwitch" style="display:flex;width:100%;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:10px;padding:4px;gap:4px;">
       <button type="button" id="modeStandaloneCard" onclick="setNetworkMode('standalone')"
-        style="border:none;background:transparent;padding:8px 18px;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer;color:var(--text-muted);transition:background .15s,color .15s;">
+        style="flex:1;border:none;background:transparent;padding:14px 18px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;color:var(--text-muted);transition:background .15s,color .15s;">
         Standalone
       </button>
       <button type="button" id="modeMikrotikCard" onclick="setNetworkMode('mikrotik')"
-        style="border:none;background:transparent;padding:8px 18px;border-radius:999px;font-size:13px;font-weight:700;cursor:pointer;color:var(--text-muted);transition:background .15s,color .15s;">
+        style="flex:1;border:none;background:transparent;padding:14px 18px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;color:var(--text-muted);transition:background .15s,color .15s;">
         External Router
       </button>
     </div>
