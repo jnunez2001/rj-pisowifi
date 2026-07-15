@@ -285,40 +285,51 @@
     <div class="card-title">
       <i class="fas fa-ethernet" style="margin-right:8px;color:var(--accent-green);"></i>Ports and Roles
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Live-scanned from your router</span>
-    <button class="btn btn-primary" style="margin-left:auto;" onclick="loadRouterPorts()">
-      <i class="fas fa-rotate"></i> Rescan
-    </button>
+    <span style="font-size:12px;color:var(--text-muted);" id="routerPortsSummary">Loading...</span>
   </div>
-  <div id="routerPortsList">
-    <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
-  </div>
-  <p id="routerPortsTotal" style="font-size:13px;margin-top:10px;"></p>
-  <button class="btn btn-primary" onclick="saveRouterPorts()">
-    <i class="fas fa-save"></i> Save Port Roles
+  <button type="button" class="btn btn-primary" onclick="openRouterPortsModal()">
+    <i class="fas fa-sliders-h"></i> Configure Ports and Roles
   </button>
 </div>
 
-<!-- ROUTER MODE: PROVISION (mikrotik mode only) -->
-<div class="card" id="routerProvisionCard" style="margin-top:20px;display:none;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-bolt" style="margin-right:8px;color:var(--accent-yellow);"></i>Provision This Router
+<!-- ROUTER MODE: PORTS AND ROLES + PROVISION MODAL -->
+<div class="modal-overlay" id="routerPortsModal">
+  <div class="modal" style="max-width:720px;">
+    <div class="modal-header">
+      <div class="modal-title">Ports and Roles</div>
+      <button class="modal-close" onclick="closeModal('routerPortsModal')">
+        <i class="fas fa-times"></i>
+      </button>
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Backs up current config first, always</span>
-  </div>
-  <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
-    Save your port roles above first. This applies everything to the router live, so preview what will happen before running it.
-  </p>
-  <div style="display:flex;gap:10px;">
-    <button class="btn btn-secondary" onclick="previewProvisioning()">
-      <i class="fas fa-eye"></i> Preview Changes
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+      <button type="button" class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="loadRouterPorts()">
+        <i class="fas fa-rotate"></i> Rescan
+      </button>
+    </div>
+    <div id="routerPortsList" style="max-height:340px;overflow-y:auto;">
+      <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+    </div>
+    <p id="routerPortsTotal" style="font-size:13px;margin-top:10px;"></p>
+    <button class="btn btn-primary" onclick="saveRouterPorts()">
+      <i class="fas fa-save"></i> Save Port Roles
     </button>
-    <button class="btn btn-primary" onclick="applyProvisioning()">
-      <i class="fas fa-bolt"></i> Configure
-    </button>
+
+    <div style="border-top:1px solid var(--border-color);margin-top:18px;padding-top:16px;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:6px;"><i class="fas fa-bolt" style="margin-right:6px;color:var(--accent-yellow);"></i>Apply to Router</div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+        Save your port roles above first. Backs up the router's current config, then applies everything live — preview what will happen before running it.
+      </p>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-secondary" onclick="previewProvisioning()">
+          <i class="fas fa-eye"></i> Preview Changes
+        </button>
+        <button class="btn btn-primary" onclick="applyProvisioning()">
+          <i class="fas fa-bolt"></i> Configure
+        </button>
+      </div>
+      <div id="provisionResult" style="margin-top:16px;"></div>
+    </div>
   </div>
-  <div id="provisionResult" style="margin-top:16px;"></div>
 </div>
 
 <!-- ROUTER MODE: LIVE STATUS (mikrotik mode only) -->
@@ -440,56 +451,54 @@
     <div class="card-title">
       <i class="fas fa-ethernet" style="margin-right:8px;color:var(--accent-green);"></i>Ports and Roles
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Turn this server's own network ports into a real router</span>
-    <button class="btn btn-primary" style="margin-left:auto;" onclick="loadStandalonePorts()">
-      <i class="fas fa-rotate"></i> Rescan
-    </button>
+    <span style="font-size:12px;color:var(--text-muted);" id="standalonePortsSummary">Loading...</span>
   </div>
-  <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
-    <i class="fas fa-info-circle"></i>
-    Mark a port (or a VLAN lane on it) as <strong>Gated</strong> for paid customer access, <strong>Open</strong> for trusted free access, or <strong>WAN</strong> for your internet connection. Combine ports/lanes to share one subnet across more than one wire.
-  </div>
-  <div id="standalonePortsList">
-    <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
-  </div>
-  <p id="standalonePortsTotal" style="font-size:13px;margin-top:10px;"></p>
-  <button class="btn btn-primary" onclick="saveStandalonePorts()">
-    <i class="fas fa-save"></i> Save Port Roles
+  <button type="button" class="btn btn-primary" onclick="openStandalonePortsModal()">
+    <i class="fas fa-sliders-h"></i> Configure Ports and Roles
   </button>
 </div>
 
-<!-- STANDALONE MODE: PROVISION -->
-<div class="card" id="standaloneProvisionCard" style="margin-top:20px;display:none;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-bolt" style="margin-right:8px;color:var(--accent-yellow);"></i>Apply Ports and Roles
+<!-- STANDALONE MODE: PORTS AND ROLES + APPLY MODAL -->
+<div class="modal-overlay" id="standalonePortsModal">
+  <div class="modal" style="max-width:720px;">
+    <div class="modal-header">
+      <div class="modal-title">Ports and Roles</div>
+      <button class="modal-close" onclick="closeModal('standalonePortsModal')">
+        <i class="fas fa-times"></i>
+      </button>
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Builds the VLANs, DHCP, and firewall rules for your saved lanes</span>
-  </div>
-  <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
-    Save your port roles above first. Preview what will happen before applying — this reconfigures live networking on the machine you're likely connected through.
-  </p>
-  <div style="display:flex;gap:10px;">
-    <button class="btn btn-secondary" onclick="previewStandaloneProvisioning()">
-      <i class="fas fa-eye"></i> Preview Changes
+    <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
+      <i class="fas fa-info-circle"></i>
+      Mark a port (or a VLAN lane on it) as <strong>Gated</strong> for paid customer access, <strong>Open</strong> for trusted free access, or <strong>WAN</strong> for your internet connection. Combine ports/lanes to share one subnet across more than one wire.
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+      <button type="button" class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="loadStandalonePorts()">
+        <i class="fas fa-rotate"></i> Rescan
+      </button>
+    </div>
+    <div id="standalonePortsList" style="max-height:340px;overflow-y:auto;">
+      <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+    </div>
+    <p id="standalonePortsTotal" style="font-size:13px;margin-top:10px;"></p>
+    <button class="btn btn-primary" onclick="saveStandalonePorts()">
+      <i class="fas fa-save"></i> Save Port Roles
     </button>
-    <button class="btn btn-primary" onclick="applyStandaloneProvisioning()">
-      <i class="fas fa-bolt"></i> Apply
-    </button>
-  </div>
-  <div id="standaloneProvisionResult" style="margin-top:16px;"></div>
-</div>
 
-<!-- PHYSICAL INTERFACES -->
-<div class="card" style="margin-top:20px;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-ethernet" style="margin-right:8px;color:var(--accent-green);"></i>Available Base Interfaces
+    <div style="border-top:1px solid var(--border-color);margin-top:18px;padding-top:16px;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:6px;"><i class="fas fa-bolt" style="margin-right:6px;color:var(--accent-yellow);"></i>Apply Ports and Roles</div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+        Save your port roles above first. Preview what will happen before applying — this reconfigures live networking on the machine you're likely connected through.
+      </p>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-secondary" onclick="previewStandaloneProvisioning()">
+          <i class="fas fa-eye"></i> Preview Changes
+        </button>
+        <button class="btn btn-primary" onclick="applyStandaloneProvisioning()">
+          <i class="fas fa-bolt"></i> Apply
+        </button>
+      </div>
+      <div id="standaloneProvisionResult" style="margin-top:16px;"></div>
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Physical interfaces that can have VLANs</span>
-  </div>
-  <div id="interfacesList" style="display:flex;flex-wrap:wrap;gap:12px;">
-    <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
   </div>
 </div>
 

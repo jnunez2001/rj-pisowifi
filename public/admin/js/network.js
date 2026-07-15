@@ -1,5 +1,17 @@
 // ===== NETWORK PAGE =====
 
+// Shared modal helper (closeModal was called throughout this page's markup
+// - Router Terminal, Create VLAN - but never actually defined anywhere,
+// meaning every close/cancel button on those modals silently did nothing.
+// Fixed here rather than left as-is since the new Ports and Roles popups
+// below rely on it too.
+function closeModal(id) {
+  document.getElementById(id).classList.remove('show');
+}
+function openModal(id) {
+  document.getElementById(id).classList.add('show');
+}
+
 // ===== BIOS POWER-LOSS REMINDER =====
 // Can't be set from software (see hardwareDetection.js) - shown only on
 // x86 hardware, since ARM SBCs have no BIOS/soft-off state and don't need
@@ -262,8 +274,8 @@ async function saveAdminHostname() {
 // most recently loaded, and every inline onclick handler below implicitly
 // operates against that one.
 const laneState = {
-  router: { physicalPorts: [], lanes: [], containerId: 'routerPortsList', totalId: 'routerPortsTotal', apiPath: '/api/admin/router/ports' },
-  standalone: { physicalPorts: [], lanes: [], containerId: 'standalonePortsList', totalId: 'standalonePortsTotal', apiPath: '/api/admin/network/standalone/ports' },
+  router: { physicalPorts: [], lanes: [], containerId: 'routerPortsList', totalId: 'routerPortsTotal', summaryId: 'routerPortsSummary', apiPath: '/api/admin/router/ports' },
+  standalone: { physicalPorts: [], lanes: [], containerId: 'standalonePortsList', totalId: 'standalonePortsTotal', summaryId: 'standalonePortsSummary', apiPath: '/api/admin/network/standalone/ports' },
 };
 let activeLaneNamespace = 'router';
 function laneNs() { return laneState[activeLaneNamespace]; }
@@ -310,6 +322,7 @@ async function loadLanePorts() {
     if (ns.physicalPorts.length === 0) {
       el.innerHTML = '<div style="color:var(--text-muted);">No ports detected.</div>';
       totalEl.textContent = '';
+      updateLaneSummary(ns, 0, 0, 0);
       return;
     }
 
@@ -323,9 +336,38 @@ async function loadLanePorts() {
     totalEl.textContent = totalText;
     totalEl.style.color = over ? 'var(--accent-red)' : 'var(--accent-green)';
 
+    const activeLaneCount = ns.lanes.filter((l) => (l.role === 'gated' || l.role === 'open') && !l.bridge_with_port).length;
+    updateLaneSummary(ns, activeLaneCount, guaranteed, plan);
+
   } catch(e) {
     el.innerHTML = '<div style="color:var(--accent-red);">Failed to load: ' + (e.message || 'unknown error') + '</div>';
+    const summaryEl = document.getElementById(ns.summaryId);
+    if (summaryEl) summaryEl.textContent = 'Failed to load';
   }
+}
+
+// Keeps the collapsed trigger card useful at a glance, without needing the
+// popup open just to see whether anything's configured yet.
+function updateLaneSummary(ns, activeLaneCount, guaranteed, plan) {
+  const summaryEl = document.getElementById(ns.summaryId);
+  if (!summaryEl) return;
+  if (activeLaneCount === 0) {
+    summaryEl.textContent = 'No lanes configured yet';
+    return;
+  }
+  summaryEl.textContent = `${activeLaneCount} lane${activeLaneCount > 1 ? 's' : ''} configured — ${guaranteed} of ${plan || '?'} Mbps guaranteed`;
+}
+
+function openRouterPortsModal() {
+  activeLaneNamespace = 'router';
+  openModal('routerPortsModal');
+  loadLanePorts();
+}
+
+function openStandalonePortsModal() {
+  activeLaneNamespace = 'standalone';
+  openModal('standalonePortsModal');
+  loadLanePorts();
 }
 
 // Every physical port always shows at least its untagged lane, even if
@@ -696,7 +738,7 @@ async function loadNetworkPage() {
 }
 
 function showRouterModeCards(show) {
-  ['ispPlanCard', 'portalAddressCard', 'routerPortsCard', 'routerProvisionCard', 'routerStatusCard', 'routerTerminalCard'].forEach(id => {
+  ['ispPlanCard', 'portalAddressCard', 'routerPortsCard', 'routerStatusCard', 'routerTerminalCard'].forEach(id => {
     document.getElementById(id).style.display = show ? 'block' : 'none';
   });
   if (show) {
@@ -711,7 +753,7 @@ function showRouterModeCards(show) {
 // this server is the DHCP/NAT boundary there. In mikrotik mode the router
 // owns both, so these cards would just be dead UI.
 function showStandaloneModeCards(show) {
-  ['staticLeasesCard', 'portForwardCard', 'standalonePortsCard', 'standaloneProvisionCard'].forEach(id => {
+  ['staticLeasesCard', 'portForwardCard', 'standalonePortsCard'].forEach(id => {
     document.getElementById(id).style.display = show ? 'block' : 'none';
   });
   if (show) {
@@ -944,28 +986,18 @@ async function saveNetworkSettings() {
 
 let cachedInterfaces = [];
 
+// No longer rendered as its own card (folded into Standalone's Ports and
+// Roles popup, which already lists these same physical interfaces) - this
+// now exists purely to keep cachedInterfaces/the VLAN Management "Create
+// VLAN" dropdown populated.
 async function loadInterfaces() {
-  const el = document.getElementById('interfacesList');
   try {
     const data = await apiCall('GET', '/api/admin/network/interfaces');
     if (!data.success) throw new Error(data.message);
     cachedInterfaces = data.interfaces;
-    if (data.interfaces.length === 0) {
-      el.innerHTML = '<div style="color:var(--text-muted);">No interfaces detected.</div>';
-      return;
-    }
-    el.innerHTML = data.interfaces.map(i => `
-      <div style="background:var(--bg-primary);border:1px solid var(--border-color);border-radius:8px;padding:12px 16px;min-width:180px;">
-        <div style="font-weight:700;">${i.name}</div>
-        <div style="font-size:12px;color:var(--text-muted);">MAC: ${i.mac || 'n/a'}</div>
-        <span class="badge ${i.status === 'up' ? 'badge-green' : 'badge-red'}" style="margin-top:6px;display:inline-block;">
-          <i class="fas fa-circle" style="font-size:8px;"></i> ${i.status}
-        </span>
-      </div>
-    `).join('');
     populateVlanBaseInterfaceOptions();
   } catch(e) {
-    el.innerHTML = '<div style="color:var(--accent-red);">Failed to load interfaces.</div>';
+    console.error('Interfaces load error:', e);
   }
 }
 
