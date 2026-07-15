@@ -290,7 +290,7 @@ echo "$USER ALL=(ALL) NOPASSWD: /sbin/shutdown, /usr/sbin/shutdown" \
 
 # Bug found on real hardware: the admin panel's Network > Network
 # Configuration card (server/routes/admin.js POST /network) calls
-# `sudo cp ... /etc/netplan/50-cloud-init.yaml` and `sudo netplan apply`
+# `sudo cp ... /etc/netplan/60-rj-pisowifi.yaml` and `sudo netplan apply`
 # directly, but no sudoers entry for either was ever added here either -
 # same failure mode as the reboot/shutdown bug just above, except this one
 # surfaces immediately ("Failed to apply config") instead of silently, since
@@ -298,7 +298,15 @@ echo "$USER ALL=(ALL) NOPASSWD: /sbin/shutdown, /usr/sbin/shutdown" \
 # to the one destination file this app ever writes, rather than a blanket
 # grant on cp (which could otherwise overwrite any file on the system as
 # root).
-echo "$USER ALL=(ALL) NOPASSWD: /bin/cp * /etc/netplan/50-cloud-init.yaml" \
+#
+# Bug found the same night: this used to target 50-cloud-init.yaml, which
+# cloud-init regenerates back to DHCP on every boot, silently reverting any
+# static IP a client set. The app now writes to 60-rj-pisowifi.yaml instead
+# (a filename that wins netplan's merge without cloud-init involved), so a
+# commercial install needs the matching sudoers entry from day one instead
+# of a client hitting "Failed to apply network settings" and needing this
+# fixed by hand, the way tonight's live troubleshooting session did.
+echo "$USER ALL=(ALL) NOPASSWD: /bin/cp * /etc/netplan/60-rj-pisowifi.yaml" \
   >> /etc/sudoers.d/rj-pisowifi
 echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/netplan apply" \
   >> /etc/sudoers.d/rj-pisowifi
