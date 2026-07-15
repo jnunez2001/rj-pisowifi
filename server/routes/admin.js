@@ -642,9 +642,31 @@ router.get('/settings', adminAuth, (req, res) => {
     settings.forEach(s => {
       if (!sensitiveKeys.includes(s.key)) settingsObj[s.key] = s.value;
     });
+    // The raw/encrypted password never leaves this endpoint, but the admin
+    // panel still needs to know a password IS saved so it can show a
+    // masked placeholder instead of always looking blank (which made it
+    // look like nothing was ever saved, even though it was).
+    const mikrotikPass = settings.find(s => s.key === 'mikrotik_pass');
+    settingsObj.mikrotik_pass_set = !!(mikrotikPass && mikrotikPass.value);
     return res.json({ success: true, settings: settingsObj });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/router/password — reveals the saved MikroTik password on
+// demand. Deliberately a separate endpoint from GET /settings (which never
+// includes it) so the plaintext password is only ever sent to the browser
+// when an authenticated admin explicitly clicks "Show," not on every page
+// load.
+router.get('/router/password', adminAuth, (req, res) => {
+  try {
+    const { decryptSecret } = require('../utils/secretCrypto');
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'mikrotik_pass'").get();
+    const password = row && row.value ? decryptSecret(row.value) : '';
+    res.json({ success: true, password });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Could not retrieve password' });
   }
 });
 

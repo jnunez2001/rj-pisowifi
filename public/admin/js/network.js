@@ -603,15 +603,66 @@ async function loadNetworkModeSettings() {
     document.getElementById('modeMikrotik').checked = mode === 'mikrotik';
     document.getElementById('mikrotikIp').value = s.mikrotik_ip || '';
     document.getElementById('mikrotikUser').value = s.mikrotik_user || 'admin';
-    document.getElementById('mikrotikPass').value = s.mikrotik_pass || '';
     document.getElementById('mikrotikInterface').value = s.mikrotik_interface || 'ether1';
     document.getElementById('mikrotikSsl').checked = s.mikrotik_ssl === '1';
     document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
+
+    // The password itself is never sent here, only whether one is saved,
+    // so the field can show a masked placeholder instead of always
+    // looking blank (see GET /api/admin/settings for why).
+    const passField = document.getElementById('mikrotikPass');
+    const passHint = document.getElementById('mikrotikPassHint');
+    if (s.mikrotik_pass_set) {
+      passField.value = '';
+      passField.placeholder = '••••••••••';
+      passHint.style.display = 'block';
+    } else {
+      passField.value = '';
+      passField.placeholder = 'Leave blank if none';
+      passHint.style.display = 'none';
+    }
+    passField.dataset.revealed = 'false';
+
     updateNetworkModeCards(mode);
     showRouterModeCards(mode === 'mikrotik');
-    if (mode === 'mikrotik') await loadLocalInterfaces(s.server_lan_mac || '');
+    if (mode === 'mikrotik') {
+      await loadLocalInterfaces(s.server_lan_mac || '');
+      if (s.mikrotik_ip) testMikrotikConnection();
+    }
   } catch(e) {
     console.error('Network mode load error:', e);
+  }
+}
+
+// Reveals the actual saved password on demand rather than ever sending it
+// down with the normal settings load - keeps the plaintext password off
+// the wire except for this one explicit, authenticated request.
+async function toggleMikrotikPassword() {
+  const passField = document.getElementById('mikrotikPass');
+  const toggleBtn = document.getElementById('mikrotikPassToggle');
+
+  if (passField.dataset.revealed === 'true') {
+    passField.type = 'password';
+    passField.value = '';
+    passField.placeholder = passField.dataset.hadPassword === 'true' ? '••••••••••' : 'Leave blank if none';
+    passField.dataset.revealed = 'false';
+    toggleBtn.innerHTML = '<i class="fas fa-eye"></i> Show';
+    return;
+  }
+
+  try {
+    const data = await apiCall('GET', '/api/admin/router/password');
+    if (data.success) {
+      passField.dataset.hadPassword = data.password ? 'true' : 'false';
+      passField.type = 'text';
+      passField.value = data.password || '';
+      passField.dataset.revealed = 'true';
+      toggleBtn.innerHTML = '<i class="fas fa-eye-slash"></i> Hide';
+    } else {
+      showToast(data.message || 'Could not retrieve password.', 'error');
+    }
+  } catch(e) {
+    showToast('Server error.', 'error');
   }
 }
 
@@ -648,24 +699,37 @@ function onNetworkModeChange() {
   document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
   updateNetworkModeCards(mode);
   showRouterModeCards(mode === 'mikrotik');
-  if (mode === 'mikrotik') loadLocalInterfaces('');
+  if (mode === 'mikrotik') {
+    loadLocalInterfaces('');
+    const ip = document.getElementById('mikrotikIp').value.trim();
+    if (ip) {
+      testMikrotikConnection();
+    } else {
+      const statusEl = document.getElementById('mikrotikLiveStatus');
+      if (statusEl) {
+        statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:8px;"></i> Enter a router IP below';
+        statusEl.style.color = 'var(--text-muted)';
+      }
+    }
+  }
 }
 
 async function testMikrotikConnection() {
-  const statusEl = document.getElementById('mikrotikConnStatus');
-  statusEl.textContent = 'Testing...';
+  const statusEl = document.getElementById('mikrotikLiveStatus');
+  if (!statusEl) return;
+  statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
   statusEl.style.color = 'var(--text-muted)';
   try {
     const data = await apiCall('POST', '/api/admin/router/test-connection');
     if (data.success) {
-      statusEl.textContent = '✓ Connected';
+      statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:8px;"></i> Connected';
       statusEl.style.color = 'var(--accent-green)';
     } else {
-      statusEl.textContent = '✗ ' + (data.message || 'Failed');
+      statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:8px;"></i> ' + (data.message || 'Not reachable');
       statusEl.style.color = 'var(--accent-red)';
     }
   } catch(e) {
-    statusEl.textContent = '✗ Server error';
+    statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:8px;"></i> Server error';
     statusEl.style.color = 'var(--accent-red)';
   }
 }
