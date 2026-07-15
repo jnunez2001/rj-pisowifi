@@ -254,23 +254,45 @@ async function saveAdminHostname() {
 // list of lane definitions; cachedPhysicalPorts is the live-scanned port
 // list they're grouped under for display.
 
-let cachedPhysicalPorts = [];
-let cachedLanes = [];
+// Shared lane-editing engine behind both Router mode's "Ports and Roles"
+// and Standalone's own version of the same card (STANDALONE_ARCHITECTURE_PLAN.md
+// - reuses router_ports and this UI, not reinvented). Only one of the two
+// cards is ever visible at a time (mode-gated), so a single namespaced
+// state object is enough - activeLaneNamespace tracks whichever one was
+// most recently loaded, and every inline onclick handler below implicitly
+// operates against that one.
+const laneState = {
+  router: { physicalPorts: [], lanes: [], containerId: 'routerPortsList', totalId: 'routerPortsTotal', apiPath: '/api/admin/router/ports' },
+  standalone: { physicalPorts: [], lanes: [], containerId: 'standalonePortsList', totalId: 'standalonePortsTotal', apiPath: '/api/admin/network/standalone/ports' },
+};
+let activeLaneNamespace = 'router';
+function laneNs() { return laneState[activeLaneNamespace]; }
 
 async function loadRouterPorts() {
-  const el = document.getElementById('routerPortsList');
-  const totalEl = document.getElementById('routerPortsTotal');
+  activeLaneNamespace = 'router';
+  await loadLanePorts();
+}
+
+async function loadStandalonePorts() {
+  activeLaneNamespace = 'standalone';
+  await loadLanePorts();
+}
+
+async function loadLanePorts() {
+  const ns = laneNs();
+  const el = document.getElementById(ns.containerId);
+  const totalEl = document.getElementById(ns.totalId);
   try {
-    const data = await apiCall('GET', '/api/admin/router/ports');
+    const data = await apiCall('GET', ns.apiPath);
     if (!data.success) throw new Error(data.message);
-    cachedPhysicalPorts = data.physical_ports;
+    ns.physicalPorts = data.physical_ports;
 
     // bridge_with_id is a real database id - translate it into a
     // port_name/vlan_id pair so the UI can identify a lane by its content
     // even before it's saved (a brand-new lane has no id yet).
     const byId = {};
     for (const l of data.lanes) byId[l.id] = l;
-    cachedLanes = data.lanes.map((l) => {
+    ns.lanes = data.lanes.map((l) => {
       const target = l.bridge_with_id ? byId[l.bridge_with_id] : null;
       return {
         port_name: l.port_name,
@@ -285,8 +307,8 @@ async function loadRouterPorts() {
       };
     });
 
-    if (cachedPhysicalPorts.length === 0) {
-      el.innerHTML = '<div style="color:var(--text-muted);">No ports detected. Check the connection above.</div>';
+    if (ns.physicalPorts.length === 0) {
+      el.innerHTML = '<div style="color:var(--text-muted);">No ports detected.</div>';
       totalEl.textContent = '';
       return;
     }
@@ -296,11 +318,13 @@ async function loadRouterPorts() {
     const plan = data.isp_plan_mbps || 0;
     const guaranteed = data.guaranteed_total_mbps || 0;
     const over = plan > 0 && guaranteed > plan;
-    totalEl.textContent = `Guaranteed total: ${guaranteed} of ${plan || '?'} Mbps` + (over ? ' — over your plan!' : (plan > 0 ? ' — within plan' : ''));
+    let totalText = `Guaranteed total: ${guaranteed} of ${plan || '?'} Mbps` + (over ? ' — over your plan!' : (plan > 0 ? ' — within plan' : ''));
+    if (data.max_vlan_lanes) totalText += ` — up to ${data.max_vlan_lanes} lanes on this hardware`;
+    totalEl.textContent = totalText;
     totalEl.style.color = over ? 'var(--accent-red)' : 'var(--accent-green)';
 
   } catch(e) {
-    el.innerHTML = '<div style="color:var(--accent-red);">Failed to reach router: ' + (e.message || 'unknown error') + '</div>';
+    el.innerHTML = '<div style="color:var(--accent-red);">Failed to load: ' + (e.message || 'unknown error') + '</div>';
   }
 }
 
@@ -308,22 +332,25 @@ async function loadRouterPorts() {
 // nothing's been set for it yet - VLAN-tagged lanes are opt-in extras
 // added with "Add VLAN lane".
 function ensureUntaggedLanes() {
-  for (const port of cachedPhysicalPorts) {
-    if (!cachedLanes.some((l) => l.port_name === port.name && !l.vlan_id)) {
-      cachedLanes.push({ port_name: port.name, vlan_id: 0, role: 'unused', lane_name: '', speed_mbps: 0, burst_mbps: 0, isolate_clients: true, bridge_with_port: '', bridge_with_vlan: 0 });
+  const ns = laneNs();
+  for (const port of ns.physicalPorts) {
+    if (!ns.lanes.some((l) => l.port_name === port.name && !l.vlan_id)) {
+      ns.lanes.push({ port_name: port.name, vlan_id: 0, role: 'unused', lane_name: '', speed_mbps: 0, burst_mbps: 0, isolate_clients: true, bridge_with_port: '', bridge_with_vlan: 0 });
     }
   }
 }
 
 function renderPortsAndLanes() {
   ensureUntaggedLanes();
-  document.getElementById('routerPortsList').innerHTML = cachedPhysicalPorts.map((port) => renderPortCard(port)).join('');
+  const ns = laneNs();
+  document.getElementById(ns.containerId).innerHTML = ns.physicalPorts.map((port) => renderPortCard(port)).join('');
 }
 
 function renderPortCard(port) {
-  const indices = cachedLanes.map((l, i) => i).filter((i) => cachedLanes[i].port_name === port.name);
-  const untaggedIndex = indices.find((i) => !cachedLanes[i].vlan_id);
-  const vlanIndices = indices.filter((i) => cachedLanes[i].vlan_id).sort((a, b) => cachedLanes[a].vlan_id - cachedLanes[b].vlan_id);
+  const lanes = laneNs().lanes;
+  const indices = lanes.map((l, i) => i).filter((i) => lanes[i].port_name === port.name);
+  const untaggedIndex = indices.find((i) => !lanes[i].vlan_id);
+  const vlanIndices = indices.filter((i) => lanes[i].vlan_id).sort((a, b) => lanes[a].vlan_id - lanes[b].vlan_id);
 
   const runningBadge = port.running
     ? '<span class="badge badge-green"><i class="fas fa-circle" style="font-size:8px;"></i> up</span>'
@@ -348,7 +375,8 @@ function renderPortCard(port) {
 }
 
 function renderLaneBlock(i) {
-  const l = cachedLanes[i];
+  const lanes = laneNs().lanes;
+  const l = lanes[i];
   const roleOptions = ['wan', 'gated', 'open', 'unused'].map((r) =>
     `<option value="${r}" ${l.role === r ? 'selected' : ''}>${roleLabel(r)}</option>`
   ).join('');
@@ -357,7 +385,7 @@ function renderLaneBlock(i) {
   // not themselves already combined into someone else's lane. A lane that
   // joins another one inherits it entirely (name/speed/isolation), so its
   // own fields are hidden below rather than left showing stale values.
-  const combineCandidates = cachedLanes
+  const combineCandidates = lanes
     .map((other, j) => ({ other, j }))
     .filter(({ other, j }) => j !== i && (other.role === 'gated' || other.role === 'open') && !other.bridge_with_port);
   const isJoined = !!l.bridge_with_port;
@@ -380,7 +408,7 @@ function renderLaneBlock(i) {
     </div>`;
 
     if (isJoined) {
-      const primary = cachedLanes.find((c) => c.port_name === l.bridge_with_port && (c.vlan_id || 0) === (l.bridge_with_vlan || 0));
+      const primary = lanes.find((c) => c.port_name === l.bridge_with_port && (c.vlan_id || 0) === (l.bridge_with_vlan || 0));
       extra += `<p style="font-size:13px;color:var(--text-muted);margin-top:8px;">Combined into <strong>${(primary && primary.lane_name) || l.bridge_with_port}</strong>'s lane. It uses that lane's name, speed, and settings.</p>`;
     } else {
       extra += `
@@ -431,7 +459,7 @@ function roleLabel(r) {
 // cachedLanes before a full re-render, so changing one lane's role doesn't
 // discard values already entered for the others.
 function syncLanesFromDom() {
-  cachedLanes.forEach((l, i) => {
+  laneNs().lanes.forEach((l, i) => {
     const roleEl = document.getElementById(`laneRole_${i}`);
     if (roleEl) l.role = roleEl.value;
     const laneNameEl = document.getElementById(`laneName_${i}`);
@@ -448,7 +476,7 @@ function syncLanesFromDom() {
         l.bridge_with_port = '';
         l.bridge_with_vlan = 0;
       } else {
-        const target = cachedLanes[parseInt(bridgeEl.value, 10)];
+        const target = laneNs().lanes[parseInt(bridgeEl.value, 10)];
         l.bridge_with_port = target.port_name;
         l.bridge_with_vlan = target.vlan_id || 0;
       }
@@ -458,7 +486,7 @@ function syncLanesFromDom() {
 
 function onLaneChange(i) {
   syncLanesFromDom();
-  cachedLanes[i].role = document.getElementById(`laneRole_${i}`).value;
+  laneNs().lanes[i].role = document.getElementById(`laneRole_${i}`).value;
   renderPortsAndLanes();
 }
 
@@ -471,33 +499,36 @@ function addVlanLane(portName) {
     if (!isNaN(vlanId)) showToast('VLAN ID must be between 1 and 4094.', 'error');
     return;
   }
-  if (cachedLanes.some((l) => l.port_name === portName && l.vlan_id === vlanId)) {
+  const ns = laneNs();
+  if (ns.lanes.some((l) => l.port_name === portName && l.vlan_id === vlanId)) {
     showToast('That VLAN ID already exists on this port.', 'error');
     return;
   }
   syncLanesFromDom();
-  cachedLanes.push({ port_name: portName, vlan_id: vlanId, role: 'unused', lane_name: '', speed_mbps: 0, burst_mbps: 0, isolate_clients: true, bridge_with_port: '', bridge_with_vlan: 0 });
+  ns.lanes.push({ port_name: portName, vlan_id: vlanId, role: 'unused', lane_name: '', speed_mbps: 0, burst_mbps: 0, isolate_clients: true, bridge_with_port: '', bridge_with_vlan: 0 });
   renderPortsAndLanes();
 }
 
 function removeVlanLane(i) {
   syncLanesFromDom();
-  const removed = cachedLanes[i];
+  const ns = laneNs();
+  const removed = ns.lanes[i];
   // Clear any other lane's "combine with" pointing at the one being
   // removed, so nothing is left referencing a lane that no longer exists.
-  cachedLanes.forEach((l) => {
+  ns.lanes.forEach((l) => {
     if (l.bridge_with_port === removed.port_name && (l.bridge_with_vlan || 0) === (removed.vlan_id || 0)) {
       l.bridge_with_port = '';
       l.bridge_with_vlan = 0;
     }
   });
-  cachedLanes.splice(i, 1);
+  ns.lanes.splice(i, 1);
   renderPortsAndLanes();
 }
 
-async function saveRouterPorts() {
+async function saveLanePorts() {
   syncLanesFromDom();
-  const lanes = cachedLanes.map((l) => ({
+  const ns = laneNs();
+  const lanes = ns.lanes.map((l) => ({
     port_name: l.port_name,
     vlan_id: l.vlan_id || 0,
     role: l.role,
@@ -509,14 +540,25 @@ async function saveRouterPorts() {
     bridge_with_vlan: l.bridge_with_vlan || 0,
   }));
   try {
-    const data = await apiCall('POST', '/api/admin/router/ports', { lanes });
+    const data = await apiCall('POST', ns.apiPath, { lanes });
     if (data.success) {
       showToast('Port roles saved!');
-      await loadRouterPorts();
+      await loadLanePorts();
     } else {
       showToast(data.message || 'Failed to save.', 'error');
     }
   } catch(e) { showToast('Server error.', 'error'); }
+}
+
+// Router mode's Save button still calls this exact name from network.html.
+async function saveRouterPorts() {
+  activeLaneNamespace = 'router';
+  await saveLanePorts();
+}
+
+async function saveStandalonePorts() {
+  activeLaneNamespace = 'standalone';
+  await saveLanePorts();
 }
 
 // ===== ROUTER MODE: LIVE STATUS =====
@@ -590,6 +632,41 @@ async function applyProvisioning() {
   }
 }
 
+// ===== STANDALONE MODE: PROVISION (VLAN-based multi-lane engine) =====
+
+async function previewStandaloneProvisioning() {
+  const el = document.getElementById('standaloneProvisionResult');
+  el.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Building preview...</div>';
+  try {
+    const data = await apiCall('GET', '/api/admin/network/standalone/provision/preview');
+    if (!data.success) throw new Error(data.message);
+    el.innerHTML = '<div style="font-size:13px;font-weight:700;margin-bottom:6px;">Will apply:</div>' +
+      '<ol style="font-size:13px;padding-left:20px;">' +
+      data.steps.map(s => `<li>${escapeHtml(s)}</li>`).join('') +
+      '</ol>';
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--accent-red);">Failed to build preview: ' + escapeHtml(e.message || 'unknown error') + '</div>';
+  }
+}
+
+async function applyStandaloneProvisioning() {
+  if (!confirm("This applies your saved lane configuration to this server's own network stack right now. You're likely connected through it — a mistake here can cut off access until you're physically at the machine. Continue?")) return;
+  const el = document.getElementById('standaloneProvisionResult');
+  el.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Applying configuration...</div>';
+  try {
+    const data = await apiCall('POST', '/api/admin/network/standalone/provision/apply');
+    if (data.success) {
+      el.innerHTML = '<div style="color:var(--accent-green);"><i class="fas fa-check"></i> Configuration applied.</div>';
+      showToast('Standalone network configured!');
+    } else {
+      el.innerHTML = '<div style="color:var(--accent-red);">' + escapeHtml(data.message || 'Failed.') + '</div>';
+      showToast(data.message || 'Provisioning failed.', 'error');
+    }
+  } catch(e) {
+    el.innerHTML = '<div style="color:var(--accent-red);">Server error: ' + escapeHtml(e.message || 'unknown error') + '</div>';
+  }
+}
+
 function renderProvisionLog(data, success) {
   const el = document.getElementById('provisionResult');
   let html = '';
@@ -634,12 +711,13 @@ function showRouterModeCards(show) {
 // this server is the DHCP/NAT boundary there. In mikrotik mode the router
 // owns both, so these cards would just be dead UI.
 function showStandaloneModeCards(show) {
-  ['staticLeasesCard', 'portForwardCard'].forEach(id => {
+  ['staticLeasesCard', 'portForwardCard', 'standalonePortsCard', 'standaloneProvisionCard'].forEach(id => {
     document.getElementById(id).style.display = show ? 'block' : 'none';
   });
   if (show) {
     loadStaticLeases();
     loadPortForwards();
+    loadStandalonePorts();
   }
 }
 

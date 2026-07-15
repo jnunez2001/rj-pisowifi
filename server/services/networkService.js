@@ -141,9 +141,31 @@ function macToClassId(mac) {
 // separate it) - per-client tc commands issued from here must target that
 // same sub-interface, not the raw physical one, or they'd fail since the
 // qdisc they're attaching to doesn't exist on the physical interface at all.
-function getLanInterface() {
+// clientIp lets this resolve the RIGHT lane when the multi-lane Standalone
+// engine is active (STANDALONE_ARCHITECTURE_PLAN.md) - setup-network.sh is
+// the only place that actually computes VLAN/bridge interface names and
+// subnet assignments, so it writes that mapping to the 'standalone_lane_map'
+// setting as JSON and this just reads it back, rather than re-deriving the
+// same logic a second time here and risking the two falling out of sync.
+// Falls back to the single legacy interface whenever multi-lane mode isn't
+// active, or the client's IP doesn't match any known lane (e.g. still on
+// the legacy 10.0.0.0/24 range) - existing single-lane installs are
+// unaffected either way.
+function getLanInterface(clientIp) {
   try {
     const db = require('../config/database');
+    if (clientIp) {
+      const mapSetting = db.prepare("SELECT value FROM settings WHERE key = 'standalone_lane_map'").get();
+      if (mapSetting) {
+        try {
+          const lanes = JSON.parse(mapSetting.value);
+          const octet = clientIp.split('.')[1];
+          const match = lanes.find((l) => l.subnet === `10.${octet}.0.0`);
+          if (match) return match.interface;
+        } catch (e) {}
+      }
+    }
+
     const base = db.prepare("SELECT value FROM settings WHERE key = 'lan_interface'").get()?.value ||
       process.env.LAN_IF ||
       'enp0s8';
@@ -203,7 +225,7 @@ function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst 
 
   return new Promise((resolve) => {
     const classId = macToClassId(normalizedMac);
-    const lanIf = getLanInterface();
+    const lanIf = getLanInterface(clientIp);
     const cmds = [
       `sudo tc class replace dev ${lanIf} parent 1: classid 1:${classId} htb rate ${download}mbit ceil ${download}mbit burst 32k cburst 32k quantum 15000`,
       `sudo tc filter replace dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_ip ${clientIp} classid 1:${classId}`,
@@ -248,7 +270,7 @@ function removeClientBandwidth(mac) {
 
   return new Promise((resolve) => {
     const classId = macToClassId(normalizedMac);
-    const lanIf = getLanInterface();
+    const lanIf = getLanInterface(clientIp);
     exec(
       `sudo tc filter del dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_ip ${clientIp} classid 1:${classId}; ` +
       `sudo tc class del dev ${lanIf} classid 1:${classId}; ` +

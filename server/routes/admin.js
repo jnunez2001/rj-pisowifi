@@ -1828,6 +1828,210 @@ router.post('/network/diagnostics/traceroute', adminAuth, (req, res) => {
   });
 });
 
+// ===== STANDALONE PORTS AND ROLES + PROVISIONING
+// (STANDALONE_ARCHITECTURE_PLAN.md - VLAN-based multi-lane engine) =====
+// Reuses router_ports the same way router/MikroTik mode does, but scoped
+// strictly to interfaces that actually exist on THIS box - a MikroTik's
+// own saved port names (ether1, ether2...) never match a real local
+// interface, so switching modes can never let one mode's saved lanes leak
+// into the other's save/delete logic.
+
+function getLocalPhysicalInterfaces() {
+  if (!fs.existsSync('/sys/class/net')) return [];
+  return fs.readdirSync('/sys/class/net').filter((n) =>
+    /^(eth|enp|ens|enx|wlan|wlx|wlp)/.test(n) && !n.includes('.')
+  );
+}
+
+router.get('/network/standalone/ports', adminAuth, (req, res) => {
+  try {
+    const localNames = getLocalPhysicalInterfaces();
+    const physical_ports = localNames.map((name) => {
+      let operstate = 'unknown';
+      try { operstate = fs.readFileSync(`/sys/class/net/${name}/operstate`, 'utf8').trim(); } catch (e) {}
+      let mac = '';
+      try { mac = fs.readFileSync(`/sys/class/net/${name}/address`, 'utf8').trim(); } catch (e) {}
+      return { name, status: operstate, mac };
+    });
+
+    const allLanes = localNames.length
+      ? db.prepare(`SELECT * FROM router_ports WHERE port_name IN (${localNames.map(() => '?').join(',')}) ORDER BY port_name, vlan_id`).all(...localNames)
+      : [];
+    const lanes = allLanes.map((l) => ({
+      id: l.id,
+      port_name: l.port_name,
+      vlan_id: l.vlan_id || 0,
+      role: l.role,
+      lane_name: l.lane_name,
+      speed_mbps: l.speed_mbps,
+      burst_mbps: l.burst_mbps,
+      isolate_clients: !!l.isolate_clients,
+      bridge_with_id: l.bridge_with_id,
+    }));
+
+    const planSetting = db.prepare("SELECT value FROM settings WHERE key = 'isp_plan_mbps'").get();
+    const guaranteedTotal = lanes.reduce((sum, l) => sum + (l.role !== 'unused' && l.role !== 'wan' && !l.bridge_with_id ? (l.speed_mbps || 0) : 0), 0);
+    const hardware = require('../services/hardwareDetection').detect();
+
+    return res.json({
+      success: true,
+      physical_ports,
+      lanes,
+      isp_plan_mbps: planSetting ? parseInt(planSetting.value, 10) || 0 : 0,
+      guaranteed_total_mbps: guaranteedTotal,
+      max_vlan_lanes: hardware.features.maxVlanLanes,
+    });
+  } catch (err) {
+    console.error('Standalone ports list error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/network/standalone/ports — same shape/validation as
+// POST /router/ports, but stale-row deletion is scoped to this box's own
+// real interfaces only, so saving Standalone lanes can never wipe out
+// router-mode lane definitions saved for a MikroTik, or vice versa.
+router.post('/network/standalone/ports', adminAuth, (req, res) => {
+  try {
+    const { lanes } = req.body;
+    if (!Array.isArray(lanes)) {
+      return res.status(400).json({ success: false, message: 'lanes array required' });
+    }
+    const localNames = getLocalPhysicalInterfaces();
+    const validRoles = ['wan', 'gated', 'open', 'unused'];
+    const keyOf = (l) => `${l.port_name}::${parseInt(l.vlan_id, 10) || 0}`;
+    const byKey = new Map(lanes.map((l) => [keyOf(l), l]));
+
+    for (const l of lanes) {
+      if (!l.port_name || !localNames.includes(l.port_name) || !validRoles.includes(l.role)) {
+        return res.status(400).json({ success: false, message: `Invalid lane entry: ${JSON.stringify(l)}` });
+      }
+      if (l.bridge_with_port) {
+        const targetKey = `${l.bridge_with_port}::${parseInt(l.bridge_with_vlan, 10) || 0}`;
+        if (targetKey === keyOf(l)) {
+          return res.status(400).json({ success: false, message: `${l.port_name} (VLAN ${l.vlan_id || 'none'}) can't join its own lane` });
+        }
+        const target = byKey.get(targetKey);
+        if (!target) {
+          return res.status(400).json({ success: false, message: `${l.port_name} can't join ${l.bridge_with_port}: that lane isn't in this request` });
+        }
+        if (target.role === 'wan' || target.role === 'unused') {
+          return res.status(400).json({ success: false, message: `${l.port_name} can't join ${l.bridge_with_port}: that lane has no role (${target.role})` });
+        }
+        if (target.bridge_with_port) {
+          return res.status(400).json({ success: false, message: `${l.port_name} can't join ${l.bridge_with_port}: that lane is itself joined to another one. Join the other lane's primary instead.` });
+        }
+      }
+    }
+
+    const hardware = require('../services/hardwareDetection').detect();
+    const activeLaneCount = lanes.filter((l) => (l.role === 'gated' || l.role === 'open') && !l.bridge_with_port).length;
+    if (activeLaneCount > hardware.features.maxVlanLanes) {
+      return res.status(400).json({ success: false, message: `This hardware tier (${hardware.tier}) supports up to ${hardware.features.maxVlanLanes} lanes, ${activeLaneCount} were submitted` });
+    }
+
+    // Stale-row deletion scoped to real local interfaces only (see comment
+    // above) - a router-mode lane saved for e.g. "ether1" never matches any
+    // of these names, so it's never touched by this delete.
+    const deleteStale = db.prepare(`
+      DELETE FROM router_ports WHERE port_name IN (${localNames.map(() => '?').join(',') || "''"})
+      AND (port_name || '::' || vlan_id) NOT IN (${lanes.map(() => '?').join(',') || "''"})
+    `);
+    if (localNames.length > 0) {
+      deleteStale.run(...localNames, ...lanes.map((l) => keyOf(l)));
+    }
+
+    const upsert = db.prepare(`
+      INSERT INTO router_ports (port_name, vlan_id, role, lane_name, speed_mbps, burst_mbps, isolate_clients, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(port_name, vlan_id) DO UPDATE SET
+        role = excluded.role,
+        lane_name = excluded.lane_name,
+        speed_mbps = excluded.speed_mbps,
+        burst_mbps = excluded.burst_mbps,
+        isolate_clients = excluded.isolate_clients,
+        updated_at = CURRENT_TIMESTAMP
+    `);
+    for (const l of lanes) {
+      upsert.run(
+        l.port_name,
+        parseInt(l.vlan_id, 10) || 0,
+        l.role,
+        String(l.lane_name || ''),
+        parseInt(l.speed_mbps, 10) || 0,
+        parseInt(l.burst_mbps, 10) || 0,
+        l.isolate_clients === false ? 0 : 1
+      );
+    }
+    const findId = db.prepare('SELECT id FROM router_ports WHERE port_name = ? AND vlan_id = ?');
+    const setBridge = db.prepare('UPDATE router_ports SET bridge_with_id = ? WHERE port_name = ? AND vlan_id = ?');
+    for (const l of lanes) {
+      const vlanId = parseInt(l.vlan_id, 10) || 0;
+      if (l.bridge_with_port) {
+        const target = findId.get(l.bridge_with_port, parseInt(l.bridge_with_vlan, 10) || 0);
+        setBridge.run(target ? target.id : null, l.port_name, vlanId);
+      } else {
+        setBridge.run(null, l.port_name, vlanId);
+      }
+    }
+
+    return res.json({ success: true, message: 'Port roles saved' });
+  } catch (err) {
+    console.error('Standalone ports save error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/network/standalone/provision/preview — mirrors, in Node,
+// the same lane-numbering rule setup-network.sh itself uses (head lanes in
+// id order, octet = 50 + position) purely for display. setup-network.sh
+// remains the actual source of truth; this never touches the network.
+router.get('/network/standalone/provision/preview', adminAuth, (req, res) => {
+  try {
+    const localNames = getLocalPhysicalInterfaces();
+    const heads = localNames.length
+      ? db.prepare(`
+          SELECT * FROM router_ports
+          WHERE role IN ('gated','open') AND bridge_with_id IS NULL AND port_name IN (${localNames.map(() => '?').join(',')})
+          ORDER BY id
+        `).all(...localNames)
+      : [];
+    const steps = [];
+    heads.forEach((h, idx) => {
+      const octet = 50 + idx + 1;
+      const iface = h.vlan_id ? `${h.port_name}.${h.vlan_id}` : h.port_name;
+      const members = db.prepare('SELECT port_name, vlan_id FROM router_ports WHERE bridge_with_id = ?').all(h.id);
+      const laneIf = members.length ? `br-lane${h.id}` : iface;
+      steps.push(`Lane "${h.lane_name || iface}" (${h.role}): ${laneIf} → 10.${octet}.0.1/24, ${h.speed_mbps || 100}mbit${members.length ? `, bridged with ${members.map((m) => m.vlan_id ? `${m.port_name}.${m.vlan_id}` : m.port_name).join(', ')}` : ''}`);
+    });
+    if (heads.length === 0) {
+      steps.push('No gated/open lanes configured yet — the legacy single-lane 10.0.0.0/24 setup will be used, unchanged.');
+    }
+    res.json({ success: true, steps, lane_count: heads.length });
+  } catch (err) {
+    console.error('Standalone provision preview error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/network/standalone/provision/apply — the actual
+// "Configure" action. setup-network.sh always does a full rebuild from the
+// database on every run (already true for VLANs/leases/port-forwards), so
+// there's no separate backup/rollback step the way MikroTik provisioning
+// needs — re-running it is the same idempotent operation the boot-time
+// systemd service already performs.
+router.post('/network/standalone/provision/apply', adminAuth, (req, res) => {
+  const scriptPath = path.join(__dirname, '../../setup/setup-network.sh');
+  execFile('sudo', ['bash', scriptPath], { timeout: 30000 }, (err, stdout, stderr) => {
+    if (err) {
+      console.error('Standalone provision apply error:', err.message);
+      return res.status(500).json({ success: false, message: 'Provisioning failed: ' + err.message });
+    }
+    console.log('⚡ Standalone lane engine provisioned');
+    res.json({ success: true, message: 'Configuration applied' });
+  });
+});
+
 // ===== ROUTER MODE (MikroTik) — ROUTER_MODE_PLAN.md Stage 3 =====
 
 // GET /api/admin/router/ports — live-scans the router's actual physical

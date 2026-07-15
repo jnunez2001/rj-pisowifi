@@ -187,7 +187,261 @@ echo "nodogsplash chains cleaned" >> $LOG
 # our own IP/NAT/DHCP when we're actually the router (standalone mode); in
 # mikrotik mode we're just another device on the MikroTik's network and get
 # our own address the normal way.
+# ── STANDALONE MULTI-LANE DETECTION (STANDALONE_ARCHITECTURE_PLAN.md) ──
+# router_ports was originally built for router/MikroTik mode's port-role
+# UI - reused here for Standalone's own WAN/LAN engine rather than
+# reinvented, per the plan doc. Only rows whose port_name is a REAL
+# interface on THIS box ever count - a MikroTik's own port names
+# (ether1, ether2...) saved from router mode just never match anything
+# here and are silently ignored, so switching modes never cross-contaminates
+# the other mode's saved lanes.
+LOCAL_IFACES=$(ls /sys/class/net/ 2>/dev/null | grep -E '^(eth|enp|ens|enx|wlan|wlx|wlp)' | grep -v '\.')
+is_local_iface() {
+    echo "$LOCAL_IFACES" | grep -qx "$1"
+}
+
+MULTI_LANE_MODE=0
 if [ "$NETWORK_MODE" = "standalone" ]; then
+    while IFS='|' read -r RP_PORT; do
+        if [ -n "$RP_PORT" ] && is_local_iface "$RP_PORT"; then
+            MULTI_LANE_MODE=1
+            break
+        fi
+    done <<< "$(sqlite3 -separator '|' "$DB" "SELECT port_name FROM router_ports WHERE role IN ('gated','open');" 2>/dev/null)"
+fi
+echo "Multi-lane mode: $MULTI_LANE_MODE" >> $LOG
+
+if [ "$NETWORK_MODE" = "standalone" ] && [ "$MULTI_LANE_MODE" = "1" ]; then
+  # ═══════════════════════════════════════════════════════════════
+  # MULTI-LANE ENGINE — Network > Ports and Roles (Standalone), any
+  # number of gated/open lanes, VLAN sub-interfaces and/or Linux bridges
+  # for lanes spanning more than one physical port/VLAN.
+  # ═══════════════════════════════════════════════════════════════
+
+  # A router_ports row with role='wan' matching a real local interface
+  # overrides the VLAN-table/auto-detected WAN_VIF computed above, letting
+  # an owner dedicate a specific physical port to the ISP explicitly.
+  while IFS='|' read -r W_PORT W_VLAN; do
+      [ -z "$W_PORT" ] && continue
+      if is_local_iface "$W_PORT"; then
+          if [ -n "$W_VLAN" ] && [ "$W_VLAN" != "0" ]; then
+              WAN_VIF="${W_PORT}.${W_VLAN}"
+              ip link set $W_PORT up
+              ip link add link $W_PORT name $WAN_VIF type vlan id $W_VLAN 2>/dev/null || true
+          else
+              WAN_VIF="$W_PORT"
+          fi
+          ip link set $WAN_VIF up
+          pkill -f "dhclient.*$WAN_VIF" 2>/dev/null || true
+          dhclient -nw $WAN_VIF >> $LOG 2>&1 || true
+          echo "Lane engine WAN override: $WAN_VIF" >> $LOG
+          break
+      fi
+  done <<< "$(sqlite3 -separator '|' "$DB" "SELECT port_name, vlan_id FROM router_ports WHERE role='wan' ORDER BY id;" 2>/dev/null)"
+
+  echo 1 > /proc/sys/net/ipv4/ip_forward
+
+  iptables -t nat -F POSTROUTING 2>/dev/null
+  iptables -F FORWARD 2>/dev/null
+  iptables -t nat -A POSTROUTING -o $WAN_VIF -j MASQUERADE
+  # WAN admin access goes through nginx TLS on ports 80/443 (setup/nginx.conf),
+  # not a PREROUTING redirect - same reasoning as the legacy single-lane path.
+  iptables -t nat -F PREROUTING 2>/dev/null
+
+  rm -f /etc/dnsmasq.d/rj-pisowifi.conf
+  sleep 1
+  rm -f /var/lib/misc/dnsmasq.leases
+
+  nft delete table ip rj_piso 2>/dev/null || true
+  sleep 1
+
+  DNSMASQ_LANES=""
+  NFT_FORWARD_RULES=""
+  NFT_PREROUTING_RULES=""
+  LANE_MAP_JSON="["
+  LANE_MAP_SEP=""
+  LANE_INDEX=0
+
+  while IFS='|' read -r H_ID H_PORT H_VLAN H_ROLE H_NAME H_SPEED H_ISOLATE; do
+      [ -z "$H_ID" ] && continue
+      is_local_iface "$H_PORT" || continue
+
+      LANE_INDEX=$((LANE_INDEX + 1))
+      # Keeps the 10.<OCTET>.0.0/24 scheme inside a valid, collision-free
+      # octet range - hardware-tier caps (2/6/16 lanes) never get close to
+      # this limit, it's just a hard backstop.
+      if [ "$LANE_INDEX" -gt 200 ]; then
+          echo "Lane engine: too many lanes, stopping at 200" >> $LOG
+          break
+      fi
+
+      if [ -n "$H_VLAN" ] && [ "$H_VLAN" != "0" ]; then
+          H_IF="${H_PORT}.${H_VLAN}"
+          ip link set $H_PORT up
+          ip link add link $H_PORT name $H_IF type vlan id $H_VLAN 2>/dev/null || true
+      else
+          H_IF="$H_PORT"
+      fi
+      ip link set $H_IF up
+
+      # Members: other rows joined to this lane via bridge_with_id (e.g. a
+      # second physical port or VLAN sharing the same subnet as this one).
+      BRIDGE_IF="br-lane${H_ID}"
+      MEMBER_COUNT=0
+      while IFS='|' read -r M_PORT M_VLAN; do
+          [ -z "$M_PORT" ] && continue
+          is_local_iface "$M_PORT" || continue
+          if [ "$MEMBER_COUNT" = "0" ]; then
+              ip link add name $BRIDGE_IF type bridge 2>/dev/null || true
+              ip link set $BRIDGE_IF up
+              ip link set $H_IF master $BRIDGE_IF
+          fi
+          if [ -n "$M_VLAN" ] && [ "$M_VLAN" != "0" ]; then
+              M_IF="${M_PORT}.${M_VLAN}"
+              ip link set $M_PORT up
+              ip link add link $M_PORT name $M_IF type vlan id $M_VLAN 2>/dev/null || true
+          else
+              M_IF="$M_PORT"
+          fi
+          ip link set $M_IF up
+          ip link set $M_IF master $BRIDGE_IF
+          if [ "$H_ISOLATE" = "1" ]; then
+              bridge link set dev $M_IF isolated on 2>/dev/null || true
+          fi
+          MEMBER_COUNT=$((MEMBER_COUNT + 1))
+      done <<< "$(sqlite3 -separator '|' "$DB" "SELECT port_name, vlan_id FROM router_ports WHERE bridge_with_id = $H_ID;" 2>/dev/null)"
+
+      if [ "$MEMBER_COUNT" -gt 0 ]; then
+          LANE_IF="$BRIDGE_IF"
+          if [ "$H_ISOLATE" = "1" ]; then
+              bridge link set dev $H_IF isolated on 2>/dev/null || true
+          fi
+      else
+          LANE_IF="$H_IF"
+          # Client isolation on a single, unbridged lane is a WiFi-radio or
+          # switch-side feature (this box only ever sees traffic that's
+          # already been switched between clients on the same AP/port) -
+          # nothing to enforce here, logged so it's not a silent no-op.
+          [ "$H_ISOLATE" = "1" ] && echo "Lane $H_ID ($LANE_IF): isolate_clients has no effect without a bridged second port - enable client isolation on the access point itself" >> $LOG
+      fi
+
+      OCTET=$((50 + LANE_INDEX))
+      LANE_GATEWAY="10.${OCTET}.0.1"
+      LANE_SPEED=${H_SPEED:-0}
+      [ "$LANE_SPEED" -le 0 ] 2>/dev/null && LANE_SPEED=100
+
+      ip addr flush dev $LANE_IF 2>/dev/null
+      ip addr add ${LANE_GATEWAY}/24 dev $LANE_IF
+      ip link set $LANE_IF up
+      echo "Lane $H_ID ($H_NAME): $LANE_IF → $LANE_GATEWAY [$H_ROLE, ${LANE_SPEED}mbit]" >> $LOG
+
+      DNSMASQ_LANES="${DNSMASQ_LANES}
+interface=${LANE_IF}
+dhcp-range=interface:${LANE_IF},10.${OCTET}.0.10,10.${OCTET}.0.250,255.255.255.0,2h
+dhcp-option=interface:${LANE_IF},3,${LANE_GATEWAY}
+dhcp-option=interface:${LANE_IF},6,8.8.8.8"
+
+      if [ "$H_ROLE" = "gated" ]; then
+          DNSMASQ_LANES="${DNSMASQ_LANES}
+dhcp-option=interface:${LANE_IF},114,http://${LANE_GATEWAY}:3000/portal"
+          # Shared allowed_macs set (defined once below) - a paid session
+          # stays valid across every gated lane, not just the one it started
+          # on, matching how this app has exactly one session system, not
+          # one per lane.
+          NFT_FORWARD_RULES="${NFT_FORWARD_RULES}
+        iifname \"$LANE_IF\" ether saddr @allowed_macs accept
+        iifname \"$LANE_IF\" reject"
+          NFT_PREROUTING_RULES="${NFT_PREROUTING_RULES}
+        iifname \"$LANE_IF\" ether saddr != @allowed_macs udp dport 53 dnat to ${LANE_GATEWAY}:53
+        iifname \"$LANE_IF\" ether saddr != @allowed_macs tcp dport 53 dnat to ${LANE_GATEWAY}:53
+        iifname \"$LANE_IF\" ether saddr != @allowed_macs tcp dport 80 dnat to ${LANE_GATEWAY}:3000"
+      else
+          # 'open' role: trusted, full access, no captive-portal gating -
+          # e.g. a "Home"/staff lane that doesn't need to pay.
+          NFT_FORWARD_RULES="${NFT_FORWARD_RULES}
+        iifname \"$LANE_IF\" accept"
+      fi
+
+      # Root htb qdisc (not CAKE) is deliberate here, not an oversight -
+      # networkService.js's setClientBandwidth()/removeClientBandwidth()
+      # target this exact classid:999-default structure per client; CAKE
+      # doesn't support classid-based tc class/filter the way this needs.
+      # CAKE-based shaping is still a real, separate Tier 2 item.
+      tc qdisc del dev $LANE_IF root 2>/dev/null || true
+      tc qdisc add dev $LANE_IF root handle 1: htb default 999 r2q 1
+      tc class add dev $LANE_IF parent 1: classid 1:999 htb rate ${LANE_SPEED}mbit ceil ${LANE_SPEED}mbit
+      tc qdisc del dev $LANE_IF ingress 2>/dev/null || true
+      tc qdisc add dev $LANE_IF ingress
+
+      [ -n "$LANE_MAP_SEP" ] && LANE_MAP_JSON="${LANE_MAP_JSON},"
+      LANE_MAP_JSON="${LANE_MAP_JSON}{\"headId\":${H_ID},\"interface\":\"${LANE_IF}\",\"subnet\":\"10.${OCTET}.0.0\",\"gateway\":\"${LANE_GATEWAY}\",\"role\":\"${H_ROLE}\"}"
+      LANE_MAP_SEP="1"
+  done <<< "$(sqlite3 -separator '|' "$DB" "SELECT id, port_name, vlan_id, role, lane_name, speed_mbps, isolate_clients FROM router_ports WHERE role IN ('gated','open') AND bridge_with_id IS NULL ORDER BY id;" 2>/dev/null)"
+
+  LANE_MAP_JSON="${LANE_MAP_JSON}]"
+  sqlite3 "$DB" "INSERT OR REPLACE INTO settings (key, value) VALUES ('standalone_lane_map', '$(echo "$LANE_MAP_JSON" | sed "s/'/''/g")')" 2>/dev/null
+  echo "Lane map saved: $LANE_MAP_JSON" >> $LOG
+
+  cat > /etc/dnsmasq.d/rj-pisowifi.conf << EOF
+bind-interfaces
+dhcp-authoritative
+no-resolv
+server=8.8.8.8
+server=8.8.4.4
+$DNSMASQ_LANES
+EOF
+
+  sqlite3 -separator '|' "$DB" "SELECT mac_address, ip_address FROM static_leases;" 2>/dev/null | \
+    while IFS='|' read -r LEASE_MAC LEASE_IP; do
+      [ -n "$LEASE_MAC" ] && echo "dhcp-host=$LEASE_MAC,$LEASE_IP" >> /etc/dnsmasq.d/rj-pisowifi.conf
+    done
+
+  systemctl restart dnsmasq >> $LOG 2>&1
+  echo "dnsmasq started (multi-lane)" >> $LOG
+
+  PORT_FORWARD_RULES=""
+  while IFS='|' read -r FWD_PROTO FWD_EXT FWD_IP FWD_INT; do
+      [ -z "$FWD_PROTO" ] && continue
+      PORT_FORWARD_RULES="${PORT_FORWARD_RULES}
+        iifname \"$WAN_VIF\" $FWD_PROTO dport $FWD_EXT dnat to $FWD_IP:$FWD_INT"
+  done <<< "$(sqlite3 -separator '|' "$DB" "SELECT protocol, external_port, internal_ip, internal_port FROM port_forwards WHERE enabled=1;" 2>/dev/null)"
+
+  cat > /tmp/rj-piso.nft << NFTEOF
+table ip rj_piso {
+    set allowed_macs {
+        type ether_addr
+        flags dynamic
+    }
+    chain input {
+        type filter hook input priority filter; policy accept;
+    }
+    chain forward {
+        type filter hook forward priority filter; policy accept;
+        ct state established,related accept
+$NFT_FORWARD_RULES
+    }
+    chain postrouting {
+        type nat hook postrouting priority srcnat; policy accept;
+        oifname "$WAN_VIF" masquerade
+    }
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+$NFT_PREROUTING_RULES
+$PORT_FORWARD_RULES
+    }
+}
+NFTEOF
+
+  nft -f /tmp/rj-piso.nft >> $LOG 2>&1
+  echo "nftables multi-lane captive portal loaded" >> $LOG
+
+elif [ "$NETWORK_MODE" = "standalone" ]; then
+  # ═══════════════════════════════════════════════════════════════
+  # LEGACY SINGLE-LANE PATH — no gated/open router_ports rows configured
+  # yet, so behave exactly as before (one fixed 10.0.0.0/24 LAN on LAN_VIF).
+  # Existing installs that have never touched Ports and Roles keep working
+  # unchanged, no migration required.
+  # ═══════════════════════════════════════════════════════════════
 
   # LAN_VIF (and its VLAN sub-interface, if a LAN VLAN row exists) was
   # already created above, ahead of the mode branches - some setups run the
@@ -271,33 +525,23 @@ EOF
   systemctl restart dnsmasq >> $LOG 2>&1
   echo "dnsmasq started" >> $LOG
 
-else
-  # mikrotik mode: the router owns DHCP/NAT — make sure our own dnsmasq
-  # isn't still running from a prior standalone setup and fighting it.
-  rm -f /etc/dnsmasq.d/rj-pisowifi.conf
-  systemctl stop dnsmasq >> $LOG 2>&1 || true
-  systemctl disable dnsmasq >> $LOG 2>&1 || true
-  echo "mikrotik mode: dnsmasq disabled, deferring to router for DHCP" >> $LOG
-fi
+  sqlite3 "$DB" "DELETE FROM settings WHERE key = 'standalone_lane_map'" 2>/dev/null
 
-# ── NFTABLES CAPTIVE PORTAL ───────────────────────────────────
-if [ "$NETWORK_MODE" = "standalone" ]; then
+  nft delete table ip rj_piso 2>/dev/null || true
+  sleep 1
 
-    nft delete table ip rj_piso 2>/dev/null || true
-    sleep 1
-
-    # Port forwarding (admin panel > Network > Port Forwarding, standalone
-    # mode only - in mikrotik mode the router owns NAT, this table isn't
-    # read there). One dnat rule per enabled row, scoped to WAN_VIF so a
-    # forward never accidentally matches traffic arriving on the LAN side.
-    PORT_FORWARD_RULES=""
-    while IFS='|' read -r FWD_PROTO FWD_EXT FWD_IP FWD_INT; do
-        [ -z "$FWD_PROTO" ] && continue
-        PORT_FORWARD_RULES="${PORT_FORWARD_RULES}
+  # Port forwarding (admin panel > Network > Port Forwarding, standalone
+  # mode only - in mikrotik mode the router owns NAT, this table isn't
+  # read there). One dnat rule per enabled row, scoped to WAN_VIF so a
+  # forward never accidentally matches traffic arriving on the LAN side.
+  PORT_FORWARD_RULES=""
+  while IFS='|' read -r FWD_PROTO FWD_EXT FWD_IP FWD_INT; do
+      [ -z "$FWD_PROTO" ] && continue
+      PORT_FORWARD_RULES="${PORT_FORWARD_RULES}
         iifname \"$WAN_VIF\" $FWD_PROTO dport $FWD_EXT dnat to $FWD_IP:$FWD_INT"
-    done <<< "$(sqlite3 -separator '|' "$DB" "SELECT protocol, external_port, internal_ip, internal_port FROM port_forwards WHERE enabled=1;" 2>/dev/null)"
+  done <<< "$(sqlite3 -separator '|' "$DB" "SELECT protocol, external_port, internal_ip, internal_port FROM port_forwards WHERE enabled=1;" 2>/dev/null)"
 
-    cat > /tmp/rj-piso.nft << NFTEOF
+  cat > /tmp/rj-piso.nft << NFTEOF
 table ip rj_piso {
     set allowed_macs {
         type ether_addr
@@ -342,25 +586,32 @@ $PORT_FORWARD_RULES
 }
 NFTEOF
 
-    nft -f /tmp/rj-piso.nft >> $LOG 2>&1
-    echo "nftables captive portal loaded" >> $LOG
+  nft -f /tmp/rj-piso.nft >> $LOG 2>&1
+  echo "nftables captive portal loaded" >> $LOG
 
-    # ── TC BANDWIDTH SHAPING SETUP ────────────────────────────────
-    tc qdisc del dev $LAN_VIF root 2>/dev/null || true
-    tc qdisc add dev $LAN_VIF root handle 1: htb default 999 r2q 1
-    tc class add dev $LAN_VIF parent 1: classid 1:999 htb rate 100mbit ceil 100mbit
-    echo "tc root qdisc configured on $LAN_VIF" >> $LOG
+  # ── TC BANDWIDTH SHAPING SETUP ────────────────────────────────
+  tc qdisc del dev $LAN_VIF root 2>/dev/null || true
+  tc qdisc add dev $LAN_VIF root handle 1: htb default 999 r2q 1
+  tc class add dev $LAN_VIF parent 1: classid 1:999 htb rate 100mbit ceil 100mbit
+  echo "tc root qdisc configured on $LAN_VIF" >> $LOG
 
-    # Ingress qdisc for per-client upload shaping (ROUTER_MODE_PLAN.md §12 -
-    # the root htb qdisc above only ever shaped download; per-client upload
-    # caps are enforced via police filters on this ingress qdisc, added by
-    # networkService.js's setClientBandwidth()/removeClientBandwidth()).
-    tc qdisc del dev $LAN_VIF ingress 2>/dev/null || true
-    tc qdisc add dev $LAN_VIF ingress
-    echo "tc ingress qdisc configured on $LAN_VIF" >> $LOG
+  # Ingress qdisc for per-client upload shaping (ROUTER_MODE_PLAN.md §12 -
+  # the root htb qdisc above only ever shaped download; per-client upload
+  # caps are enforced via police filters on this ingress qdisc, added by
+  # networkService.js's setClientBandwidth()/removeClientBandwidth()).
+  tc qdisc del dev $LAN_VIF ingress 2>/dev/null || true
+  tc qdisc add dev $LAN_VIF ingress
+  echo "tc ingress qdisc configured on $LAN_VIF" >> $LOG
 
-elif [ "$NETWORK_MODE" = "mikrotik" ]; then
-    echo "MikroTik mode" >> $LOG
+else
+  # mikrotik mode: the router owns DHCP/NAT — make sure our own dnsmasq
+  # isn't still running from a prior standalone setup and fighting it.
+  rm -f /etc/dnsmasq.d/rj-pisowifi.conf
+  systemctl stop dnsmasq >> $LOG 2>&1 || true
+  systemctl disable dnsmasq >> $LOG 2>&1 || true
+  echo "mikrotik mode: dnsmasq disabled, deferring to router for DHCP" >> $LOG
+  sqlite3 "$DB" "DELETE FROM settings WHERE key = 'standalone_lane_map'" 2>/dev/null
+  echo "MikroTik mode" >> $LOG
 fi
 
 # ── SAVE NFTABLES FOR REBOOT ──────────────────────────────────

@@ -444,6 +444,52 @@ setups with dedicated networking hardware.</div>
   </button>
 </div>
 
+<!-- STANDALONE MODE: PORTS AND ROLES -->
+<div class="card" id="standalonePortsCard" style="margin-top:20px;display:none;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-ethernet" style="margin-right:8px;color:var(--accent-green);"></i>Ports and Roles
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Turn this server's own network ports into a real router</span>
+    <button class="btn btn-primary" style="margin-left:auto;" onclick="loadStandalonePorts()">
+      <i class="fas fa-rotate"></i> Rescan
+    </button>
+  </div>
+  <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
+    <i class="fas fa-info-circle"></i>
+    Mark a port (or a VLAN lane on it) as <strong>Gated</strong> for paid customer access, <strong>Open</strong> for trusted free access, or <strong>WAN</strong> for your internet connection. Combine ports/lanes to share one subnet across more than one wire.
+  </div>
+  <div id="standalonePortsList">
+    <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+  </div>
+  <p id="standalonePortsTotal" style="font-size:13px;margin-top:10px;"></p>
+  <button class="btn btn-primary" onclick="saveStandalonePorts()">
+    <i class="fas fa-save"></i> Save Port Roles
+  </button>
+</div>
+
+<!-- STANDALONE MODE: PROVISION -->
+<div class="card" id="standaloneProvisionCard" style="margin-top:20px;display:none;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-bolt" style="margin-right:8px;color:var(--accent-yellow);"></i>Apply Ports and Roles
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Builds the VLANs, DHCP, and firewall rules for your saved lanes</span>
+  </div>
+  <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+    Save your port roles above first. Preview what will happen before applying — this reconfigures live networking on the machine you're likely connected through.
+  </p>
+  <div style="display:flex;gap:10px;">
+    <button class="btn btn-secondary" onclick="previewStandaloneProvisioning()">
+      <i class="fas fa-eye"></i> Preview Changes
+    </button>
+    <button class="btn btn-primary" onclick="applyStandaloneProvisioning()">
+      <i class="fas fa-bolt"></i> Apply
+    </button>
+  </div>
+  <div id="standaloneProvisionResult" style="margin-top:16px;"></div>
+</div>
+
 <!-- PHYSICAL INTERFACES -->
 <div class="card" style="margin-top:20px;">
   <div class="card-header">
