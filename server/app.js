@@ -302,7 +302,14 @@ const server = app.listen(PORT, () => {
   // where the setting only ever took effect the moment someone clicked
   // "Apply Network Settings," so a reboot silently drifted back to
   // whatever cloud-init/DHCP handed the box.
-  require('./services/hostNetworkService').reapplyStaticNetworkOnBoot(require('./config/database'));
+  const hostNetworkService = require('./services/hostNetworkService');
+  const db = require('./config/database');
+  hostNetworkService.reapplyStaticNetworkOnBoot(db);
+
+  // Falls back to DHCP automatically if a static gateway goes unreachable
+  // for too long - covers a client forgetting to switch back to DHCP
+  // before moving the box to a different router or ISP.
+  hostNetworkService.startConnectivityWatchdog(db);
 });
 
 // Graceful shutdown on SIGTERM (Bug #46)

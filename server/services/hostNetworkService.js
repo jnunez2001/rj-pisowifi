@@ -72,4 +72,59 @@ async function reapplyStaticNetworkOnBoot(db) {
   }
 }
 
-module.exports = { getPrimaryInterface, applyNetworkConfig, reapplyStaticNetworkOnBoot };
+let consecutiveFailures = 0;
+const FAILURE_THRESHOLD = 3;
+
+// Fallback design principle: a static IP that outlives the network it was
+// set for is exactly the kind of single point of failure a feature should
+// never create. If someone sets a static IP, then moves the box to a
+// different router or ISP without switching back to DHCP first (the
+// warning in the admin panel is easy to miss or forget), the server goes
+// completely unreachable with no way back in short of physical console
+// access. This checks the configured gateway periodically and falls back
+// to DHCP automatically after a few consecutive misses, rather than
+// leaving a client stranded.
+function checkStaticConnectivity(db) {
+  try {
+    const type = db.prepare("SELECT value FROM settings WHERE key = 'network_type'").get()?.value;
+    if (type !== 'static') {
+      consecutiveFailures = 0;
+      return;
+    }
+
+    const gateway = db.prepare("SELECT value FROM settings WHERE key = 'static_gateway'").get()?.value;
+    if (!gateway) return;
+
+    execFile('ping', ['-c', '1', '-W', '2', gateway], (err) => {
+      if (!err) {
+        consecutiveFailures = 0;
+        return;
+      }
+
+      consecutiveFailures++;
+      console.warn(`🌐 Static gateway ${gateway} unreachable (${consecutiveFailures}/${FAILURE_THRESHOLD})`);
+
+      if (consecutiveFailures >= FAILURE_THRESHOLD) {
+        consecutiveFailures = 0;
+        console.warn('🌐 Static IP unreachable for too long, falling back to DHCP so this box stays reachable');
+        applyNetworkConfig({ type: 'dhcp' })
+          .then(() => {
+            db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)").run('network_type', 'dhcp');
+            console.log('🌐 Fell back to DHCP automatically');
+          })
+          .catch((fallbackErr) => {
+            console.error('Could not fall back to DHCP:', fallbackErr.message);
+          });
+      }
+    });
+  } catch (err) {
+    console.error('Connectivity watchdog error:', err.message);
+  }
+}
+
+function startConnectivityWatchdog(db) {
+  const cron = require('node-cron');
+  cron.schedule('*/3 * * * *', () => checkStaticConnectivity(db));
+}
+
+module.exports = { getPrimaryInterface, applyNetworkConfig, reapplyStaticNetworkOnBoot, startConnectivityWatchdog };
