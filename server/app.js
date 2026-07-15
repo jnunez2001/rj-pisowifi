@@ -1,3 +1,9 @@
+/*
+ * Zenfi WiFi Rental Server
+ * Copyright (c) 2026 Joshua Nunez. All rights reserved.
+ * Unauthorized copying, modification, or distribution is prohibited.
+ * See LICENSE.
+ */
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
