@@ -6,7 +6,7 @@
     </div>
   </div>
   <p style="font-size:13px;color:#e65100;margin:0 0 12px;">
-    This device may not turn itself back on automatically after a power outage. Enter your BIOS setup (usually by pressing Del or F2 right after powering on) and set "Restore on AC Power Loss" (sometimes called "AC Power Recovery" or "After Power Failure") to "Power On." This can't be set from software, it's a one-time step in the hardware itself.
+    This device may not power itself back on automatically after an outage. Enter BIOS setup (usually by pressing Del or F2 right after powering on) and set "Restore on AC Power Loss" (also called "AC Power Recovery" or "After Power Failure") to "Power On." This is a one-time hardware setting. It can't be configured from software.
   </p>
   <div class="form-group" style="display:flex;align-items:center;gap:8px;margin:0;">
     <input type="checkbox" id="biosAckCheckbox" style="width:auto;" onchange="acknowledgeBiosReminder()">
@@ -28,7 +28,7 @@
 
   <div style="background:#fff8e1;border:1px solid #ffa000;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#e65100;">
     <i class="fas fa-exclamation-triangle"></i>
-    <strong> Important:</strong> If IP is set to Static, switch back to DHCP before changing your router or ISP. Otherwise the server will become unreachable.
+    <strong> Important:</strong> If your IP is set to Static, switch back to DHCP before changing routers or ISPs. Otherwise the server will become unreachable.
   </div>
 
   <div class="grid-2">
@@ -72,7 +72,7 @@
       <div class="form-group">
         <label class="form-label">DNS Server</label>
         <input type="text" id="staticDns" class="form-control" placeholder="8.8.8.8">
-        <small style="color:var(--text-muted);">Default: 8.8.8.8 (Google DNS)</small>
+        <small style="color:var(--text-muted);">Default is 8.8.8.8 (Google DNS).</small>
       </div>
     </div>
   </div>
@@ -116,10 +116,10 @@
       <i class="fas fa-exclamation-triangle"></i>
       <strong> A few things to know before turning this on:</strong>
       <ul style="margin:6px 0 0 18px;padding:0;">
-        <li>Supports MikroTik routers on either RouterOS 6 or 7, including older or budget friendly models. More router brands may be supported in the future.</li>
-        <li>Your router's Hotspot service and DHCP server need to already be set up on the network you're connecting to. Bandwidth limits are applied per device once it has an IP address.</li>
-        <li>Customers go straight to your portal to pay and connect. They will never see the router's own login page.</li>
-        <li>This server still keeps track of session time and expiry. The router only reflects whether a device is currently allowed online.</li>
+        <li>Supports MikroTik routers running RouterOS 6 or 7, including older and budget-friendly models. More router brands may be supported in the future.</li>
+        <li>Your router's Hotspot service and DHCP server must already be set up on the network you're connecting to. Bandwidth limits apply per device once it has an IP address.</li>
+        <li>Customers go straight to your portal to pay and connect. They'll never see the router's own login page.</li>
+        <li>This server still tracks session time and expiry. The router only reflects whether a device is currently allowed online.</li>
       </ul>
     </div>
 
@@ -150,12 +150,12 @@
             <i class="fas fa-eye"></i> Show
           </button>
         </div>
-        <small id="mikrotikPassHint" style="color:var(--text-muted);display:none;">A password is already saved. Leave blank to keep it, or type a new one to replace it.</small>
+        <small id="mikrotikPassHint" style="color:var(--text-muted);display:none;">A password is already saved. Leave it blank to keep it, or enter a new one to replace it.</small>
       </div>
       <div class="form-group">
         <label class="form-label">Hotspot Interface</label>
         <input type="text" id="mikrotikInterface" class="form-control" placeholder="ether1">
-        <small style="color:var(--text-muted);">The interface EAP225 is connected to on MikroTik.</small>
+        <small style="color:var(--text-muted);">The interface your EAP225 is connected to on MikroTik.</small>
       </div>
     </div>
 
@@ -167,7 +167,7 @@
     <div class="form-group" id="serverLanMacGroup" style="display:none;">
       <label class="form-label">Server's Network Connection</label>
       <select id="serverLanMac" class="form-control"></select>
-      <small style="color:var(--text-muted);">This machine has more than one network connection. Pick the one that's plugged into your gated lane (for example, WiFi rental), so this server stays reachable at a fixed address and your portal link keeps working.</small>
+      <small style="color:var(--text-muted);">This machine has more than one network connection. Choose the one connected to your gated lane (for example, WiFi rental) so this server stays reachable at a fixed address and your portal link keeps working.</small>
     </div>
   </div>
 
@@ -200,7 +200,7 @@
     </div>
     <div style="background:#fff8e1;border:1px solid #ffa000;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#e65100;">
       <i class="fas fa-exclamation-triangle"></i>
-      This runs directly on your router with full admin access, same as WinBox's own terminal. Nothing here is undoable.
+      This runs directly on your router with full admin access, the same as WinBox's own terminal. Nothing here can be undone.
     </div>
     <div id="routerTerminalOutput" style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:8px;height:280px;overflow-y:auto;white-space:pre-wrap;margin-bottom:10px;">Type a command below, e.g. /interface/print</div>
     <div style="display:flex;gap:8px;">
@@ -218,7 +218,7 @@
     <div class="card-title">
       <i class="fas fa-gauge-high" style="margin-right:8px;color:var(--accent-blue);"></i>Your Internet Plan
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Every warning below scales off this number, not a fixed default</span>
+    <span style="font-size:12px;color:var(--text-muted);">Every warning below is based on this number, not a fixed default.</span>
   </div>
   <div class="form-group" style="max-width:220px;">
     <label class="form-label">Total Plan Speed (Mbps)</label>
@@ -238,7 +238,7 @@
   </div>
   <div class="alert alert-info">
     <i class="fas fa-info-circle"></i>
-    Give customers an easy, memorable address to check or add time later, instead of typing a raw IP address they could easily mistype into something else.
+    Give customers an easy, memorable address for checking or adding time later, instead of a raw IP address they could easily mistype.
   </div>
   <div class="form-group" style="max-width:320px;">
     <label class="form-label">Custom Portal Hostname</label>
@@ -261,7 +261,7 @@
   </div>
   <div class="alert alert-info">
     <i class="fas fa-info-circle"></i>
-    Customize the address you use to reach this admin panel on your own network, instead of it always being <code>rjpisowifi.local</code>.
+    Customize the address you use to reach this admin panel on your own network, instead of always using <code>rjpisowifi.local</code>.
   </div>
   <div class="form-group" style="max-width:320px;">
     <label class="form-label">Local Hostname</label>
@@ -317,7 +317,7 @@
     <div style="border-top:1px solid var(--border-color);margin-top:18px;padding-top:16px;">
       <div style="font-weight:700;font-size:14px;margin-bottom:6px;"><i class="fas fa-bolt" style="margin-right:6px;color:var(--accent-yellow);"></i>Apply to Router</div>
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
-        Save your port roles above first. Backs up the router's current config, then applies everything live — preview what will happen before running it.
+        Save your port roles above first. This backs up your router's current config, then applies everything live. Preview what will happen before running it.
       </p>
       <div style="display:flex;gap:10px;">
         <button class="btn btn-secondary" onclick="previewProvisioning()">
@@ -354,7 +354,7 @@
     <span style="font-size:12px;color:var(--text-muted);">Always give a device the same IP address</span>
   </div>
   <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
-    Useful for printers, cameras, or staff devices that need a fixed address instead of whatever the DHCP pool hands out.
+    Useful for printers, cameras, or staff devices that need a fixed address instead of whatever the DHCP pool assigns.
   </p>
   <div class="table-wrapper">
     <table>
@@ -469,7 +469,7 @@
     </div>
     <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
       <i class="fas fa-info-circle"></i>
-      Mark a port (or a VLAN lane on it) as <strong>Gated</strong> for paid customer access, <strong>Open</strong> for trusted free access, or <strong>WAN</strong> for your internet connection. Combine ports/lanes to share one subnet across more than one wire.
+      Mark a port (or a VLAN lane on it) as <strong>Gated</strong> for paid customer access, <strong>Open</strong> for trusted free access, or <strong>WAN</strong> for your internet connection. Combine ports and lanes to share one subnet across more than one wire.
     </div>
     <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
       <button type="button" class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="loadStandalonePorts()">
@@ -487,7 +487,7 @@
     <div style="border-top:1px solid var(--border-color);margin-top:18px;padding-top:16px;">
       <div style="font-weight:700;font-size:14px;margin-bottom:6px;"><i class="fas fa-bolt" style="margin-right:6px;color:var(--accent-yellow);"></i>Apply Ports and Roles</div>
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
-        Save your port roles above first. Preview what will happen before applying — this reconfigures live networking on the machine you're likely connected through.
+        Save your port roles above first. Preview what will happen before applying. This reconfigures live networking on the machine you're likely connected through.
       </p>
       <div style="display:flex;gap:10px;">
         <button class="btn btn-secondary" onclick="previewStandaloneProvisioning()">
@@ -515,8 +515,8 @@
   </div>
   <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
     <i class="fas fa-info-circle"></i>
-    Use this if your ISP requires a VLAN tagged connection, or if you're sharing one cable between your internet
-    connection and an access point's customer WiFi traffic. Changes take effect right away after saving.
+    Use this if your ISP requires a VLAN-tagged connection, or if you're sharing one cable between your internet
+    connection and an access point's customer WiFi traffic. Changes take effect immediately after saving.
   </div>
   <div class="table-wrapper">
     <table>
@@ -545,7 +545,7 @@
     <div class="card-title">
       <i class="fas fa-tag" style="margin-right:8px;color:var(--accent-green);"></i>Name Your Devices
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Give a MAC address a friendly name so it's recognizable elsewhere</span>
+    <span style="font-size:12px;color:var(--text-muted);">Give a MAC address a friendly name so it's easy to recognize elsewhere</span>
   </div>
   <div class="table-wrapper">
     <table>
@@ -582,7 +582,7 @@
     <div class="card-title">
       <i class="fas fa-stethoscope" style="margin-right:8px;color:var(--accent-blue);"></i>Network Diagnostics
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Ping or trace a route from this server, for troubleshooting</span>
+    <span style="font-size:12px;color:var(--text-muted);">Ping or trace a route from this server for troubleshooting</span>
   </div>
   <div style="display:flex;gap:8px;margin-bottom:12px;">
     <input type="text" id="diagTarget" class="form-control" placeholder="8.8.8.8 or google.com">
@@ -593,7 +593,7 @@
       <i class="fas fa-diagram-project"></i> Traceroute
     </button>
   </div>
-  <div id="diagOutput" style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:8px;height:180px;overflow-y:auto;white-space:pre-wrap;">Enter a target above and pick Ping or Traceroute.</div>
+  <div id="diagOutput" style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:8px;height:180px;overflow-y:auto;white-space:pre-wrap;">Enter a target above, then choose Ping or Traceroute.</div>
 </div>
 
 <!-- CREATE VLAN MODAL -->

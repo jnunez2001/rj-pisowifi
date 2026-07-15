@@ -42,7 +42,7 @@ async function acknowledgeBiosReminder() {
     document.getElementById('biosPowerLossCard').style.display = 'none';
     showToast('Got it, thanks for confirming.');
   } catch(e) {
-    showToast('Server error saving that.', 'error');
+    showToast('Something went wrong saving that. Please try again.', 'error');
     checkbox.checked = false;
   }
 }
@@ -98,7 +98,7 @@ async function saveNetworkConfig() {
   if (type === 'static') {
     const ip = document.getElementById('staticIp').value.trim();
     const gateway = document.getElementById('staticGateway').value.trim();
-    if (!ip) { showToast('Please enter a static IP address.', 'error'); return; }
+    if (!ip) { showToast('Enter a static IP address.', 'error'); return; }
     if (!gateway) { showToast('Gateway not detected.', 'error'); return; }
     const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
     if (!ipRegex.test(ip)) { showToast('Invalid IP address format.', 'error'); return; }
@@ -144,13 +144,13 @@ async function saveNetworkConfig() {
       status.style.background = 'var(--card-red-bg)';
       status.style.color = 'var(--card-red-text)';
       status.innerHTML = `<i class="fas fa-times-circle"></i> ${data.message}`;
-      showToast('Failed to apply.', 'error');
+      showToast("Couldn't apply settings.", 'error');
     }
   } catch(e) {
     status.style.background = 'var(--card-red-bg)';
     status.style.color = 'var(--card-red-text)';
     status.innerHTML = '<i class="fas fa-times-circle"></i> Server error applying network settings.';
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
   }
 
   btn.disabled = false;
@@ -180,7 +180,7 @@ async function saveIspPlan() {
     } else {
       showToast(data.message || 'Failed to save.', 'error');
     }
-  } catch(e) { showToast('Server error.', 'error'); }
+  } catch(e) { showToast('Server error, please try again.', 'error'); }
 }
 
 // ===== ROUTER MODE: PORTAL ADDRESS =====
@@ -205,7 +205,7 @@ async function savePortalHostname() {
     } else {
       showToast(data.message || 'Failed to save.', 'error');
     }
-  } catch(e) { showToast('Server error.', 'error'); }
+  } catch(e) { showToast('Server error, please try again.', 'error'); }
 }
 
 // ===== ADMIN PORTAL ADDRESS (renamable .local hostname) =====
@@ -252,7 +252,7 @@ async function saveAdminHostname() {
     status.style.background = 'var(--card-red-bg)';
     status.style.color = 'var(--card-red-text)';
     status.innerHTML = '<i class="fas fa-times-circle"></i> Server error applying hostname.';
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
   }
 }
 
@@ -331,8 +331,8 @@ async function loadLanePorts() {
     const plan = data.isp_plan_mbps || 0;
     const guaranteed = data.guaranteed_total_mbps || 0;
     const over = plan > 0 && guaranteed > plan;
-    let totalText = `Guaranteed total: ${guaranteed} of ${plan || '?'} Mbps` + (over ? ' — over your plan!' : (plan > 0 ? ' — within plan' : ''));
-    if (data.max_vlan_lanes) totalText += ` — up to ${data.max_vlan_lanes} lanes on this hardware`;
+    let totalText = `Guaranteed total: ${guaranteed} of ${plan || '?'} Mbps` + (over ? ' (over your plan)' : (plan > 0 ? ' (within plan)' : ''));
+    if (data.max_vlan_lanes) totalText += ` (up to ${data.max_vlan_lanes} lanes on this hardware)`;
     totalEl.textContent = totalText;
     totalEl.style.color = over ? 'var(--accent-red)' : 'var(--accent-green)';
 
@@ -355,7 +355,7 @@ function updateLaneSummary(ns, activeLaneCount, guaranteed, plan) {
     summaryEl.textContent = 'No lanes configured yet';
     return;
   }
-  summaryEl.textContent = `${activeLaneCount} lane${activeLaneCount > 1 ? 's' : ''} configured — ${guaranteed} of ${plan || '?'} Mbps guaranteed`;
+  summaryEl.textContent = `${activeLaneCount} lane${activeLaneCount > 1 ? 's' : ''} configured, ${guaranteed} of ${plan || '?'} Mbps guaranteed`;
 }
 
 function openRouterPortsModal() {
@@ -589,7 +589,7 @@ async function saveLanePorts() {
     } else {
       showToast(data.message || 'Failed to save.', 'error');
     }
-  } catch(e) { showToast('Server error.', 'error'); }
+  } catch(e) { showToast('Server error, please try again.', 'error'); }
 }
 
 // Router mode's Save button still calls this exact name from network.html.
@@ -656,7 +656,7 @@ async function previewProvisioning() {
 }
 
 async function applyProvisioning() {
-  if (!confirm('This pushes real changes to your router right now (after backing up its current config first). Continue?')) return;
+  if (!confirm('This pushes real changes to your router right now, after backing up its current config first. Continue?')) return;
   const el = document.getElementById('provisionResult');
   el.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Configuring router...</div>';
   try {
@@ -692,7 +692,7 @@ async function previewStandaloneProvisioning() {
 }
 
 async function applyStandaloneProvisioning() {
-  if (!confirm("This applies your saved lane configuration to this server's own network stack right now. You're likely connected through it — a mistake here can cut off access until you're physically at the machine. Continue?")) return;
+  if (!confirm("This applies your saved lane configuration to this server's own network stack right now. You're likely connected through it, so a mistake here can cut off access until you're physically at the machine. Continue?")) return;
   const el = document.getElementById('standaloneProvisionResult');
   el.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Applying configuration...</div>';
   try {
@@ -833,7 +833,7 @@ async function toggleMikrotikPassword() {
       showToast(data.message || 'Could not retrieve password.', 'error');
     }
   } catch(e) {
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
   }
 }
 
@@ -979,7 +979,7 @@ async function saveNetworkSettings() {
     });
     if (data.success) showToast('Network settings saved!');
     else showToast(data.message || 'Failed to save.', 'error');
-  } catch(e) { showToast('Server error.', 'error'); }
+  } catch(e) { showToast('Server error, please try again.', 'error'); }
 }
 
 // ===== INTERFACES =====
@@ -1101,7 +1101,7 @@ async function createVlan() {
       showToast(data.message || 'Failed to create VLAN.', 'error');
     }
   } catch(e) {
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
   } finally {
     btn.disabled = false;
   }
@@ -1118,7 +1118,7 @@ async function deleteVlan(id, ifName) {
       showToast(data.message || 'Failed to delete VLAN.', 'error');
     }
   } catch(e) {
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
   }
 }
 
@@ -1157,7 +1157,7 @@ async function addStaticLease() {
   try {
     const data = await apiCall('POST', '/api/admin/network/leases', { mac_address: mac, ip_address: ip, label });
     if (data.success) {
-      showToast('IP reserved.');
+      showToast('IP reserved!');
       document.getElementById('newLeaseMac').value = '';
       document.getElementById('newLeaseIp').value = '';
       document.getElementById('newLeaseLabel').value = '';
@@ -1166,7 +1166,7 @@ async function addStaticLease() {
       showToast(data.message || 'Failed to reserve IP.', 'error');
     }
   } catch(e) {
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
   }
 }
 
@@ -1181,7 +1181,7 @@ async function deleteStaticLease(id, mac) {
       showToast(data.message || 'Failed to remove.', 'error');
     }
   } catch(e) {
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
   }
 }
 
@@ -1228,7 +1228,7 @@ async function addPortForward() {
   try {
     const data = await apiCall('POST', '/api/admin/network/port-forwards', { label, protocol, external_port, internal_ip, internal_port });
     if (data.success) {
-      showToast('Port forward added.');
+      showToast('Port forward added!');
       document.getElementById('newFwdLabel').value = '';
       document.getElementById('newFwdExternalPort').value = '';
       document.getElementById('newFwdInternalIp').value = '';
@@ -1238,7 +1238,7 @@ async function addPortForward() {
       showToast(data.message || 'Failed to add port forward.', 'error');
     }
   } catch(e) {
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
   }
 }
 
@@ -1252,7 +1252,7 @@ async function togglePortForward(id) {
       await loadPortForwards();
     }
   } catch(e) {
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
     await loadPortForwards();
   }
 }
@@ -1268,7 +1268,7 @@ async function deletePortForward(id, label) {
       showToast(data.message || 'Failed to delete.', 'error');
     }
   } catch(e) {
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
   }
 }
 
@@ -1306,7 +1306,7 @@ async function addClientLabel() {
   try {
     const data = await apiCall('POST', '/api/admin/network/client-labels', { mac_address: mac, label });
     if (data.success) {
-      showToast('Name saved.');
+      showToast('Name saved!');
       document.getElementById('newClientLabelMac').value = '';
       document.getElementById('newClientLabelName').value = '';
       await loadClientLabels();
@@ -1314,7 +1314,7 @@ async function addClientLabel() {
       showToast(data.message || 'Failed to save name.', 'error');
     }
   } catch(e) {
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
   }
 }
 
@@ -1328,7 +1328,7 @@ async function deleteClientLabel(mac) {
       showToast(data.message || 'Failed to remove.', 'error');
     }
   } catch(e) {
-    showToast('Server error.', 'error');
+    showToast('Server error, please try again.', 'error');
   }
 }
 
