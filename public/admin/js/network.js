@@ -161,6 +161,54 @@ async function savePortalHostname() {
   } catch(e) { showToast('Server error.', 'error'); }
 }
 
+// ===== ADMIN PORTAL ADDRESS (renamable .local hostname) =====
+
+async function loadAdminHostname() {
+  try {
+    const data = await apiCall('GET', '/api/admin/hostname');
+    if (data.success) {
+      document.getElementById('adminHostname').value = data.hostname || '';
+    }
+  } catch(e) {
+    console.error('Admin hostname load error:', e);
+  }
+}
+
+async function saveAdminHostname() {
+  const hostname = document.getElementById('adminHostname').value.trim();
+  const status = document.getElementById('adminHostnameStatus');
+
+  if (!hostname) {
+    showToast('Enter a hostname first.', 'error');
+    return;
+  }
+
+  status.style.display = 'block';
+  status.style.background = 'var(--bg-primary)';
+  status.style.color = 'var(--text-muted)';
+  status.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Applying, this restarts the mDNS service...';
+
+  try {
+    const data = await apiCall('POST', '/api/admin/hostname', { hostname });
+    if (data.success) {
+      status.style.background = 'var(--card-green-bg)';
+      status.style.color = 'var(--card-green-text)';
+      status.innerHTML = `<i class="fas fa-check-circle"></i> ${data.message}`;
+      showToast('Admin hostname updated!');
+    } else {
+      status.style.background = 'var(--card-red-bg)';
+      status.style.color = 'var(--card-red-text)';
+      status.innerHTML = `<i class="fas fa-times-circle"></i> ${data.message}`;
+      showToast(data.message || 'Failed to save.', 'error');
+    }
+  } catch(e) {
+    status.style.background = 'var(--card-red-bg)';
+    status.style.color = 'var(--card-red-text)';
+    status.innerHTML = '<i class="fas fa-times-circle"></i> Server error applying hostname.';
+    showToast('Server error.', 'error');
+  }
+}
+
 // ===== ROUTER MODE: PORTS AND ROLES =====
 //
 // A physical port can carry more than one lane: one untagged lane plus any
@@ -528,6 +576,7 @@ async function loadNetworkPage() {
   await loadNetworkConfig();
   setTimeout(loadCurrentIp, 500);
   await loadNetworkModeSettings();
+  await loadAdminHostname();
   await loadInterfaces();
   await loadVlans();
 }

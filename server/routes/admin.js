@@ -1437,6 +1437,49 @@ router.get('/network', adminAuth, (req, res) => {
   }
 });
 
+// ===== ADMIN PORTAL ADDRESS (renamable .local mDNS hostname) =====
+// Was previously fixed to whatever install.sh baked in at setup time
+// ("rjcyberzone.local"), with no way to change it afterward short of SSHing
+// in. Reads the live system hostname directly (os.hostname()) rather than
+// a settings-table value, so this can never drift from what avahi is
+// actually advertising.
+const HOSTNAME_REGEX = /^[a-zA-Z0-9-]{1,63}$/;
+
+router.get('/hostname', adminAuth, (req, res) => {
+  try {
+    res.json({ success: true, hostname: os.hostname() });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Could not read hostname' });
+  }
+});
+
+router.post('/hostname', adminAuth, (req, res) => {
+  const { hostname } = req.body;
+  if (!hostname || !HOSTNAME_REGEX.test(hostname)) {
+    return res.status(400).json({
+      success: false,
+      message: 'Hostname can only contain letters, numbers, and hyphens (max 63 characters)'
+    });
+  }
+
+  execFile('sudo', ['hostnamectl', 'set-hostname', hostname], { timeout: 5000 }, (err) => {
+    if (err) {
+      console.error('Hostname change error:', err);
+      return res.status(500).json({ success: false, message: 'Failed to change hostname' });
+    }
+
+    execFile('sudo', ['systemctl', 'restart', 'avahi-daemon'], { timeout: 5000 }, (err2) => {
+      if (err2) {
+        console.error('Avahi restart error:', err2);
+        return res.status(500).json({ success: false, message: 'Hostname changed but failed to restart mDNS service' });
+      }
+
+      console.log(`🌐 Admin hostname changed to: ${hostname}.local`);
+      res.json({ success: true, hostname, message: `Admin panel now reachable at ${hostname}.local` });
+    });
+  });
+});
+
 // ===== VLAN MANAGEMENT =====
 // Lets an owner reproduce the "everything on one unmanaged switch, VLAN
 // tags separate the traffic" wiring pattern common in other piso-wifi

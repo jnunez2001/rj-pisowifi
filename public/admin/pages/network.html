@@ -199,6 +199,33 @@ setups with dedicated networking hardware.</div>
   </button>
 </div>
 
+<!-- ADMIN PORTAL ADDRESS (both modes) -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-house-signal" style="margin-right:8px;color:var(--accent-green);"></i>Admin Portal Address
+    </div>
+  </div>
+  <div class="alert alert-info">
+    <i class="fas fa-info-circle"></i>
+    Customize the address you use to reach this admin panel on your own network, instead of it always being <code>rjpisowifi.local</code>.
+  </div>
+  <div class="form-group" style="max-width:320px;">
+    <label class="form-label">Local Hostname</label>
+    <div style="display:flex;align-items:center;gap:6px;">
+      <input type="text" id="adminHostname" class="form-control" placeholder="e.g. rjcyberzone">
+      <span style="color:var(--text-muted);white-space:nowrap;">.local</span>
+    </div>
+    <small style="color:var(--text-muted);font-size:12px;">
+      Letters, numbers, and hyphens only. Changing this restarts the mDNS service.
+    </small>
+  </div>
+  <button class="btn btn-primary" onclick="saveAdminHostname()">
+    <i class="fas fa-save"></i> Save
+  </button>
+  <div id="adminHostnameStatus" style="display:none;margin-top:14px;padding:12px;border-radius:8px;font-size:13px;"></div>
+</div>
+
 <!-- ROUTER MODE: PORTS AND ROLES (mikrotik mode only) -->
 <div class="card" id="routerPortsCard" style="margin-top:20px;display:none;">
   <div class="card-header">

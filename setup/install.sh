@@ -311,6 +311,13 @@ echo "$USER ALL=(ALL) NOPASSWD: /bin/cp * /etc/netplan/60-rj-pisowifi.yaml" \
 echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/netplan apply" \
   >> /etc/sudoers.d/rj-pisowifi
 
+# Allow Node.js to change the admin panel's .local mDNS hostname
+# (Network > Admin Portal Address) without a password prompt
+echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/hostnamectl set-hostname *" \
+  >> /etc/sudoers.d/rj-pisowifi
+echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart avahi-daemon" \
+  >> /etc/sudoers.d/rj-pisowifi
+
 # avahi mDNS — rjcyberzone.local
 cat > /etc/avahi/services/rjcyberzone.service << EOF
 <?xml version="1.0" standalone='no'?>
