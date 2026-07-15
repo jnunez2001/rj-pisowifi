@@ -336,7 +336,15 @@ async function getLiveStatus() {
   return withMikrotik(config, async (client) => {
     const resourceRes = await client.talk(['/system/resource/print']);
     const identityRes = await client.talk(['/system/identity/print']);
-    const activeRes = await client.talk(['/ip/hotspot/active/print']);
+    // Bug: this used to count /ip/hotspot/active/print, which only ever
+    // lists devices that authenticated through Hotspot's own login page -
+    // per this file's own top comment, allowClient() deliberately bypasses
+    // that page entirely via ip-binding type=bypassed, so a real, paying,
+    // currently-online device NEVER appears there. Live Status showed 0
+    // active devices no matter how many customers were actually connected.
+    // Counting bypassed ip-bindings instead matches the access mechanism
+    // this app actually uses.
+    const activeRes = await client.talk(['/ip/hotspot/ip-binding/print', '?type=bypassed']);
     const r = resourceRes.re[0] || {};
     return {
       model: r['board-name'] || 'Unknown',
