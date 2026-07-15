@@ -1,3 +1,19 @@
+<!-- BIOS POWER-LOSS REMINDER (mini PC / x86 hardware only) -->
+<div class="card" id="biosPowerLossCard" style="display:none;margin-bottom:20px;background:#fff8e1;border:1px solid #ffa000;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-triangle-exclamation" style="margin-right:8px;color:#e65100;"></i>One-Time Setup: Power Recovery
+    </div>
+  </div>
+  <p style="font-size:13px;color:#e65100;margin:0 0 12px;">
+    This device may not turn itself back on automatically after a power outage. Enter your BIOS setup (usually by pressing Del or F2 right after powering on) and set "Restore on AC Power Loss" (sometimes called "AC Power Recovery" or "After Power Failure") to "Power On." This can't be set from software, it's a one-time step in the hardware itself.
+  </p>
+  <div class="form-group" style="display:flex;align-items:center;gap:8px;margin:0;">
+    <input type="checkbox" id="biosAckCheckbox" style="width:auto;" onchange="acknowledgeBiosReminder()">
+    <label for="biosAckCheckbox" style="margin:0;font-size:13px;">I've done this</label>
+  </div>
+</div>
+
 <!-- SERVER IP CONFIGURATION -->
 <div class="card">
   <div class="card-header">

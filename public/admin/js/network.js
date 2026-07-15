@@ -1,5 +1,40 @@
 // ===== NETWORK PAGE =====
 
+// ===== BIOS POWER-LOSS REMINDER =====
+// Can't be set from software (see hardwareDetection.js) - shown only on
+// x86 hardware, since ARM SBCs have no BIOS/soft-off state and don't need
+// this at all. Stays visible until the owner explicitly acknowledges it.
+
+async function loadBiosPowerLossReminder() {
+  try {
+    const [sysinfoData, settingsData] = await Promise.all([
+      apiCall('GET', '/api/admin/sysinfo'),
+      apiCall('GET', '/api/admin/settings'),
+    ]);
+    const isX86 = sysinfoData.success && sysinfoData.sysinfo.hardware_tier && sysinfoData.sysinfo.hardware_tier.isX86;
+    const acknowledged = settingsData.success && settingsData.settings.bios_power_loss_ack === '1';
+    const card = document.getElementById('biosPowerLossCard');
+    if (isX86 && !acknowledged) {
+      card.style.display = 'block';
+    }
+  } catch(e) {
+    console.error('BIOS reminder load error:', e);
+  }
+}
+
+async function acknowledgeBiosReminder() {
+  const checkbox = document.getElementById('biosAckCheckbox');
+  if (!checkbox.checked) return;
+  try {
+    await apiCall('POST', '/api/admin/settings', { bios_power_loss_ack: '1' });
+    document.getElementById('biosPowerLossCard').style.display = 'none';
+    showToast('Got it, thanks for confirming.');
+  } catch(e) {
+    showToast('Server error saving that.', 'error');
+    checkbox.checked = false;
+  }
+}
+
 // ===== SERVER IP CONFIGURATION =====
 
 async function loadNetworkConfig() {
@@ -573,6 +608,7 @@ function renderProvisionLog(data, success) {
 }
 
 async function loadNetworkPage() {
+  await loadBiosPowerLossReminder();
   await loadNetworkConfig();
   setTimeout(loadCurrentIp, 500);
   await loadNetworkModeSettings();
