@@ -904,11 +904,23 @@ async function runRouterTerminalCommand() {
 }
 
 function updateNetworkModeCards(mode) {
-  const standaloneCard = document.getElementById('modeStandaloneCard');
-  const mikrotikCard = document.getElementById('modeMikrotikCard');
-  if (!standaloneCard || !mikrotikCard) return;
-  standaloneCard.style.borderColor = mode !== 'mikrotik' ? 'var(--accent-green)' : 'var(--border-color)';
-  mikrotikCard.style.borderColor = mode === 'mikrotik' ? 'var(--accent-blue)' : 'var(--border-color)';
+  const standaloneBtn = document.getElementById('modeStandaloneCard');
+  const mikrotikBtn = document.getElementById('modeMikrotikCard');
+  if (!standaloneBtn || !mikrotikBtn) return;
+  const isMikrotik = mode === 'mikrotik';
+  standaloneBtn.style.background = isMikrotik ? 'transparent' : 'var(--accent-green)';
+  standaloneBtn.style.color = isMikrotik ? 'var(--text-muted)' : '#fff';
+  mikrotikBtn.style.background = isMikrotik ? 'var(--accent-blue)' : 'transparent';
+  mikrotikBtn.style.color = isMikrotik ? '#fff' : 'var(--text-muted)';
+}
+
+// Switch-style Network Mode selector (network.html) drives the same two
+// hidden radio inputs the rest of this file already reads/writes, so
+// onNetworkModeChange()/loadNetworkModeSettings() work unchanged.
+function setNetworkMode(mode) {
+  document.getElementById('modeStandalone').checked = mode !== 'mikrotik';
+  document.getElementById('modeMikrotik').checked = mode === 'mikrotik';
+  onNetworkModeChange();
 }
 
 async function saveNetworkSettings() {
