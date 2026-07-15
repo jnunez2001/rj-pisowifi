@@ -26,6 +26,12 @@ async function loadSysInfo() {
     document.getElementById('siPlatform').textContent = s.platform;
     document.getElementById('siProcessor').textContent = s.processor;
     document.getElementById('siCores').textContent = s.cpu_cores + ' cores';
+    if (s.hardware_tier) {
+      const t = s.hardware_tier;
+      const tierLabel = t.tier.charAt(0).toUpperCase() + t.tier.slice(1);
+      document.getElementById('siHardwareTier').textContent =
+        `${tierLabel} (${t.totalMemGB}GB, ${t.cores} cores, ${t.arch})`;
+    }
     document.getElementById('siIp').textContent = s.ip_address;
     document.getElementById('siGateway').textContent = s.gateway;
     document.getElementById('siMachineId').textContent = s.machine_id;

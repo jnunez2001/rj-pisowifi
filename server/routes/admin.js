@@ -1024,6 +1024,7 @@ router.get('/sysinfo', adminAuth, async (req, res) => {
     ).get();
     const license = licenseSetting ? licenseSetting.value : 'Private';
     const wifiApStatus = getWifiApStatus();
+    const hardwareTier = require('../services/hardwareDetection').detect();
 
     return res.json({
       success: true,
@@ -1044,7 +1045,8 @@ router.get('/sysinfo', adminAuth, async (req, res) => {
         machine_id: machineId,
         storage,
         version: 'v' + require('../../package.json').version,
-        license
+        license,
+        hardware_tier: hardwareTier
       }
     });
 
