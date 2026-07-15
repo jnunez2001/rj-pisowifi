@@ -1797,6 +1797,45 @@ router.post('/router/test-connection', adminAuth, async (req, res) => {
   }
 });
 
+// POST /api/admin/router/terminal — runs a raw MikroTik API command
+// straight from the admin panel, so a quick check or fix doesn't require
+// opening WinBox separately. Deliberately unrestricted, same as WinBox's
+// own terminal: this account already has full admin-level MikroTik
+// credentials on file, so there's nothing meaningfully protected by trying
+// to sandbox individual commands here.
+router.post('/router/terminal', adminAuth, async (req, res) => {
+  const { command } = req.body;
+  if (!command || typeof command !== 'string' || !command.trim()) {
+    return res.status(400).json({ success: false, message: 'Enter a command' });
+  }
+
+  // Tokenize on whitespace, keeping quoted sections (values with spaces,
+  // e.g. a comment) together as one word. Commands are expected in the
+  // same combined-path form every other call in this codebase already
+  // uses (e.g. "/ip/hotspot/ip-binding/print"), not the space-separated
+  // form the interactive CLI console alone accepts.
+  const words = command.trim().match(/"[^"]*"|'[^']*'|\S+/g).map(w =>
+    (w.startsWith('"') && w.endsWith('"')) || (w.startsWith("'") && w.endsWith("'"))
+      ? w.slice(1, -1)
+      : w
+  );
+
+  try {
+    const { getMikrotikConfig } = require('../services/mikrotikConfigHelper');
+    const { withMikrotik } = require('../services/mikrotikApiClient');
+    const config = getMikrotikConfig();
+    if (!config.ip) {
+      return res.status(400).json({ success: false, message: 'MikroTik is not configured yet' });
+    }
+
+    const result = await withMikrotik(config, (client) => client.talk(words));
+    res.json({ success: true, result });
+  } catch (err) {
+    console.error('Router terminal error:', err);
+    res.status(400).json({ success: false, message: err.message || 'Command failed' });
+  }
+});
+
 // GET /api/admin/router/local-interfaces — this server's own network
 // connections, so the admin can pick which one is on the gated lane
 // (Bug: auto-guessing this on a multi-NIC machine could reserve the wrong

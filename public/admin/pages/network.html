@@ -170,6 +170,42 @@ setups with dedicated networking hardware.</div>
   </button>
 </div>
 
+<!-- ROUTER TERMINAL (mikrotik mode only) -->
+<div class="card" id="routerTerminalCard" style="margin-top:20px;display:none;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-terminal" style="margin-right:8px;color:var(--accent-blue);"></i>Router Terminal
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Run MikroTik commands without opening WinBox</span>
+  </div>
+  <button type="button" class="btn btn-secondary" onclick="openRouterTerminal()">
+    <i class="fas fa-terminal"></i> Open Terminal
+  </button>
+</div>
+
+<!-- ROUTER TERMINAL MODAL -->
+<div class="modal-overlay" id="routerTerminalModal">
+  <div class="modal" style="max-width:640px;">
+    <div class="modal-header">
+      <div class="modal-title">Router Terminal</div>
+      <button class="modal-close" onclick="closeModal('routerTerminalModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div style="background:#fff8e1;border:1px solid #ffa000;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#e65100;">
+      <i class="fas fa-exclamation-triangle"></i>
+      This runs directly on your router with full admin access, same as WinBox's own terminal. Nothing here is undoable.
+    </div>
+    <div id="routerTerminalOutput" style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:8px;height:280px;overflow-y:auto;white-space:pre-wrap;margin-bottom:10px;">Type a command below, e.g. /interface/print</div>
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="routerTerminalInput" class="form-control" placeholder="/ip/hotspot/ip-binding/print" style="font-family:monospace;" onkeydown="if(event.key==='Enter') runRouterTerminalCommand()">
+      <button class="btn btn-primary" onclick="runRouterTerminalCommand()">
+        <i class="fas fa-play"></i> Run
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ROUTER MODE: YOUR INTERNET PLAN (mikrotik mode only) -->
 <div class="card" id="ispPlanCard" style="margin-top:20px;display:none;">
   <div class="card-header">

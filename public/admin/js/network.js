@@ -582,7 +582,7 @@ async function loadNetworkPage() {
 }
 
 function showRouterModeCards(show) {
-  ['ispPlanCard', 'portalAddressCard', 'routerPortsCard', 'routerProvisionCard', 'routerStatusCard'].forEach(id => {
+  ['ispPlanCard', 'portalAddressCard', 'routerPortsCard', 'routerProvisionCard', 'routerStatusCard', 'routerTerminalCard'].forEach(id => {
     document.getElementById(id).style.display = show ? 'block' : 'none';
   });
   if (show) {
@@ -732,6 +732,45 @@ async function testMikrotikConnection() {
     statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:8px;"></i> Server error';
     statusEl.style.color = 'var(--accent-red)';
   }
+}
+
+// ===== ROUTER TERMINAL =====
+
+function openRouterTerminal() {
+  document.getElementById('routerTerminalModal').classList.add('show');
+  setTimeout(() => document.getElementById('routerTerminalInput').focus(), 50);
+}
+
+async function runRouterTerminalCommand() {
+  const input = document.getElementById('routerTerminalInput');
+  const output = document.getElementById('routerTerminalOutput');
+  const command = input.value.trim();
+  if (!command) return;
+
+  // textContent, not innerHTML - router output (interface names, comments,
+  // etc.) is untrusted text and should never be parsed as markup.
+  output.textContent += `\n\n> ${command}\n`;
+  input.value = '';
+  input.disabled = true;
+  output.scrollTop = output.scrollHeight;
+
+  try {
+    const data = await apiCall('POST', '/api/admin/router/terminal', { command });
+    if (data.success) {
+      const rows = (data.result && data.result.re) || [];
+      output.textContent += rows.length === 0
+        ? '(no output)'
+        : rows.map(row => Object.entries(row).map(([k, v]) => `${k}: ${v}`).join('\n')).join('\n\n');
+    } else {
+      output.textContent += `Error: ${data.message}`;
+    }
+  } catch (e) {
+    output.textContent += 'Error: server error';
+  }
+
+  input.disabled = false;
+  input.focus();
+  output.scrollTop = output.scrollHeight;
 }
 
 function updateNetworkModeCards(mode) {
