@@ -163,11 +163,18 @@ async function loadIspPlan() {
   try {
     const data = await apiCall('GET', '/api/admin/settings');
     if (data.success) {
-      document.getElementById('ispPlanMbps').value = data.settings.isp_plan_mbps || '0';
+      const mbps = data.settings.isp_plan_mbps || '0';
+      document.getElementById('ispPlanMbps').value = mbps;
+      const sub = document.getElementById('ispPlanNavSub');
+      if (sub) sub.textContent = mbps > 0 ? `${mbps} Mbps total` : 'Not set';
     }
   } catch(e) {
     console.error('ISP plan load error:', e);
   }
+}
+
+function openIspPlanModal() {
+  openModal('ispPlanModal');
 }
 
 async function saveIspPlan() {
@@ -738,7 +745,7 @@ async function loadNetworkPage() {
 }
 
 function showRouterModeCards(show) {
-  ['ispPlanCard', 'portalAddressCard', 'routerPortsCard', 'routerStatusCard', 'routerTerminalCard'].forEach(id => {
+  ['routerSetupCard', 'portalAddressCard', 'routerStatusCard', 'routerTerminalCard'].forEach(id => {
     document.getElementById(id).style.display = show ? 'block' : 'none';
   });
   if (show) {
@@ -753,9 +760,7 @@ function showRouterModeCards(show) {
 // this server is the DHCP/NAT boundary there. In mikrotik mode the router
 // owns both, so these cards would just be dead UI.
 function showStandaloneModeCards(show) {
-  ['staticLeasesCard', 'portForwardCard', 'standalonePortsCard'].forEach(id => {
-    document.getElementById(id).style.display = show ? 'block' : 'none';
-  });
+  document.getElementById('standaloneSetupCard').style.display = show ? 'block' : 'none';
   if (show) {
     loadStaticLeases();
     loadPortForwards();
@@ -1016,6 +1021,8 @@ async function loadVlans() {
   try {
     const data = await apiCall('GET', '/api/admin/network/vlans');
     if (!data.success) throw new Error(data.message);
+    const sub = document.getElementById('vlanNavSub');
+    if (sub) sub.textContent = data.vlans.length === 0 ? 'No VLANs active' : `${data.vlans.length} VLAN${data.vlans.length > 1 ? 's' : ''} active`;
     if (data.vlans.length === 0) {
       tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text-muted);">No VLANs configured.</td></tr>';
       return;
@@ -1043,6 +1050,11 @@ async function loadVlans() {
   } catch(e) {
     tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--accent-red);">Failed to load VLANs.</td></tr>';
   }
+}
+
+function openVlanModal() {
+  openModal('vlanListModal');
+  loadVlans();
 }
 
 function openCreateVlanModal() {
@@ -1124,11 +1136,18 @@ async function deleteVlan(id, ifName) {
 
 // ===== STATIC DHCP LEASES (standalone mode) =====
 
+function openLeasesModal() {
+  openModal('leasesModal');
+  loadStaticLeases();
+}
+
 async function loadStaticLeases() {
   const tbody = document.getElementById('staticLeasesTableBody');
   try {
     const data = await apiCall('GET', '/api/admin/network/leases');
     if (!data.success) throw new Error(data.message);
+    const sub = document.getElementById('leasesNavSub');
+    if (sub) sub.textContent = data.leases.length === 0 ? 'None reserved' : `${data.leases.length} reserved`;
     if (data.leases.length === 0) {
       tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);">No reserved IPs yet.</td></tr>';
       return;
@@ -1187,11 +1206,18 @@ async function deleteStaticLease(id, mac) {
 
 // ===== PORT FORWARDING (standalone mode) =====
 
+function openPortForwardModal() {
+  openModal('portForwardModal');
+  loadPortForwards();
+}
+
 async function loadPortForwards() {
   const tbody = document.getElementById('portForwardsTableBody');
   try {
     const data = await apiCall('GET', '/api/admin/network/port-forwards');
     if (!data.success) throw new Error(data.message);
+    const sub = document.getElementById('portForwardNavSub');
+    if (sub) sub.textContent = data.forwards.length === 0 ? 'None configured' : `${data.forwards.length} configured`;
     if (data.forwards.length === 0) {
       tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">No port forwards yet.</td></tr>';
       return;
@@ -1274,12 +1300,23 @@ async function deletePortForward(id, label) {
 
 // ===== CLIENT NAMING =====
 
+function openClientLabelsModal() {
+  openModal('clientLabelsModal');
+  loadClientLabels();
+}
+
+function openDiagnosticsModal() {
+  openModal('diagnosticsModal');
+}
+
 async function loadClientLabels() {
   const tbody = document.getElementById('clientLabelsTableBody');
   if (!tbody) return;
   try {
     const data = await apiCall('GET', '/api/admin/network/client-labels');
     if (!data.success) throw new Error(data.message);
+    const sub = document.getElementById('clientLabelsNavSub');
+    if (sub) sub.textContent = data.labels.length === 0 ? 'None named' : `${data.labels.length} named`;
     if (data.labels.length === 0) {
       tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);">No named devices yet.</td></tr>';
       return;

@@ -1,192 +1,224 @@
+<style>
+/* Scoped to this page only - grouped-list design language, mapped onto
+   the app's existing theme variables (themes.css) so dark mode keeps
+   working automatically, no parallel color system. */
+.zf-network { max-width: 640px; }
+.zf-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+.zf-card-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 14px 16px 8px;
+}
+.zf-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border-color);
+  gap: 16px;
+}
+.zf-row:first-of-type { border-top: none; }
+.zf-row-label { font-size: 14px; color: var(--text-primary); flex-shrink: 0; }
+.zf-row-hint { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.zf-row input[type=text], .zf-row input[type=password], .zf-row input[type=number], .zf-row select {
+  font-family: inherit;
+  font-size: 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: right;
+  outline: none;
+  width: 190px;
+}
+.zf-row input:disabled { color: var(--text-muted); cursor: not-allowed; }
+.zf-pw-wrap { display: flex; align-items: center; gap: 6px; }
+.zf-pw-wrap input { width: 130px; }
+.zf-eye-btn { border: none; background: none; color: var(--accent-blue); font-size: 12px; cursor: pointer; padding: 4px; white-space: nowrap; }
+.zf-segmented {
+  display: flex;
+  background: var(--bg-primary);
+  border-radius: 10px;
+  padding: 4px;
+  margin: 4px 16px 16px;
+}
+.zf-segmented button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 12px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: background .15s, color .15s;
+}
+.zf-segmented button.active { background: var(--accent-green); color: #fff; }
+.zf-status-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; }
+.zf-status-dot { width: 8px; height: 8px; border-radius: 50%; }
+.zf-nav-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-top: 1px solid var(--border-color); cursor: pointer;
+}
+.zf-nav-row:first-of-type { border-top: none; }
+.zf-nav-row:hover { background: var(--bg-hover); }
+.zf-nav-left { display: flex; flex-direction: column; gap: 2px; }
+.zf-nav-title { font-size: 14px; color: var(--text-primary); }
+.zf-nav-sub { font-size: 12px; color: var(--text-muted); }
+.zf-chevron { color: var(--text-muted); font-size: 15px; }
+.zf-btn-row {
+  background: var(--accent-green); color: #fff; border: none; border-radius: 8px;
+  font-size: 14px; font-weight: 700; padding: 11px 16px; margin: 4px 16px 16px; cursor: pointer;
+  width: calc(100% - 32px);
+}
+.zf-footnote { font-size: 12px; color: var(--text-muted); padding: 0 16px 14px; line-height: 1.5; }
+.zf-warning-footnote { font-size: 12px; color: var(--accent-orange); padding: 0 16px 14px; line-height: 1.5; }
+.zf-modal-body-text { font-size: 13px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.5; }
+</style>
+
+<div class="zf-network">
+
 <!-- BIOS POWER-LOSS REMINDER (mini PC / x86 hardware only) -->
-<div class="card" id="biosPowerLossCard" style="display:none;margin-bottom:20px;background:#fff8e1;border:1px solid #ffa000;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-triangle-exclamation" style="margin-right:8px;color:#e65100;"></i>One-Time Setup: Power Recovery
-    </div>
-  </div>
-  <p style="font-size:13px;color:#e65100;margin:0 0 12px;">
+<div class="zf-card" id="biosPowerLossCard" style="display:none;border-color:var(--accent-orange);">
+  <div class="zf-card-title" style="color:var(--accent-orange);">One-Time Setup: Power Recovery</div>
+  <div class="zf-footnote" style="padding-top:0;color:var(--text-primary);">
     This device may not power itself back on automatically after an outage. Enter BIOS setup (usually by pressing Del or F2 right after powering on) and set "Restore on AC Power Loss" (also called "AC Power Recovery" or "After Power Failure") to "Power On." This is a one-time hardware setting. It can't be configured from software.
-  </p>
-  <div class="form-group" style="display:flex;align-items:center;gap:8px;margin:0;">
-    <input type="checkbox" id="biosAckCheckbox" style="width:auto;" onchange="acknowledgeBiosReminder()">
-    <label for="biosAckCheckbox" style="margin:0;font-size:13px;">I've done this</label>
+  </div>
+  <div class="zf-row" style="border-top:none;padding-top:0;">
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+      <input type="checkbox" id="biosAckCheckbox" style="width:auto;" onchange="acknowledgeBiosReminder()">
+      I've done this
+    </label>
   </div>
 </div>
 
-<!-- SERVER IP CONFIGURATION -->
-<div class="card">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-network-wired" style="margin-right:8px;color:var(--accent-blue);"></i>Network Configuration
-    </div>
-    <span class="badge badge-green" id="currentIpBadge" style="font-size:12px;">
-      <i class="fas fa-circle" style="font-size:8px;margin-right:4px;"></i>
-      <span id="currentIpDisplay">Loading...</span>
-    </span>
+<!-- NETWORK CONFIGURATION -->
+<div class="zf-card">
+  <div class="zf-card-title">Server IP Configuration</div>
+  <div class="zf-row">
+    <div class="zf-row-label">Status</div>
+    <span class="zf-status-pill" style="color:var(--accent-green);"><span class="zf-status-dot" style="background:var(--accent-green);"></span><span id="currentIpDisplay">Loading...</span></span>
   </div>
-
-  <div style="background:#fff8e1;border:1px solid #ffa000;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#e65100;">
-    <i class="fas fa-exclamation-triangle"></i>
-    <strong> Important:</strong> If your IP is set to Static, switch back to DHCP before changing routers or ISPs. Otherwise the server will become unreachable.
+  <div class="zf-row">
+    <div class="zf-row-label">IP Configuration</div>
+    <select id="networkType" onchange="onNetworkTypeChange()">
+      <option value="dhcp">DHCP (Automatic)</option>
+      <option value="static">Static IP (Manual)</option>
+    </select>
   </div>
-
-  <div class="grid-2">
-    <div class="form-group">
-      <label class="form-label">IP Configuration</label>
-      <select id="networkType" class="form-control" onchange="onNetworkTypeChange()">
-        <option value="dhcp">DHCP (Automatic)</option>
-        <option value="static">Static IP (Manual)</option>
-      </select>
-      <small style="color:var(--text-muted);">DHCP is recommended for most setups.</small>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Current IP Address</label>
-      <input type="text" id="currentIpField" class="form-control" readonly
-             style="background:var(--bg-primary);color:var(--text-muted);cursor:not-allowed;">
-      <small style="color:var(--text-muted);">Assigned by your router.</small>
-    </div>
+  <div class="zf-row">
+    <div class="zf-row-label">Current IP Address</div>
+    <input type="text" id="currentIpField" readonly disabled>
   </div>
-
   <div id="staticIpFields" style="display:none;">
-    <div class="grid-2">
-      <div class="form-group">
-        <label class="form-label">Static IP Address</label>
-        <input type="text" id="staticIp" class="form-control" placeholder="192.168.0.59">
-        <small style="color:var(--text-muted);">Must be outside your router's DHCP range.</small>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Gateway <span style="color:var(--text-muted);font-size:11px;">(auto-detected)</span></label>
-        <input type="text" id="staticGateway" class="form-control" readonly
-               style="background:var(--bg-primary);color:var(--text-muted);cursor:not-allowed;">
-        <small style="color:var(--text-muted);">Your router's IP address.</small>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Subnet Prefix</label>
-        <select id="staticSubnet" class="form-control">
-          <option value="24">/24, 255.255.255.0 (most common)</option>
-          <option value="16">/16, 255.255.0.0</option>
-          <option value="8">/8, 255.0.0.0</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">DNS Server</label>
-        <input type="text" id="staticDns" class="form-control" placeholder="8.8.8.8">
-        <small style="color:var(--text-muted);">Default is 8.8.8.8 (Google DNS).</small>
-      </div>
+    <div class="zf-row">
+      <div class="zf-row-label">Static IP Address</div>
+      <input type="text" id="staticIp" placeholder="192.168.0.59">
+    </div>
+    <div class="zf-row">
+      <div class="zf-row-label">Gateway</div>
+      <input type="text" id="staticGateway" readonly disabled>
+    </div>
+    <div class="zf-row">
+      <div class="zf-row-label">Subnet Prefix</div>
+      <select id="staticSubnet">
+        <option value="24">/24, 255.255.255.0</option>
+        <option value="16">/16, 255.255.0.0</option>
+        <option value="8">/8, 255.0.0.0</option>
+      </select>
+    </div>
+    <div class="zf-row">
+      <div class="zf-row-label">DNS Server</div>
+      <input type="text" id="staticDns" placeholder="8.8.8.8">
     </div>
   </div>
-
-  <button class="btn btn-primary" onclick="saveNetworkConfig()" id="saveNetworkBtn">
-    <i class="fas fa-save"></i> Apply Network Settings
-  </button>
-
-  <div id="networkStatus" style="display:none;margin-top:14px;padding:12px;border-radius:8px;font-size:13px;"></div>
+  <button class="zf-btn-row" onclick="saveNetworkConfig()" id="saveNetworkBtn">Apply Network Settings</button>
+  <div class="zf-footnote">Switch back to DHCP before changing routers or ISPs, otherwise the server may become unreachable.</div>
+  <div id="networkStatus" style="display:none;margin:0 16px 14px;padding:12px;border-radius:8px;font-size:13px;"></div>
 </div>
 
 <!-- NETWORK MODE -->
-<div class="card" style="margin-top:20px;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-network-wired" style="margin-right:8px;color:var(--accent-blue);"></i>Network Mode
-    </div>
-    <span style="font-size:12px;color:var(--text-muted);">How customers get internet access</span>
+<div class="zf-card">
+  <div class="zf-card-title">Network Mode</div>
+  <input type="radio" name="networkMode" id="modeStandalone" value="standalone" onchange="onNetworkModeChange()" style="display:none;">
+  <input type="radio" name="networkMode" id="modeMikrotik" value="mikrotik" onchange="onNetworkModeChange()" style="display:none;">
+  <div id="networkModeSwitch" class="zf-segmented">
+    <button type="button" id="modeStandaloneCard" onclick="setNetworkMode('standalone')">Standalone</button>
+    <button type="button" id="modeMikrotikCard" onclick="setNetworkMode('mikrotik')">External Router</button>
   </div>
-
-  <div class="form-group">
-    <input type="radio" name="networkMode" id="modeStandalone" value="standalone" onchange="onNetworkModeChange()" style="display:none;">
-    <input type="radio" name="networkMode" id="modeMikrotik" value="mikrotik" onchange="onNetworkModeChange()" style="display:none;">
-
-    <div id="networkModeSwitch" style="display:flex;width:100%;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:10px;padding:4px;gap:4px;">
-      <button type="button" id="modeStandaloneCard" onclick="setNetworkMode('standalone')"
-        style="flex:1;border:none;background:transparent;padding:14px 18px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;color:var(--text-muted);transition:background .15s,color .15s;">
-        Standalone
-      </button>
-      <button type="button" id="modeMikrotikCard" onclick="setNetworkMode('mikrotik')"
-        style="flex:1;border:none;background:transparent;padding:14px 18px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;color:var(--text-muted);transition:background .15s,color .15s;">
-        External Router
-      </button>
-    </div>
-  </div>
-
-  <!-- MIKROTIK SETTINGS (shown only when MikroTik selected) -->
-  <div id="mikrotikFields" style="display:none;margin-top:16px;">
-
-    <div style="background:#fff8e1;border:1px solid #ffa000;border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;color:#e65100;">
-      <i class="fas fa-exclamation-triangle"></i>
-      <strong> A few things to know before turning this on:</strong>
-      <ul style="margin:6px 0 0 18px;padding:0;">
-        <li>Supports MikroTik routers running RouterOS 6 or 7, including older and budget-friendly models. More router brands may be supported in the future.</li>
-        <li>Your router's Hotspot service and DHCP server must already be set up on the network you're connecting to. Bandwidth limits apply per device once it has an IP address.</li>
-        <li>Customers go straight to your portal to pay and connect. They'll never see the router's own login page.</li>
-        <li>This server still tracks session time and expiry. The router only reflects whether a device is currently allowed online.</li>
-      </ul>
-    </div>
-
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
-      <span style="font-size:13px;color:var(--text-muted);">Status:</span>
-      <span id="mikrotikLiveStatus" style="font-size:13px;font-weight:700;color:var(--text-muted);">
-        <i class="fas fa-spinner fa-spin"></i> Checking...
-      </span>
-      <button type="button" class="btn btn-secondary" style="margin-left:auto;padding:4px 10px;font-size:12px;" onclick="testMikrotikConnection()">
-        <i class="fas fa-rotate"></i> Recheck
-      </button>
-    </div>
-
-    <div class="grid-2">
-      <div class="form-group">
-        <label class="form-label">MikroTik IP Address</label>
-        <input type="text" id="mikrotikIp" class="form-control" placeholder="192.168.0.1">
-      </div>
-      <div class="form-group">
-        <label class="form-label">MikroTik Username</label>
-        <input type="text" id="mikrotikUser" class="form-control" placeholder="admin">
-      </div>
-      <div class="form-group">
-        <label class="form-label">MikroTik Password</label>
-        <div style="display:flex;align-items:center;gap:6px;">
-          <input type="password" id="mikrotikPass" class="form-control" placeholder="Leave blank if none">
-          <button type="button" class="btn btn-secondary" id="mikrotikPassToggle" style="padding:6px 10px;white-space:nowrap;" onclick="toggleMikrotikPassword()">
-            <i class="fas fa-eye"></i> Show
-          </button>
-        </div>
-        <small id="mikrotikPassHint" style="color:var(--text-muted);display:none;">A password is already saved. Leave it blank to keep it, or enter a new one to replace it.</small>
-      </div>
-      <div class="form-group">
-        <label class="form-label">Hotspot Interface</label>
-        <input type="text" id="mikrotikInterface" class="form-control" placeholder="ether1">
-        <small style="color:var(--text-muted);">The interface your EAP225 is connected to on MikroTik.</small>
-      </div>
-    </div>
-
-    <div class="form-group" style="display:flex;align-items:center;gap:8px;">
-      <input type="checkbox" id="mikrotikSsl" style="width:auto;">
-      <label for="mikrotikSsl" style="margin:0;">Use encrypted connection (requires api-ssl enabled on the router)</label>
-    </div>
-
-    <div class="form-group" id="serverLanMacGroup" style="display:none;">
-      <label class="form-label">Server's Network Connection</label>
-      <select id="serverLanMac" class="form-control"></select>
-      <small style="color:var(--text-muted);">This machine has more than one network connection. Choose the one connected to your gated lane (for example, WiFi rental) so this server stays reachable at a fixed address and your portal link keeps working.</small>
-    </div>
-  </div>
-
-  <button class="btn btn-primary" onclick="saveNetworkSettings()">
-    <i class="fas fa-save"></i> Save Network Settings
-  </button>
 </div>
 
-<!-- ROUTER TERMINAL (mikrotik mode only) -->
-<div class="card" id="routerTerminalCard" style="margin-top:20px;display:none;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-terminal" style="margin-right:8px;color:var(--accent-blue);"></i>Router Terminal
-    </div>
-    <span style="font-size:12px;color:var(--text-muted);">Run MikroTik commands without opening WinBox</span>
+<!-- MIKROTIK CONNECTION (mikrotik mode only) -->
+<div class="zf-card" id="mikrotikFields" style="display:none;">
+  <div class="zf-card-title">MikroTik Connection</div>
+  <div class="zf-row">
+    <div class="zf-row-label">Status</div>
+    <span class="zf-status-pill" id="mikrotikLiveStatus" style="color:var(--text-muted);">
+      <i class="fas fa-spinner fa-spin"></i> Checking...
+    </span>
   </div>
-  <button type="button" class="btn btn-secondary" onclick="openRouterTerminal()">
-    <i class="fas fa-terminal"></i> Open Terminal
-  </button>
+  <div class="zf-row">
+    <div class="zf-row-label">Router IP Address</div>
+    <input type="text" id="mikrotikIp" placeholder="192.168.0.1">
+  </div>
+  <div class="zf-row">
+    <div class="zf-row-label">Username</div>
+    <input type="text" id="mikrotikUser" placeholder="admin">
+  </div>
+  <div class="zf-row">
+    <div class="zf-row-label">Password</div>
+    <div class="zf-pw-wrap">
+      <input type="password" id="mikrotikPass" placeholder="Leave blank if none">
+      <button type="button" class="zf-eye-btn" id="mikrotikPassToggle" onclick="toggleMikrotikPassword()">
+        <i class="fas fa-eye"></i> Show
+      </button>
+    </div>
+  </div>
+  <div class="zf-row-hint" id="mikrotikPassHint" style="display:none;padding:0 16px 12px;">A password is already saved. Leave it blank to keep it, or enter a new one to replace it.</div>
+  <div class="zf-row">
+    <div class="zf-row-label">Hotspot Interface</div>
+    <input type="text" id="mikrotikInterface" placeholder="ether1">
+  </div>
+  <div class="zf-row">
+    <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
+      <input type="checkbox" id="mikrotikSsl" style="width:auto;">
+      Use encrypted connection
+    </label>
+  </div>
+  <div id="serverLanMacGroup" style="display:none;">
+    <div class="zf-row">
+      <div class="zf-row-label">Server's Network Connection</div>
+      <select id="serverLanMac"></select>
+    </div>
+    <div class="zf-footnote" style="padding-top:0;">This machine has more than one network connection. Choose the one connected to your gated lane (for example, WiFi rental) so this server stays reachable at a fixed address and your portal link keeps working.</div>
+  </div>
+  <div style="display:flex;justify-content:flex-end;padding:0 16px 14px;">
+    <button type="button" class="zf-eye-btn" style="font-size:13px;" onclick="testMikrotikConnection()"><i class="fas fa-rotate"></i> Recheck</button>
+  </div>
+  <button class="zf-btn-row" onclick="saveNetworkSettings()">Save Network Settings</button>
+  <div class="zf-footnote">Supports MikroTik routers running RouterOS 6 or 7. Your router's Hotspot service and DHCP server must already be set up on the network you're connecting to. Customers go straight to your portal to pay and connect. They'll never see the router's own login page.</div>
+</div>
+
+<!-- ROUTER CONSOLE (mikrotik mode only) -->
+<div class="zf-card" id="routerTerminalCard" style="display:none;">
+  <div class="zf-card-title">Router Console</div>
+  <div class="zf-nav-row" onclick="openRouterTerminal()">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">Router Terminal</div>
+      <div class="zf-nav-sub">Run MikroTik commands without opening WinBox</div>
+    </div>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+  </div>
 </div>
 
 <!-- ROUTER TERMINAL MODAL -->
@@ -198,7 +230,7 @@
         <i class="fas fa-times"></i>
       </button>
     </div>
-    <div style="background:#fff8e1;border:1px solid #ffa000;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:#e65100;">
+    <div class="zf-modal-body-text" style="color:var(--accent-orange);">
       <i class="fas fa-exclamation-triangle"></i>
       This runs directly on your router with full admin access, the same as WinBox's own terminal. Nothing here can be undone.
     </div>
@@ -212,84 +244,43 @@
   </div>
 </div>
 
-<!-- ROUTER MODE: YOUR INTERNET PLAN (mikrotik mode only) -->
-<div class="card" id="ispPlanCard" style="margin-top:20px;display:none;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-gauge-high" style="margin-right:8px;color:var(--accent-blue);"></i>Your Internet Plan
+<!-- ROUTER SETUP (mikrotik mode only) -->
+<div class="zf-card" id="routerSetupCard" style="display:none;">
+  <div class="zf-card-title">Router Setup</div>
+  <div class="zf-nav-row" onclick="openIspPlanModal()">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">Internet Plan</div>
+      <div class="zf-nav-sub" id="ispPlanNavSub">Loading...</div>
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Every warning below is based on this number, not a fixed default.</span>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <div class="form-group" style="max-width:220px;">
-    <label class="form-label">Total Plan Speed (Mbps)</label>
-    <input type="number" id="ispPlanMbps" class="form-control" placeholder="e.g. 50" min="0">
+  <div class="zf-nav-row" onclick="openRouterPortsModal()">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">Ports and Roles</div>
+      <div class="zf-nav-sub" id="routerPortsSummary">Loading...</div>
+    </div>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <button class="btn btn-primary" onclick="saveIspPlan()">
-    <i class="fas fa-save"></i> Save
-  </button>
 </div>
 
-<!-- ROUTER MODE: PORTAL ADDRESS (mikrotik mode only) -->
-<div class="card" id="portalAddressCard" style="margin-top:20px;display:none;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-globe" style="margin-right:8px;color:var(--accent-blue);"></i>Portal Address
+<!-- INTERNET PLAN MODAL (mikrotik mode) -->
+<div class="modal-overlay" id="ispPlanModal">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-header">
+      <div class="modal-title">Internet Plan</div>
+      <button class="modal-close" onclick="closeModal('ispPlanModal')">
+        <i class="fas fa-times"></i>
+      </button>
     </div>
-  </div>
-  <div class="alert alert-info">
-    <i class="fas fa-info-circle"></i>
-    Give customers an easy, memorable address for checking or adding time later, instead of a raw IP address they could easily mistype.
-  </div>
-  <div class="form-group" style="max-width:320px;">
-    <label class="form-label">Custom Portal Hostname</label>
-    <input type="text" id="portalHostname" class="form-control" placeholder="e.g. rjcyberzone.wifi">
-    <small style="color:var(--text-muted);font-size:12px;">
-      Applies on your next Configure run. Leave blank to disable.
-    </small>
-  </div>
-  <button class="btn btn-primary" onclick="savePortalHostname()">
-    <i class="fas fa-save"></i> Save
-  </button>
-</div>
-
-<!-- ADMIN PORTAL ADDRESS (both modes) -->
-<div class="card" style="margin-top:20px;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-house-signal" style="margin-right:8px;color:var(--accent-green);"></i>Admin Portal Address
+    <div class="zf-modal-body-text">Every warning across this router's setup is based on this number, not a fixed default.</div>
+    <div class="form-group" style="max-width:220px;">
+      <label class="form-label">Total Plan Speed (Mbps)</label>
+      <input type="number" id="ispPlanMbps" class="form-control" placeholder="e.g. 50" min="0">
     </div>
+    <button class="btn btn-primary" onclick="saveIspPlan()">
+      <i class="fas fa-save"></i> Save
+    </button>
   </div>
-  <div class="alert alert-info">
-    <i class="fas fa-info-circle"></i>
-    Customize the address you use to reach this admin panel on your own network, instead of always using <code>rjpisowifi.local</code>.
-  </div>
-  <div class="form-group" style="max-width:320px;">
-    <label class="form-label">Local Hostname</label>
-    <div style="display:flex;align-items:center;gap:6px;">
-      <input type="text" id="adminHostname" class="form-control" placeholder="e.g. rjcyberzone">
-      <span style="color:var(--text-muted);white-space:nowrap;">.local</span>
-    </div>
-    <small style="color:var(--text-muted);font-size:12px;">
-      Letters, numbers, and hyphens only. Changing this restarts the mDNS service.
-    </small>
-  </div>
-  <button class="btn btn-primary" onclick="saveAdminHostname()">
-    <i class="fas fa-save"></i> Save
-  </button>
-  <div id="adminHostnameStatus" style="display:none;margin-top:14px;padding:12px;border-radius:8px;font-size:13px;"></div>
-</div>
-
-<!-- ROUTER MODE: PORTS AND ROLES (mikrotik mode only) -->
-<div class="card" id="routerPortsCard" style="margin-top:20px;display:none;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-ethernet" style="margin-right:8px;color:var(--accent-green);"></i>Ports and Roles
-    </div>
-    <span style="font-size:12px;color:var(--text-muted);" id="routerPortsSummary">Loading...</span>
-  </div>
-  <button type="button" class="btn btn-primary" onclick="openRouterPortsModal()">
-    <i class="fas fa-sliders-h"></i> Configure Ports and Roles
-  </button>
 </div>
 
 <!-- ROUTER MODE: PORTS AND ROLES + PROVISION MODAL -->
@@ -333,129 +324,37 @@
 </div>
 
 <!-- ROUTER MODE: LIVE STATUS (mikrotik mode only) -->
-<div class="card" id="routerStatusCard" style="margin-top:20px;display:none;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-heart-pulse" style="margin-right:8px;color:var(--accent-red);"></i>Live Status
-    </div>
-    <span style="font-size:12px;color:var(--text-muted);">Read directly from the router</span>
-  </div>
-  <div id="routerStatusGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
-    <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+<div class="zf-card" id="routerStatusCard" style="display:none;">
+  <div class="zf-card-title">Live Status</div>
+  <div id="routerStatusGrid">
+    <div class="zf-row"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
   </div>
 </div>
 
-<!-- STANDALONE MODE: STATIC DHCP LEASES -->
-<div class="card" id="staticLeasesCard" style="margin-top:20px;display:none;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-thumbtack" style="margin-right:8px;color:var(--accent-green);"></i>Static DHCP Leases
+<!-- STANDALONE SETUP (standalone mode only) -->
+<div class="zf-card" id="standaloneSetupCard" style="display:none;">
+  <div class="zf-card-title">Standalone Setup</div>
+  <div class="zf-nav-row" onclick="openStandalonePortsModal()">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">Ports and Roles</div>
+      <div class="zf-nav-sub" id="standalonePortsSummary">Loading...</div>
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Always give a device the same IP address</span>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
-    Useful for printers, cameras, or staff devices that need a fixed address instead of whatever the DHCP pool assigns.
-  </p>
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>MAC Address</th>
-          <th>IP Address</th>
-          <th>Label</th>
-          <th style="text-align:right;">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="staticLeasesTableBody">
-        <tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
-      </tbody>
-    </table>
+  <div class="zf-nav-row" onclick="openLeasesModal()">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">Static DHCP Leases</div>
+      <div class="zf-nav-sub" id="leasesNavSub">Loading...</div>
+    </div>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <div class="grid-2" style="margin-top:16px;">
-    <div class="form-group">
-      <label class="form-label">MAC Address</label>
-      <input type="text" id="newLeaseMac" class="form-control" placeholder="aa:bb:cc:dd:ee:ff">
+  <div class="zf-nav-row" onclick="openPortForwardModal()">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">Port Forwarding</div>
+      <div class="zf-nav-sub" id="portForwardNavSub">Loading...</div>
     </div>
-    <div class="form-group">
-      <label class="form-label">IP Address</label>
-      <input type="text" id="newLeaseIp" class="form-control" placeholder="10.0.0.50">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Label (optional)</label>
-      <input type="text" id="newLeaseLabel" class="form-control" placeholder="Front Counter Printer">
-    </div>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <button class="btn btn-primary" onclick="addStaticLease()">
-    <i class="fas fa-plus"></i> Reserve IP
-  </button>
-</div>
-
-<!-- STANDALONE MODE: PORT FORWARDING -->
-<div class="card" id="portForwardCard" style="margin-top:20px;display:none;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-route" style="margin-right:8px;color:var(--accent-blue);"></i>Port Forwarding
-    </div>
-    <span style="font-size:12px;color:var(--text-muted);">Let a specific service on your LAN be reached from the internet</span>
-  </div>
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>Label</th>
-          <th>Protocol</th>
-          <th>External Port</th>
-          <th>Internal IP : Port</th>
-          <th>Enabled</th>
-          <th style="text-align:right;">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="portForwardsTableBody">
-        <tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="grid-2" style="margin-top:16px;">
-    <div class="form-group">
-      <label class="form-label">Label</label>
-      <input type="text" id="newFwdLabel" class="form-control" placeholder="e.g. NVR Camera">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Protocol</label>
-      <select id="newFwdProtocol" class="form-control">
-        <option value="tcp">TCP</option>
-        <option value="udp">UDP</option>
-      </select>
-    </div>
-    <div class="form-group">
-      <label class="form-label">External Port</label>
-      <input type="number" id="newFwdExternalPort" class="form-control" placeholder="8080" min="1" max="65535">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Internal IP Address</label>
-      <input type="text" id="newFwdInternalIp" class="form-control" placeholder="10.0.0.50">
-    </div>
-    <div class="form-group">
-      <label class="form-label">Internal Port</label>
-      <input type="number" id="newFwdInternalPort" class="form-control" placeholder="80" min="1" max="65535">
-    </div>
-  </div>
-  <button class="btn btn-primary" onclick="addPortForward()">
-    <i class="fas fa-plus"></i> Add Port Forward
-  </button>
-</div>
-
-<!-- STANDALONE MODE: PORTS AND ROLES -->
-<div class="card" id="standalonePortsCard" style="margin-top:20px;display:none;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-ethernet" style="margin-right:8px;color:var(--accent-green);"></i>Ports and Roles
-    </div>
-    <span style="font-size:12px;color:var(--text-muted);" id="standalonePortsSummary">Loading...</span>
-  </div>
-  <button type="button" class="btn btn-primary" onclick="openStandalonePortsModal()">
-    <i class="fas fa-sliders-h"></i> Configure Ports and Roles
-  </button>
 </div>
 
 <!-- STANDALONE MODE: PORTS AND ROLES + APPLY MODAL -->
@@ -502,98 +401,264 @@
   </div>
 </div>
 
+<!-- STATIC DHCP LEASES MODAL -->
+<div class="modal-overlay" id="leasesModal">
+  <div class="modal" style="max-width:640px;">
+    <div class="modal-header">
+      <div class="modal-title">Static DHCP Leases</div>
+      <button class="modal-close" onclick="closeModal('leasesModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="zf-modal-body-text">Useful for printers, cameras, or staff devices that need a fixed address instead of whatever the DHCP pool assigns.</div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>MAC Address</th>
+            <th>IP Address</th>
+            <th>Label</th>
+            <th style="text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="staticLeasesTableBody">
+          <tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="grid-2" style="margin-top:16px;">
+      <div class="form-group">
+        <label class="form-label">MAC Address</label>
+        <input type="text" id="newLeaseMac" class="form-control" placeholder="aa:bb:cc:dd:ee:ff">
+      </div>
+      <div class="form-group">
+        <label class="form-label">IP Address</label>
+        <input type="text" id="newLeaseIp" class="form-control" placeholder="10.0.0.50">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Label (optional)</label>
+        <input type="text" id="newLeaseLabel" class="form-control" placeholder="Front Counter Printer">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="addStaticLease()">
+      <i class="fas fa-plus"></i> Reserve IP
+    </button>
+  </div>
+</div>
+
+<!-- PORT FORWARDING MODAL -->
+<div class="modal-overlay" id="portForwardModal">
+  <div class="modal" style="max-width:680px;">
+    <div class="modal-header">
+      <div class="modal-title">Port Forwarding</div>
+      <button class="modal-close" onclick="closeModal('portForwardModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="zf-modal-body-text">Let a specific service on your LAN be reached from the internet.</div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Label</th>
+            <th>Protocol</th>
+            <th>External Port</th>
+            <th>Internal IP : Port</th>
+            <th>Enabled</th>
+            <th style="text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="portForwardsTableBody">
+          <tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="grid-2" style="margin-top:16px;">
+      <div class="form-group">
+        <label class="form-label">Label</label>
+        <input type="text" id="newFwdLabel" class="form-control" placeholder="e.g. NVR Camera">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Protocol</label>
+        <select id="newFwdProtocol" class="form-control">
+          <option value="tcp">TCP</option>
+          <option value="udp">UDP</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">External Port</label>
+        <input type="number" id="newFwdExternalPort" class="form-control" placeholder="8080" min="1" max="65535">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Internal IP Address</label>
+        <input type="text" id="newFwdInternalIp" class="form-control" placeholder="10.0.0.50">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Internal Port</label>
+        <input type="number" id="newFwdInternalPort" class="form-control" placeholder="80" min="1" max="65535">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="addPortForward()">
+      <i class="fas fa-plus"></i> Add Port Forward
+    </button>
+  </div>
+</div>
+
+<!-- ADMIN PORTAL ADDRESS (both modes) -->
+<div class="zf-card">
+  <div class="zf-card-title">Admin Portal Address</div>
+  <div class="zf-row">
+    <div class="zf-row-label">Local Hostname</div>
+    <div style="display:flex;align-items:center;gap:4px;">
+      <input type="text" id="adminHostname" placeholder="e.g. rjcyberzone">
+      <span style="color:var(--text-muted);white-space:nowrap;font-size:14px;">.local</span>
+    </div>
+  </div>
+  <button class="zf-btn-row" onclick="saveAdminHostname()">Save</button>
+  <div class="zf-footnote">Customize the address you use to reach this admin panel on your own network, instead of always using rjpisowifi.local. Letters, numbers, and hyphens only. Changing this restarts the mDNS service.</div>
+  <div id="adminHostnameStatus" style="display:none;margin:0 16px 14px;padding:12px;border-radius:8px;font-size:13px;"></div>
+</div>
+
+<!-- ROUTER MODE: PORTAL ADDRESS (mikrotik mode only) -->
+<div class="zf-card" id="portalAddressCard" style="display:none;">
+  <div class="zf-card-title">Customer Portal Address</div>
+  <div class="zf-row">
+    <div class="zf-row-label">Portal Hostname</div>
+    <input type="text" id="portalHostname" placeholder="e.g. rjcyberzone.wifi">
+  </div>
+  <button class="zf-btn-row" onclick="savePortalHostname()">Save</button>
+  <div class="zf-footnote">Give customers an easy, memorable address for checking or adding time later, instead of a raw IP address they could easily mistype. Applies on your next Configure run. Leave blank to disable.</div>
+</div>
+
 <!-- VLAN MANAGEMENT -->
-<div class="card" style="margin-top:20px;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-layer-group" style="margin-right:8px;color:var(--accent-yellow);"></i>VLAN Management
+<div class="zf-card">
+  <div class="zf-card-title">VLAN Management</div>
+  <div class="zf-nav-row" onclick="openVlanModal()">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">VLAN Management</div>
+      <div class="zf-nav-sub" id="vlanNavSub">Loading...</div>
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Create and manage VLAN interfaces for WAN and LAN</span>
-    <button class="btn btn-primary" style="margin-left:auto;" onclick="openCreateVlanModal()">
-      <i class="fas fa-plus"></i> Create VLAN
-    </button>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
-    <i class="fas fa-info-circle"></i>
-    Use this if your ISP requires a VLAN-tagged connection, or if you're sharing one cable between your internet
-    connection and an access point's customer WiFi traffic. Changes take effect immediately after saving.
-  </div>
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>VLAN Interface</th>
-          <th>VLAN ID</th>
-          <th>Base Interface</th>
-          <th>Mode</th>
-          <th>Protocol</th>
-          <th>IP Address</th>
-          <th>Status</th>
-          <th style="text-align:right;">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="vlansTableBody">
-        <tr><td colspan="8" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
-      </tbody>
-    </table>
+  <div class="zf-footnote">Available in both Standalone and External Router mode. Use this if your ISP requires a VLAN-tagged connection, or if you're sharing one cable between your internet connection and an access point's customer WiFi traffic.</div>
+</div>
+
+<!-- VLAN MANAGEMENT MODAL (list) -->
+<div class="modal-overlay" id="vlanListModal">
+  <div class="modal" style="max-width:720px;">
+    <div class="modal-header">
+      <div class="modal-title">VLAN Management</div>
+      <button class="modal-close" onclick="closeModal('vlanListModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+      <button class="btn btn-primary" style="padding:6px 12px;font-size:13px;" onclick="openCreateVlanModal()">
+        <i class="fas fa-plus"></i> Create VLAN
+      </button>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>VLAN Interface</th>
+            <th>VLAN ID</th>
+            <th>Base Interface</th>
+            <th>Mode</th>
+            <th>Protocol</th>
+            <th>IP Address</th>
+            <th>Status</th>
+            <th style="text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="vlansTableBody">
+          <tr><td colspan="8" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 
-<!-- CLIENT NAMING -->
-<div class="card" style="margin-top:20px;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-tag" style="margin-right:8px;color:var(--accent-green);"></i>Name Your Devices
+<!-- DEVICES AND DIAGNOSTICS (both modes) -->
+<div class="zf-card">
+  <div class="zf-card-title">Devices and Diagnostics</div>
+  <div class="zf-nav-row" onclick="openClientLabelsModal()">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">Name Your Devices</div>
+      <div class="zf-nav-sub" id="clientLabelsNavSub">Loading...</div>
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Give a MAC address a friendly name so it's easy to recognize elsewhere</span>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>MAC Address</th>
-          <th>Name</th>
-          <th style="text-align:right;">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="clientLabelsTableBody">
-        <tr><td colspan="3" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
-      </tbody>
-    </table>
-  </div>
-  <div class="grid-2" style="margin-top:16px;">
-    <div class="form-group">
-      <label class="form-label">MAC Address</label>
-      <input type="text" id="newClientLabelMac" class="form-control" placeholder="aa:bb:cc:dd:ee:ff">
+  <div class="zf-nav-row" onclick="openDiagnosticsModal()">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">Network Diagnostics</div>
+      <div class="zf-nav-sub">Ping or trace a route from this server</div>
     </div>
-    <div class="form-group">
-      <label class="form-label">Name</label>
-      <input type="text" id="newClientLabelName" class="form-control" placeholder="e.g. Owner's Phone">
-    </div>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <button class="btn btn-primary" onclick="addClientLabel()">
-    <i class="fas fa-plus"></i> Save Name
-  </button>
 </div>
 
-<!-- NETWORK DIAGNOSTICS -->
-<div class="card" style="margin-top:20px;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-stethoscope" style="margin-right:8px;color:var(--accent-blue);"></i>Network Diagnostics
+<!-- NAME YOUR DEVICES MODAL -->
+<div class="modal-overlay" id="clientLabelsModal">
+  <div class="modal" style="max-width:560px;">
+    <div class="modal-header">
+      <div class="modal-title">Name Your Devices</div>
+      <button class="modal-close" onclick="closeModal('clientLabelsModal')">
+        <i class="fas fa-times"></i>
+      </button>
     </div>
-    <span style="font-size:12px;color:var(--text-muted);">Ping or trace a route from this server for troubleshooting</span>
-  </div>
-  <div style="display:flex;gap:8px;margin-bottom:12px;">
-    <input type="text" id="diagTarget" class="form-control" placeholder="8.8.8.8 or google.com">
-    <button class="btn btn-secondary" onclick="runDiagnostic('ping')">
-      <i class="fas fa-satellite-dish"></i> Ping
+    <div class="zf-modal-body-text">Give a MAC address a friendly name so it's easy to recognize elsewhere.</div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>MAC Address</th>
+            <th>Name</th>
+            <th style="text-align:right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="clientLabelsTableBody">
+          <tr><td colspan="3" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="grid-2" style="margin-top:16px;">
+      <div class="form-group">
+        <label class="form-label">MAC Address</label>
+        <input type="text" id="newClientLabelMac" class="form-control" placeholder="aa:bb:cc:dd:ee:ff">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Name</label>
+        <input type="text" id="newClientLabelName" class="form-control" placeholder="e.g. Owner's Phone">
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="addClientLabel()">
+      <i class="fas fa-plus"></i> Save Name
     </button>
-    <button class="btn btn-secondary" onclick="runDiagnostic('traceroute')">
-      <i class="fas fa-diagram-project"></i> Traceroute
-    </button>
   </div>
-  <div id="diagOutput" style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:8px;height:180px;overflow-y:auto;white-space:pre-wrap;">Enter a target above, then choose Ping or Traceroute.</div>
+</div>
+
+<!-- NETWORK DIAGNOSTICS MODAL -->
+<div class="modal-overlay" id="diagnosticsModal">
+  <div class="modal" style="max-width:560px;">
+    <div class="modal-header">
+      <div class="modal-title">Network Diagnostics</div>
+      <button class="modal-close" onclick="closeModal('diagnosticsModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="zf-modal-body-text">Ping or trace a route from this server, for troubleshooting.</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px;">
+      <input type="text" id="diagTarget" class="form-control" placeholder="8.8.8.8 or google.com">
+      <button class="btn btn-secondary" onclick="runDiagnostic('ping')">
+        <i class="fas fa-satellite-dish"></i> Ping
+      </button>
+      <button class="btn btn-secondary" onclick="runDiagnostic('traceroute')">
+        <i class="fas fa-diagram-project"></i> Traceroute
+      </button>
+    </div>
+    <div id="diagOutput" style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:8px;height:180px;overflow-y:auto;white-space:pre-wrap;">Enter a target above, then choose Ping or Traceroute.</div>
+  </div>
 </div>
 
 <!-- CREATE VLAN MODAL -->
@@ -653,4 +718,6 @@
       </button>
     </div>
   </div>
+</div>
+
 </div>
