@@ -1,17 +1,21 @@
 <style>
 /* Scoped to this page only - grouped-list design language, mapped onto
    the app's existing theme variables (themes.css) so dark mode keeps
-   working automatically, no parallel color system. Column-flow instead of
-   a fixed max-width column so cards actually use available screen width
-   on wide admin displays instead of leaving most of the page blank. */
-.zf-network { column-width: 460px; column-gap: 20px; }
+   working automatically, no parallel color system. A real 2-column grid
+   (not CSS `columns`, which fills one column top-to-bottom before
+   wrapping and left uneven, messy-looking bottoms) - grid places cards in
+   left-right row order instead, so pairs of cards line up cleanly and the
+   layout still fills the available width. Collapses to one column on
+   narrow screens. */
+.zf-network { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; max-width: 1200px; margin: 0 auto; }
+@media (max-width: 900px) {
+  .zf-network { grid-template-columns: 1fr; }
+}
 .zf-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 14px;
-  margin-bottom: 20px;
   overflow: hidden;
-  break-inside: avoid;
 }
 .zf-card-title {
   font-size: 12px;
