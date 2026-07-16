@@ -7,7 +7,7 @@
    left-right row order instead, so pairs of cards line up cleanly and the
    layout still fills the available width. Collapses to one column on
    narrow screens. */
-.zf-network { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; max-width: 1200px; margin: 0 auto; }
+.zf-network { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; max-width: 1200px; margin: 0 auto; }
 @media (max-width: 900px) {
   .zf-network { grid-template-columns: 1fr; }
 }
