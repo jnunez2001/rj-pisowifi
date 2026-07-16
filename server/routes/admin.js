@@ -1186,6 +1186,26 @@ router.get('/vendos', adminAuth, (req, res) => {
   }
 });
 
+// DELETE /api/admin/vendos/:id — removes a stale/replaced ESP32 entry from
+// the Devices list. Purely a DB row (the device re-registers itself via
+// POST /vendo/register on its next check-in if it's still actually live),
+// so this is safe to use for "that unit got swapped out" or "that MAC is
+// a dead board" cleanup without any live-access side effects.
+router.delete('/vendos/:id', adminAuth, (req, res) => {
+  try {
+    const vendo = db.prepare('SELECT * FROM vendos WHERE id = ?').get(req.params.id);
+    if (!vendo) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    db.prepare('DELETE FROM vendos WHERE id = ?').run(req.params.id);
+    console.log(`🗑️  Vendo removed: ${vendo.mac_address} (${vendo.name})`);
+    return res.json({ success: true, message: 'Device removed' });
+  } catch (err) {
+    console.error('Vendo delete error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // ===== TRUSTED DEVICES =====
 // Devices that should always have internet access, never gated behind
 // payment (see database.js's trusted_devices table comment for why this

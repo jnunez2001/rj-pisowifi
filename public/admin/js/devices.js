@@ -76,7 +76,7 @@ async function loadDevices() {
     if (!data.success || !data.vendos.length) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="6" style="text-align:center;color:var(--text-muted);padding:32px;">
+          <td colspan="7" style="text-align:center;color:var(--text-muted);padding:32px;">
             <i class="fas fa-microchip" style="font-size:32px;margin-bottom:12px;display:block;opacity:0.3;"></i>
             No devices registered yet.<br>
             <span style="font-size:12px;">Follow the steps on the right to add a device.</span>
@@ -128,6 +128,11 @@ async function loadDevices() {
           <td style="font-size:13px;color:var(--text-muted);">
             ${timeAgo(v.last_seen)}
           </td>
+          <td style="text-align:right;">
+            <button class="btn btn-sm btn-danger" onclick="removeVendo(${v.id}, '${escapeHtml(v.name)}')">
+              <i class="fas fa-trash"></i>
+            </button>
+          </td>
         </tr>`;
     }).join('');
 
@@ -138,6 +143,21 @@ async function loadDevices() {
 
   } catch(e) {
     console.error('Devices error:', e);
+  }
+}
+
+async function removeVendo(id, name) {
+  if (!confirm(`Remove "${name}" from the devices list? It will reappear on its own if it's still powered on and reaches the server.`)) return;
+  try {
+    const data = await apiCall('DELETE', `/api/admin/vendos/${id}`);
+    if (data.success) {
+      showToast('Device removed', 'success');
+      loadDevices();
+    } else {
+      showToast(data.message || 'Failed to remove device', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
   }
 }
 
