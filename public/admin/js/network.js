@@ -140,9 +140,29 @@ async function saveNetworkConfig() {
       subnet: document.getElementById('staticSubnet').value || '24'
     };
 
-    const data = await apiCall('POST', '/api/admin/network', payload);
+    // Bug: applying this change runs `netplan apply` on the server, which
+    // reconfigures the very network interface this request arrived on -
+    // when the admin is connected through that interface (the normal
+    // case), the TCP connection carrying this request can die the instant
+    // the IP changes, even though the change itself succeeded. The old
+    // code just `await`ed the fetch directly, so the button spun forever
+    // waiting for a response that could never arrive over a now-dead
+    // connection - indistinguishable from a real hang. Racing against a
+    // timeout lets this tell the difference and say something useful
+    // instead of spinning silently.
+    const timeoutMs = 9000;
+    const timeout = new Promise((resolve) => setTimeout(() => resolve({ __timedOut: true }), timeoutMs));
+    const data = await Promise.race([apiCall('POST', '/api/admin/network', payload), timeout]);
 
-    if (data.success) {
+    if (data.__timedOut) {
+      status.style.background = 'var(--card-orange-bg, var(--bg-primary))';
+      status.style.color = 'var(--card-orange-text, var(--text-muted))';
+      const ip = document.getElementById('staticIp').value.trim();
+      status.innerHTML = type === 'static'
+        ? `<i class="fas fa-triangle-exclamation"></i> No response yet, likely because the IP just changed and this page's connection was interrupted. Try reaching the admin panel at <strong>${ip}</strong> now.`
+        : '<i class="fas fa-triangle-exclamation"></i> No response yet, likely because the IP just changed. Check your router for the new address.';
+      showToast('Settings likely applied, connection was interrupted by the IP change.', 'error');
+    } else if (data.success) {
       status.style.background = 'var(--card-green-bg)';
       status.style.color = 'var(--card-green-text)';
       if (type === 'dhcp') {
