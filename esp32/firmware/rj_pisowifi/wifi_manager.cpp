@@ -76,6 +76,22 @@ void registerVendo() {
 
 void checkWiFiReconnect() {
   if (WiFi.status() != WL_CONNECTED) {
+    // Bug: the coin gate relay had no safety cutoff tied to connectivity -
+    // if WiFi dropped while the relay was armed (RELAY_TIMEOUT_MS gives up
+    // to 35s per Insert Coin press), the gate stayed physically open for
+    // the rest of that window regardless. A coin dropped in during that
+    // gap gets mechanically accepted by the coin validator (that part is
+    // independent of the ESP32 entirely) but postCoin() can never reach
+    // the server to credit it - money taken, nothing granted, no way for
+    // the customer to know until they check their session. Closing the
+    // gate the instant WiFi drops is the fix: it can't fully prevent this
+    // for whatever coin is already mid-drop at the exact moment
+    // connectivity dies, but it stops every coin after that.
+    if (relayActive) {
+      Serial.println("WiFi down while relay armed — closing coin gate for safety");
+      deactivateRelay();
+    }
+
     // Bug this fixes: a device whose saved WiFi credentials had gone bad
     // (the store's WiFi password changed, the SSID renamed) used to retry
     // those exact same broken credentials forever, silently - the only
