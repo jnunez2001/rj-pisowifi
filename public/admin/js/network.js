@@ -718,17 +718,24 @@ async function previewStandaloneProvisioning() {
   try {
     const data = await apiCall('GET', '/api/admin/network/standalone/provision/preview');
     if (!data.success) throw new Error(data.message);
-    el.innerHTML = '<div style="font-size:13px;font-weight:700;margin-bottom:6px;">Will apply:</div>' +
+    let html = '';
+    if (data.warnings && data.warnings.length) {
+      html += '<div style="background:#fff8e1;border:1px solid #ffa000;border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:13px;color:#e65100;">' +
+        data.warnings.map(w => `<div><i class="fas fa-exclamation-triangle"></i> ${escapeHtml(w)}</div>`).join('') +
+        '</div>';
+    }
+    html += '<div style="font-size:13px;font-weight:700;margin-bottom:6px;">Will apply:</div>' +
       '<ol style="font-size:13px;padding-left:20px;">' +
       data.steps.map(s => `<li>${escapeHtml(s)}</li>`).join('') +
       '</ol>';
+    el.innerHTML = html;
   } catch(e) {
     el.innerHTML = '<div style="color:var(--accent-red);">Failed to build preview: ' + escapeHtml(e.message || 'unknown error') + '</div>';
   }
 }
 
 async function applyStandaloneProvisioning() {
-  if (!confirm("This applies your saved lane configuration to this server's own network stack right now. You're likely connected through it, so a mistake here can cut off access until you're physically at the machine. Continue?")) return;
+  if (!confirm("This applies your saved lane configuration to this server's own network stack right now. You're likely connected through it, so a mistake here can cut off access until you're physically at the machine. Any device with a manually-saved server address (e.g. an ESP32 coin-slot vendo) will need it updated to match its lane's new gateway afterward. Continue?")) return;
   const el = document.getElementById('standaloneProvisionResult');
   el.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Applying configuration...</div>';
   try {

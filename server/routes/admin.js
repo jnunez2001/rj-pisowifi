@@ -2024,10 +2024,19 @@ router.get('/network/standalone/provision/preview', adminAuth, (req, res) => {
       const laneIf = members.length ? `br-lane${h.id}` : iface;
       steps.push(`Lane "${h.lane_name || iface}" (${h.role}): ${laneIf} → 10.${octet}.0.1/24, ${h.speed_mbps || 100}mbit${members.length ? `, bridged with ${members.map((m) => m.vlan_id ? `${m.port_name}.${m.vlan_id}` : m.port_name).join(', ')}` : ''}`);
     });
+    const warnings = [];
     if (heads.length === 0) {
       steps.push('No gated/open lanes configured yet — the legacy single-lane 10.0.0.0/24 setup will be used, unchanged.');
+    } else {
+      // Any device with a manually-saved server address (the clearest
+      // example: an ESP32 coin-slot vendo, configured once through its own
+      // setup portal) has no way to learn its gateway changed - it just
+      // silently stops reaching this server. Surfaced here, right before
+      // Apply, since that's the one moment an admin can still act on it
+      // before a live device goes dark with no obvious cause.
+      warnings.push('Any device with a manually-saved server address (e.g. an ESP32 coin-slot vendo) needs its saved address updated to match its lane\'s new gateway shown below - it has no way to detect this change on its own.');
     }
-    res.json({ success: true, steps, lane_count: heads.length });
+    res.json({ success: true, steps, warnings, lane_count: heads.length });
   } catch (err) {
     console.error('Standalone provision preview error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
