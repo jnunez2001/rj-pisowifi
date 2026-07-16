@@ -12,6 +12,19 @@ function openModal(id) {
   document.getElementById(id).classList.add('show');
 }
 
+// Inline expand/collapse used by several Network tab cards (Internet Plan,
+// Static DHCP Leases, Port Forwarding, VLAN Management, Name Your Devices)
+// instead of a popup - simpler features stay on the page, only genuinely
+// complex ones (Ports and Roles, Router Terminal) get a full modal.
+function toggleAccordion(rowId, panelId, loadFn) {
+  const row = document.getElementById(rowId);
+  const panel = document.getElementById(panelId);
+  const isOpen = panel.style.display === 'block';
+  panel.style.display = isOpen ? 'none' : 'block';
+  row.classList.toggle('open', !isOpen);
+  if (!isOpen && loadFn) loadFn();
+}
+
 // ===== BIOS POWER-LOSS REMINDER =====
 // Can't be set from software (see hardwareDetection.js) - shown only on
 // x86 hardware, since ARM SBCs have no BIOS/soft-off state and don't need
@@ -171,10 +184,6 @@ async function loadIspPlan() {
   } catch(e) {
     console.error('ISP plan load error:', e);
   }
-}
-
-function openIspPlanModal() {
-  openModal('ispPlanModal');
 }
 
 async function saveIspPlan() {
@@ -1052,11 +1061,6 @@ async function loadVlans() {
   }
 }
 
-function openVlanModal() {
-  openModal('vlanListModal');
-  loadVlans();
-}
-
 function openCreateVlanModal() {
   populateVlanBaseInterfaceOptions();
   document.getElementById('vlanIdInput').value = '';
@@ -1136,11 +1140,6 @@ async function deleteVlan(id, ifName) {
 
 // ===== STATIC DHCP LEASES (standalone mode) =====
 
-function openLeasesModal() {
-  openModal('leasesModal');
-  loadStaticLeases();
-}
-
 async function loadStaticLeases() {
   const tbody = document.getElementById('staticLeasesTableBody');
   try {
@@ -1205,11 +1204,6 @@ async function deleteStaticLease(id, mac) {
 }
 
 // ===== PORT FORWARDING (standalone mode) =====
-
-function openPortForwardModal() {
-  openModal('portForwardModal');
-  loadPortForwards();
-}
 
 async function loadPortForwards() {
   const tbody = document.getElementById('portForwardsTableBody');
@@ -1299,15 +1293,6 @@ async function deletePortForward(id, label) {
 }
 
 // ===== CLIENT NAMING =====
-
-function openClientLabelsModal() {
-  openModal('clientLabelsModal');
-  loadClientLabels();
-}
-
-function openDiagnosticsModal() {
-  openModal('diagnosticsModal');
-}
 
 async function loadClientLabels() {
   const tbody = document.getElementById('clientLabelsTableBody');

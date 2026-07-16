@@ -1,14 +1,17 @@
 <style>
 /* Scoped to this page only - grouped-list design language, mapped onto
    the app's existing theme variables (themes.css) so dark mode keeps
-   working automatically, no parallel color system. */
-.zf-network { max-width: 640px; }
+   working automatically, no parallel color system. Column-flow instead of
+   a fixed max-width column so cards actually use available screen width
+   on wide admin displays instead of leaving most of the page blank. */
+.zf-network { column-width: 460px; column-gap: 20px; }
 .zf-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
   border-radius: 14px;
   margin-bottom: 20px;
   overflow: hidden;
+  break-inside: avoid;
 }
 .zf-card-title {
   font-size: 12px;
@@ -75,7 +78,9 @@
 .zf-nav-left { display: flex; flex-direction: column; gap: 2px; }
 .zf-nav-title { font-size: 14px; color: var(--text-primary); }
 .zf-nav-sub { font-size: 12px; color: var(--text-muted); }
-.zf-chevron { color: var(--text-muted); font-size: 15px; }
+.zf-chevron { color: var(--text-muted); font-size: 13px; transition: transform .15s; }
+.zf-nav-row.open .zf-chevron { transform: rotate(90deg); }
+.zf-accordion-panel { display: none; border-top: 1px solid var(--border-color); padding: 14px 16px; }
 .zf-btn-row {
   background: var(--accent-green); color: #fff; border: none; border-radius: 8px;
   font-size: 14px; font-weight: 700; padding: 11px 16px; margin: 4px 16px 16px; cursor: pointer;
@@ -247,32 +252,15 @@
 <!-- ROUTER SETUP (mikrotik mode only) -->
 <div class="zf-card" id="routerSetupCard" style="display:none;">
   <div class="zf-card-title">Router Setup</div>
-  <div class="zf-nav-row" onclick="openIspPlanModal()">
+  <div class="zf-nav-row" id="ispPlanNavRow" onclick="toggleAccordion('ispPlanNavRow','ispPlanPanel',loadIspPlan)">
     <div class="zf-nav-left">
       <div class="zf-nav-title">Internet Plan</div>
       <div class="zf-nav-sub" id="ispPlanNavSub">Loading...</div>
     </div>
     <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <div class="zf-nav-row" onclick="openRouterPortsModal()">
-    <div class="zf-nav-left">
-      <div class="zf-nav-title">Ports and Roles</div>
-      <div class="zf-nav-sub" id="routerPortsSummary">Loading...</div>
-    </div>
-    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
-  </div>
-</div>
-
-<!-- INTERNET PLAN MODAL (mikrotik mode) -->
-<div class="modal-overlay" id="ispPlanModal">
-  <div class="modal" style="max-width:420px;">
-    <div class="modal-header">
-      <div class="modal-title">Internet Plan</div>
-      <button class="modal-close" onclick="closeModal('ispPlanModal')">
-        <i class="fas fa-times"></i>
-      </button>
-    </div>
-    <div class="zf-modal-body-text">Every warning across this router's setup is based on this number, not a fixed default.</div>
+  <div class="zf-accordion-panel" id="ispPlanPanel">
+    <div class="zf-modal-body-text" style="margin-bottom:10px;">Every warning across this router's setup is based on this number, not a fixed default.</div>
     <div class="form-group" style="max-width:220px;">
       <label class="form-label">Total Plan Speed (Mbps)</label>
       <input type="number" id="ispPlanMbps" class="form-control" placeholder="e.g. 50" min="0">
@@ -280,6 +268,13 @@
     <button class="btn btn-primary" onclick="saveIspPlan()">
       <i class="fas fa-save"></i> Save
     </button>
+  </div>
+  <div class="zf-nav-row" onclick="openRouterPortsModal()">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">Ports and Roles</div>
+      <div class="zf-nav-sub" id="routerPortsSummary">Loading...</div>
+    </div>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
 </div>
 
@@ -341,75 +336,14 @@
     </div>
     <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <div class="zf-nav-row" onclick="openLeasesModal()">
+  <div class="zf-nav-row" id="leasesNavRow" onclick="toggleAccordion('leasesNavRow','leasesPanel',loadStaticLeases)">
     <div class="zf-nav-left">
       <div class="zf-nav-title">Static DHCP Leases</div>
       <div class="zf-nav-sub" id="leasesNavSub">Loading...</div>
     </div>
     <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <div class="zf-nav-row" onclick="openPortForwardModal()">
-    <div class="zf-nav-left">
-      <div class="zf-nav-title">Port Forwarding</div>
-      <div class="zf-nav-sub" id="portForwardNavSub">Loading...</div>
-    </div>
-    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
-  </div>
-</div>
-
-<!-- STANDALONE MODE: PORTS AND ROLES + APPLY MODAL -->
-<div class="modal-overlay" id="standalonePortsModal">
-  <div class="modal" style="max-width:720px;">
-    <div class="modal-header">
-      <div class="modal-title">Ports and Roles</div>
-      <button class="modal-close" onclick="closeModal('standalonePortsModal')">
-        <i class="fas fa-times"></i>
-      </button>
-    </div>
-    <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
-      <i class="fas fa-info-circle"></i>
-      Mark a port (or a VLAN lane on it) as <strong>Gated</strong> for paid customer access, <strong>Open</strong> for trusted free access, or <strong>WAN</strong> for your internet connection. Combine ports and lanes to share one subnet across more than one wire.
-    </div>
-    <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
-      <button type="button" class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="loadStandalonePorts()">
-        <i class="fas fa-rotate"></i> Rescan
-      </button>
-    </div>
-    <div id="standalonePortsList" style="max-height:340px;overflow-y:auto;">
-      <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
-    </div>
-    <p id="standalonePortsTotal" style="font-size:13px;margin-top:10px;"></p>
-    <button class="btn btn-primary" onclick="saveStandalonePorts()">
-      <i class="fas fa-save"></i> Save Port Roles
-    </button>
-
-    <div style="border-top:1px solid var(--border-color);margin-top:18px;padding-top:16px;">
-      <div style="font-weight:700;font-size:14px;margin-bottom:6px;"><i class="fas fa-bolt" style="margin-right:6px;color:var(--accent-yellow);"></i>Apply Ports and Roles</div>
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
-        Save your port roles above first. Preview what will happen before applying. This reconfigures live networking on the machine you're likely connected through.
-      </p>
-      <div style="display:flex;gap:10px;">
-        <button class="btn btn-secondary" onclick="previewStandaloneProvisioning()">
-          <i class="fas fa-eye"></i> Preview Changes
-        </button>
-        <button class="btn btn-primary" onclick="applyStandaloneProvisioning()">
-          <i class="fas fa-bolt"></i> Apply
-        </button>
-      </div>
-      <div id="standaloneProvisionResult" style="margin-top:16px;"></div>
-    </div>
-  </div>
-</div>
-
-<!-- STATIC DHCP LEASES MODAL -->
-<div class="modal-overlay" id="leasesModal">
-  <div class="modal" style="max-width:640px;">
-    <div class="modal-header">
-      <div class="modal-title">Static DHCP Leases</div>
-      <button class="modal-close" onclick="closeModal('leasesModal')">
-        <i class="fas fa-times"></i>
-      </button>
-    </div>
+  <div class="zf-accordion-panel" id="leasesPanel">
     <div class="zf-modal-body-text">Useful for printers, cameras, or staff devices that need a fixed address instead of whatever the DHCP pool assigns.</div>
     <div class="table-wrapper">
       <table>
@@ -444,17 +378,14 @@
       <i class="fas fa-plus"></i> Reserve IP
     </button>
   </div>
-</div>
-
-<!-- PORT FORWARDING MODAL -->
-<div class="modal-overlay" id="portForwardModal">
-  <div class="modal" style="max-width:680px;">
-    <div class="modal-header">
-      <div class="modal-title">Port Forwarding</div>
-      <button class="modal-close" onclick="closeModal('portForwardModal')">
-        <i class="fas fa-times"></i>
-      </button>
+  <div class="zf-nav-row" id="portForwardNavRow" onclick="toggleAccordion('portForwardNavRow','portForwardPanel',loadPortForwards)">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">Port Forwarding</div>
+      <div class="zf-nav-sub" id="portForwardNavSub">Loading...</div>
     </div>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+  </div>
+  <div class="zf-accordion-panel" id="portForwardPanel">
     <div class="zf-modal-body-text">Let a specific service on your LAN be reached from the internet.</div>
     <div class="table-wrapper">
       <table>
@@ -504,6 +435,50 @@
   </div>
 </div>
 
+<!-- STANDALONE MODE: PORTS AND ROLES + APPLY MODAL -->
+<div class="modal-overlay" id="standalonePortsModal">
+  <div class="modal" style="max-width:720px;">
+    <div class="modal-header">
+      <div class="modal-title">Ports and Roles</div>
+      <button class="modal-close" onclick="closeModal('standalonePortsModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
+      <i class="fas fa-info-circle"></i>
+      Mark a port (or a VLAN lane on it) as <strong>Gated</strong> for paid customer access, <strong>Open</strong> for trusted free access, or <strong>WAN</strong> for your internet connection. Combine ports and lanes to share one subnet across more than one wire.
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+      <button type="button" class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="loadStandalonePorts()">
+        <i class="fas fa-rotate"></i> Rescan
+      </button>
+    </div>
+    <div id="standalonePortsList" style="max-height:340px;overflow-y:auto;">
+      <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+    </div>
+    <p id="standalonePortsTotal" style="font-size:13px;margin-top:10px;"></p>
+    <button class="btn btn-primary" onclick="saveStandalonePorts()">
+      <i class="fas fa-save"></i> Save Port Roles
+    </button>
+
+    <div style="border-top:1px solid var(--border-color);margin-top:18px;padding-top:16px;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:6px;"><i class="fas fa-bolt" style="margin-right:6px;color:var(--accent-yellow);"></i>Apply Ports and Roles</div>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+        Save your port roles above first. Preview what will happen before applying. This reconfigures live networking on the machine you're likely connected through.
+      </p>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-secondary" onclick="previewStandaloneProvisioning()">
+          <i class="fas fa-eye"></i> Preview Changes
+        </button>
+        <button class="btn btn-primary" onclick="applyStandaloneProvisioning()">
+          <i class="fas fa-bolt"></i> Apply
+        </button>
+      </div>
+      <div id="standaloneProvisionResult" style="margin-top:16px;"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ADMIN PORTAL ADDRESS (both modes) -->
 <div class="zf-card">
   <div class="zf-card-title">Admin Portal Address</div>
@@ -533,24 +508,17 @@
 <!-- VLAN MANAGEMENT -->
 <div class="zf-card">
   <div class="zf-card-title">VLAN Management</div>
-  <div class="zf-nav-row" onclick="openVlanModal()">
+  <div class="zf-nav-row" id="vlanNavRow" onclick="toggleAccordion('vlanNavRow','vlanPanel',loadVlans)">
     <div class="zf-nav-left">
       <div class="zf-nav-title">VLAN Management</div>
       <div class="zf-nav-sub" id="vlanNavSub">Loading...</div>
     </div>
     <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <div class="zf-footnote">Available in both Standalone and External Router mode. Use this if your ISP requires a VLAN-tagged connection, or if you're sharing one cable between your internet connection and an access point's customer WiFi traffic.</div>
-</div>
-
-<!-- VLAN MANAGEMENT MODAL (list) -->
-<div class="modal-overlay" id="vlanListModal">
-  <div class="modal" style="max-width:720px;">
-    <div class="modal-header">
-      <div class="modal-title">VLAN Management</div>
-      <button class="modal-close" onclick="closeModal('vlanListModal')">
-        <i class="fas fa-times"></i>
-      </button>
+  <div class="zf-accordion-panel" id="vlanPanel">
+    <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
+      <i class="fas fa-info-circle"></i>
+      Use this if your ISP requires a VLAN-tagged connection, or if you're sharing one cable between your internet connection and an access point's customer WiFi traffic. Changes take effect immediately after saving.
     </div>
     <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
       <button class="btn btn-primary" style="padding:6px 12px;font-size:13px;" onclick="openCreateVlanModal()">
@@ -579,34 +547,17 @@
   </div>
 </div>
 
-<!-- DEVICES AND DIAGNOSTICS (both modes) -->
+<!-- DEVICES (both modes) -->
 <div class="zf-card">
-  <div class="zf-card-title">Devices and Diagnostics</div>
-  <div class="zf-nav-row" onclick="openClientLabelsModal()">
+  <div class="zf-card-title">Devices</div>
+  <div class="zf-nav-row" id="clientLabelsNavRow" onclick="toggleAccordion('clientLabelsNavRow','clientLabelsPanel',loadClientLabels)">
     <div class="zf-nav-left">
       <div class="zf-nav-title">Name Your Devices</div>
       <div class="zf-nav-sub" id="clientLabelsNavSub">Loading...</div>
     </div>
     <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
-  <div class="zf-nav-row" onclick="openDiagnosticsModal()">
-    <div class="zf-nav-left">
-      <div class="zf-nav-title">Network Diagnostics</div>
-      <div class="zf-nav-sub">Ping or trace a route from this server</div>
-    </div>
-    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
-  </div>
-</div>
-
-<!-- NAME YOUR DEVICES MODAL -->
-<div class="modal-overlay" id="clientLabelsModal">
-  <div class="modal" style="max-width:560px;">
-    <div class="modal-header">
-      <div class="modal-title">Name Your Devices</div>
-      <button class="modal-close" onclick="closeModal('clientLabelsModal')">
-        <i class="fas fa-times"></i>
-      </button>
-    </div>
+  <div class="zf-accordion-panel" id="clientLabelsPanel">
     <div class="zf-modal-body-text">Give a MAC address a friendly name so it's easy to recognize elsewhere.</div>
     <div class="table-wrapper">
       <table>
@@ -638,27 +589,20 @@
   </div>
 </div>
 
-<!-- NETWORK DIAGNOSTICS MODAL -->
-<div class="modal-overlay" id="diagnosticsModal">
-  <div class="modal" style="max-width:560px;">
-    <div class="modal-header">
-      <div class="modal-title">Network Diagnostics</div>
-      <button class="modal-close" onclick="closeModal('diagnosticsModal')">
-        <i class="fas fa-times"></i>
-      </button>
-    </div>
-    <div class="zf-modal-body-text">Ping or trace a route from this server, for troubleshooting.</div>
-    <div style="display:flex;gap:8px;margin-bottom:12px;">
-      <input type="text" id="diagTarget" class="form-control" placeholder="8.8.8.8 or google.com">
-      <button class="btn btn-secondary" onclick="runDiagnostic('ping')">
-        <i class="fas fa-satellite-dish"></i> Ping
-      </button>
-      <button class="btn btn-secondary" onclick="runDiagnostic('traceroute')">
-        <i class="fas fa-diagram-project"></i> Traceroute
-      </button>
-    </div>
-    <div id="diagOutput" style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:8px;height:180px;overflow-y:auto;white-space:pre-wrap;">Enter a target above, then choose Ping or Traceroute.</div>
+<!-- NETWORK DIAGNOSTICS (both modes, always visible, not a popup or dropdown) -->
+<div class="zf-card">
+  <div class="zf-card-title">Network Diagnostics</div>
+  <div style="padding:0 16px 12px;font-size:13px;color:var(--text-muted);">Ping or trace a route from this server, for troubleshooting.</div>
+  <div style="display:flex;gap:8px;padding:0 16px 12px;">
+    <input type="text" id="diagTarget" class="form-control" placeholder="8.8.8.8 or google.com">
+    <button class="btn btn-secondary" onclick="runDiagnostic('ping')">
+      <i class="fas fa-satellite-dish"></i> Ping
+    </button>
+    <button class="btn btn-secondary" onclick="runDiagnostic('traceroute')">
+      <i class="fas fa-diagram-project"></i> Traceroute
+    </button>
   </div>
+  <div id="diagOutput" style="margin:0 16px 16px;background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:8px;height:180px;overflow-y:auto;white-space:pre-wrap;">Enter a target above, then choose Ping or Traceroute.</div>
 </div>
 
 <!-- CREATE VLAN MODAL -->
