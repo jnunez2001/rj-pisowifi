@@ -1,6 +1,6 @@
 {
   "name": "rj-pisowifi",
-  "version": "1.0.3",
+  "version": "1.0.2",
   "description": "Zenfi WiFi rental server",
   "main": "server/app.js",
   "scripts": {
