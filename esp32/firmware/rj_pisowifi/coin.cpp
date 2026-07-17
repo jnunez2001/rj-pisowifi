@@ -4,9 +4,20 @@
 
 portMUX_TYPE coinMux = portMUX_INITIALIZER_UNLOCKED;
 
+// Temporary hardware workaround, 2026-07-17: the coin gate relay is
+// currently stuck physically open regardless of software state (a
+// wiring/relay-module fault - see config.h's own history on this, both
+// active-high and active-low logic were already tried without fixing it).
+// With the gate stuck open, coins can drop in whether or not anyone
+// pressed Insert Coin, but this guard was still discarding every one of
+// those pulses since coinSlotActive only ever gets set by a legitimate
+// activateRelay() call - money taken, nothing credited, worse than doing
+// nothing. Counting every pulse regardless of gate-trigger state at least
+// makes money-in match time-out until the relay itself is physically
+// fixed. Once it is, restore the `if (!coinSlotActive) return;` guard so
+// coins outside a real Insert Coin window go back to being ignored rather
+// than silently credited to whichever session happens to be pending.
 void IRAM_ATTR onCoinPulse() {
-  if (!coinSlotActive) return;
-
   portENTER_CRITICAL_ISR(&coinMux);
   coinPulseCount++;
   lastPulseTime = millis();
