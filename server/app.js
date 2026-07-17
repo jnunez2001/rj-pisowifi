@@ -59,7 +59,17 @@ function isLocalRequest(req) {
   return addr === '127.0.0.1' || addr === '::1' || addr === '::ffff:127.0.0.1';
 }
 function restrictAdminToLocalhost(req, res, next) {
-  if (isLocalRequest(req) || ADMIN_LAN_ALLOWED_PATHS.has(req.path)) return next();
+  // Bug found on real hardware: this used to check req.path, which Express
+  // strips the mount prefix from inside a middleware registered via
+  // app.use('/api/admin', ...) - so a request to /api/admin/vendo/register
+  // saw req.path as just "/vendo/register", which never matched this set's
+  // full-path entries. Every real LAN device (the ESP32 vendo, on every
+  // register call and every heartbeat) got silently 404'd here no matter
+  // what, while a curl from localhost "worked" only because it short-
+  // circuits on isLocalRequest() before this check is ever reached.
+  // req.originalUrl always holds the full path regardless of mount depth.
+  const path = req.originalUrl.split('?')[0];
+  if (isLocalRequest(req) || ADMIN_LAN_ALLOWED_PATHS.has(path)) return next();
   // 404, not 403 - a direct LAN probe shouldn't even get confirmation
   // that an admin panel exists here at all.
   return res.status(404).end();
