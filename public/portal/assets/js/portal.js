@@ -480,10 +480,25 @@ function updateUI(session) {
       if (remaining <= 0) {
         clearInterval(timerInterval);
         timeDisplay.textContent = '00:00:00';
-        setTimeout(checkSession, 2000);
+        // Bug: the local countdown hitting zero doesn't mean the server has
+        // actually expired the session yet - timerService.js's sweep only
+        // runs every 30s, so a single checkSession() 2s after zero often
+        // landed in that gap and found the session still "active" (with
+        // internet already gone the moment the sweep does run). The page
+        // just sat on 00:00:00 with no clear message - looked like a
+        // connected-but-broken WiFi, not an expired session. Poll tightly
+        // for the first 40s after hitting zero instead of a single check,
+        // so it catches the real server-side expiry within a few seconds
+        // of it happening rather than waiting for the next regular 8s poll.
+        let catchUpChecks = 0;
+        const catchUpInterval = setInterval(() => {
+          catchUpChecks++;
+          checkSession();
+          if (catchUpChecks >= 8) clearInterval(catchUpInterval); // ~40s at 5s each
+        }, 5000);
       } else {
         timeDisplay.textContent = formatTime(remaining);
-        expiryWarning.style.display = remaining < 5 ? 'block' : 'none';
+        expiryWarning.style.display = remaining <= 2 ? 'block' : 'none';
       }
     }, 1000);
   }
