@@ -4,20 +4,22 @@
 
 portMUX_TYPE coinMux = portMUX_INITIALIZER_UNLOCKED;
 
-// Temporary hardware workaround, 2026-07-17: the coin gate relay is
-// currently stuck physically open regardless of software state (a
-// wiring/relay-module fault - see config.h's own history on this, both
-// active-high and active-low logic were already tried without fixing it).
-// With the gate stuck open, coins can drop in whether or not anyone
-// pressed Insert Coin, but this guard was still discarding every one of
-// those pulses since coinSlotActive only ever gets set by a legitimate
-// activateRelay() call - money taken, nothing credited, worse than doing
-// nothing. Counting every pulse regardless of gate-trigger state at least
-// makes money-in match time-out until the relay itself is physically
-// fixed. Once it is, restore the `if (!coinSlotActive) return;` guard so
-// coins outside a real Insert Coin window go back to being ignored rather
-// than silently credited to whichever session happens to be pending.
+// Reverted 2026-07-17, same day: briefly counted every pulse regardless of
+// coinSlotActive (see git history) to stop legitimately-mistimed coins from
+// being silently discarded while the coin gate relay is stuck physically
+// open (a wiring/relay-module fault - see config.h's own history on this).
+// In practice this let anyone generate credit at will once they noticed the
+// gate ignores whether Insert Coin was ever pressed - real fraud, not just
+// an edge case, and worse than the problem it was meant to solve. Back to
+// only counting pulses during a legitimate Insert Coin window
+// (coinSlotActive, set by activateRelay()). The underlying stuck-open gate
+// still needs a physical fix - until then, coins dropped outside a real
+// Insert Coin window are ignored again (as they should be), and the coin
+// slot should stay physically disconnected if it can't be trusted to stay
+// closed on its own.
 void IRAM_ATTR onCoinPulse() {
+  if (!coinSlotActive) return;
+
   portENTER_CRITICAL_ISR(&coinMux);
   coinPulseCount++;
   lastPulseTime = millis();
