@@ -74,10 +74,17 @@ router.post('/redeem', async (req, res) => {
       });
     }
 
-    // Check if MAC has already redeemed ANY promo (prevent duplicate redemption)
+    // Bug: this included 'used' (a promo whose session already fully ended -
+    // sessionService.js's expireSession() marks it 'used' the moment that
+    // happens) alongside 'active' (a promo whose session is currently
+    // live). Meant to block redeeming a second code while one is still
+    // running - matches the error message's own "wait for your session to
+    // expire" wording - but including 'used' blocked every device from
+    // ever redeeming a second promo code again, forever, even long after
+    // its first session had completely ended. Only 'active' should block.
     const previousPromo = db.prepare(`
       SELECT id FROM promo_vouchers
-      WHERE mac_address = ? AND status IN ('active', 'used')
+      WHERE mac_address = ? AND status = 'active'
     `).get(mac);
 
     if (previousPromo) {
