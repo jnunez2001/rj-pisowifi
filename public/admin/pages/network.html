@@ -50,6 +50,21 @@
 .zf-pw-wrap { display: flex; align-items: center; gap: 6px; }
 .zf-pw-wrap input { width: 130px; }
 .zf-eye-btn { border: none; background: none; color: var(--accent-blue); font-size: 12px; cursor: pointer; padding: 4px; white-space: nowrap; }
+/* Bug: label and value stayed side-by-side no matter how narrow the
+   screen got, so a long value (an IP address, a subnet string, a saved
+   hostname) had nowhere to go but get clipped by the row's fixed-width
+   input column. Below this width, stack value under label instead - full
+   width, nothing to truncate. */
+@media (max-width: 480px) {
+  .zf-row { flex-wrap: wrap; }
+  .zf-row-label { width: 100%; }
+  .zf-row input[type=text], .zf-row input[type=password], .zf-row input[type=number], .zf-row select {
+    width: 100%;
+    text-align: left;
+  }
+  .zf-pw-wrap { width: 100%; }
+  .zf-pw-wrap input { width: 100%; }
+}
 .zf-segmented {
   display: flex;
   background: var(--bg-primary);
