@@ -16,6 +16,28 @@ LOG="/var/log/rj-network-setup.log"
 DB="${DB_PATH:-/var/lib/rj-pisowifi/database/rjpisowifi.db}"
 GATEWAY_IP="10.0.0.1"
 
+# Cross-checked against an OpenWrt/rockchip reference build's
+# etc/init.d/packet_steering — it spreads each interface's RX packet
+# processing (RPS) across every CPU core instead of leaving it pinned to
+# whichever core handles that NIC's interrupt. On a multi-core board doing
+# NAT + nftables + tc shaping (Orange Pi 3B class hardware), that single
+# core can become the real throughput ceiling well before the network link
+# itself does. Best-effort: /sys queue files don't exist on every kernel/
+# NIC driver, and interfaces here are frequently VLAN sub-interfaces or
+# bridges created moments earlier, so failures are silently ignored rather
+# than aborting network setup over a pure performance tweak.
+enable_rps() {
+    local ifc="$1"
+    local ncpus
+    ncpus=$(nproc 2>/dev/null || echo 1)
+    [ "$ncpus" -le 1 ] && return 0
+    local mask
+    mask=$(printf '%x' $(( (1 << ncpus) - 1 )))
+    for q in /sys/class/net/"$ifc"/queues/rx-*/rps_cpus; do
+        [ -e "$q" ] && echo "$mask" > "$q" 2>/dev/null || true
+    done
+}
+
 echo "=== R&J Network Setup $(date) ===" >> $LOG
 
 # Read from DB
@@ -239,6 +261,8 @@ if [ "$NETWORK_MODE" = "standalone" ] && [ "$MULTI_LANE_MODE" = "1" ]; then
       fi
   done <<< "$(sqlite3 -separator '|' "$DB" "SELECT port_name, vlan_id FROM router_ports WHERE role='wan' ORDER BY id;" 2>/dev/null)"
 
+  enable_rps "$WAN_VIF"
+
   echo 1 > /proc/sys/net/ipv4/ip_forward
 
   iptables -t nat -F POSTROUTING 2>/dev/null
@@ -331,6 +355,8 @@ if [ "$NETWORK_MODE" = "standalone" ] && [ "$MULTI_LANE_MODE" = "1" ]; then
           # nothing to enforce here, logged so it's not a silent no-op.
           [ "$H_ISOLATE" = "1" ] && echo "Lane $H_ID ($LANE_IF): isolate_clients has no effect without a bridged second port - enable client isolation on the access point itself" >> $LOG
       fi
+
+      enable_rps "$LANE_IF"
 
       OCTET=$((50 + LANE_INDEX))
       LANE_GATEWAY="10.${OCTET}.0.1"
@@ -468,6 +494,9 @@ elif [ "$NETWORK_MODE" = "standalone" ]; then
   ip addr add ${GATEWAY_IP}/24 dev $LAN_VIF
   ip link set $LAN_VIF up
   echo "LAN: $LAN_VIF → $GATEWAY_IP" >> $LOG
+
+  enable_rps "$WAN_VIF"
+  enable_rps "$LAN_VIF"
 
   # IP forwarding
   echo 1 > /proc/sys/net/ipv4/ip_forward

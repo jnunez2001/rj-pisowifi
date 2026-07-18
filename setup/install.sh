@@ -182,12 +182,47 @@ EOF
 cat > /etc/systemd/system/rj-network-setup.service << EOF
 [Unit]
 Description=R&J PisoWifi Network Setup
-After=network.target
+After=network.target rj-fix-clock.service
 
 [Service]
 Type=oneshot
 ExecStart=/bin/bash $APP_DIR/setup/setup-network.sh
 RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Cross-checked against an OpenWrt/rockchip reference build (see
+# setup/fix-clock.sh and setup/set-cpu-performance.sh for the reasoning
+# behind each). Runs as early as possible, ahead of network setup and the
+# app itself, since a wrong clock at that point can make session/promo
+# expiry checks and nginx's TLS cert validation wrong for the whole window
+# until NTP syncs.
+chmod +x $APP_DIR/setup/fix-clock.sh $APP_DIR/setup/set-cpu-performance.sh
+
+cat > /etc/systemd/system/rj-fix-clock.service << EOF
+[Unit]
+Description=R&J PisoWifi Clock Sanity Check
+Before=rj-network-setup.service rj-pisowifi.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $APP_DIR/setup/fix-clock.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+EOF
+
+cat > /etc/systemd/system/rj-cpu-performance.service << EOF
+[Unit]
+Description=R&J PisoWifi CPU Governor
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $APP_DIR/setup/set-cpu-performance.sh
 
 [Install]
 WantedBy=multi-user.target
@@ -229,6 +264,9 @@ EOF
 systemctl daemon-reload >> $LOG 2>&1
 systemctl enable rj-pisowifi >> $LOG 2>&1
 systemctl enable rj-network-setup >> $LOG 2>&1
+systemctl enable rj-fix-clock >> $LOG 2>&1
+systemctl enable rj-cpu-performance >> $LOG 2>&1
+systemctl start rj-cpu-performance >> $LOG 2>&1
 systemctl enable rj-pisowifi-watchdog.timer >> $LOG 2>&1
 systemctl start rj-pisowifi-watchdog.timer >> $LOG 2>&1
 echo "Services installed" | tee -a $LOG
