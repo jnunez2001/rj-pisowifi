@@ -30,7 +30,17 @@ fi
 echo "[2/3] Starting Pi-hole container (loopback-only)..." | tee -a $LOG
 
 if docker ps -a --format '{{.Names}}' | grep -qx rj-pihole; then
-  echo "rj-pihole container already exists, leaving it as-is (re-run 'docker rm -f rj-pihole' first to recreate)" | tee -a $LOG
+  # Bug: an existing-but-stopped container (e.g. after a reboot before the
+  # --restart policy caught up, or a prior partial run) was left stopped -
+  # enable_pihole would still get set to 1 below, so dnsmasq would point at
+  # an upstream nothing is listening on. Fail-open design means customers
+  # never lose DNS either way, but filtering would silently just not work.
+  if ! docker ps --format '{{.Names}}' | grep -qx rj-pihole; then
+    echo "rj-pihole container exists but is stopped - starting it" | tee -a $LOG
+    docker start rj-pihole >> $LOG 2>&1
+  else
+    echo "rj-pihole container already running, leaving it as-is (re-run 'docker rm -f rj-pihole' first to recreate)" | tee -a $LOG
+  fi
 else
   ADMIN_PASS=$(openssl rand -base64 18)
   docker run -d \
