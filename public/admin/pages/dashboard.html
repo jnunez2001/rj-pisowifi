@@ -1,5 +1,16 @@
-<div class="page-title">Dashboard</div>
-<div class="page-subtitle">Welcome back! Here's what's happening today.</div>
+<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+  <div>
+    <div class="page-title">Dashboard</div>
+    <div class="page-subtitle">Welcome back! Here's what's happening today.</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <span style="font-size:13px;color:var(--text-muted);font-weight:600;">Comprehensive View</span>
+    <label class="toggle-switch">
+      <input type="checkbox" id="dashboardComprehensiveToggle" onchange="toggleDashboardMode()">
+      <span class="toggle-slider"></span>
+    </label>
+  </div>
+</div>
 
 <!-- STAT CARDS -->
 <div class="stat-grid">
@@ -27,6 +38,21 @@
     <div class="stat-value" id="activeSessions">0</div>
     <div class="stat-desc">Currently Connected</div>
   </div>
+</div>
+
+<!-- NETWORK TRAFFIC (Comprehensive View only) -->
+<div class="card" id="networkTrafficCard" style="display:none;margin-bottom:16px;">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Network Traffic</div>
+      <div class="card-subtitle">Live bandwidth, updated every few seconds</div>
+    </div>
+    <div style="display:flex;gap:16px;font-size:13px;">
+      <span style="color:var(--accent-green);font-weight:700;"><i class="fas fa-arrow-down"></i> <span id="currentDownload">0</span> Mbps</span>
+      <span style="color:var(--accent-blue);font-weight:700;"><i class="fas fa-arrow-up"></i> <span id="currentUpload">0</span> Mbps</span>
+    </div>
+  </div>
+  <canvas id="networkChart" height="70"></canvas>
 </div>
 
 <!-- CHARTS + STATUS ROW -->

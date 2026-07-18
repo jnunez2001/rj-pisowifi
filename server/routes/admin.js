@@ -1023,6 +1023,46 @@ function getAvailableMem() {
 }
 
 // GET /api/admin/sysinfo
+// GET /api/admin/network-stats — Dashboard's optional (comprehensive mode
+// only) live bandwidth graph. Standalone mode computes a rate from two
+// interface byte-counter samples (module-level cache below); router mode
+// asks the MikroTik directly for an instant rate on the gated port(s),
+// which needs no sampling at all. Either path fails soft to 0/0 rather
+// than erroring - this is a nice-to-have graph, not core function.
+let lastIfSample = null; // { bytes: {rx, tx}, time }
+
+router.get('/network-stats', adminAuth, async (req, res) => {
+  try {
+    const mode = db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
+
+    if (mode === 'mikrotik') {
+      const gatedPorts = db.prepare("SELECT port_name FROM router_ports WHERE role = 'gated'").all().map(r => r.port_name);
+      if (gatedPorts.length === 0) return res.json({ success: true, download_mbps: 0, upload_mbps: 0 });
+      const traffic = await require('../services/mikrotikService').getInterfaceTraffic(gatedPorts);
+      return res.json({ success: true, ...traffic });
+    }
+
+    const lanIf = db.prepare("SELECT value FROM settings WHERE key = 'lan_interface'").get()?.value || 'enp0s8';
+    const rxBytes = parseInt(fs.readFileSync(`/sys/class/net/${lanIf}/statistics/rx_bytes`, 'utf8').trim(), 10);
+    const txBytes = parseInt(fs.readFileSync(`/sys/class/net/${lanIf}/statistics/tx_bytes`, 'utf8').trim(), 10);
+    const now = Date.now();
+
+    if (!lastIfSample) {
+      lastIfSample = { rxBytes, txBytes, time: now };
+      return res.json({ success: true, download_mbps: 0, upload_mbps: 0 });
+    }
+
+    const elapsedSec = (now - lastIfSample.time) / 1000;
+    const download_mbps = elapsedSec > 0 ? Math.round(((rxBytes - lastIfSample.rxBytes) * 8 / 1000000 / elapsedSec) * 10) / 10 : 0;
+    const upload_mbps = elapsedSec > 0 ? Math.round(((txBytes - lastIfSample.txBytes) * 8 / 1000000 / elapsedSec) * 10) / 10 : 0;
+    lastIfSample = { rxBytes, txBytes, time: now };
+
+    return res.json({ success: true, download_mbps: Math.max(0, download_mbps), upload_mbps: Math.max(0, upload_mbps) });
+  } catch (err) {
+    return res.json({ success: true, download_mbps: 0, upload_mbps: 0 });
+  }
+});
+
 router.get('/sysinfo', adminAuth, async (req, res) => {
   try {
     const cpus = os.cpus();

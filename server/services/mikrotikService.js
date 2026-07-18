@@ -373,6 +373,33 @@ async function getLiveStatus() {
   });
 }
 
+// Dashboard's optional Network Traffic graph (comprehensive mode). RouterOS
+// gives an instant rate directly via monitor-traffic's "once" mode - no
+// need to sample twice and compute a delta client-side the way the
+// standalone/interface-counter path has to.
+async function getInterfaceTraffic(interfaceNames) {
+  const config = getMikrotikConfig();
+  if (!config.ip || !interfaceNames.length) return { download_mbps: 0, upload_mbps: 0 };
+  return withMikrotik(config, async (client) => {
+    let rxTotal = 0;
+    let txTotal = 0;
+    for (const name of interfaceNames) {
+      const res = await client.talk(['/interface/monitor-traffic', `=interface=${name}`, '=once=']);
+      const r = res.re[0] || {};
+      rxTotal += parseInt(r['rx-bits-per-second'], 10) || 0;
+      txTotal += parseInt(r['tx-bits-per-second'], 10) || 0;
+    }
+    // Measuring the customer-facing (gated LAN) interface, not WAN: traffic
+    // the router TRANSMITS out that port is what customers are downloading,
+    // traffic it RECEIVES on that port is what they're uploading - the
+    // reverse of how rx/tx would read on the WAN side.
+    return {
+      download_mbps: Math.round((txTotal / 1000000) * 10) / 10,
+      upload_mbps: Math.round((rxTotal / 1000000) * 10) / 10
+    };
+  });
+}
+
 // "Test connection" button — just needs to prove login succeeds, doesn't
 // need the full status payload.
 async function testConnection() {
@@ -419,6 +446,7 @@ module.exports = {
   isMikrotikModeEnabled,
   getRouterPorts,
   getLiveStatus,
+  getInterfaceTraffic,
   testConnection,
   getMacFromIp,
 };
