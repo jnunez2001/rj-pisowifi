@@ -107,6 +107,18 @@
       <button class="btn btn-sm btn-secondary" onclick="setPromo(7,'days',150)">7 days / ₱150</button>
       <button class="btn btn-sm btn-secondary" onclick="setPromo(30,'days',300)">30 days / ₱300</button>
     </div>
+    <div class="card-title" style="font-size:13px;margin:8px 0;color:var(--text-muted);">SPEED (optional)</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Download (Mbps)</label>
+        <input type="number" id="promoDownloadMbps" class="form-control" placeholder="Use global setting" min="1">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Upload (Mbps)</label>
+        <input type="number" id="promoUploadMbps" class="form-control" placeholder="Same as download" min="1">
+      </div>
+    </div>
+    <small style="color:var(--text-muted);display:block;margin-bottom:16px;">Leave blank to use the global Bandwidth Control setting (Security page) — same as a coin session gets.</small>
     <div style="display:flex;gap:10px;justify-content:flex-end;">
       <button class="btn btn-secondary" onclick="closeModal('promoModal')">Cancel</button>
       <button class="btn btn-primary" onclick="createPromo()">

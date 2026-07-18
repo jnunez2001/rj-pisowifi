@@ -107,6 +107,8 @@ function openCreateVoucher() {
   document.getElementById('promoDuration').value = '';
   document.getElementById('promoDurationUnit').value = 'days';
   document.getElementById('promoPrice').value = '';
+  document.getElementById('promoDownloadMbps').value = '';
+  document.getElementById('promoUploadMbps').value = '';
   document.getElementById('promoModal').classList.add('show');
 }
 
@@ -127,11 +129,15 @@ async function createPromo() {
   }
 
   const minutes = durationToMinutes(duration, unit);
+  const downloadMbps = document.getElementById('promoDownloadMbps').value.trim();
+  const uploadMbps = document.getElementById('promoUploadMbps').value.trim();
 
   try {
     const data = await apiCall('POST', '/api/admin/promos', {
       duration_minutes: minutes,
-      price
+      price,
+      download_mbps: downloadMbps || null,
+      upload_mbps: uploadMbps || null
     });
 
     if (data.success) {

@@ -375,10 +375,13 @@ router.get('/promos', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/promos
+// POST /api/admin/promos — a one-off code, generated the same way a
+// voucher group's codes are (see generateCustomVoucherCode() below) rather
+// than the old fixed "PROMO-XXXXXX" format, so a single voucher and a
+// batch-created one look and behave the same to a customer.
 router.post('/promos', adminAuth, (req, res) => {
   try {
-    const { duration_days, duration_minutes, price } = req.body;
+    const { duration_days, duration_minutes, price, download_mbps, upload_mbps } = req.body;
 
     // Support both duration_minutes (new) and duration_days (old)
     const minutes = duration_minutes || (duration_days * 1440);
@@ -391,16 +394,27 @@ router.post('/promos', adminAuth, (req, res) => {
       return res.status(400).json({ success: false, message: 'Price must be a non-negative number' });
     }
 
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let code = 'PROMO-';
-    for (let i = 0; i < 6; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
+    // Optional per-voucher bandwidth override - blank/omitted means "use
+    // whatever the global Bandwidth Control setting (Security page) says",
+    // same as a coin-paid session gets.
+    const downloadMbps = (download_mbps !== undefined && download_mbps !== null && download_mbps !== '')
+      ? parseInt(download_mbps, 10) : null;
+    const uploadMbps = (upload_mbps !== undefined && upload_mbps !== null && upload_mbps !== '')
+      ? parseInt(upload_mbps, 10) : null;
+    if (download_mbps !== undefined && download_mbps !== null && download_mbps !== '' && (!Number.isFinite(downloadMbps) || downloadMbps <= 0)) {
+      return res.status(400).json({ success: false, message: 'Download speed must be a positive number' });
     }
+    if (upload_mbps !== undefined && upload_mbps !== null && upload_mbps !== '' && (!Number.isFinite(uploadMbps) || uploadMbps <= 0)) {
+      return res.status(400).json({ success: false, message: 'Upload speed must be a positive number' });
+    }
+
+    const code = generateCustomVoucherCode(6, 'mixed', 'upper');
 
     // Store as fractional days for backward compat
     const durationDays = minutes / 1440;
-    db.prepare('INSERT INTO promo_vouchers (code, duration_days, price) VALUES (?, ?, ?)').run(code, durationDays, p);
-    console.log(`🎫 Promo created: ${code} — ${minutes} mins`);
+    db.prepare('INSERT INTO promo_vouchers (code, duration_days, price, download_mbps, upload_mbps) VALUES (?, ?, ?, ?, ?)')
+      .run(code, durationDays, p, downloadMbps, uploadMbps);
+    console.log(`🎫 Promo created: ${code} — ${minutes} mins${downloadMbps ? ` (custom ${downloadMbps}/${uploadMbps || downloadMbps}Mbps)` : ''}`);
     return res.json({ success: true, code, duration_minutes: minutes, price: p });
   } catch (err) {
     console.error('Admin create promo error:', err);
@@ -935,15 +949,43 @@ router.post('/restore', adminAuth, (req, res) => {
 // ("Online", no id, nothing ever touches it) — it would say Online even
 // if the AP interface were physically down. Checks the actual LAN
 // interface link state (same interface bandwidth shaping already targets).
-function getWifiApStatus() {
+//
+// Bug found live, still in mikrotik/router mode: this always checked THIS
+// server's own LAN interface link state - meaningless there, since in
+// router mode this box is just another device on the MikroTik's network
+// (setup-network.sh's own comment says exactly that) and the real AP is a
+// separate device plugged into the router, not this server's NIC at all.
+// Router mode now asks the router itself for the physical link state of
+// whichever port(s) are assigned the 'gated' role (the customer WiFi
+// lane) - that's the actual signal for "is the AP's uplink port alive."
+async function getWifiApStatus() {
+  const mode = db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
+
+  if (mode === 'mikrotik') {
+    try {
+      const gatedPorts = db.prepare("SELECT port_name FROM router_ports WHERE role = 'gated'").all().map(r => r.port_name);
+      if (gatedPorts.length === 0) return { status: 'unknown', detail: 'No gated (customer WiFi) port assigned yet — set one up in Network > Ports and Roles.' };
+      const ports = await require('../services/mikrotikService').getRouterPorts();
+      const relevant = ports.filter(p => gatedPorts.includes(p.name));
+      if (relevant.length === 0) return { status: 'unknown', detail: 'Assigned port not found on the router.' };
+      const anyUp = relevant.some(p => p.running);
+      return {
+        status: anyUp ? 'up' : 'down',
+        detail: `Router port${relevant.length > 1 ? 's' : ''} ${relevant.map(p => p.name).join(', ')}: ${anyUp ? 'link up' : 'no link detected'}`
+      };
+    } catch (e) {
+      return { status: 'unknown', detail: 'Could not reach the router to check port status.' };
+    }
+  }
+
   try {
     const lanIf = db.prepare("SELECT value FROM settings WHERE key = 'lan_interface'").get()?.value || 'enp0s8';
     const output = execSync(`ip link show ${lanIf}`, { timeout: 2000 }).toString();
-    if (/state UP/.test(output)) return 'up';
-    if (/state DOWN/.test(output)) return 'down';
-    return 'unknown';
+    if (/state UP/.test(output)) return { status: 'up', detail: `Interface ${lanIf}: link up` };
+    if (/state DOWN/.test(output)) return { status: 'down', detail: `Interface ${lanIf}: no link detected` };
+    return { status: 'unknown', detail: `Interface ${lanIf}: state unknown` };
   } catch (e) {
-    return 'unknown';
+    return { status: 'unknown', detail: 'Could not read interface state.' };
   }
 }
 
@@ -1044,7 +1086,8 @@ router.get('/sysinfo', adminAuth, async (req, res) => {
       "SELECT value FROM settings WHERE key = 'license'"
     ).get();
     const license = licenseSetting ? licenseSetting.value : 'Private';
-    const wifiApStatus = getWifiApStatus();
+    const wifiAp = await getWifiApStatus();
+    const paymentMethods = db.prepare("SELECT value FROM settings WHERE key = 'payment_methods'").get()?.value || 'both';
     const hardwareTier = require('../services/hardwareDetection').detect();
 
     return res.json({
@@ -1059,7 +1102,9 @@ router.get('/sysinfo', adminAuth, async (req, res) => {
         free_mem: freeMem,
         mem_percent: Math.round((usedMem / totalMem) * 100),
         uptime,
-        wifi_ap_status: wifiApStatus,
+        wifi_ap_status: wifiAp.status,
+        wifi_ap_detail: wifiAp.detail,
+        payment_methods: paymentMethods,
         uptime_seconds: uptimeSeconds,
         ip_address: ipAddress,
         gateway,

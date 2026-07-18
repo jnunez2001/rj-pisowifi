@@ -182,7 +182,13 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
   // Ensure internet access is still allowed (in case of reboot)
   try {
     await allowClient(mac);
-    if (isBandwidthCapEnabled()) {
+    // Bug: this always reapplied the GLOBAL cap, silently overwriting a
+    // voucher's own bandwidth override (Create Voucher's optional Mbps
+    // fields, set on the session at redemption time) the moment a
+    // customer added more time to an existing session.
+    if (session.download_mbps) {
+      await setClientBandwidth(mac, session.download_mbps, session.upload_mbps || session.download_mbps, getBurstConfig());
+    } else if (isBandwidthCapEnabled()) {
       await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
     }
   } catch(e) {}
@@ -253,7 +259,12 @@ async function resumeSession(voucherCode) {
   try {
     await allowClient(session.mac_address);
     console.log(`[Network] Internet unlocked for ${session.mac_address} (resumed)`);
-    if (isBandwidthCapEnabled()) {
+    // Same voucher-override bug as addTimeToSession() above.
+    if (session.download_mbps) {
+      const upMbps = session.upload_mbps || session.download_mbps;
+      await setClientBandwidth(session.mac_address, session.download_mbps, upMbps, getBurstConfig());
+      console.log(`[Network] Voucher bandwidth reapplied to ${session.mac_address}: ${session.download_mbps}Mbps down / ${upMbps}Mbps up`);
+    } else if (isBandwidthCapEnabled()) {
       await setClientBandwidth(session.mac_address, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
       console.log(`[Network] Bandwidth cap reapplied to ${session.mac_address}: ${getMaxMbps()}Mbps down / ${getMaxUploadMbps()}Mbps up`);
     } else {
@@ -327,5 +338,7 @@ module.exports = {
   pauseSession,
   resumeSession,
   expireSession,
-  getActiveSessions
+  getActiveSessions,
+  getBurstConfig,
+  isBandwidthCapEnabled
 };

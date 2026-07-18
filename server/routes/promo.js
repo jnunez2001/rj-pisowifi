@@ -3,8 +3,10 @@ const router = express.Router();
 const db = require('../config/database');
 const {
   getSessionByMac,
-  createSession
+  createSession,
+  getBurstConfig
 } = require('../services/sessionService');
+const { setClientBandwidth } = require('../services/networkService');
 const { logFinancialEvent } = require('../services/financialLogService');
 
 // Promo redemption is a LAN-only flow — nftables DNATs it straight to this
@@ -118,6 +120,24 @@ router.post('/redeem', async (req, res) => {
     // separately so an admin looking a customer up by the code they were
     // handed can actually find the session it created.
     db.prepare('UPDATE sessions SET redeemed_code = ? WHERE voucher_code = ?').run(normalized, session.voucher_code);
+
+    // Per-voucher bandwidth override (Create Voucher's optional Mbps
+    // fields). createSession() above already applied the GLOBAL cap if one
+    // is enabled - this replaces it with the voucher's own numbers, and
+    // saves them on the session itself so timerService.js's 30s
+    // self-healing re-assertion keeps using THIS voucher's speed instead of
+    // silently reverting to the global cap on its next tick.
+    if (promo.download_mbps) {
+      const overrideDown = promo.download_mbps;
+      const overrideUp = promo.upload_mbps || promo.download_mbps;
+      db.prepare('UPDATE sessions SET download_mbps = ?, upload_mbps = ? WHERE voucher_code = ?')
+        .run(overrideDown, overrideUp, session.voucher_code);
+      try {
+        await setClientBandwidth(mac, overrideDown, overrideUp, getBurstConfig());
+      } catch (e) {
+        console.error(`Failed to apply voucher bandwidth override for ${mac}:`, e.message);
+      }
+    }
 
     // Mark promo as used
     const expiresAt = new Date(

@@ -268,13 +268,29 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
       }
       await client.talk(parentWords);
 
+      // Bug found live: burst was configured on the parent queue only. Real
+      // traffic never actually flows through the parent itself in a RouterOS
+      // queue tree - it flows through whichever CHILD queue matches
+      // (game-priority UDP or "other"), each independently rate-limited by
+      // its own max-limit. Without the same burst-limit/threshold/time here,
+      // a child's flat max-limit is the real bottleneck regardless of what
+      // the parent allows, silently capping every client at the base rate -
+      // exactly the "still not bursting, maintained the Xmbps cap" symptom.
+      const childBurstWords = burstMbps ? [
+        `=burst-limit=${burstMbps}M/${burstMbps}M`,
+        `=burst-threshold=${upload}M/${download}M`,
+        `=burst-time=${burstSeconds}s/${burstSeconds}s`,
+      ] : [];
+
       await client.talk([
         '/queue/simple/add', `=name=${baseName}-udp`, `=parent=${baseName}`,
         '=packet-marks=rj-game-priority', `=max-limit=${upload}M/${download}M`, '=priority=1/1',
+        ...childBurstWords,
       ]);
       await client.talk([
         '/queue/simple/add', `=name=${baseName}-other`, `=parent=${baseName}`,
         `=max-limit=${upload}M/${download}M`, '=priority=8/8',
+        ...childBurstWords,
       ]);
 
       console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up, game traffic prioritized${burstMbps ? ` (burst ${burstMbps}Mbps for ${burstSeconds}s)` : ''}${placeBeforeId ? '' : ' (WARNING: could not find lane queue to place before - lane-wide limit may take priority)'}`);
