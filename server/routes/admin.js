@@ -697,6 +697,18 @@ router.post('/settings', adminAuth, (req, res) => {
       upsert.run(key, String(value));
     }
     console.log('⚙️ Settings updated:', Object.keys(updates).join(', '));
+
+    // Bug: switching Network Mode (Standalone <-> External Router) here
+    // only ever updated the DB - nothing re-ran setup-network.sh, so the
+    // box kept running whatever nftables/dnsmasq/tc state the OLD mode had
+    // set up until the next reboot or an unrelated VLAN change happened to
+    // trigger a re-apply. An owner flipping the mode switch and expecting
+    // it to take effect immediately (the UI gives no indication otherwise)
+    // would see stale behavior with no visible error.
+    if ('network_mode' in updates) {
+      applyNetworkSetup();
+    }
+
     return res.json({ success: true, message: 'Settings updated' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
