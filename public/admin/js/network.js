@@ -841,8 +841,28 @@ async function loadNetworkModeSettings() {
       await loadLocalInterfaces(s.server_lan_mac || '');
       if (s.mikrotik_ip) testMikrotikConnection();
     }
+
+    const piholeToggle = document.getElementById('enablePiholeToggle');
+    if (piholeToggle) {
+      piholeToggle.checked = s.enable_pihole === '1';
+      updateToggleLabel('enablePiholeToggle', 'piholeStatusLabel');
+    }
   } catch(e) {
     console.error('Network mode load error:', e);
+  }
+}
+
+// DNS Filtering (Pi-hole) toggle - Network tab. Re-applying network setup
+// on save (POST /api/admin/settings triggers it for this key) is what
+// actually swaps dnsmasq's upstream DNS lines - see setup-network.sh.
+async function savePiholeSetting() {
+  const enabled = document.getElementById('enablePiholeToggle').checked;
+  try {
+    const data = await apiCall('POST', '/api/admin/settings', { enable_pihole: enabled ? '1' : '0' });
+    if (data.success) showToast(enabled ? 'DNS filtering enabled.' : 'DNS filtering disabled.');
+    else showToast(data.message || 'Failed to save.', 'error');
+  } catch (e) {
+    showToast('Server error, please try again.', 'error');
   }
 }
 
