@@ -261,6 +261,13 @@ if [ "$NETWORK_MODE" = "standalone" ] && [ "$MULTI_LANE_MODE" = "1" ]; then
   LANE_MAP_JSON="["
   LANE_MAP_SEP=""
   LANE_INDEX=0
+  # Flowtable (nftables' equivalent of OpenWrt's flow_offloading): once a
+  # connection is accepted, the kernel fast-paths its packets past the
+  # forward chain instead of re-walking every lane's MAC-set lookup for the
+  # life of the connection. Matters most on weak ARM boards (Orange Pi 3B
+  # class hardware) where per-packet chain evaluation is the bottleneck.
+  # WAN_VIF is always a member; each lane interface joins as its loop runs.
+  FLOWTABLE_DEVICES="\"$WAN_VIF\""
 
   while IFS='|' read -r H_ID H_PORT H_VLAN H_ROLE H_NAME H_SPEED H_ISOLATE; do
       [ -z "$H_ID" ] && continue
@@ -376,6 +383,7 @@ dhcp-option=interface:${LANE_IF},114,http://${LANE_GATEWAY}:3000/portal"
       [ -n "$LANE_MAP_SEP" ] && LANE_MAP_JSON="${LANE_MAP_JSON},"
       LANE_MAP_JSON="${LANE_MAP_JSON}{\"headId\":${H_ID},\"interface\":\"${LANE_IF}\",\"subnet\":\"10.${OCTET}.0.0\",\"gateway\":\"${LANE_GATEWAY}\",\"role\":\"${H_ROLE}\"}"
       LANE_MAP_SEP="1"
+      FLOWTABLE_DEVICES="${FLOWTABLE_DEVICES}, \"$LANE_IF\""
   done <<< "$(sqlite3 -separator '|' "$DB" "SELECT id, port_name, vlan_id, role, lane_name, speed_mbps, isolate_clients FROM router_ports WHERE role IN ('gated','open') AND bridge_with_id IS NULL ORDER BY id;" 2>/dev/null)"
 
   LANE_MAP_JSON="${LANE_MAP_JSON}]"
@@ -408,6 +416,10 @@ EOF
 
   cat > /tmp/rj-piso.nft << NFTEOF
 table ip rj_piso {
+    flowtable ft {
+        hook ingress priority 0;
+        devices = { $FLOWTABLE_DEVICES };
+    }
     set allowed_macs {
         type ether_addr
         flags dynamic
@@ -418,6 +430,7 @@ table ip rj_piso {
     chain forward {
         type filter hook forward priority filter; policy accept;
         ct state established,related accept
+        ip protocol { tcp, udp } flow add @ft
 $NFT_FORWARD_RULES
     }
     chain postrouting {
@@ -433,7 +446,7 @@ $PORT_FORWARD_RULES
 NFTEOF
 
   nft -f /tmp/rj-piso.nft >> $LOG 2>&1
-  echo "nftables multi-lane captive portal loaded" >> $LOG
+  echo "nftables multi-lane captive portal loaded (flow offload: $FLOWTABLE_DEVICES)" >> $LOG
 
 elif [ "$NETWORK_MODE" = "standalone" ]; then
   # ═══════════════════════════════════════════════════════════════
@@ -543,6 +556,10 @@ EOF
 
   cat > /tmp/rj-piso.nft << NFTEOF
 table ip rj_piso {
+    flowtable ft {
+        hook ingress priority 0;
+        devices = { "$WAN_VIF", "$LAN_VIF" };
+    }
     set allowed_macs {
         type ether_addr
         flags dynamic
@@ -556,6 +573,7 @@ table ip rj_piso {
     chain forward {
         type filter hook forward priority filter; policy accept;
         ct state established,related accept
+        ip protocol { tcp, udp } flow add @ft
         iifname "$LAN_VIF" ether saddr @allowed_macs accept
         # Bug #76: this was a silent "drop" for every unpaid device's
         # traffic that wasn't DNS(53)/HTTP(80) - including HTTPS(443),
@@ -587,7 +605,7 @@ $PORT_FORWARD_RULES
 NFTEOF
 
   nft -f /tmp/rj-piso.nft >> $LOG 2>&1
-  echo "nftables captive portal loaded" >> $LOG
+  echo "nftables captive portal loaded (flow offload: $WAN_VIF, $LAN_VIF)" >> $LOG
 
   # ── TC BANDWIDTH SHAPING SETUP ────────────────────────────────
   tc qdisc del dev $LAN_VIF root 2>/dev/null || true
