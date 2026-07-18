@@ -13,6 +13,19 @@ function formatDuration(minutes) {
   return `${minutes} mins`;
 }
 
+// Bug: a fully-used voucher (status 'used' - session ended normally) fell
+// into the same "else" branch as a genuinely unknown status and got shown
+// as "Expired", which is wrong - nothing about this schema tracks a
+// pre-redemption expiry, so 'used' just means it was successfully
+// consumed. Single source of truth for both the flat table and the group
+// details modal so they never drift from each other.
+function voucherStatusBadge(status) {
+  if (status === 'unused') return { cls: 'badge-orange', label: '⏳ Unused' };
+  if (status === 'active') return { cls: 'badge-green', label: '✅ Active' };
+  if (status === 'used') return { cls: 'badge-blue', label: '✔️ Used' };
+  return { cls: 'badge-red', label: '❌ Unknown' };
+}
+
 async function loadVouchers() {
   await loadPromos();
   await loadVoucherGroups();
@@ -54,6 +67,7 @@ async function loadPromos() {
 
     tbody.innerHTML = data.promos.map(p => {
       const minutes = p.duration_minutes || (p.duration_days * 1440);
+      const badge = voucherStatusBadge(p.status);
       return `
         <tr>
           <td>
@@ -65,13 +79,7 @@ async function loadPromos() {
           <td><span class="badge badge-blue">${formatDuration(minutes)}</span></td>
           <td><span class="badge badge-green">₱${p.price}</span></td>
           <td>
-            <span class="badge ${
-              p.status === 'unused' ? 'badge-orange' :
-              p.status === 'active' ? 'badge-green' : 'badge-red'
-            }">
-              ${p.status === 'unused' ? '⏳ Unused' :
-                p.status === 'active' ? '✅ Active' : '❌ Expired'}
-            </span>
+            <span class="badge ${badge.cls}">${badge.label}</span>
           </td>
           <td style="font-family:monospace;font-size:12px;color:var(--text-muted);">
             ${p.mac_address || '--'}
@@ -211,13 +219,17 @@ async function loadVoucherGroups() {
         <td style="font-weight:700;">${g.name}</td>
         <td>${g.actual_count}</td>
         <td>
-          <span class="badge badge-green">${g.unused_count || 0} unused</span>
-          <span class="badge badge-red" style="margin-left:4px;">${g.used_count || 0} used</span>
+          <span class="badge badge-orange">${g.unused_count || 0} unused</span>
+          <span class="badge badge-green" style="margin-left:4px;">${g.active_count || 0} active</span>
+          <span class="badge badge-blue" style="margin-left:4px;">${g.used_count || 0} used</span>
         </td>
         <td><span class="badge badge-blue">${formatDuration(g.duration_minutes)}</span></td>
         <td><span class="badge badge-green">₱${g.price}</span></td>
         <td>
           <div style="display:flex;gap:6px;">
+            <button class="btn btn-sm btn-secondary btn-icon" onclick="viewVoucherGroup(${g.id})" title="View codes">
+              <i class="fas fa-eye"></i>
+            </button>
             <button class="btn btn-sm btn-secondary btn-icon" onclick="printVoucherGroup(${g.id})" title="Print">
               <i class="fas fa-print"></i>
             </button>
@@ -312,6 +324,46 @@ async function deleteVoucherGroup(id, name) {
       showToast(data.message || 'Failed to delete', 'error');
     }
   } catch(e) {
+    showToast('Server error', 'error');
+  }
+}
+
+// Popup card listing every code in a group with its live status - lets an
+// admin actually track a batch (who's used it, who hasn't) instead of only
+// ever seeing aggregate counts on the groups table.
+async function viewVoucherGroup(id) {
+  try {
+    const data = await apiCall('GET', `/api/admin/vouchers/groups/${id}`);
+    if (!data.success) {
+      showToast(data.message || 'Failed to load group', 'error');
+      return;
+    }
+    const { group, vouchers } = data;
+
+    document.getElementById('groupDetailsTitle').textContent = group.name;
+
+    const unused = vouchers.filter(v => v.status === 'unused').length;
+    const active = vouchers.filter(v => v.status === 'active').length;
+    const used = vouchers.filter(v => v.status === 'used').length;
+    document.getElementById('groupDetailsSummary').innerHTML = `
+      <span class="badge badge-orange">${unused} unused</span>
+      <span class="badge badge-green">${active} active</span>
+      <span class="badge badge-blue">${used} used</span>
+      <span class="badge badge-blue" style="margin-left:auto;">${formatDuration(group.duration_minutes)} &bull; ₱${group.price}</span>
+    `;
+
+    document.getElementById('groupDetailsTable').innerHTML = vouchers.map(v => {
+      const badge = voucherStatusBadge(v.status);
+      return `
+        <tr>
+          <td style="font-family:monospace;font-weight:700;color:var(--accent-red);letter-spacing:1px;">${v.code}</td>
+          <td><span class="badge ${badge.cls}">${badge.label}</span></td>
+          <td style="font-family:monospace;font-size:12px;color:var(--text-muted);">${v.mac_address || '--'}</td>
+        </tr>`;
+    }).join('');
+
+    document.getElementById('groupDetailsModal').classList.add('show');
+  } catch (e) {
     showToast('Server error', 'error');
   }
 }

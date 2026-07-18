@@ -43,7 +43,7 @@
       <div class="card-title">Voucher Groups</div>
       <div class="card-subtitle">Batch-create and print a set of vouchers at once</div>
     </div>
-    <button class="btn btn-primary" onclick="openCreateGroup()">
+    <button class="btn btn-primary" onclick="openCreateGroup()" style="white-space:nowrap;">
       <i class="fas fa-layer-group"></i> Create Voucher Group
     </button>
   </div>
@@ -54,7 +54,7 @@
         <tr>
           <th>Group Name</th>
           <th>Quantity</th>
-          <th>Used / Unused</th>
+          <th>Status</th>
           <th>Duration</th>
           <th>Price</th>
           <th>Actions</th>
@@ -224,6 +224,31 @@
       <button class="btn btn-primary" id="createGroupBtn" onclick="createVoucherGroup()">
         <i class="fas fa-layer-group"></i> Create Group
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- VOUCHER GROUP DETAILS MODAL -->
+<div class="modal-overlay" id="groupDetailsModal">
+  <div class="modal" style="max-width:700px;">
+    <div class="modal-header">
+      <div class="modal-title" id="groupDetailsTitle">Voucher Group</div>
+      <button class="modal-close" onclick="closeModal('groupDetailsModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:16px;" id="groupDetailsSummary"></div>
+    <div class="table-wrapper" style="max-height:400px;overflow-y:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Status</th>
+            <th>Used By</th>
+          </tr>
+        </thead>
+        <tbody id="groupDetailsTable"></tbody>
+      </table>
     </div>
   </div>
 </div>

@@ -113,6 +113,12 @@ router.post('/redeem', async (req, res) => {
     // Create session
     const session = await createSession(mac, ip || '', minutes, expirationMinutes);
 
+    // Session gets its own internal RJ-XXXXXX id (voucher_code) regardless
+    // of how it was paid for - record the actual code the customer typed
+    // separately so an admin looking a customer up by the code they were
+    // handed can actually find the session it created.
+    db.prepare('UPDATE sessions SET redeemed_code = ? WHERE voucher_code = ?').run(normalized, session.voucher_code);
+
     // Mark promo as used
     const expiresAt = new Date(
       Date.now() + minutes * 60 * 1000

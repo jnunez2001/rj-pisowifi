@@ -361,10 +361,14 @@ router.get('/transactions/export', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/promos
+// GET /api/admin/promos — one-off codes only. Codes created as part of a
+// group (voucher_groups) are deliberately excluded here: they already have
+// their own dedicated card below (Voucher Groups), and showing every
+// individual grouped code in this flat table too just duplicated them,
+// making a batch of 50+ codes drown out the handful of real one-off codes.
 router.get('/promos', adminAuth, (req, res) => {
   try {
-    const promos = db.prepare('SELECT * FROM promo_vouchers ORDER BY created_at DESC').all();
+    const promos = db.prepare('SELECT * FROM promo_vouchers WHERE group_id IS NULL ORDER BY created_at DESC').all();
     return res.json({ success: true, promos });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -508,11 +512,16 @@ router.post('/vouchers/groups', adminAuth, (req, res) => {
 // GET /api/admin/vouchers/groups — list all groups with usage counts
 router.get('/vouchers/groups', adminAuth, (req, res) => {
   try {
+    // Bug: used_count lumped 'active' (redeemed, session currently running)
+    // and 'used' (session fully ended) together as one bucket, so there was
+    // no way to tell "50 people are on this right now" from "50 people used
+    // this and left" at a glance. Broken out into all 3 real states.
     const groups = db.prepare(`
       SELECT g.*,
         COUNT(v.id) as actual_count,
         SUM(CASE WHEN v.status = 'unused' THEN 1 ELSE 0 END) as unused_count,
-        SUM(CASE WHEN v.status != 'unused' THEN 1 ELSE 0 END) as used_count
+        SUM(CASE WHEN v.status = 'active' THEN 1 ELSE 0 END) as active_count,
+        SUM(CASE WHEN v.status = 'used' THEN 1 ELSE 0 END) as used_count
       FROM voucher_groups g
       LEFT JOIN promo_vouchers v ON v.group_id = g.id
       GROUP BY g.id
