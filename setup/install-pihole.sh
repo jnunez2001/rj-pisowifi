@@ -54,7 +54,6 @@ else
     -e FTLCONF_dns_listeningMode="all" \
     -v rj-pihole-etc:/etc/pihole \
     -v rj-pihole-dnsmasq:/etc/dnsmasq.d \
-    --dns=127.0.0.1 \
     pihole/pihole:latest >> $LOG 2>&1
 
   echo "" | tee -a $LOG
