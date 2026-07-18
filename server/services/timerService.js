@@ -193,6 +193,26 @@ async function startTimer() {
         WHERE is_paused = 0
       `).all();
 
+      // Bug: access (allowClient) and bandwidth shaping (setClientBandwidth)
+      // only ever got applied once - at session creation, or at server
+      // boot via restoreActiveSessions(). Nothing re-asserted either one
+      // afterward, so a device that forgets and rejoins the WiFi (new DHCP
+      // lease, same MAC), roams between multiple APs feeding the same
+      // gated lane, or hits any brief nftables/MikroTik state reset, could
+      // sit with a perfectly valid session in the database while the
+      // actual network-level access had gone stale - internet wouldn't
+      // resume, or bandwidth shaping would still be pointed at the old,
+      // now-abandoned IP. allowClient()/setClientBandwidth() both resolve
+      // the client's CURRENT IP/state fresh on every call and are
+      // idempotent (refresh an existing binding rather than erroring), so
+      // re-asserting them here on every tick makes an active session
+      // self-healing instead of "correct once, then hope nothing changes" -
+      // works the same way in both standalone and router mode, since
+      // networkService.js already picks the right backend.
+      const capEnabledSetting = db.prepare("SELECT value FROM settings WHERE key = 'enable_bandwidth_cap'").get();
+      const isBandwidthCapEnabled = capEnabledSetting?.value === '1';
+      const { allowClient, setClientBandwidth } = require('./networkService');
+
       for (const session of activeSessions) {
         const remaining = (
           new Date(session.expires_at) - new Date()
@@ -200,10 +220,21 @@ async function startTimer() {
 
         if (remaining > 0) {
           db.prepare(`
-            UPDATE sessions 
+            UPDATE sessions
             SET minutes_remaining = ?
             WHERE voucher_code = ?
           `).run(remaining, session.voucher_code);
+
+          try {
+            await allowClient(session.mac_address);
+            if (isBandwidthCapEnabled) {
+              const maxMbps = getSetting('bandwidth_cap_download_mbps', 5);
+              const maxUploadMbps = getSetting('bandwidth_cap_upload_mbps', 5);
+              await setClientBandwidth(session.mac_address, maxMbps, maxUploadMbps);
+            }
+          } catch (e) {
+            console.error(`Failed to re-assert access for ${session.mac_address}:`, e.message);
+          }
         }
       }
 
