@@ -14,6 +14,7 @@
 set -e
 LOG="/var/log/rj-pihole-install.log"
 DB="/var/lib/rj-pisowifi/database/rjpisowifi.db"
+APP_USER="rjcyberzone"
 
 echo "=== R&J Pi-hole Install $(date) ===" >> $LOG
 
@@ -25,6 +26,24 @@ fi
 if ! command -v docker >/dev/null 2>&1; then
   echo "[1/3] Installing Docker..." | tee -a $LOG
   curl -fsSL https://get.docker.com | sh >> $LOG 2>&1
+fi
+
+# Bug found live: the "Update Block Lists" button (POST
+# /api/admin/dns-filter/update-lists) runs `docker exec ...` as the app's
+# own process, which runs as $APP_USER (systemd User=, not root) - without
+# group membership, that call fails on Docker's socket permission check
+# with no useful error surfaced to the admin panel beyond "Could not
+# update block lists right now". Docker group membership is functionally
+# root-equivalent (same trust level this app's process already has via
+# its narrow NOPASSWD sudoers entries for nft/tc/ip), so this isn't a new
+# privilege the app didn't already effectively have. Restarting the
+# service is required, not optional - a running systemd unit doesn't pick
+# up new group membership just because usermod ran; it needs to actually
+# restart so its process gets re-spawned with the updated group list.
+if ! id -nG "$APP_USER" 2>/dev/null | grep -qw docker; then
+  usermod -aG docker "$APP_USER"
+  echo "Added $APP_USER to the docker group" | tee -a $LOG
+  systemctl restart rj-pisowifi >> $LOG 2>&1 || true
 fi
 
 echo "[2/3] Starting Pi-hole container (loopback-only)..." | tee -a $LOG
