@@ -45,6 +45,23 @@ WAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='wan_interface';" 2
 LAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='lan_interface';" 2>/dev/null)
 NETWORK_MODE=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='network_mode';" 2>/dev/null)
 
+# Pi-hole (setup/install-pihole.sh, opt-in, off by default): when enabled,
+# dnsmasq's UPSTREAM_DNS_LINES puts Pi-hole's loopback-only container
+# FIRST, with the same public DNS servers this project has always used
+# kept right behind it as automatic fallback - dnsmasq stops routing to an
+# upstream that's not answering, so a Pi-hole crash never takes DNS down
+# for customers (see settings default in database.js, and the
+# fail-open-by-design rule this app's add-ons all follow).
+ENABLE_PIHOLE=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='enable_pihole';" 2>/dev/null)
+if [ "$ENABLE_PIHOLE" = "1" ]; then
+    UPSTREAM_DNS_LINES="server=127.0.0.1#5335
+server=8.8.8.8
+server=8.8.4.4"
+else
+    UPSTREAM_DNS_LINES="server=8.8.8.8
+server=8.8.4.4"
+fi
+
 # VLAN Management (admin panel > Network > VLAN Management): supports the
 # "everything on one unmanaged switch" wiring some setups use, where an ISP
 # requires a VLAN-tagged uplink (mode='wan') and/or an access point tags
@@ -420,8 +437,7 @@ dhcp-option=interface:${LANE_IF},114,http://${LANE_GATEWAY}:3000/portal"
 bind-interfaces
 dhcp-authoritative
 no-resolv
-server=8.8.8.8
-server=8.8.4.4
+$UPSTREAM_DNS_LINES
 $DNSMASQ_LANES
 EOF
 
@@ -551,8 +567,7 @@ dhcp-option=3,$GATEWAY_IP
 dhcp-option=6,8.8.8.8
 dhcp-option=114,http://$GATEWAY_IP:3000/portal
 no-resolv
-server=8.8.8.8
-server=8.8.4.4
+$UPSTREAM_DNS_LINES
 EOF
 
   # Static DHCP leases (admin panel > Network > Static DHCP Leases) - one

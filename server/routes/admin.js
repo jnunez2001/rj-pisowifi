@@ -705,7 +705,7 @@ router.post('/settings', adminAuth, (req, res) => {
     // trigger a re-apply. An owner flipping the mode switch and expecting
     // it to take effect immediately (the UI gives no indication otherwise)
     // would see stale behavior with no visible error.
-    if ('network_mode' in updates) {
+    if ('network_mode' in updates || 'enable_pihole' in updates) {
       applyNetworkSetup();
     }
 

@@ -624,6 +624,19 @@
   <div id="diagOutput" style="margin:0 16px 16px;background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:8px;height:180px;overflow-y:auto;white-space:pre-wrap;">Enter a target above, then choose Ping or Traceroute.</div>
 </div>
 
+<!-- DNS FILTERING (Pi-hole, both modes, opt-in) -->
+<div class="zf-card">
+  <div class="zf-card-title">DNS Filtering</div>
+  <div style="padding:0 16px 12px;font-size:13px;color:var(--text-muted);">Blocks ads and trackers for every connected customer. Requires the DNS filtering service to be installed on this server first.</div>
+  <div style="display:flex;align-items:center;gap:12px;padding:0 16px 16px;">
+    <label class="toggle-switch">
+      <input type="checkbox" id="enablePiholeToggle" onchange="updateToggleLabel('enablePiholeToggle','piholeStatusLabel'); savePiholeSetting();">
+      <span class="toggle-slider"></span>
+    </label>
+    <span id="piholeStatusLabel" style="font-size:13px;color:var(--text-muted);">Disabled</span>
+  </div>
+</div>
+
 <!-- CREATE VLAN MODAL -->
 <div class="modal-overlay" id="createVlanModal">
   <div class="modal">

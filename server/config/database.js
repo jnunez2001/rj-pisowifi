@@ -329,6 +329,16 @@ if (settingCount.count === 0) {
   // flip this on once api-ssl is configured on their router.
   insertSetting.run('mikrotik_ssl', '0');
   insertSetting.run('mikrotik_port', '');
+
+  // Pi-hole DNS filtering (opt-in, off by default). Per the standing
+  // fallback-design rule (every add-on must fail open, never cascade into
+  // taking the whole system down), this never replaces our own proven
+  // per-lane dnsmasq - it only adds Pi-hole as dnsmasq's FIRST upstream
+  // resolver (setup-network.sh), with the existing public DNS servers kept
+  // right behind it as automatic fallback. If Pi-hole's container goes
+  // down, dnsmasq just stops getting answers from that upstream and uses
+  // the next one - no customer loses DNS because Pi-hole crashed.
+  insertSetting.run('enable_pihole', '0');
 }
 
 // One-time migration for existing installs: 'nodogsplash' was the old
