@@ -58,11 +58,25 @@ else
     pihole/pihole:latest >> $LOG 2>&1
 
   echo "" | tee -a $LOG
-  echo "Pi-hole admin UI (SSH-tunnel or localhost only, not exposed to customers):" | tee -a $LOG
+  echo "Blocking service admin UI (SSH-tunnel or localhost only, not exposed to customers):" | tee -a $LOG
   echo "  http://127.0.0.1:8081/admin" | tee -a $LOG
   echo "  password: $ADMIN_PASS" | tee -a $LOG
   echo "  (save this now — it is only printed once)" | tee -a $LOG
   echo "" | tee -a $LOG
+
+  # Stored encrypted (same secretCrypto helper as mikrotik_pass, see
+  # server/utils/secretCrypto.js) so the app's own admin panel can query
+  # the stats/status API without a human copy-pasting it into a settings
+  # field. DB_PATH must match install.sh's real data directory so the
+  # encryption key file (kept OUTSIDE the DB on purpose) is the same one
+  # the running app process uses.
+  APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  ENCRYPTED_PASS=$(DB_PATH="/var/lib/rj-pisowifi/database/rjpisowifi.db" node -e "console.log(require('$APP_DIR/server/utils/secretCrypto').encryptSecret(process.argv[1]))" "$ADMIN_PASS" 2>>"$LOG")
+  if [ -n "$ENCRYPTED_PASS" ]; then
+    sqlite3 "$DB" "INSERT OR REPLACE INTO settings (key, value) VALUES ('pihole_api_pass', '$(echo "$ENCRYPTED_PASS" | sed "s/'/''/g")')" 2>/dev/null || true
+  else
+    echo "WARNING: could not store the password for the app to use automatically - stats/status panel won't work until this is fixed" | tee -a $LOG
+  fi
 fi
 
 echo "[3/3] Enabling Pi-hole in settings and re-applying network..." | tee -a $LOG

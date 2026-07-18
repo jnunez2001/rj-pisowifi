@@ -846,21 +846,79 @@ async function loadNetworkModeSettings() {
     if (piholeToggle) {
       piholeToggle.checked = s.enable_pihole === '1';
       updateToggleLabel('enablePiholeToggle', 'piholeStatusLabel');
+      document.getElementById('dnsFilterStats').style.display = piholeToggle.checked ? 'block' : 'none';
+      if (piholeToggle.checked) loadDnsFilterStatus();
     }
   } catch(e) {
     console.error('Network mode load error:', e);
   }
 }
 
-// DNS Filtering (Pi-hole) toggle - Network tab. Re-applying network setup
-// on save (POST /api/admin/settings triggers it for this key) is what
-// actually swaps dnsmasq's upstream DNS lines - see setup-network.sh.
-async function savePiholeSetting() {
+// DNS Filtering toggle - Network tab. Re-applying network setup on save
+// (POST /api/admin/settings triggers it for this key) is what actually
+// swaps dnsmasq's upstream DNS lines - see setup-network.sh. The stats
+// panel is a separate, best-effort call to the filtering service's own
+// API (server/services/dnsFilterService.js) - it can be off/unreachable
+// even while the toggle itself saved fine, since dnsmasq's fail-open
+// fallback means the toggle "working" and the service "running" aren't
+// the same thing.
+async function onDnsFilterToggle() {
   const enabled = document.getElementById('enablePiholeToggle').checked;
+  const statsPanel = document.getElementById('dnsFilterStats');
+  statsPanel.style.display = enabled ? 'block' : 'none';
   try {
     const data = await apiCall('POST', '/api/admin/settings', { enable_pihole: enabled ? '1' : '0' });
-    if (data.success) showToast(enabled ? 'DNS filtering enabled.' : 'DNS filtering disabled.');
-    else showToast(data.message || 'Failed to save.', 'error');
+    if (data.success) {
+      showToast(enabled ? 'DNS filtering enabled.' : 'DNS filtering disabled.');
+      if (enabled) loadDnsFilterStatus();
+    } else {
+      showToast(data.message || 'Failed to save.', 'error');
+    }
+  } catch (e) {
+    showToast('Server error, please try again.', 'error');
+  }
+}
+
+async function loadDnsFilterStatus() {
+  const unavailable = document.getElementById('dnsFilterUnavailable');
+  const loaded = document.getElementById('dnsFilterLoaded');
+  unavailable.style.display = 'block';
+  loaded.style.display = 'none';
+  try {
+    const data = await apiCall('GET', '/api/admin/dns-filter/status');
+    if (!data.available) {
+      unavailable.innerHTML = '<i class="fas fa-circle-exclamation"></i> Filtering service not reachable. Make sure it\'s installed and running on this server.';
+      return;
+    }
+    document.getElementById('dnsFilterQueries').textContent = data.queries_today.toLocaleString();
+    document.getElementById('dnsFilterBlocked').textContent = data.blocked_today.toLocaleString();
+    document.getElementById('dnsFilterPercent').textContent = `${data.blocked_percent}%`;
+    const topList = document.getElementById('dnsFilterTopBlocked');
+    if (data.top_blocked && data.top_blocked.length) {
+      topList.innerHTML = data.top_blocked.map(d =>
+        `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border-color);">
+          <span>${escapeHtml(d.domain)}</span><span style="color:var(--text-muted);">${d.count.toLocaleString()}</span>
+        </div>`
+      ).join('');
+    } else {
+      topList.innerHTML = '<span style="color:var(--text-muted);">No data yet.</span>';
+    }
+    unavailable.style.display = 'none';
+    loaded.style.display = 'block';
+  } catch (e) {
+    unavailable.innerHTML = '<i class="fas fa-circle-exclamation"></i> Could not load stats right now.';
+  }
+}
+
+async function updateDnsFilterLists() {
+  try {
+    const data = await apiCall('POST', '/api/admin/dns-filter/update-lists');
+    if (data.success) {
+      showToast('Block lists updated.');
+      loadDnsFilterStatus();
+    } else {
+      showToast(data.message || 'Could not update block lists.', 'error');
+    }
   } catch (e) {
     showToast('Server error, please try again.', 'error');
   }
