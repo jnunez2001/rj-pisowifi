@@ -284,6 +284,10 @@ if (settingCount.count === 0) {
   insertSetting.run('disconnect_message', 'Your session has ended. Thank you!');
   insertSetting.run('show_voucher', '0');
   insertSetting.run('redirect_url', '');
+  // Which payment entry points the portal offers - 'coin', 'voucher', or
+  // 'both'. Defaults to 'both' so every existing install keeps its exact
+  // current behavior (both buttons shown) with no migration needed.
+  insertSetting.run('payment_methods', 'both');
 
   // Session settings
   insertSetting.run('allow_pause', '1');
