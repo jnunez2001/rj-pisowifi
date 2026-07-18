@@ -1536,6 +1536,31 @@ router.post('/hostname', adminAuth, (req, res) => {
   });
 });
 
+// ===== DNS FILTERING (blocking service status/stats) =====
+// GET /api/admin/dns-filter/status
+router.get('/dns-filter/status', adminAuth, async (req, res) => {
+  try {
+    const status = await require('../services/dnsFilterService').getStatus();
+    return res.json({ success: true, ...status });
+  } catch (err) {
+    return res.json({ success: true, available: false });
+  }
+});
+
+// POST /api/admin/dns-filter/update-lists — refreshes the block list inside
+// the isolated container. Best-effort: if the container isn't running this
+// just fails quietly, same fail-open reasoning as everywhere else this
+// add-on touches.
+router.post('/dns-filter/update-lists', adminAuth, (req, res) => {
+  execFile('docker', ['exec', 'rj-pihole', 'pihole', '-g'], { timeout: 60000 }, (err) => {
+    if (err) {
+      console.error('DNS filter list update failed:', err.message);
+      return res.status(500).json({ success: false, message: 'Could not update block lists right now' });
+    }
+    return res.json({ success: true, message: 'Block lists updated' });
+  });
+});
+
 // ===== VLAN MANAGEMENT =====
 // Lets an owner reproduce the "everything on one unmanaged switch, VLAN
 // tags separate the traffic" wiring pattern common in other piso-wifi
