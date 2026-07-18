@@ -30,7 +30,15 @@ db.exec(`
     paused_at DATETIME,
     hard_expires_at DATETIME NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    expires_at DATETIME NOT NULL
+    expires_at DATETIME NOT NULL,
+    -- The actual code a customer typed in (promo/voucher), separate from
+    -- voucher_code above which is this app's own internally generated
+    -- per-session identifier (RJ-XXXXXX). NULL for coin-inserted sessions.
+    -- Added because an admin redeeming/looking up a customer's voucher by
+    -- the code they were handed had no way to find the session it created -
+    -- Active Sessions only ever showed the internal RJ- id, not what the
+    -- customer actually typed.
+    redeemed_code TEXT
   );
   -- Note: status column removed (Bug #1) — sessions are deleted on expiry, so existing sessions are always active
 
@@ -233,6 +241,12 @@ try {
 // ran (found on real hardware).
 try {
   db.exec('ALTER TABLE free_claims ADD COLUMN ip_address TEXT');
+} catch (e) {
+  // already applied
+}
+
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN redeemed_code TEXT');
 } catch (e) {
   // already applied
 }

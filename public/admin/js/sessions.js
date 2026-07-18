@@ -45,6 +45,7 @@ async function loadSessions() {
             <span style="font-family:monospace;font-size:13px;color:var(--accent-red);font-weight:700;">
               ${s.voucher_code}
             </span>
+            ${s.redeemed_code ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;" title="The code the customer actually typed in">code: ${s.redeemed_code}</div>` : ''}
           </td>
           <td style="font-family:monospace;font-size:12px;color:var(--text-muted);">
             ${s.mac_address}

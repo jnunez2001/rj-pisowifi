@@ -387,10 +387,25 @@ function applyPortalSettings() {
   if (insertBtnConnected) insertBtnConnected.style.display = showCoin ? 'block' : 'none';
 
   const vouchersBtn = document.getElementById('vouchersBtn');
-  if (vouchersBtn) vouchersBtn.style.display = showVoucherEntry ? 'block' : 'none';
-  if (!showVoucherEntry) {
-    const voucherInputRow = document.getElementById('voucherInputRow');
-    if (voucherInputRow) voucherInputRow.style.display = 'none';
+  const voucherInputRow = document.getElementById('voucherInputRow');
+
+  if (portalSettings.payment_methods === 'voucher') {
+    // Voucher Only: the code entry box IS the primary action, not something
+    // buried behind a small button below "Claim Free Time" - move it to the
+    // top of the disconnected section (right after the welcome message) and
+    // show it immediately, and hide the now-redundant toggle button.
+    if (vouchersBtn) vouchersBtn.style.display = 'none';
+    if (voucherInputRow) {
+      const section = document.getElementById('sectionDisconnected');
+      const welcomeMsg = document.getElementById('welcomeMsg');
+      if (section && welcomeMsg && voucherInputRow.parentElement === section) {
+        section.insertBefore(voucherInputRow, welcomeMsg.nextSibling);
+      }
+      voucherInputRow.style.display = 'flex';
+    }
+  } else {
+    if (vouchersBtn) vouchersBtn.style.display = showVoucherEntry ? 'block' : 'none';
+    if (!showVoucherEntry && voucherInputRow) voucherInputRow.style.display = 'none';
   }
 }
 
