@@ -35,7 +35,20 @@ async function loadSystemStatus() {
         wifiEl.innerHTML = `<span class="status-dot ${status === 'up' ? 'online' : ''}"></span>${
           status === 'up' ? 'Online' : status === 'down' ? 'Offline' : 'Unknown'
         }`;
+        // Detail explains WHAT was actually checked (a router port's link
+        // state in External Router mode vs this server's own NIC in
+        // Standalone) - a bare Unknown/Offline badge alone doesn't tell an
+        // admin whether that's even the right thing being measured.
+        const wifiRow = document.getElementById('wifiApRow');
+        if (wifiRow && sysinfo.sysinfo.wifi_ap_detail) wifiRow.title = sysinfo.sysinfo.wifi_ap_detail;
       }
+
+      // Coin Slot row: hidden entirely in Voucher Only mode (Settings >
+      // Portal Settings > Payment Methods) - a red "Offline" badge there
+      // reads as a hardware fault when the coin slot was never expected to
+      // be in use in the first place.
+      const coinRow = document.getElementById('coinSlotRow');
+      if (coinRow) coinRow.style.display = sysinfo.sysinfo.payment_methods === 'voucher' ? 'none' : 'flex';
     }
   } catch(e) {}
 

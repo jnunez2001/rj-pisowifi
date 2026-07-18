@@ -38,7 +38,16 @@ db.exec(`
     -- the code they were handed had no way to find the session it created -
     -- Active Sessions only ever showed the internal RJ- id, not what the
     -- customer actually typed.
-    redeemed_code TEXT
+    redeemed_code TEXT,
+    -- Per-voucher bandwidth override (promo_vouchers.download_mbps/
+    -- upload_mbps), copied here at redemption time. NULL means "use the
+    -- global Bandwidth Control setting", same as a coin session. Kept on
+    -- the session itself (not re-looked-up from the voucher every time) so
+    -- timerService.js's 30s self-healing re-assertion applies the SAME
+    -- override on every tick instead of silently reverting a premium
+    -- voucher back to the global cap the next time it runs.
+    download_mbps INTEGER,
+    upload_mbps INTEGER
   );
   -- Note: status column removed (Bug #1) — sessions are deleted on expiry, so existing sessions are always active
 
@@ -60,7 +69,12 @@ db.exec(`
     status TEXT DEFAULT 'unused',
     mac_address TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    expires_at DATETIME
+    expires_at DATETIME,
+    -- NULL = use the global Bandwidth Control setting (Security page),
+    -- same as a coin session. Only set when an admin explicitly wants this
+    -- specific voucher/batch to override it (e.g. a premium-speed pass).
+    download_mbps INTEGER,
+    upload_mbps INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS voucher_groups (
@@ -247,6 +261,20 @@ try {
 
 try {
   db.exec('ALTER TABLE sessions ADD COLUMN redeemed_code TEXT');
+} catch (e) {
+  // already applied
+}
+
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN download_mbps INTEGER');
+  db.exec('ALTER TABLE sessions ADD COLUMN upload_mbps INTEGER');
+} catch (e) {
+  // already applied
+}
+
+try {
+  db.exec('ALTER TABLE promo_vouchers ADD COLUMN download_mbps INTEGER');
+  db.exec('ALTER TABLE promo_vouchers ADD COLUMN upload_mbps INTEGER');
 } catch (e) {
   // already applied
 }

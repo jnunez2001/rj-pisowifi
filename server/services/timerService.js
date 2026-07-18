@@ -10,6 +10,7 @@ async function restoreActiveSessions() {
   try {
     const db = require('../config/database');
     const { allowClient, setClientBandwidth } = require('./networkService');
+    const { getBurstConfig } = require('./sessionService');
 
     // Bug: this used to select ALL sessions, including paused ones, and
     // called allowClient() for every row — so a customer who had paused
@@ -32,14 +33,21 @@ async function restoreActiveSessions() {
     // Check if bandwidth cap is enabled
     const capEnabledSetting = db.prepare("SELECT value FROM settings WHERE key = 'enable_bandwidth_cap'").get();
     const isBandwidthCapEnabled = capEnabledSetting?.value === '1';
+    // Same bug as the 30s tick below: burst was never passed here either,
+    // so a reboot silently dropped every active session's burst config.
+    const burstConfig = getBurstConfig();
 
     for (const session of activeSessions) {
       try {
         await allowClient(session.mac_address);
-        if (isBandwidthCapEnabled) {
+        if (session.download_mbps) {
+          const upMbps = session.upload_mbps || session.download_mbps;
+          await setClientBandwidth(session.mac_address, session.download_mbps, upMbps, burstConfig);
+          console.log(`✅ Restored: ${session.voucher_code} → ${session.mac_address} (${session.download_mbps}Mbps down / ${upMbps}Mbps up, voucher override)`);
+        } else if (isBandwidthCapEnabled) {
           const maxMbps = db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_download_mbps'").get()?.value || '5';
           const maxUploadMbps = db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_upload_mbps'").get()?.value || '5';
-          await setClientBandwidth(session.mac_address, parseInt(maxMbps, 10) || 5, parseInt(maxUploadMbps, 10) || 5);
+          await setClientBandwidth(session.mac_address, parseInt(maxMbps, 10) || 5, parseInt(maxUploadMbps, 10) || 5, burstConfig);
           console.log(`✅ Restored: ${session.voucher_code} → ${session.mac_address} (${maxMbps}Mbps down / ${maxUploadMbps}Mbps up)`);
         } else {
           console.log(`✅ Restored: ${session.voucher_code} → ${session.mac_address} (no cap)`);
@@ -212,6 +220,19 @@ async function startTimer() {
       const capEnabledSetting = db.prepare("SELECT value FROM settings WHERE key = 'enable_bandwidth_cap'").get();
       const isBandwidthCapEnabled = capEnabledSetting?.value === '1';
       const { allowClient, setClientBandwidth } = require('./networkService');
+      const { getBurstConfig } = require('./sessionService');
+
+      // Bug found live ("burst is not working" even after the shaping
+      // fixes below): this used to call setClientBandwidth() with NO
+      // burst argument at all - burst.mbps/seconds only ever got applied
+      // once, at session creation. This tick runs every 30s for the life
+      // of every active session and silently re-created each client's
+      // queue/class as a plain non-burst one every single time, wiping out
+      // burst within 30 seconds of a customer connecting regardless of
+      // what session creation set up. Also now respects a per-session
+      // bandwidth override (Create Voucher's optional Mbps fields) instead
+      // of always re-asserting the global cap over it.
+      const burstConfig = getBurstConfig();
 
       for (const session of activeSessions) {
         const remaining = (
@@ -227,10 +248,12 @@ async function startTimer() {
 
           try {
             await allowClient(session.mac_address);
-            if (isBandwidthCapEnabled) {
+            if (session.download_mbps) {
+              await setClientBandwidth(session.mac_address, session.download_mbps, session.upload_mbps || session.download_mbps, burstConfig);
+            } else if (isBandwidthCapEnabled) {
               const maxMbps = getSetting('bandwidth_cap_download_mbps', 5);
               const maxUploadMbps = getSetting('bandwidth_cap_upload_mbps', 5);
-              await setClientBandwidth(session.mac_address, maxMbps, maxUploadMbps);
+              await setClientBandwidth(session.mac_address, maxMbps, maxUploadMbps, burstConfig);
             }
           } catch (e) {
             console.error(`Failed to re-assert access for ${session.mac_address}:`, e.message);
