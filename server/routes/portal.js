@@ -115,6 +115,7 @@ router.get('/rates', (req, res) => {
       welcome_message: getSetting('welcome_message', 'Welcome! Insert a coin to get started.'),
       disconnect_message: getSetting('disconnect_message', 'Your session has ended. Thank you!'),
       show_voucher: getSetting('show_voucher', '0'),
+      payment_methods: getSetting('payment_methods', 'both'),
       redirect_url: getSetting('redirect_url', ''),
       allow_pause: getSetting('allow_pause', '1'),
       max_pause_minutes: getSetting('max_pause_minutes', '30'),

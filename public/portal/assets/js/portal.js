@@ -60,7 +60,8 @@ let portalSettings = {
   redirect_url: '',
   allow_pause: '1',
   max_pause_minutes: '30',
-  grace_period_minutes: '0'
+  grace_period_minutes: '0',
+  payment_methods: 'both'
 };
 
 // ===== COIN MODAL TIMER =====
@@ -360,6 +361,13 @@ function closeCoinModal() {
 }
 
 // ===== APPLY PORTAL SETTINGS TO UI =====
+// Bug: this function existed but was never actually called anywhere - the
+// pause-button and voucher-box logic it was written for was duplicated
+// inline elsewhere instead (see updateUI()). Now also owns showing/hiding
+// the coin and voucher entry points per the admin's Payment Methods
+// setting (Settings > Portal Settings) - runs once after settings load
+// since these buttons are static DOM elements, not re-rendered per state
+// change.
 function applyPortalSettings() {
   const voucherBox = document.getElementById('voucherBox');
   if (currentSession && currentSession.active) {
@@ -368,6 +376,21 @@ function applyPortalSettings() {
   const pauseBtn = document.getElementById('pauseBtn');
   if (pauseBtn) {
     pauseBtn.style.display = portalSettings.allow_pause === '1' ? 'block' : 'none';
+  }
+
+  const showCoin = portalSettings.payment_methods !== 'voucher';
+  const showVoucherEntry = portalSettings.payment_methods !== 'coin';
+
+  const insertBtn = document.getElementById('insertBtn');
+  if (insertBtn) insertBtn.style.display = showCoin ? 'block' : 'none';
+  const insertBtnConnected = document.getElementById('insertBtnConnected');
+  if (insertBtnConnected) insertBtnConnected.style.display = showCoin ? 'block' : 'none';
+
+  const vouchersBtn = document.getElementById('vouchersBtn');
+  if (vouchersBtn) vouchersBtn.style.display = showVoucherEntry ? 'block' : 'none';
+  if (!showVoucherEntry) {
+    const voucherInputRow = document.getElementById('voucherInputRow');
+    if (voucherInputRow) voucherInputRow.style.display = 'none';
   }
 }
 
@@ -542,6 +565,8 @@ async function loadSettings() {
     portalSettings.max_pause_minutes = data.max_pause_minutes || '30';
     portalSettings.grace_period_minutes = data.grace_period_minutes || '0';
     portalSettings.vendo_ip = data.vendo_ip || '';
+    portalSettings.payment_methods = data.payment_methods || 'both';
+    applyPortalSettings();
 
     document.getElementById('cafeName').textContent = data.cafe_name.toUpperCase();
     document.title = data.cafe_name;

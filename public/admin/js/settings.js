@@ -35,6 +35,7 @@ async function loadSettings() {
     document.getElementById('disconnectMessage').value = s.disconnect_message || '';
     document.getElementById('redirectUrl').value = s.redirect_url || '';
     setToggle('showVoucher', 'showVoucherLabel', s.show_voucher === '1');
+    document.getElementById('paymentMethods').value = s.payment_methods || 'both';
 
     // Session Settings
     setToggle('allowPause', 'allowPauseLabel', s.allow_pause === '1');
@@ -94,6 +95,7 @@ async function savePortalSettings() {
       disconnect_message: document.getElementById('disconnectMessage').value,
       redirect_url: document.getElementById('redirectUrl').value,
       show_voucher: document.getElementById('showVoucher').checked ? '1' : '0',
+      payment_methods: document.getElementById('paymentMethods').value,
     });
     if (data.success) showToast('Portal settings saved!');
     else showToast(data.message || 'Failed to save.', 'error');

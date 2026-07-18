@@ -22,6 +22,18 @@ router.post('/redeem', async (req, res) => {
   try {
     const ip = getRealClientIp(req);
 
+    // Settings > Portal Settings > Payment Methods. Safe to enforce here
+    // (unlike coin credits in coin.js) because no real money has changed
+    // hands yet at this point — a voucher code being rejected just tells
+    // the customer to use the other method, nothing is lost.
+    const paymentMethods = db.prepare("SELECT value FROM settings WHERE key = 'payment_methods'").get()?.value || 'both';
+    if (paymentMethods === 'coin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Voucher redemption is currently disabled. Please use the coin slot instead.'
+      });
+    }
+
     if (!req.body.mac || !req.body.code) {
       return res.status(400).json({
         success: false,

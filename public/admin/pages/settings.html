@@ -93,6 +93,15 @@
       <small style="color:var(--text-muted);">Redirect customer to this URL after connecting.</small>
     </div>
     <div class="form-group">
+      <label class="form-label">Payment Methods on Portal</label>
+      <select id="paymentMethods" class="form-control">
+        <option value="both">Coin + Voucher (both)</option>
+        <option value="coin">Coin Only</option>
+        <option value="voucher">Voucher Only</option>
+      </select>
+      <small style="color:var(--text-muted);">Choose which way customers can pay for time.</small>
+    </div>
+    <div class="form-group">
       <label class="form-label">Show Voucher Code on Portal</label>
       <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
         <label class="toggle-switch">
