@@ -382,8 +382,13 @@ body {
 .stat-card.orange .stat-icon { background: var(--card-orange-bg); color: var(--card-orange-text); }
 
 /* ===== GRID LAYOUTS ===== */
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+/* align-items: start (not the CSS Grid default of stretch) - two cards
+   side by side used to be forced to match the taller one's height, leaving
+   a large empty gap under whichever card had less content (e.g. Settings'
+   Admin Credentials card next to the taller Cafe Information card). Each
+   card now sizes to its own content, independent of its row neighbor. */
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; align-items: start; }
 
 /* ===== TABLE ===== */
 .table-wrapper {

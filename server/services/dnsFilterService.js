@@ -42,6 +42,24 @@ async function login() {
   return data?.session?.sid || null;
 }
 
+// Pulls a number out of a response body trying several plausible field
+// paths - never verified against a live instance before shipping (no
+// Pi-hole available in this dev environment), and different Pi-hole FTL
+// versions have shuffled the summary schema before (v5 vs v6 alone differ:
+// flat dns_queries_today/ads_blocked_today vs nested queries.total/
+// queries.blocked). Reported live as "always 0" even with real traffic
+// flowing through the container, so single-path field access was almost
+// certainly the bug - this tries the v6 nested shape first, then v5's flat
+// shape, before giving up and logging the actual raw body so the real
+// shape can be read directly from the server logs if it's still wrong.
+function pick(obj, paths) {
+  for (const path of paths) {
+    const value = path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj);
+    if (value !== undefined && value !== null) return value;
+  }
+  return undefined;
+}
+
 // Summary + top blocked domains in one call for the admin panel's card.
 // Returns { available: false } if the service is off, unreachable, or the
 // stored credential is missing/stale - the panel shows "not available"
@@ -49,7 +67,10 @@ async function login() {
 async function getStatus() {
   try {
     const sid = await login();
-    if (!sid) return { available: false };
+    if (!sid) {
+      console.warn('[DNS Filter] Could not authenticate - check the stored credential (re-run install-pihole.sh to regenerate it)');
+      return { available: false };
+    }
 
     const headers = { sid };
     const [summaryRes, topRes] = await Promise.all([
@@ -57,22 +78,35 @@ async function getStatus() {
       fetchWithTimeout(`${BASE_URL}/stats/top_domains?blocked=true&count=5`, { headers })
     ]);
 
-    if (!summaryRes.ok) return { available: false };
+    if (!summaryRes.ok) {
+      console.warn(`[DNS Filter] /stats/summary returned HTTP ${summaryRes.status}`);
+      return { available: false };
+    }
     const summary = await summaryRes.json();
     const top = topRes.ok ? await topRes.json() : { domains: [] };
 
-    const queries = summary?.queries?.total ?? 0;
-    const blocked = summary?.queries?.blocked ?? 0;
-    const percent = summary?.queries?.percent_blocked ?? (queries > 0 ? Math.round((blocked / queries) * 1000) / 10 : 0);
+    const queries = pick(summary, ['queries.total', 'dns_queries_today', 'queries_today']) ?? 0;
+    const blocked = pick(summary, ['queries.blocked', 'ads_blocked_today', 'blocked_today']) ?? 0;
+    const percent = pick(summary, ['queries.percent_blocked', 'ads_percentage_today'])
+      ?? (queries > 0 ? Math.round((blocked / queries) * 1000) / 10 : 0);
 
+    if (queries === 0) {
+      // Not necessarily a bug (a fresh container with no traffic yet is
+      // genuinely 0) - but logged so a real parsing failure is visible
+      // instead of silently looking identical to "no traffic yet".
+      console.log('[DNS Filter] Summary shows 0 queries - raw response for debugging:', JSON.stringify(summary).slice(0, 500));
+    }
+
+    const domainsList = top?.domains || top?.top_domains || [];
     return {
       available: true,
       queries_today: queries,
       blocked_today: blocked,
       blocked_percent: percent,
-      top_blocked: (top?.domains || []).map((d) => ({ domain: d.domain, count: d.count }))
+      top_blocked: domainsList.map((d) => ({ domain: d.domain || d.name, count: d.count }))
     };
   } catch (e) {
+    console.error('[DNS Filter] getStatus() failed:', e.message);
     return { available: false };
   }
 }

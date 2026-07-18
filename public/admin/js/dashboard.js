@@ -1,6 +1,8 @@
 let revenueChart = null;
 let startTime = Date.now();
 let currentChartRange = 'weekly';
+let networkChart = null;
+let networkStatsInterval = null;
 
 async function loadDashboard() {
   // Bug: initChart() used to run AFTER loadSalesStats(), so on every fresh
@@ -14,6 +16,123 @@ async function loadDashboard() {
   await loadActiveSessionsCount();
   await loadSystemVersion();
   await loadSystemStatus();
+  await loadDashboardMode();
+}
+
+// Comprehensive vs clean dashboard (Dashboard's own toggle, top right) -
+// off by default. Only gates the Network Traffic graph for now; existing
+// cards (sales, system status, transactions) stay visible either way so
+// this can't accidentally hide something an owner already relies on.
+async function loadDashboardMode() {
+  try {
+    const data = await apiCall('GET', '/api/admin/settings');
+    const comprehensive = data.success && data.settings.dashboard_comprehensive === '1';
+    const toggle = document.getElementById('dashboardComprehensiveToggle');
+    if (toggle) toggle.checked = comprehensive;
+    setDashboardMode(comprehensive);
+  } catch (e) {}
+}
+
+function setDashboardMode(comprehensive) {
+  const card = document.getElementById('networkTrafficCard');
+  if (card) card.style.display = comprehensive ? 'block' : 'none';
+  if (comprehensive) {
+    initNetworkChart();
+    if (!networkStatsInterval) {
+      pollNetworkStats();
+      networkStatsInterval = setInterval(pollNetworkStats, 4000);
+    }
+  } else {
+    destroyDashboard();
+  }
+}
+
+async function toggleDashboardMode() {
+  const comprehensive = document.getElementById('dashboardComprehensiveToggle').checked;
+  setDashboardMode(comprehensive);
+  try {
+    await apiCall('POST', '/api/admin/settings', { dashboard_comprehensive: comprehensive ? '1' : '0' });
+  } catch (e) {}
+}
+
+function initNetworkChart() {
+  const canvas = document.getElementById('networkChart');
+  if (!canvas || networkChart) return;
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const textColor = isDark ? '#888' : '#999';
+  const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+
+  networkChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Download (Mbps)',
+          data: [],
+          borderColor: '#00c853',
+          backgroundColor: 'rgba(0,200,83,0.08)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0
+        },
+        {
+          label: 'Upload (Mbps)',
+          data: [],
+          borderColor: '#2196f3',
+          backgroundColor: 'rgba(33,150,243,0.08)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      animation: false,
+      plugins: { legend: { display: true, labels: { color: textColor, boxWidth: 12 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: textColor, maxTicksLimit: 6 } },
+        y: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor } }
+      }
+    }
+  });
+}
+
+const NETWORK_CHART_MAX_POINTS = 20;
+
+async function pollNetworkStats() {
+  try {
+    const data = await apiCall('GET', '/api/admin/network-stats');
+    if (!data.success) return;
+    document.getElementById('currentDownload').textContent = data.download_mbps;
+    document.getElementById('currentUpload').textContent = data.upload_mbps;
+
+    if (!networkChart) return;
+    const label = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    networkChart.data.labels.push(label);
+    networkChart.data.datasets[0].data.push(data.download_mbps);
+    networkChart.data.datasets[1].data.push(data.upload_mbps);
+    if (networkChart.data.labels.length > NETWORK_CHART_MAX_POINTS) {
+      networkChart.data.labels.shift();
+      networkChart.data.datasets[0].data.shift();
+      networkChart.data.datasets[1].data.shift();
+    }
+    networkChart.update('none');
+  } catch (e) {}
+}
+
+function destroyDashboard() {
+  if (networkStatsInterval) {
+    clearInterval(networkStatsInterval);
+    networkStatsInterval = null;
+  }
+  if (networkChart) {
+    networkChart.destroy();
+    networkChart = null;
+  }
 }
 
 // Bug: "Server Uptime" ran its own client-side timer starting from page

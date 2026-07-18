@@ -647,16 +647,37 @@ async function loadRouterStatus() {
     const data = await apiCall('GET', '/api/admin/router/status');
     if (!data.success) throw new Error(data.message);
     const s = data.status;
+    const cpuColor = s.cpuLoad >= 80 ? 'var(--accent-red)' : s.cpuLoad >= 50 ? 'var(--accent-orange)' : 'var(--accent-green)';
     el.innerHTML = `
-      <div><div style="font-size:12px;color:var(--text-muted);">Model</div><div>${s.model}</div></div>
-      <div><div style="font-size:12px;color:var(--text-muted);">RouterOS</div><div>${s.routerosVersion}</div></div>
-      <div><div style="font-size:12px;color:var(--text-muted);">Uptime</div><div>${s.uptime}</div></div>
-      <div><div style="font-size:12px;color:var(--text-muted);">Active Devices</div><div>${s.activeDevices}</div></div>
-      <div><div style="font-size:12px;color:var(--text-muted);">CPU Load</div><div>${s.cpuLoad}%</div></div>
-      <div><div style="font-size:12px;color:var(--text-muted);">Identity</div><div>${s.identity || '-'}</div></div>
+      <div class="grid-3" style="gap:12px;">
+        <div class="stat-card" style="padding:14px;">
+          <div class="stat-label"><i class="fas fa-microchip" style="margin-right:6px;"></i>Model</div>
+          <div class="stat-value" style="font-size:18px;">${s.model}</div>
+        </div>
+        <div class="stat-card" style="padding:14px;">
+          <div class="stat-label"><i class="fas fa-code-branch" style="margin-right:6px;"></i>RouterOS</div>
+          <div class="stat-value" style="font-size:18px;">${s.routerosVersion}</div>
+        </div>
+        <div class="stat-card" style="padding:14px;">
+          <div class="stat-label"><i class="fas fa-id-badge" style="margin-right:6px;"></i>Identity</div>
+          <div class="stat-value" style="font-size:18px;">${s.identity || '--'}</div>
+        </div>
+        <div class="stat-card" style="padding:14px;">
+          <div class="stat-label"><i class="fas fa-clock" style="margin-right:6px;"></i>Uptime</div>
+          <div class="stat-value" style="font-size:18px;">${s.uptime}</div>
+        </div>
+        <div class="stat-card" style="padding:14px;">
+          <div class="stat-label"><i class="fas fa-users" style="margin-right:6px;"></i>Active Devices</div>
+          <div class="stat-value" style="font-size:18px;color:var(--accent-green);">${s.activeDevices}</div>
+        </div>
+        <div class="stat-card" style="padding:14px;">
+          <div class="stat-label"><i class="fas fa-gauge-high" style="margin-right:6px;"></i>CPU Load</div>
+          <div class="stat-value" style="font-size:18px;color:${cpuColor};">${s.cpuLoad}%</div>
+        </div>
+      </div>
     `;
   } catch(e) {
-    el.innerHTML = '<div style="color:var(--accent-red);">Failed to reach router.</div>';
+    el.innerHTML = '<div style="color:var(--accent-red);padding:12px;"><i class="fas fa-triangle-exclamation"></i> Failed to reach router.</div>';
   }
 }
 

@@ -129,6 +129,7 @@ async function navigateTo(page) {
   // Destroy previous page intervals before switching
   if (typeof destroyAbout === 'function') destroyAbout();
   if (typeof destroySessions === 'function') destroySessions();
+  if (typeof destroyDashboard === 'function') destroyDashboard();
 
   currentPage = page;
 

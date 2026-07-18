@@ -331,6 +331,12 @@ if (settingCount.count === 0) {
   // current behavior (both buttons shown) with no migration needed.
   insertSetting.run('payment_methods', 'both');
 
+  // Dashboard: comprehensive view (live bandwidth graph, extra system
+  // health detail) vs a clean/minimal one. Off by default - a clean
+  // dashboard is the safer default for a non-technical owner; anyone who
+  // wants the deeper view opts in.
+  insertSetting.run('dashboard_comprehensive', '0');
+
   // Session settings
   insertSetting.run('allow_pause', '1');
   insertSetting.run('max_pause_minutes', '30');
