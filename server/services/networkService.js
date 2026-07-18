@@ -193,10 +193,21 @@ function getLanInterface(clientIp) {
 // rewrites it). "police... drop" simply drops packets over the rate rather
 // than queueing them (ingress traffic can't be queued the way htb queues
 // egress), which is the standard way to rate-limit inbound traffic with tc.
-// burst is optional: { mbps, seconds } - only meaningful in router mode
-// (RouterOS Simple Queue burst-limit/burst-threshold/burst-time). Standalone
-// mode's tc/htb shaping has no equivalent time-windowed burst concept here,
-// so it's silently ignored there rather than pretended to work.
+// burst is optional: { mbps, seconds }. Correction: this used to be treated
+// as router-mode-only, on the assumption HTB had no equivalent to RouterOS's
+// burst-limit/burst-threshold/burst-time - wrong. HTB's own rate/ceil/burst
+// parameters do exactly this natively: ceil is the allowed peak (burst)
+// rate, and burst/cburst is a token-bucket sized in bytes so the class can
+// actually sustain ceil for burst.seconds before falling back to the
+// steady-state rate. sizeOfBurstBucket() below computes that byte size from
+// the admin's configured mbps/seconds instead of the previous fixed 32k
+// smoothing bucket (which was never meant to represent a real burst window).
+function burstBucketBytes(burst, fallbackMbps) {
+  if (!burst || !burst.mbps || !burst.seconds) return { ceilMbps: fallbackMbps, bytes: 32 * 1024 };
+  const bytes = Math.round((burst.mbps * 1000000 / 8) * burst.seconds);
+  return { ceilMbps: burst.mbps, bytes };
+}
+
 function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst = null) {
   let normalizedMac;
   try {
@@ -226,8 +237,16 @@ function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst 
   return new Promise((resolve) => {
     const classId = macToClassId(normalizedMac);
     const lanIf = getLanInterface(clientIp);
+    const { ceilMbps, bytes } = burstBucketBytes(burst, download);
+    // CAKE runs as a leaf qdisc under this client's own HTB class (not on
+    // the interface root) so each customer gets its own flow-fairness/AQM
+    // scoped to their own rate cap, instead of one shared queue where a
+    // heavy downloader could still starve other customers' flows. Handle
+    // reuses classId (100-999) so it's already guaranteed unique per client
+    // and matches across shape/cleanup calls.
     const cmds = [
-      `sudo tc class replace dev ${lanIf} parent 1: classid 1:${classId} htb rate ${download}mbit ceil ${download}mbit burst 32k cburst 32k quantum 15000`,
+      `sudo tc class replace dev ${lanIf} parent 1: classid 1:${classId} htb rate ${download}mbit ceil ${ceilMbps}mbit burst ${bytes} cburst ${bytes} quantum 15000`,
+      `sudo tc qdisc replace dev ${lanIf} parent 1:${classId} handle ${classId}: cake bandwidth ${ceilMbps}mbit`,
       `sudo tc filter replace dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_ip ${clientIp} classid 1:${classId}`,
       `sudo tc filter replace dev ${lanIf} parent ffff: protocol ip prio 1 flower src_ip ${clientIp} action police rate ${upload}mbit burst 32k drop`
     ];
@@ -236,7 +255,7 @@ function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst 
       if (error) {
         console.error(`[TC] Failed to shape ${normalizedMac} (${clientIp}):`, error.message);
       } else {
-        console.log(`[TC] Shaped ${normalizedMac} (${clientIp}) to ${download}mbit down / ${upload}mbit up (class 1:${classId})`);
+        console.log(`[TC] Shaped ${normalizedMac} (${clientIp}) to ${download}mbit down (burst ${ceilMbps}mbit) / ${upload}mbit up, CAKE enabled (class 1:${classId})`);
         lastShapedIp.set(normalizedMac, clientIp);
       }
       resolve();
@@ -273,6 +292,7 @@ function removeClientBandwidth(mac) {
     const lanIf = getLanInterface(clientIp);
     exec(
       `sudo tc filter del dev ${lanIf} protocol ip parent 1:0 prio 1 flower dst_ip ${clientIp} classid 1:${classId}; ` +
+      `sudo tc qdisc del dev ${lanIf} parent 1:${classId} handle ${classId}:; ` +
       `sudo tc class del dev ${lanIf} classid 1:${classId}; ` +
       `sudo tc filter del dev ${lanIf} parent ffff: protocol ip prio 1 flower src_ip ${clientIp}`,
       (error, stdout, stderr) => {
