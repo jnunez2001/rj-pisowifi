@@ -60,7 +60,7 @@ async function saveCafeSettings() {
       cafe_address: document.getElementById('cafeAddress').value,
       cafe_contact: document.getElementById('cafeContact').value,
     });
-    if (data.success) showToast('Cafe info saved!');
+    if (data.success) showToast('Site info saved!');
     else showToast(data.message || 'Failed to save.', 'error');
   } catch(e) { showToast('Server error.', 'error'); }
 }

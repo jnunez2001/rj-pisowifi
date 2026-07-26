@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
-const { logFinancialEvent } = require('../services/financialLogService');
+const { creditCoinValue, NoMatchingRateError } = require('../services/coinCreditService');
+const { resolveDeviceKey } = require('../services/satelliteKioskService');
 
 // MAC address validation helper (Bug #27)
 function isValidMac(mac) {
@@ -44,7 +45,14 @@ router.get('/pending/:mac', (req, res) => {
 // POST /api/coin — ESP32 calls this when a coin is detected
 router.post('/', async (req, res) => {
   try {
-    const { mac: deviceMac, coin_value, ip } = req.body;
+    const { mac: deviceMac, coin_value, ip, device_key } = req.body;
+
+    // Optional - absent on every existing ESP32 deployment in the field,
+    // which must keep working exactly as before. Only a request that
+    // actually carries a key matching a paired Satellite Kiosk gets
+    // attributed to it; anything else (no key, unrecognized key) resolves
+    // to null and is credited as generic Coins, same as today.
+    const kioskId = resolveDeviceKey(device_key);
 
     if (!coin_value || typeof coin_value !== 'number' || coin_value <= 0) {
       return res.status(400).json({
@@ -85,35 +93,25 @@ router.post('/', async (req, res) => {
       });
     }
 
-    const { getRates } = require('../services/voucherService');
-    const { getSessionByMac, createSession, addTimeToSession } = require('../services/sessionService');
-
-    // ===== SMART COIN MATCHING =====
-    const allRates = getRates().sort((a, b) => b.coin_value - a.coin_value);
-
-    let remaining = coin_value;
-    const matchedRates = [];
-
-    for (const rate of allRates) {
-      if (remaining <= 0) break;
-      if (rate.coin_value <= remaining) {
-        const times = Math.floor(remaining / rate.coin_value);
-        matchedRates.push({ rate, times });
-        remaining -= rate.coin_value * times;
+    // ===== SMART COIN MATCHING + CREDIT =====
+    // (shared with the direct-GPIO coin path — server/services/coinCreditService.js)
+    let result;
+    try {
+      result = await creditCoinValue(mac, coin_value, ip, kioskId);
+    } catch (err) {
+      if (err instanceof NoMatchingRateError) {
+        const attempt = recordAttempt(mac);
+        return res.status(400).json({
+          success: false,
+          blocked: attempt.blocked,
+          remaining: attempt.remaining,
+          remaining_attempts: attempt.remaining_attempts,
+          message: attempt.blocked
+            ? attempt.message
+            : `Invalid coin. ${attempt.remaining_attempts} attempts left.`
+        });
       }
-    }
-
-    if (matchedRates.length === 0 || remaining === coin_value) {
-      const attempt = recordAttempt(mac);
-      return res.status(400).json({
-        success: false,
-        blocked: attempt.blocked,
-        remaining: attempt.remaining,
-        remaining_attempts: attempt.remaining_attempts,
-        message: attempt.blocked
-          ? attempt.message
-          : `Invalid coin. ${attempt.remaining_attempts} attempts left.`
-      });
+      throw err;
     }
 
     clearAttempts(mac);
@@ -127,70 +125,6 @@ router.post('/', async (req, res) => {
     if (pendingValid && mac === pendingCoinMac) {
       pendingSetAt = Date.now();
       pendingTotal += coin_value;
-    }
-
-    let totalMinutes = 0;
-    let totalExpirationMinutes = 0;
-
-    for (const { rate, times } of matchedRates) {
-      totalMinutes += rate.minutes * times;
-      totalExpirationMinutes += rate.expiration_minutes * times;
-    }
-
-    const matchLog = matchedRates
-      .map(({ rate, times }) => `₱${rate.coin_value}x${times}`)
-      .join(' + ');
-    console.log(`💡 ₱${coin_value} matched as: ${matchLog} = ${totalMinutes} mins (mac: ${mac})`);
-
-    const existingSession = getSessionByMac(mac);
-
-    let result;
-
-    if (existingSession) {
-      const updated = await addTimeToSession(mac, totalMinutes, totalExpirationMinutes);
-
-      db.prepare(`
-        INSERT INTO transactions
-        (voucher_code, coin_value, minutes_added, type)
-        VALUES (?, ?, ?, 'coin')
-      `).run(existingSession.voucher_code, coin_value, totalMinutes);
-      logFinancialEvent({ voucher_code: existingSession.voucher_code, coin_value, minutes_added: totalMinutes, type: 'coin', mac });
-
-      console.log(`💰 Added ${totalMinutes} mins to ${existingSession.voucher_code}`);
-
-      result = {
-        success: true,
-        action: 'time_added',
-        voucher_code: updated.voucher_code,
-        minutes_added: totalMinutes,
-        minutes_remaining: updated.minutes_remaining,
-        expires_at: updated.expires_at,
-        hard_expires_at: updated.hard_expires_at,
-        matched_as: matchLog
-      };
-
-    } else {
-      const session = await createSession(mac, ip || '', totalMinutes, totalExpirationMinutes);
-
-      db.prepare(`
-        INSERT INTO transactions
-        (voucher_code, coin_value, minutes_added, type)
-        VALUES (?, ?, ?, 'coin')
-      `).run(session.voucher_code, coin_value, totalMinutes);
-      logFinancialEvent({ voucher_code: session.voucher_code, coin_value, minutes_added: totalMinutes, type: 'coin', mac });
-
-      console.log(`🆕 New session: ${session.voucher_code} for ${mac}`);
-
-      result = {
-        success: true,
-        action: 'session_created',
-        voucher_code: session.voucher_code,
-        minutes_added: totalMinutes,
-        minutes_remaining: session.minutes_remaining,
-        expires_at: session.expires_at,
-        hard_expires_at: session.hard_expires_at,
-        matched_as: matchLog
-      };
     }
 
     // Bug: this used to clear pendingCoinMac immediately after any single
@@ -209,6 +143,55 @@ router.post('/', async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
+// ===== DIRECT GPIO COINSLOT (Workstream 4) =====
+// Separate from the pendingCoinMac mechanism above, which is specific to
+// the ESP32 HTTP-relay flow — this is the busy-lock/rate-limited waiting-
+// client registration for a coin acceptor wired directly into the box's
+// own GPIO header. See server/services/coinslotGpio.js.
+
+// POST /api/coin/gpio/register — portal calls this when Insert Coin opens
+// in direct-GPIO mode.
+router.post('/gpio/register', (req, res) => {
+  const { mac } = req.body;
+  if (!mac || !isValidMac(mac)) {
+    return res.status(400).json({ success: false, message: 'Valid MAC address required' });
+  }
+  const coinslotGpio = require('../services/coinslotGpio');
+  const { status, windowSeconds } = coinslotGpio.registerWaitingClient(mac);
+  if (status === coinslotGpio.REGISTER_BUSY) {
+    return res.status(409).json({ success: false, status, message: 'Coin slot is busy with another customer.' });
+  }
+  if (status === coinslotGpio.REGISTER_RATE_LIMITED) {
+    return res.status(429).json({ success: false, status, message: 'Too many attempts — please wait before trying again.' });
+  }
+  return res.json({ success: true, status, window_seconds: windowSeconds });
+});
+
+// POST /api/coin/gpio/cancel — portal calls this when the Insert Coin
+// modal is closed without paying.
+router.post('/gpio/cancel', (req, res) => {
+  const { mac } = req.body;
+  if (!mac || !isValidMac(mac)) {
+    return res.status(400).json({ success: false, message: 'Valid MAC address required' });
+  }
+  const coinslotGpio = require('../services/coinslotGpio');
+  const cancelled = coinslotGpio.cancelWaitingClient(mac);
+  return res.json({ success: true, cancelled });
+});
+
+// GET /api/coin/gpio/status/:mac — portal polls this to know whose coin
+// window is currently active.
+router.get('/gpio/status/:mac', (req, res) => {
+  const mac = normalizeMacParam(req.params.mac);
+  const coinslotGpio = require('../services/coinslotGpio');
+  const waitingMac = coinslotGpio.currentWaitingMac();
+  return res.json({ success: true, is_waiting: !!mac && waitingMac === mac });
+});
+
+function normalizeMacParam(mac) {
+  return String(mac || '').trim().toLowerCase();
+}
 
 // GET /api/coin/status/:mac
 router.get('/status/:mac', (req, res) => {

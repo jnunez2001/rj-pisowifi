@@ -7,7 +7,8 @@ const {
   allowClient,
   blockClient,
   setClientBandwidth,
-  removeClientBandwidth
+  removeClientBandwidth,
+  checkRoam
 } = require('./networkService');
 const sseService = require('./sseService');
 
@@ -330,6 +331,55 @@ function getActiveSessions() {
   `).all();
 }
 
+// Standalone mode's bandwidth shaping is bound to whichever interface a
+// client's IP was on when it was applied (see standaloneDriver.js's
+// checkRoam) — internet access itself already follows a customer across
+// every AP/lane by design, but their speed cap doesn't unless something
+// re-applies it after a roam. Called periodically by watchdogService, only
+// meaningful in standalone/OpenWRT mode (checkRoam no-ops to
+// `{changed:false}` everywhere else, so this is a safe no-op call in
+// MikroTik mode too, not just a guarded one).
+async function repairRoamedSessions() {
+  const now = new Date().toISOString();
+  const active = db.prepare(`
+    SELECT * FROM sessions WHERE hard_expires_at > ? AND is_paused = 0
+  `).all(now);
+
+  const repaired = [];
+  for (const session of active) {
+    let roam;
+    try {
+      roam = await checkRoam(session.mac_address);
+    } catch (e) {
+      console.error(`[Network] Roam check failed for ${session.mac_address}:`, e.message);
+      continue;
+    }
+    if (!roam?.changed) continue;
+
+    try {
+      // Clean up the old interface's shaping class before reapplying on
+      // the new one - removeClientBandwidth() already knows to use the
+      // last-shaped IP for this, not a fresh (now-wrong) lookup.
+      await removeClientBandwidth(session.mac_address);
+
+      if (session.download_mbps) {
+        const upMbps = session.upload_mbps || session.download_mbps;
+        await setClientBandwidth(session.mac_address, session.download_mbps, upMbps, getBurstConfig());
+      } else if (isBandwidthCapEnabled()) {
+        await setClientBandwidth(session.mac_address, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
+      }
+      // else: bandwidth cap disabled - no shaping to reapply, removing the
+      // old class was the whole fix.
+
+      console.log(`[Network] Re-shaped ${session.mac_address} after roam: ${roam.oldIp} -> ${roam.newIp}`);
+      repaired.push(session.mac_address);
+    } catch (e) {
+      console.error(`[Network] Failed to re-shape ${session.mac_address} after roam:`, e.message);
+    }
+  }
+  return repaired;
+}
+
 module.exports = {
   getSessionByMac,
   getSessionByVoucher,
@@ -340,5 +390,6 @@ module.exports = {
   expireSession,
   getActiveSessions,
   getBurstConfig,
-  isBandwidthCapEnabled
+  isBandwidthCapEnabled,
+  repairRoamedSessions
 };

@@ -176,10 +176,54 @@
   <div class="zf-card-title">Network Mode</div>
   <input type="radio" name="networkMode" id="modeStandalone" value="standalone" onchange="onNetworkModeChange()" style="display:none;">
   <input type="radio" name="networkMode" id="modeMikrotik" value="mikrotik" onchange="onNetworkModeChange()" style="display:none;">
+  <input type="radio" name="networkMode" id="modeOpenwrt" value="openwrt" onchange="onNetworkModeChange()" style="display:none;">
   <div id="networkModeSwitch" class="zf-segmented">
     <button type="button" id="modeStandaloneCard" onclick="setNetworkMode('standalone')">Standalone</button>
-    <button type="button" id="modeMikrotikCard" onclick="setNetworkMode('mikrotik')">External Router</button>
+    <button type="button" id="modeMikrotikCard" onclick="setNetworkMode('mikrotik')">MikroTik</button>
+    <button type="button" id="modeOpenwrtCard" onclick="setNetworkMode('openwrt')">OpenWRT</button>
   </div>
+</div>
+
+<!-- OPENWRT CONNECTION (openwrt mode only) -->
+<div class="zf-card" id="openwrtFields" style="display:none;">
+  <div class="zf-card-title">OpenWRT Connection</div>
+  <div class="zf-row">
+    <div class="zf-row-label">Status</div>
+    <span class="zf-status-pill" id="openwrtLiveStatus" style="color:var(--text-muted);">
+      <i class="fas fa-spinner fa-spin"></i> Checking...
+    </span>
+  </div>
+  <div class="zf-row">
+    <div class="zf-row-label">Router IP Address</div>
+    <input type="text" id="openwrtHost" placeholder="192.168.1.1">
+  </div>
+  <div class="zf-row">
+    <div class="zf-row-label">SSH Port</div>
+    <input type="text" id="openwrtPort" placeholder="22">
+  </div>
+  <div class="zf-row">
+    <div class="zf-row-label">Username</div>
+    <input type="text" id="openwrtUser" placeholder="root">
+  </div>
+  <div class="zf-row">
+    <div class="zf-row-label">Password</div>
+    <div class="zf-pw-wrap">
+      <input type="password" id="openwrtPass" placeholder="Leave blank if using a key">
+      <button type="button" class="zf-eye-btn" id="openwrtPassToggle" onclick="toggleOpenwrtPassword()">
+        <i class="fas fa-eye"></i> Show
+      </button>
+    </div>
+  </div>
+  <div class="zf-row-hint" id="openwrtPassHint" style="display:none;padding:0 16px 12px;">A password is already saved. Leave it blank to keep it, or enter a new one to replace it.</div>
+  <div class="zf-row">
+    <div class="zf-row-label">LAN Bridge Interface</div>
+    <input type="text" id="openwrtLanInterface" placeholder="br-lan">
+  </div>
+  <div style="display:flex;justify-content:flex-end;padding:0 16px 14px;">
+    <button type="button" class="zf-eye-btn" style="font-size:13px;" onclick="testOpenwrtConnection()"><i class="fas fa-rotate"></i> Recheck</button>
+  </div>
+  <button class="zf-btn-row" onclick="saveOpenwrtSettings()">Save Network Settings</button>
+  <div class="zf-footnote">Connects over SSH. The router needs an nftables set (rj_piso_allowed) and an ifb0 device for upload shaping set up once beforehand — see the OpenWRT setup guide.</div>
 </div>
 
 <!-- MIKROTIK CONNECTION (mikrotik mode only) -->

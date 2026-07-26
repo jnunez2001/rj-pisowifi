@@ -9,6 +9,8 @@
 // be wrong here. ARM SBCs (Orange Pi, Raspberry Pi) and x86 mini PCs both
 // get judged on the same RAM/core thresholds.
 const os = require('os');
+const fs = require('fs');
+const { execSync } = require('child_process');
 
 const TIERS = {
   MINIMAL: 'minimal',
@@ -17,6 +19,7 @@ const TIERS = {
 };
 
 let cached = null;
+let cachedGpio = null;
 
 function detect() {
   if (cached) return cached;
@@ -67,4 +70,59 @@ function detect() {
   return cached;
 }
 
-module.exports = { detect, TIERS };
+// Separate concern from the compute-tier detection above: not "how
+// powerful is this hardware" but "does it physically have GPIO pins at
+// all." A generic Linux PC (or a VM, or a Windows box) can be plenty
+// powerful and still have nowhere to wire a coin acceptor directly - only
+// single-board computers (Orange Pi, Raspberry Pi, etc.) expose real GPIO.
+// Main Kiosk (direct-GPIO) is gated on this; Satellite Kiosk is NOT - an
+// ESP32 relaying over WiFi/HTTP works on any hardware, including this one.
+function detectGpioCapability() {
+  if (cachedGpio) return cachedGpio;
+
+  if (process.platform !== 'linux') {
+    cachedGpio = {
+      available: false,
+      hasHardware: false,
+      toolsInstalled: false,
+      reason: `Main Kiosk direct wiring requires a Linux single-board computer with GPIO pins (Orange Pi, Raspberry Pi, etc.). This box is running ${process.platform === 'win32' ? 'Windows' : process.platform}, which has no GPIO header to wire a coin acceptor into.`,
+    };
+    return cachedGpio;
+  }
+
+  let hasHardware = false;
+  try {
+    hasHardware = fs.readdirSync('/dev').some((f) => f.startsWith('gpiochip'));
+  } catch (e) {
+    hasHardware = false;
+  }
+
+  // Same lookup shape as coinslotGpio.js's own which() (a separate concern
+  // - that one gates the listener actually starting, this one gates
+  // whether the admin UI should even offer the feature) - kept consistent
+  // so the two checks can't quietly disagree about whether tools exist.
+  let toolsInstalled = false;
+  try {
+    const result = execSync('command -v gpiomon 2>/dev/null || which gpiomon 2>/dev/null').toString().trim();
+    toolsInstalled = !!result;
+  } catch (e) {
+    toolsInstalled = false;
+  }
+
+  let reason = null;
+  if (!hasHardware) {
+    reason = 'No GPIO hardware detected on this device (no /dev/gpiochip* found). Main Kiosk direct wiring requires a single-board computer with GPIO pins (Orange Pi, Raspberry Pi, etc.) - a generic PC or VM can\'t accept a coin acceptor wired directly into it.';
+  } else if (!toolsInstalled) {
+    reason = 'GPIO hardware was detected, but the required tools (libgpiod\'s gpiomon/gpioset) aren\'t installed. Install them and restart: sudo apt install gpiod';
+  }
+
+  cachedGpio = {
+    available: hasHardware && toolsInstalled,
+    hasHardware,
+    toolsInstalled,
+    reason,
+  };
+  return cachedGpio;
+}
+
+module.exports = { detect, detectGpioCapability, TIERS };

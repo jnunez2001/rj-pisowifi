@@ -1,0 +1,94 @@
+<div class="page-title">Satellite Kiosks</div>
+<div class="page-subtitle">Secondary coin-accepting stations that relay credits back to this box wirelessly.</div>
+
+<div class="card">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Registered Kiosks</div>
+      <div class="card-subtitle">Each one is paired individually and shows its own status and revenue, separate from your Main Kiosk.</div>
+    </div>
+    <button class="btn btn-primary btn-sm" onclick="openModal('addKioskModal')">
+      <i class="fas fa-plus"></i> Add Satellite Kiosk
+    </button>
+  </div>
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Last Seen</th>
+          <th>Today's Revenue</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="kioskList">
+        <tr><td colspan="5"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ADD KIOSK MODAL -->
+<div class="modal-overlay" id="addKioskModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Add Satellite Kiosk</div>
+      <button class="modal-close" onclick="closeModal('addKioskModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input type="text" id="newKioskName" class="form-control" placeholder="e.g. Counter 2, Sari-Sari Extension" autocomplete="off">
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeModal('addKioskModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitAddKiosk()">
+        <i class="fas fa-plus"></i> Add
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- DEVICE KEY MODAL - shown once, right after creation -->
+<div class="modal-overlay" id="kioskKeyModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Kiosk Added</div>
+      <button class="modal-close" onclick="closeModal('kioskKeyModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="notice notice-error" style="margin-bottom:14px;">
+      <i class="fas fa-triangle-exclamation"></i>
+      <span>This key won't be shown again. Copy it into that kiosk's own setup now.</span>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Pairing Key for "<span id="kioskKeyName"></span>"</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="kioskKeyValue" class="form-control" readonly style="font-family:monospace;font-size:13px;">
+        <button class="btn btn-secondary btn-sm" onclick="copyKioskKey()"><i class="fas fa-copy"></i></button>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;">
+      <button class="btn btn-primary" onclick="closeModal('kioskKeyModal')">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- RENAME MODAL -->
+<div class="modal-overlay" id="renameKioskModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Rename Kiosk</div>
+      <button class="modal-close" onclick="closeModal('renameKioskModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input type="text" id="renameKioskName" class="form-control" autocomplete="off">
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeModal('renameKioskModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitRenameKiosk()">
+        <i class="fas fa-save"></i> Save
+      </button>
+    </div>
+  </div>
+</div>

@@ -302,15 +302,22 @@ function showToast(message, type = 'success') {
 }
 
 // ===== COIN MODAL =====
+// Bug: this used to show "Vendo offline" any time /relay/on didn't return
+// success - but the server correctly returns success:false with "No vendo
+// configured" for any operator NOT using an ESP32 relay at all (Main Kiosk
+// direct-GPIO, or before vendo_ip is set up), which isn't an error, it's
+// the normal state. Only a real ESP32-configured-but-unreachable failure
+// (502) should alarm the customer; "not configured" should stay silent.
 async function activateVendoRelay() {
   try {
     const res = await fetch(`${SERVER}/api/portal/relay/on`, { method: 'POST' });
     const data = await res.json();
-    if (!data.success) {
+    if (!data.success && res.status !== 400) {
       showToast('Vendo offline - coin slot may not respond', 'error');
     }
   } catch(e) {
-    showToast('Vendo offline - coin slot may not respond', 'error');
+    // Network-level failure reaching this server's own API - not
+    // necessarily the ESP32's fault, don't alarm the customer over it.
   }
 }
 
@@ -335,6 +342,42 @@ async function registerPendingCoin() {
   }
 }
 
+// Main Kiosk (direct-GPIO) registration - safe to always call alongside
+// the ESP32 pending registration above, regardless of which mode is
+// actually active. The server no-ops this harmlessly when GPIO mode isn't
+// configured (registerWaitingClient returns REGISTER_OK/0 and disables the
+// acceptor), so there's no need to detect the mode client-side first.
+// Unlike the ESP32 path, a GPIO coin credits a session immediately per
+// pulse rather than accumulating in a "pending total" - the existing
+// session-status poll already reacts to minutes_remaining increasing
+// (see checkSession's coinModalOpen branch), so no separate GPIO polling
+// loop is needed here.
+async function registerPendingGpioCoin() {
+  const mac = getMac();
+  if (!mac) return;
+  try {
+    await fetch(`${SERVER}/api/coin/gpio/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac })
+    });
+  } catch(e) {
+    console.log('Failed to register GPIO coin window');
+  }
+}
+
+async function cancelPendingGpioCoin() {
+  const mac = getMac();
+  if (!mac) return;
+  try {
+    await fetch(`${SERVER}/api/coin/gpio/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac })
+    });
+  } catch(e) {}
+}
+
 function handleInsertCoin() {
   if (isBlocked) return;
   playSound('insert');
@@ -342,6 +385,7 @@ function handleInsertCoin() {
   document.getElementById('coinModal').classList.add('show');
   startCoinTimer();
   registerPendingCoin();
+  registerPendingGpioCoin();
   startPendingPoll();
   activateVendoRelay();
 }
@@ -352,6 +396,7 @@ function closeCoinModal() {
   stopPendingPoll();
   document.getElementById('coinModal').classList.remove('show');
   deactivateVendoRelay();
+  cancelPendingGpioCoin();
   if (redirectAfterCoinModal) {
     redirectAfterCoinModal = false;
     setTimeout(() => {

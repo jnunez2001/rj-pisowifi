@@ -74,6 +74,7 @@ const { encryptSecret } = require('../utils/secretCrypto');
 const { getActiveSessions, expireSession, pauseSession, resumeSession } = require('../services/sessionService');
 const { getRates } = require('../services/voucherService');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
+const kioskService = require('../services/satelliteKioskService');
 const os = require('os');
 const { exec, execSync, execFile } = require('child_process');
 
@@ -147,6 +148,51 @@ router.get('/sessions', adminAuth, (req, res) => {
   } catch (err) {
     console.error('Admin sessions error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ===== SATELLITE KIOSKS (see server/services/satelliteKioskService.js) =====
+
+// GET /api/admin/satellite-kiosks
+router.get('/satellite-kiosks', adminAuth, (req, res) => {
+  try {
+    res.json({ success: true, kiosks: kioskService.listKiosks() });
+  } catch (err) {
+    console.error('List satellite kiosks error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/satellite-kiosks — { name } -> returns the unmasked
+// device_key exactly once, for the operator to copy into that kiosk's own
+// config. It is never returned again after this response.
+router.post('/satellite-kiosks', adminAuth, (req, res) => {
+  try {
+    const kiosk = kioskService.createKiosk(req.body.name);
+    res.json({ success: true, kiosk });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// PUT /api/admin/satellite-kiosks/:id — { name }
+router.put('/satellite-kiosks/:id', adminAuth, (req, res) => {
+  try {
+    kioskService.renameKiosk(req.params.id, req.body.name);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// DELETE /api/admin/satellite-kiosks/:id — preserves that kiosk's
+// transaction history, only detaches it (see satelliteKioskService.js)
+router.delete('/satellite-kiosks/:id', adminAuth, (req, res) => {
+  try {
+    kioskService.deleteKiosk(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
   }
 });
 
@@ -261,6 +307,19 @@ router.get('/sales', adminAuth, (req, res) => {
       FROM transactions WHERE date(created_at) = ? AND type = 'coin'
     `).get(today);
 
+    // Main Kiosk (kiosk_id NULL) vs Satellite Kiosks (kiosk_id set) split -
+    // see docs/tabs/satellite-kiosks.md. Combined here rather than broken
+    // out per-kiosk; the Satellite Kiosks tab itself (/api/admin/satellite-
+    // kiosks) already has the per-kiosk breakdown for anyone who drills in.
+    const todayMainKiosk = db.prepare(`
+      SELECT COUNT(*) as count, SUM(coin_value) as income
+      FROM transactions WHERE date(created_at) = ? AND type = 'coin' AND kiosk_id IS NULL
+    `).get(today);
+    const todaySatelliteKiosks = db.prepare(`
+      SELECT COUNT(*) as count, SUM(coin_value) as income
+      FROM transactions WHERE date(created_at) = ? AND type = 'coin' AND kiosk_id IS NOT NULL
+    `).get(today);
+
     const todayPromo = db.prepare(`
       SELECT COUNT(*) as promo_count, SUM(coin_value) as promo_income
       FROM transactions WHERE date(created_at) = ? AND type = 'promo'
@@ -318,15 +377,30 @@ router.get('/sales', adminAuth, (req, res) => {
       chartFormat = 'date';
     }
 
+    // Named kiosk attribution for the Recent Transactions table - a plain
+    // JOIN rather than a second round-trip from the frontend to resolve
+    // kiosk_id -> name.
     const recent = db.prepare(`
-      SELECT * FROM transactions ORDER BY created_at DESC LIMIT 20
+      SELECT t.*, sk.name as kiosk_name
+      FROM transactions t
+      LEFT JOIN satellite_kiosks sk ON sk.id = t.kiosk_id
+      ORDER BY t.created_at DESC LIMIT 20
     `).all();
 
     return res.json({
       success: true,
       today: {
         coin_income: todaySales.total_coins || 0,
+        coin_transactions: todaySales.transaction_count || 0,
+        main_kiosk_income: todayMainKiosk.income || 0,
+        main_kiosk_transactions: todayMainKiosk.count || 0,
+        satellite_kiosk_income: todaySatelliteKiosks.income || 0,
+        satellite_kiosk_transactions: todaySatelliteKiosks.count || 0,
         promo_income: todayPromo.promo_income || 0,
+        // Was computed above (promo_count) but never actually returned -
+        // the Hotspot Dashboard's Revenue by Source breakdown needs a
+        // per-category transaction count, not just income.
+        promo_transactions: todayPromo.promo_count || 0,
         total_income: (todaySales.total_coins || 0) + (todayPromo.promo_income || 0),
         transactions: todaySales.transaction_count || 0,
         minutes_sold: todaySales.total_minutes || 0,
@@ -661,7 +735,7 @@ router.get('/settings', adminAuth, (req, res) => {
   try {
     const settings = db.prepare('SELECT * FROM settings').all();
     const settingsObj = {};
-    const sensitiveKeys = ['admin_password', 'admin_username', 'mikrotik_pass'];
+    const sensitiveKeys = ['admin_password', 'admin_username', 'mikrotik_pass', 'openwrt_pass'];
     settings.forEach(s => {
       if (!sensitiveKeys.includes(s.key)) settingsObj[s.key] = s.value;
     });
@@ -671,6 +745,8 @@ router.get('/settings', adminAuth, (req, res) => {
     // look like nothing was ever saved, even though it was).
     const mikrotikPass = settings.find(s => s.key === 'mikrotik_pass');
     settingsObj.mikrotik_pass_set = !!(mikrotikPass && mikrotikPass.value);
+    const openwrtPass = settings.find(s => s.key === 'openwrt_pass');
+    settingsObj.openwrt_pass_set = !!(openwrtPass && openwrtPass.value);
     return res.json({ success: true, settings: settingsObj });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -707,13 +783,13 @@ router.post('/settings', adminAuth, (req, res) => {
         upsert.run('must_change_password', '0');
         continue;
       }
-      if (key === 'mikrotik_pass') {
+      if (key === 'mikrotik_pass' || key === 'openwrt_pass') {
         // Router credentials have real resale value here — never store raw
         // (Bug: was plaintext at rest, same class as admin_password above).
         // Blank means "leave current value alone" (matches the frontend's
         // "leave blank to keep current" pattern for admin_password).
         if (String(value) !== '') {
-          upsert.run('mikrotik_pass', encryptSecret(String(value)));
+          upsert.run(key, encryptSecret(String(value)));
         }
         continue;
       }
@@ -1060,6 +1136,21 @@ router.get('/network-stats', adminAuth, async (req, res) => {
     return res.json({ success: true, download_mbps: Math.max(0, download_mbps), upload_mbps: Math.max(0, upload_mbps) });
   } catch (err) {
     return res.json({ success: true, download_mbps: 0, upload_mbps: 0 });
+  }
+});
+
+// GET /api/admin/hardware/gpio-capability — lets the Main Kiosk Coin Slot
+// settings page tell an operator up front whether their actual hardware
+// can support direct-GPIO wiring at all, instead of letting them configure
+// something that can never work on a Windows box, a generic Linux PC, or a
+// VM with no GPIO header. Satellite Kiosk is unaffected by this check - an
+// ESP32 relaying over WiFi/HTTP works on any hardware.
+router.get('/hardware/gpio-capability', adminAuth, (req, res) => {
+  try {
+    const { detectGpioCapability } = require('../services/hardwareDetection');
+    return res.json({ success: true, ...detectGpioCapability() });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 
@@ -2350,6 +2441,18 @@ router.post('/router/test-connection', adminAuth, async (req, res) => {
     const mikrotikService = require('../services/mikrotikService');
     await mikrotikService.testConnection();
     return res.json({ success: true, message: 'Connected' });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message || 'Connection failed' });
+  }
+});
+
+// POST /api/admin/router/openwrt-test-connection
+router.post('/router/openwrt-test-connection', adminAuth, async (req, res) => {
+  try {
+    const openwrtDriver = require('../services/drivers/openwrtDriver');
+    const ok = await openwrtDriver.ping();
+    if (ok) return res.json({ success: true, message: 'Connected' });
+    return res.status(400).json({ success: false, message: 'Not reachable' });
   } catch (err) {
     return res.status(400).json({ success: false, message: err.message || 'Connection failed' });
   }

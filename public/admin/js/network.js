@@ -831,13 +831,19 @@ async function loadNetworkModeSettings() {
     if (!data.success) return;
     const s = data.settings;
     const mode = s.network_mode || 'standalone';
-    document.getElementById('modeStandalone').checked = mode !== 'mikrotik';
+    document.getElementById('modeStandalone').checked = mode === 'standalone';
     document.getElementById('modeMikrotik').checked = mode === 'mikrotik';
+    document.getElementById('modeOpenwrt').checked = mode === 'openwrt';
     document.getElementById('mikrotikIp').value = s.mikrotik_ip || '';
     document.getElementById('mikrotikUser').value = s.mikrotik_user || 'admin';
     document.getElementById('mikrotikInterface').value = s.mikrotik_interface || 'ether1';
     document.getElementById('mikrotikSsl').checked = s.mikrotik_ssl === '1';
     document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
+    document.getElementById('openwrtHost').value = s.openwrt_host || '';
+    document.getElementById('openwrtPort').value = s.openwrt_port || '22';
+    document.getElementById('openwrtUser').value = s.openwrt_user || 'root';
+    document.getElementById('openwrtLanInterface').value = s.openwrt_lan_interface || 'br-lan';
+    document.getElementById('openwrtFields').style.display = mode === 'openwrt' ? 'block' : 'none';
 
     // The password itself is never sent here, only whether one is saved,
     // so the field can show a masked placeholder instead of always
@@ -855,12 +861,27 @@ async function loadNetworkModeSettings() {
     }
     passField.dataset.revealed = 'false';
 
+    const owPassField = document.getElementById('openwrtPass');
+    const owPassHint = document.getElementById('openwrtPassHint');
+    if (s.openwrt_pass_set) {
+      owPassField.value = '';
+      owPassField.placeholder = '••••••••••';
+      owPassHint.style.display = 'block';
+    } else {
+      owPassField.value = '';
+      owPassField.placeholder = 'Leave blank if using a key';
+      owPassHint.style.display = 'none';
+    }
+    owPassField.dataset.revealed = 'false';
+
     updateNetworkModeCards(mode);
     showRouterModeCards(mode === 'mikrotik');
-    showStandaloneModeCards(mode !== 'mikrotik');
+    showStandaloneModeCards(mode === 'standalone');
     if (mode === 'mikrotik') {
       await loadLocalInterfaces(s.server_lan_mac || '');
       if (s.mikrotik_ip) testMikrotikConnection();
+    } else if (mode === 'openwrt') {
+      if (s.openwrt_host) testOpenwrtConnection();
     }
 
     const piholeToggle = document.getElementById('enablePiholeToggle');
@@ -1008,9 +1029,10 @@ async function loadLocalInterfaces(savedMac) {
 function onNetworkModeChange() {
   const mode = document.querySelector('input[name="networkMode"]:checked').value;
   document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
+  document.getElementById('openwrtFields').style.display = mode === 'openwrt' ? 'block' : 'none';
   updateNetworkModeCards(mode);
   showRouterModeCards(mode === 'mikrotik');
-  showStandaloneModeCards(mode !== 'mikrotik');
+  showStandaloneModeCards(mode === 'standalone');
   if (mode === 'mikrotik') {
     loadLocalInterfaces('');
     const ip = document.getElementById('mikrotikIp').value.trim();
@@ -1023,7 +1045,62 @@ function onNetworkModeChange() {
         statusEl.style.color = 'var(--text-muted)';
       }
     }
+  } else if (mode === 'openwrt') {
+    const host = document.getElementById('openwrtHost').value.trim();
+    if (host) {
+      testOpenwrtConnection();
+    } else {
+      const statusEl = document.getElementById('openwrtLiveStatus');
+      if (statusEl) {
+        statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:8px;"></i> Enter a router IP below';
+        statusEl.style.color = 'var(--text-muted)';
+      }
+    }
   }
+}
+
+function toggleOpenwrtPassword() {
+  const input = document.getElementById('openwrtPass');
+  const btn = document.getElementById('openwrtPassToggle');
+  const revealed = input.dataset.revealed === 'true';
+  input.type = revealed ? 'password' : 'text';
+  input.dataset.revealed = revealed ? 'false' : 'true';
+  btn.innerHTML = revealed ? '<i class="fas fa-eye"></i> Show' : '<i class="fas fa-eye-slash"></i> Hide';
+}
+
+async function testOpenwrtConnection() {
+  const statusEl = document.getElementById('openwrtLiveStatus');
+  if (!statusEl) return;
+  statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+  statusEl.style.color = 'var(--text-muted)';
+  try {
+    const data = await apiCall('POST', '/api/admin/router/openwrt-test-connection');
+    if (data.success) {
+      statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:8px;"></i> Connected';
+      statusEl.style.color = 'var(--accent-green)';
+    } else {
+      statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:8px;"></i> ' + (data.message || 'Not reachable');
+      statusEl.style.color = 'var(--accent-red)';
+    }
+  } catch(e) {
+    statusEl.innerHTML = '<i class="fas fa-circle" style="font-size:8px;"></i> Server error';
+    statusEl.style.color = 'var(--accent-red)';
+  }
+}
+
+async function saveOpenwrtSettings() {
+  try {
+    const data = await apiCall('POST', '/api/admin/settings', {
+      network_mode: 'openwrt',
+      openwrt_host: document.getElementById('openwrtHost').value,
+      openwrt_port: document.getElementById('openwrtPort').value,
+      openwrt_user: document.getElementById('openwrtUser').value,
+      openwrt_pass: document.getElementById('openwrtPass').value,
+      openwrt_lan_interface: document.getElementById('openwrtLanInterface').value,
+    });
+    if (data.success) showToast('Network settings saved!');
+    else showToast(data.message || 'Failed to save.', 'error');
+  } catch(e) { showToast('Server error, please try again.', 'error'); }
 }
 
 async function testMikrotikConnection() {
@@ -1086,22 +1163,27 @@ async function runRouterTerminalCommand() {
 }
 
 function updateNetworkModeCards(mode) {
-  const standaloneBtn = document.getElementById('modeStandaloneCard');
-  const mikrotikBtn = document.getElementById('modeMikrotikCard');
-  if (!standaloneBtn || !mikrotikBtn) return;
-  const isMikrotik = mode === 'mikrotik';
-  standaloneBtn.style.background = isMikrotik ? 'transparent' : 'var(--accent-green)';
-  standaloneBtn.style.color = isMikrotik ? 'var(--text-muted)' : '#fff';
-  mikrotikBtn.style.background = isMikrotik ? 'var(--accent-blue)' : 'transparent';
-  mikrotikBtn.style.color = isMikrotik ? '#fff' : 'var(--text-muted)';
+  const cards = {
+    standalone: document.getElementById('modeStandaloneCard'),
+    mikrotik: document.getElementById('modeMikrotikCard'),
+    openwrt: document.getElementById('modeOpenwrtCard'),
+  };
+  if (!cards.standalone || !cards.mikrotik || !cards.openwrt) return;
+  const colors = { standalone: 'var(--accent-green)', mikrotik: 'var(--accent-blue)', openwrt: 'var(--accent-orange, #ff9800)' };
+  Object.entries(cards).forEach(([key, btn]) => {
+    const active = key === mode;
+    btn.style.background = active ? colors[key] : 'transparent';
+    btn.style.color = active ? '#fff' : 'var(--text-muted)';
+  });
 }
 
-// Switch-style Network Mode selector (network.html) drives the same two
+// Switch-style Network Mode selector (network.html) drives the same three
 // hidden radio inputs the rest of this file already reads/writes, so
 // onNetworkModeChange()/loadNetworkModeSettings() work unchanged.
 function setNetworkMode(mode) {
-  document.getElementById('modeStandalone').checked = mode !== 'mikrotik';
+  document.getElementById('modeStandalone').checked = mode === 'standalone';
   document.getElementById('modeMikrotik').checked = mode === 'mikrotik';
+  document.getElementById('modeOpenwrt').checked = mode === 'openwrt';
   onNetworkModeChange();
 }
 

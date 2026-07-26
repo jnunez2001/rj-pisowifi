@@ -70,8 +70,8 @@ function initNetworkChart() {
         {
           label: 'Download (Mbps)',
           data: [],
-          borderColor: '#00c853',
-          backgroundColor: 'rgba(0,200,83,0.08)',
+          borderColor: '#1a9c63',
+          backgroundColor: 'rgba(26,156,99,0.08)',
           borderWidth: 2,
           fill: true,
           tension: 0.3,
@@ -80,8 +80,8 @@ function initNetworkChart() {
         {
           label: 'Upload (Mbps)',
           data: [],
-          borderColor: '#2196f3',
-          backgroundColor: 'rgba(33,150,243,0.08)',
+          borderColor: '#3d6d94',
+          backgroundColor: 'rgba(61,109,148,0.08)',
           borderWidth: 2,
           fill: true,
           tension: 0.3,
@@ -332,12 +332,12 @@ function initChart() {
       datasets: [{
         label: 'Revenue (₱)',
         data: [0, 0, 0, 0, 0, 0, 0],
-        borderColor: '#00c853',
-        backgroundColor: 'rgba(0,200,83,0.1)',
+        borderColor: '#1a9c63',
+        backgroundColor: 'rgba(26,156,99,0.1)',
         borderWidth: 2.5,
         fill: true,
         tension: 0.4,
-        pointBackgroundColor: '#00c853',
+        pointBackgroundColor: '#1a9c63',
         pointRadius: 4,
         pointHoverRadius: 6
       }]

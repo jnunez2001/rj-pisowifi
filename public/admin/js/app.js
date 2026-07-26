@@ -90,6 +90,7 @@ function showAdmin() {
   document.getElementById('adminLayout').style.display = 'flex';
   navigateTo('dashboard');
   startSessionPolling();
+  if (typeof refreshRouterFlyoutVisibility === 'function') refreshRouterFlyoutVisibility();
 }
 
 // ===== THEME =====
@@ -108,9 +109,32 @@ function toggleTheme() {
   }
 }
 
+// ===== SIDEBAR MINIMIZE (Workstream 13) =====
+// Replaces the old per-section accordion (retired — large groups are now
+// flyoutNav.js mega-menus instead) with a single whole-sidebar
+// collapse-to-icon-rail toggle, matching the Omada reference. State
+// persists per-browser so an operator's preference sticks across reloads.
+const SIDEBAR_COLLAPSED_KEY = 'rj_sidebar_collapsed';
+
+function toggleSidebarCollapse() {
+  const sidebar = document.getElementById('sidebar');
+  const layout = document.getElementById('adminLayout');
+  const collapsed = sidebar.classList.toggle('collapsed');
+  layout.classList.toggle('sidebar-collapsed', collapsed);
+  localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0');
+  if (typeof closeFlyout === 'function') closeFlyout();
+}
+
+function initSidebarCollapse() {
+  if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1') {
+    document.getElementById('sidebar').classList.add('collapsed');
+    document.getElementById('adminLayout').classList.add('sidebar-collapsed');
+  }
+}
+
 // ===== NAVIGATION =====
 const pageTitles = {
-  dashboard: 'Dashboard',
+  dashboard: 'Overview',
   sales: 'Sales Report',
   sessions: 'Active Sessions',
   vouchers: 'Vouchers',
@@ -122,22 +146,78 @@ const pageTitles = {
   branding: 'Branding',
   devices: 'Devices',
   update: 'System Update',
-  about: 'About'
+  about: 'About',
+  'coin-slot-gpio': 'Main Kiosk Coin Slot',
+  'satellite-kiosks': 'Satellite Kiosks',
+  'hotspot-dashboard': 'Hotspot Dashboard',
+  wallet: 'Wallet Overview',
+  'wallet-hotspot': 'Hotspot Earnings',
+  'wallet-isp': 'ISP Earnings',
+  'wallet-rental': 'Device Rental Earnings',
+  'wallet-withdrawals': 'Withdrawals',
+  'isp-dashboard': 'ISP Dashboard',
+  'rental-dashboard': 'Device Rental Dashboard',
+  'rental-devices': 'Rental Devices',
+  'rental-rates': 'Rental Rates',
+  'ai-assistant': 'AI Assistant',
+  'network-pppoe': 'PPPoE WAN',
+  'network-pfsense': 'pfSense',
+  'network-mikrotik-script': 'MikroTik Setup Script',
+  'mikrotik-interfaces': 'Interfaces',
+  'mikrotik-wan': 'MikroTik WAN',
+  'mikrotik-wireless': 'Wireless / AP',
+  'mikrotik-dhcp': 'DHCP Server & Leases',
+  'mikrotik-vlans': 'VLANs & Lanes',
+  'mikrotik-queues': 'Bandwidth / Queues',
+  'mikrotik-hotspot': 'Hotspot / Captive Portal',
+  'mikrotik-firewall': 'Firewall & NAT',
+  'mikrotik-backup': 'Backup & Restore',
+  'mikrotik-users': 'Users & API Access',
+  'mikrotik-wireguard': 'VPN / WireGuard',
+  'mikrotik-routes': 'Static Routes',
+  'mikrotik-logs': 'Logs',
+  'isp-subscribers': 'Subscribers',
+  'isp-plans': 'Plans',
+  'isp-billing': 'Billing',
+  'isp-sms': 'SMS Notifications',
+  'isp-walled-garden': 'Walled Garden',
+  'isp-import': 'Import'
 };
+
+function refreshCurrentPage() {
+  const btn = event?.currentTarget;
+  if (btn) {
+    btn.classList.remove('spinning');
+    // Force reflow so re-adding the class restarts the animation on repeat clicks.
+    void btn.offsetWidth;
+    btn.classList.add('spinning');
+  }
+  navigateTo(currentPage);
+}
 
 async function navigateTo(page) {
   // Destroy previous page intervals before switching
   if (typeof destroyAbout === 'function') destroyAbout();
   if (typeof destroySessions === 'function') destroySessions();
   if (typeof destroyDashboard === 'function') destroyDashboard();
+  if (typeof destroyHotspotDashboard === 'function') destroyHotspotDashboard();
 
   currentPage = page;
 
-  // Update active nav item
+  // Update active nav item. Prefer the actual clicked element when this
+  // came from a real nav-item click; otherwise (refresh button, flyout
+  // link, programmatic call) look the item up by its onclick target so
+  // the sidebar highlight doesn't just vanish on non-click navigations.
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.remove('active');
   });
-  event?.currentTarget?.classList.add('active');
+  const clickedItem = event?.currentTarget;
+  if (clickedItem?.classList.contains('nav-item')) {
+    clickedItem.classList.add('active');
+  } else {
+    const matched = document.querySelector(`.nav-item[onclick="navigateTo('${page}')"]`);
+    if (matched) matched.classList.add('active');
+  }
 
   // Update breadcrumb
   document.getElementById('currentPageTitle').textContent =
@@ -146,6 +226,17 @@ async function navigateTo(page) {
   // Load page
   const content = document.getElementById('pageContent');
   content.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+
+  // Not-yet-built roadmap tabs render an honest placeholder instead of
+  // fetching a page file that doesn't exist yet.
+  if (typeof COMING_SOON_PAGES !== 'undefined' && COMING_SOON_PAGES[page]) {
+    renderComingSoon(content, COMING_SOON_PAGES[page]);
+    if (window.innerWidth <= 768) {
+      document.getElementById('sidebar').classList.remove('open');
+      document.getElementById('sidebarOverlay').style.display = 'none';
+    }
+    return;
+  }
 
   try {
     const res = await fetch(`pages/${page}.html`);
@@ -156,6 +247,9 @@ async function navigateTo(page) {
     // Run page script
     const scripts = {
       dashboard: () => typeof loadDashboard === 'function' && loadDashboard(),
+      'hotspot-dashboard': () => typeof loadHotspotDashboard === 'function' && loadHotspotDashboard(),
+      'satellite-kiosks': () => typeof loadSatelliteKiosks === 'function' && loadSatelliteKiosks(),
+      'coin-slot-gpio': () => typeof loadCoinSlotGpio === 'function' && loadCoinSlotGpio(),
       sessions: () => typeof loadSessions === 'function' && loadSessions(),
       sales: () => typeof loadSales === 'function' && loadSales(),
       rates: () => typeof loadRates === 'function' && loadRates(),
@@ -376,8 +470,40 @@ async function executePowerAction() {
   }
 }
 
+// ===== FIELD HELP POPOVER =====
+// Small "?" or book icon next to a field label, click to show a short
+// tooltip instead of always-visible gray paragraph text under every
+// field. One document-level delegate so it works on every page loaded
+// dynamically into #pageContent, no per-page rebinding needed.
+function initFieldHelp() {
+  document.addEventListener('click', (e) => {
+    const existing = document.querySelector('.field-help-popover');
+    if (existing) existing.remove();
+
+    const trigger = e.target.closest('.field-help');
+    if (!trigger) return;
+    e.stopPropagation();
+
+    const popover = document.createElement('div');
+    popover.className = 'field-help-popover';
+    popover.textContent = trigger.dataset.help || '';
+    document.body.appendChild(popover);
+
+    const rect = trigger.getBoundingClientRect();
+    const popRect = popover.getBoundingClientRect();
+    let left = rect.left;
+    if (left + popRect.width > window.innerWidth - 12) {
+      left = window.innerWidth - popRect.width - 12;
+    }
+    popover.style.left = `${Math.max(12, left)}px`;
+    popover.style.top = `${rect.bottom + 8}px`;
+  });
+}
+
 // ===== INIT =====
 function init() {
+  initSidebarCollapse();
+
   // Load saved theme
   const savedTheme = localStorage.getItem('rj_theme') || 'light';
   document.documentElement.setAttribute('data-theme', savedTheme);
@@ -394,6 +520,14 @@ function init() {
   } else {
     document.getElementById('loginScreen').style.display = 'block';
   }
+
+  initFieldHelp();
+
+  // Boot loading screen (branded, replaces the blank-white flash that used
+  // to show while init() decided login vs admin) - hidden last so it
+  // covers that whole decision, not just page paint.
+  const bootLoading = document.getElementById('bootLoading');
+  if (bootLoading) bootLoading.style.display = 'none';
 }
 
 // Add slide-in animation
