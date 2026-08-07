@@ -45,6 +45,17 @@ WAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='wan_interface';" 2
 LAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='lan_interface';" 2>/dev/null)
 NETWORK_MODE=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='network_mode';" 2>/dev/null)
 
+# Settings > Portal Settings > Customer Portal Address - was a real, saved
+# setting the admin UI already let you configure ("Give customers an easy,
+# memorable address for checking or adding time later"), but nothing ever
+# actually made it resolve to anything - a customer closing the portal tab
+# had no way back in except knowing the raw gateway IP, since the OS's own
+# captive-portal auto-popup only fires before they have real internet, not
+# after they've already paid. dnsmasq (this server's own DNS for every
+# gated/open lane in standalone mode) can answer this hostname directly for
+# every connected customer with one address= line per lane's gateway.
+PORTAL_HOSTNAME=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='portal_hostname';" 2>/dev/null)
+
 # Pi-hole (setup/install-pihole.sh, opt-in, off by default): when enabled,
 # dnsmasq's UPSTREAM_DNS_LINES puts Pi-hole's loopback-only container
 # FIRST, with the same public DNS servers this project has always used
@@ -394,6 +405,17 @@ dhcp-option=interface:${LANE_IF},6,8.8.8.8"
       if [ "$H_ROLE" = "gated" ]; then
           DNSMASQ_LANES="${DNSMASQ_LANES}
 dhcp-option=interface:${LANE_IF},114,http://${LANE_GATEWAY}:3000/portal"
+          # dnsmasq's address=/domain/ip is global (answered the same way
+          # regardless of which interface asked), not per-lane - can only
+          # point at ONE gateway. First gated lane wins; a customer on a
+          # different gated lane in a multi-lane setup should still use
+          # their own lane's gateway IP directly to get back to the portal.
+          if [ -n "$PORTAL_HOSTNAME" ] && [ -z "$PORTAL_HOSTNAME_APPLIED" ]; then
+              DNSMASQ_LANES="${DNSMASQ_LANES}
+address=/${PORTAL_HOSTNAME}/${LANE_GATEWAY}"
+              PORTAL_HOSTNAME_APPLIED=1
+              echo "Portal address ${PORTAL_HOSTNAME} -> ${LANE_GATEWAY} (lane $H_ID)" >> $LOG
+          fi
           # Shared allowed_macs set (defined once below) - a paid session
           # stays valid across every gated lane, not just the one it started
           # on, matching how this app has exactly one session system, not
@@ -568,6 +590,7 @@ dhcp-option=6,8.8.8.8
 dhcp-option=114,http://$GATEWAY_IP:3000/portal
 no-resolv
 $UPSTREAM_DNS_LINES
+$([ -n "$PORTAL_HOSTNAME" ] && echo "address=/${PORTAL_HOSTNAME}/${GATEWAY_IP}")
 EOF
 
   # Static DHCP leases (admin panel > Network > Static DHCP Leases) - one
