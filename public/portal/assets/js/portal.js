@@ -434,6 +434,14 @@ function applyPortalSettings() {
   const vouchersBtn = document.getElementById('vouchersBtn');
   const voucherInputRow = document.getElementById('voucherInputRow');
 
+  // Connected-state "Add Time with Voucher" - same showVoucherEntry rule as
+  // the disconnected state's Vouchers button, just its own elements since
+  // both sections coexist in the DOM (only one visible at a time).
+  const vouchersBtnConnected = document.getElementById('vouchersBtnConnected');
+  const voucherInputRowConnected = document.getElementById('voucherInputRowConnected');
+  if (vouchersBtnConnected) vouchersBtnConnected.style.display = showVoucherEntry ? 'block' : 'none';
+  if (!showVoucherEntry && voucherInputRowConnected) voucherInputRowConnected.style.display = 'none';
+
   if (portalSettings.payment_methods === 'voucher') {
     // Voucher Only: the code entry box IS the primary action, not something
     // buried behind a small button below "Claim Free Time" - move it to the
@@ -785,6 +793,41 @@ async function redeemVoucher() {
     if (data.success) {
       document.getElementById('voucherInput').value = '';
       document.getElementById('voucherInputRow').style.display = 'none';
+      playSound('success');
+      checkSession();
+    } else {
+      alert(data.message || 'Invalid code');
+    }
+  } catch(e) {}
+}
+
+// Add-time-while-connected - server/routes/promo.js now adds this voucher's
+// minutes to the customer's existing session instead of rejecting it for
+// already having one, mirroring how the coin slot has always let a
+// connected customer top up. Separate input/button from the disconnected
+// state's (different element ids) since both sections can exist in the DOM
+// at once, just not both visible at the same time.
+function showVoucherInputConnected() {
+  const row = document.getElementById('voucherInputRowConnected');
+  row.style.display = row.style.display === 'flex' ? 'none' : 'flex';
+}
+
+async function redeemVoucherConnected() {
+  const raw = document.getElementById('voucherInputConnected').value.trim().toUpperCase();
+  const code = raw.includes('-') ? raw : raw.replace(/^(PROMO|RJ)/, '$1-');
+  if (!code) { alert('Enter a voucher code'); return; }
+  const mac = getMac();
+  if (!mac) { alert('Cannot detect device.'); return; }
+  try {
+    const res = await fetch(`${SERVER}/api/promo/redeem`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac, code, ip: '' })
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('voucherInputConnected').value = '';
+      document.getElementById('voucherInputRowConnected').style.display = 'none';
       playSound('success');
       checkSession();
     } else {
