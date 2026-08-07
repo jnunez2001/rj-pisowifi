@@ -2,40 +2,70 @@
 :root {
   --bg-primary: #f8f9fa;
   --bg-secondary: #ffffff;
-  --bg-sidebar: #1a1a2e;
+  /* Sidebar is now light (icon-rail, Omada-style) rather than dark navy —
+     same variable names kept so every existing page that reads these
+     doesn't need touching, only the values change. */
+  --bg-sidebar: #f5f6f7;
   --bg-card: #ffffff;
   --bg-hover: #f0f0f0;
-  --bg-active: #e8f5e9;
+  --bg-active: #e6f4ef;
 
   --text-primary: #1a1a1a;
   --text-secondary: #666666;
   --text-muted: #999999;
-  --text-sidebar: #ffffff;
-  --text-sidebar-muted: #aaaaaa;
+  --text-sidebar: #2b2f33;
+  --text-sidebar-muted: #6b7075;
 
   --border-color: #e0e0e0;
   --border-light: #f0f0f0;
 
-  --accent-green: #00c853;
-  --accent-red: #e94560;
-  --accent-blue: #2196f3;
-  --accent-orange: #ffa000;
-  --accent-purple: #9c27b0;
+  /* Brand primary shifts from hot-pink-red to a restrained teal — the
+     "not kids colors" direction. --accent-green stays as the general
+     positive/success color; --brand-teal is specifically the top-bar/
+     primary-action/active-state color, since Omada's own reference uses
+     one teal throughout rather than reusing its "good" status green for
+     branding too. */
+  --brand-teal: #0c8f6d;
+  --brand-teal-dark: #0a7259;
+  --brand-teal-light: #e6f4ef;
+
+  /* Muted, professional status colors - Omada uses green/orange/red/gray
+     functionally (health, alerts), never as decoration, and never at full
+     saturation. These were previously near-neon Material Design defaults
+     (#00c853, #2196f3, etc.) which read as "playful," not "clean." */
+  --accent-green: #1a9c63;
+  --accent-red: #c4453f;
+  --accent-blue: #3d6d94;
+  --accent-orange: #a8660a;
+  --accent-purple: #6b4c85;
 
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.06);
   --shadow-md: 0 4px 16px rgba(0,0,0,0.1);
 
   --sidebar-width: 260px;
+  --sidebar-collapsed-width: 64px;
   --header-height: 60px;
 
   --card-green-bg: #e8f5e9;
-  --card-green-text: #00a844;
-  --card-red-bg: #ffe8ec;
-  --card-red-text: #e94560;
+  --card-green-text: #1a9c63;
+  --card-red-bg: #fbe9ea;
+  --card-red-text: #c4453f;
   --card-blue-bg: #e3f2fd;
-  --card-blue-text: #1565c0;
-  --card-orange-bg: #fff8e1;
-  --card-orange-text: #e65100;
+  --card-blue-text: #3d6d94;
+  --card-orange-bg: #fdf3e2;
+  --card-orange-text: #a8660a;
+
+  /* Flyout mega-menu (Workstream 13) */
+  --flyout-bg: #ffffff;
+  --flyout-border: #e0e0e0;
+  --flyout-column-heading: #1a1a1a;
+  --flyout-shadow: 0 8px 24px rgba(0,0,0,0.12);
+
+  /* Flat-form layout (Workstream 13) */
+  --form-label-width: 220px;
+  --info-callout-bg: #e8f2fc;
+  --info-callout-border: #b6d9f5;
+  --info-callout-text: #2c5c85;
 }
 
 /* ===== DARK THEME ===== */
@@ -45,7 +75,7 @@
   --bg-sidebar: #111111;
   --bg-card: #1e1e1e;
   --bg-hover: #252525;
-  --bg-active: #1a2a1a;
+  --bg-active: #10261f;
 
   --text-primary: #ffffff;
   --text-secondary: #aaaaaa;
@@ -56,15 +86,31 @@
   --border-color: #2a2a2a;
   --border-light: #222222;
 
+  --brand-teal: #14a67f;
+  --brand-teal-dark: #0c8f6d;
+  --brand-teal-light: #10261f;
+
+  --accent-red: #d1615c;
+  --accent-orange: #c9832e;
+
   --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
   --shadow-md: 0 4px 16px rgba(0,0,0,0.4);
 
   --card-green-bg: #0a2a0a;
-  --card-green-text: #00c853;
+  --card-green-text: #2bb87a;
   --card-red-bg: #2a0a0a;
-  --card-red-text: #e94560;
+  --card-red-text: #d1615c;
   --card-blue-bg: #0a1a2a;
-  --card-blue-text: #2196f3;
+  --card-blue-text: #5b8fc2;
   --card-orange-bg: #2a1a00;
-  --card-orange-text: #ffa000;
+  --card-orange-text: #c9832e;
+
+  --flyout-bg: #1e1e1e;
+  --flyout-border: #2a2a2a;
+  --flyout-column-heading: #ffffff;
+  --flyout-shadow: 0 8px 24px rgba(0,0,0,0.5);
+
+  --info-callout-bg: #0f1f2b;
+  --info-callout-border: #1d3a52;
+  --info-callout-text: #8fc3e8;
 }

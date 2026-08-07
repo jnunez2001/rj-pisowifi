@@ -33,3 +33,9 @@ ZENFI_ADMIN_PANEL_PLAN.md
 mockups/
 PRICING_AND_MARKETING_PLAN.md
 STANDALONE_ARCHITECTURE_PLAN.md
+
+# Internal roadmap/tab-map/design-reference docs (Workstreams 0-13 planning) -
+# same reasoning as the plan docs above: dev-facing architecture notes, not
+# something that should ship to a client device or be visible in a public
+# repo history.
+docs/

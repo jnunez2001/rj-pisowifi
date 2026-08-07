@@ -1,0 +1,206 @@
+<div class="page-title">Main Kiosk Coin Slot</div>
+<div class="page-subtitle">Set up the coin acceptor wired directly into this box.</div>
+
+<div id="gpioCompatBanner" class="notice notice-error" style="display:none;">
+  <i class="fas fa-triangle-exclamation"></i>
+  <span id="gpioCompatMessage"></span>
+</div>
+
+<div class="grid-2">
+
+  <!-- MODE & RATE -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <i class="fas fa-coins" style="margin-right:8px;color:var(--accent-green);"></i>Mode & Rate
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">
+        Mode
+        <span class="field-help" data-help="Turn this on if a coin acceptor is wired directly into this box. If you use a Satellite Kiosk instead, leave this off."><i class="fas fa-book"></i></span>
+      </label>
+      <select id="gpioMode" class="form-control">
+        <option value="disabled">Disabled</option>
+        <option value="direct_gpio">Enabled (Main Kiosk)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">
+        Pesos per Pulse
+        <span class="field-help" data-help="Matches your coin acceptor's own pulse setting. Check the acceptor's manual or DIP switches."><i class="fas fa-circle-question"></i></span>
+      </label>
+      <input type="number" id="gpioPhpPerPulse" class="form-control" min="1" max="100" step="1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">
+        Active Window (seconds)
+        <span class="field-help" data-help="How long the coin slot stays ready after a customer starts inserting coins."><i class="fas fa-circle-question"></i></span>
+      </label>
+      <input type="number" id="gpioActiveWindow" class="form-control" min="10" max="600" step="1">
+    </div>
+    <button class="btn btn-primary" onclick="saveGpioModeRate()">
+      <i class="fas fa-save"></i> Save
+    </button>
+  </div>
+
+  <!-- STATUS -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Status</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
+          <i class="fas fa-power-off" style="margin-right:6px;"></i>Listener
+        </span>
+        <span class="badge" id="gpioListenerStatus">-</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
+          <i class="fas fa-microchip" style="margin-right:6px;"></i>Hardware Configured
+        </span>
+        <span class="badge" id="gpioHardwareStatus">-</span>
+      </div>
+    </div>
+    <div class="notice notice-info" style="margin-top:14px;margin-bottom:0;">
+      <i class="fas fa-circle-info"></i>
+      <span>Chip and Line changes need a server restart to take effect.</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ADVANCED: HARDWARE WIRING -->
+<details class="card" style="margin-top:16px;">
+  <summary style="cursor:pointer;font-weight:700;font-size:14px;color:var(--text-primary);">
+    <i class="fas fa-microchip" style="margin-right:8px;color:var(--text-muted);"></i>Hardware Wiring (Advanced)
+  </summary>
+  <div style="margin-top:16px;" class="grid-2">
+    <div class="form-group">
+      <label class="form-label">GPIO Chip</label>
+      <input type="text" id="gpioChip" class="form-control" placeholder="e.g. gpiochip0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">GPIO Line</label>
+      <input type="text" id="gpioLine" class="form-control" placeholder="e.g. 17">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Pulse Edge</label>
+      <select id="gpioEdge" class="form-control">
+        <option value="falling">Falling</option>
+        <option value="rising">Rising</option>
+        <option value="both">Both</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Debounce (ms)</label>
+      <input type="number" id="gpioDebounceMs" class="form-control" min="1" max="5000" step="1">
+    </div>
+  </div>
+  <div class="form-group" style="margin-top:8px;">
+    <label class="form-label">
+      Coin Acceptor Enable/Disable
+      <span class="field-help" data-help="Leave blank if your acceptor doesn't have a separate inhibit or enable pin."><i class="fas fa-circle-question"></i></span>
+    </label>
+  </div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label class="form-label">Inhibit Chip</label>
+      <input type="text" id="gpioInhibitChip" class="form-control" placeholder="e.g. gpiochip0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Inhibit Line</label>
+      <input type="text" id="gpioInhibitLine" class="form-control" placeholder="e.g. 27">
+    </div>
+  </div>
+  <label class="form-label" style="display:flex;align-items:center;gap:8px;font-weight:500;">
+    <input type="checkbox" id="gpioInhibitActiveHigh"> Inhibit signal is active high
+  </label>
+  <button class="btn btn-primary" style="margin-top:12px;" onclick="saveGpioHardware()">
+    <i class="fas fa-save"></i> Save Hardware Settings
+  </button>
+</details>
+
+<!-- ADVANCED: STATUS/ERROR LEDS -->
+<details class="card" style="margin-top:16px;">
+  <summary style="cursor:pointer;font-weight:700;font-size:14px;color:var(--text-primary);">
+    <i class="fas fa-lightbulb" style="margin-right:8px;color:var(--text-muted);"></i>Status & Error LEDs (Advanced, Optional)
+  </summary>
+  <div style="margin-top:16px;" class="grid-2">
+    <div class="form-group">
+      <label class="form-label">Status LED Chip</label>
+      <input type="text" id="gpioStatusLedChip" class="form-control">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Status LED Line</label>
+      <input type="text" id="gpioStatusLedLine" class="form-control">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Error LED Chip</label>
+      <input type="text" id="gpioErrorLedChip" class="form-control">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Error LED Line</label>
+      <input type="text" id="gpioErrorLedLine" class="form-control">
+    </div>
+  </div>
+  <label class="form-label" style="display:flex;align-items:center;gap:8px;font-weight:500;">
+    <input type="checkbox" id="gpioStatusLedActiveHigh"> Status LED is active high
+  </label>
+  <label class="form-label" style="display:flex;align-items:center;gap:8px;font-weight:500;">
+    <input type="checkbox" id="gpioErrorLedActiveHigh"> Error LED is active high
+  </label>
+  <button class="btn btn-primary" style="margin-top:12px;" onclick="saveGpioLeds()">
+    <i class="fas fa-save"></i> Save LED Settings
+  </button>
+</details>
+
+<!-- ADVANCED: ANTI-FRAUD TUNING -->
+<details class="card" style="margin-top:16px;">
+  <summary style="cursor:pointer;font-weight:700;font-size:14px;color:var(--text-primary);">
+    <i class="fas fa-shield-halved" style="margin-right:8px;color:var(--text-muted);"></i>Anti-Fraud Tuning (Advanced)
+  </summary>
+  <div class="notice notice-info" style="margin-top:12px;">
+    <i class="fas fa-circle-info"></i>
+    <span>The defaults work for most coin acceptors. Only change these if you see false rejections.</span>
+  </div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label class="form-label">
+        Burst Max (pulses)
+        <span class="field-help" data-help="Rejects an unusually fast run of pulses, like a lighter or igniter fraud attempt, not a normal coin."><i class="fas fa-circle-question"></i></span>
+      </label>
+      <input type="number" id="gpioBurstMax" class="form-control" min="1" max="100" step="1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Burst Window (ms)</label>
+      <input type="number" id="gpioBurstWindowMs" class="form-control" min="50" max="5000" step="1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Minimum Pulse Width (ms)</label>
+      <input type="number" id="gpioMinPulseMs" class="form-control" min="1" max="500" step="1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">
+        Max Empty Opens
+        <span class="field-help" data-help="Repeatedly opening the coin window without paying. Set to 0 for unlimited."><i class="fas fa-circle-question"></i></span>
+      </label>
+      <input type="number" id="gpioMaxEmptyOpens" class="form-control" min="0" max="100" step="1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Empty Open Window (seconds)</label>
+      <input type="number" id="gpioEmptyOpenWindowSeconds" class="form-control" min="30" max="3600" step="1">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Empty Open Cooldown (seconds)</label>
+      <input type="number" id="gpioEmptyOpenCooldownSeconds" class="form-control" min="10" max="3600" step="1">
+    </div>
+  </div>
+  <label class="form-label" style="display:flex;align-items:center;gap:8px;font-weight:500;">
+    <input type="checkbox" id="gpioBusyLock"> Only allow one coin window active at a time (recommended)
+  </label>
+  <button class="btn btn-primary" style="margin-top:12px;" onclick="saveGpioAntiFraud()">
+    <i class="fas fa-save"></i> Save Anti-Fraud Settings
+  </button>
+</details>

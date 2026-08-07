@@ -1,5 +1,11 @@
 let salesChart = null;
 
+function escapeSalesHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 async function loadSales() {
   try {
     const data = await apiCall('GET', '/api/admin/sales');
@@ -66,8 +72,8 @@ function buildSalesChart(weekData) {
       datasets: [{
         label: 'Revenue (₱)',
         data: values,
-        backgroundColor: 'rgba(0,200,83,0.7)',
-        borderColor: '#00c853',
+        backgroundColor: 'rgba(26,156,99,0.7)',
+        borderColor: '#1a9c63',
         borderWidth: 2,
         borderRadius: 6
       }]
@@ -129,9 +135,16 @@ function buildTransactionTable(transactions) {
   }
 
   tbody.innerHTML = transactions.map(t => {
+    // t.kiosk_name comes from /api/admin/sales' LEFT JOIN against
+    // satellite_kiosks (added for the Hotspot Dashboard's Revenue by
+    // Source) - shows the specific kiosk a coin credit came from instead
+    // of a generic "Coin" label once more than one source exists, same
+    // fix already applied there, kept consistent here.
     let typeBadge = '';
     if (t.type === 'coin') {
-      typeBadge = '<span class="badge badge-blue">🪙 Coin</span>';
+      typeBadge = t.kiosk_name
+        ? `<span class="badge badge-blue">📡 ${escapeSalesHtml(t.kiosk_name)}</span>`
+        : '<span class="badge badge-blue">🪙 Main Kiosk</span>';
     } else if (t.type === 'promo') {
       typeBadge = '<span class="badge badge-orange">🎫 Promo</span>';
     } else if (t.type === 'free') {

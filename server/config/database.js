@@ -51,14 +51,20 @@ db.exec(`
   );
   -- Note: status column removed (Bug #1) — sessions are deleted on expiry, so existing sessions are always active
 
+  -- No FOREIGN KEY on voucher_code (bug fix, see the migration below for
+  -- existing databases that already have one). Sessions are deleted on
+  -- expiry (by design - see sessionService.js's expireSession) but
+  -- transactions are a permanent revenue ledger that must survive that
+  -- deletion. A strict FK here made expireSession() fail with
+  -- "FOREIGN KEY constraint failed" for every session that had ever been
+  -- credited, which is effectively all of them.
   CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     voucher_code TEXT NOT NULL,
     coin_value INTEGER NOT NULL,
     minutes_added REAL NOT NULL,
     type TEXT DEFAULT 'coin',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY(voucher_code) REFERENCES sessions(voucher_code)
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   CREATE TABLE IF NOT EXISTS promo_vouchers (
@@ -143,6 +149,43 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     mac_address TEXT UNIQUE NOT NULL,
     label TEXT NOT NULL DEFAULT '',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS watchdog_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT NOT NULL,
+    issues_json TEXT NOT NULL DEFAULT '[]',
+    checked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- A secondary coin acceptor relayed back to this box over WiFi via an
+  -- ESP32/ESP8266 board ("Satellite Kiosk", as opposed to this box's own
+  -- directly-wired "Main Kiosk"). device_key is a pairing secret the
+  -- operator flashes into that board's own config - unregistered relay
+  -- traffic (no key, or a key that doesn't match) still works exactly as
+  -- it always has, credited as generic "Coins" with no kiosk attribution,
+  -- so existing ESP32 deployments in the field are never broken by this.
+  CREATE TABLE IF NOT EXISTS satellite_kiosks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    device_key TEXT UNIQUE NOT NULL,
+    last_seen DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Bug found via client-capacity audit: standaloneDriver.js's per-client
+  -- tc classid used to be a hash (mac -> 100..999), not a real allocation.
+  -- With only 900 slots, the birthday paradox makes a collision ~38% likely
+  -- at just 30 concurrent shaped clients, ~99.6% by 100 - and a collision
+  -- means two different customers silently share one HTB bandwidth class
+  -- (one client's rate overwrites the other's), and if either disconnects,
+  -- removeClientBandwidth() deletes the class both were using, killing the
+  -- other's still-active shaping. This table makes classId a real,
+  -- persistent, collision-free allocation instead.
+  CREATE TABLE IF NOT EXISTS tc_class_allocations (
+    mac_address TEXT PRIMARY KEY,
+    class_id INTEGER UNIQUE NOT NULL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -266,6 +309,66 @@ try {
 }
 
 try {
+  // No FOREIGN KEY on purpose - a strict FK here would reproduce the same
+  // "DELETE fails because a transaction still references it" bug class
+  // already found with sessions/transactions. Deleting a kiosk nulls this
+  // column out on its transactions first (see satelliteKioskService.js),
+  // so this is informational, not enforced.
+  db.exec('ALTER TABLE transactions ADD COLUMN kiosk_id INTEGER');
+} catch (e) {
+  // already applied
+}
+
+// Bug fix migration: a database created before this fix still has the old
+// FOREIGN KEY(voucher_code) REFERENCES sessions(voucher_code) baked into
+// transactions (SQLite doesn't support dropping a constraint in place -
+// ALTER TABLE ... DROP CONSTRAINT isn't a thing here - so this rebuilds
+// the table without it). Runs once; every boot after the first is a no-op
+// once the FK is gone. Wrapped in an explicit transaction so a failure
+// partway through leaves the original table untouched rather than losing
+// data - this touches the financial ledger, so it does not get to be
+// halfway migrated.
+try {
+  const fkList = db.pragma('foreign_key_list(transactions)');
+  const hasVoucherFk = fkList.some(fk => fk.table === 'sessions' && fk.from === 'voucher_code');
+  if (hasVoucherFk) {
+    console.log('🔧 Migrating transactions table to drop its FK to sessions (fixes expireSession() failing on any session with transaction history)...');
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      db.exec(`
+        CREATE TABLE transactions_migrated (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          voucher_code TEXT NOT NULL,
+          coin_value INTEGER NOT NULL,
+          minutes_added REAL NOT NULL,
+          type TEXT DEFAULT 'coin',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          kiosk_id INTEGER
+        );
+      `);
+      db.exec(`
+        INSERT INTO transactions_migrated (id, voucher_code, coin_value, minutes_added, type, created_at, kiosk_id)
+        SELECT id, voucher_code, coin_value, minutes_added, type, created_at, kiosk_id FROM transactions;
+      `);
+      const oldCount = db.prepare('SELECT COUNT(*) c FROM transactions').get().c;
+      const newCount = db.prepare('SELECT COUNT(*) c FROM transactions_migrated').get().c;
+      if (oldCount !== newCount) {
+        throw new Error(`Row count mismatch after copy: ${oldCount} -> ${newCount}, aborting migration`);
+      }
+      db.exec('DROP TABLE transactions');
+      db.exec('ALTER TABLE transactions_migrated RENAME TO transactions');
+      db.exec('COMMIT');
+      console.log(`✅ transactions table migrated (${newCount} rows preserved, FK removed)`);
+    } catch (migErr) {
+      db.exec('ROLLBACK');
+      console.error('⚠️ transactions FK migration failed, rolled back - original table untouched:', migErr.message);
+    }
+  }
+} catch (e) {
+  console.error('⚠️ transactions FK migration check failed:', e.message);
+}
+
+try {
   db.exec('ALTER TABLE sessions ADD COLUMN download_mbps INTEGER');
   db.exec('ALTER TABLE sessions ADD COLUMN upload_mbps INTEGER');
 } catch (e) {
@@ -305,7 +408,7 @@ if (settingCount.count === 0) {
   const insertSetting = db.prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?)'
   );
-  insertSetting.run('cafe_name', 'R&J PisoWifi');
+  insertSetting.run('cafe_name', 'ZenFi');
   insertSetting.run('admin_password', hashPassword('admin123'));
   insertSetting.run('admin_username', 'admin');
   // Fresh installs start with the default password — force a change before

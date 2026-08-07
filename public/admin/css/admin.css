@@ -1,9 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap');
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  font-family: 'Inter', sans-serif;
+  font-family: 'Roboto', sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
   transition: background 0.3s, color 0.3s;
@@ -19,6 +19,7 @@ body {
 .sidebar {
   width: var(--sidebar-width);
   background: var(--bg-sidebar);
+  border-right: 1px solid var(--border-color);
   /* Bug: this was min-height, which lets the sidebar grow taller than the
      screen instead of being clipped to it. That meant .sidebar-nav's
      overflow-y:auto below never actually engaged (its parent just kept
@@ -32,93 +33,180 @@ body {
   display: flex;
   flex-direction: column;
   z-index: 100;
-  transition: transform 0.3s ease;
+  transition: width 0.2s ease, transform 0.3s ease;
 }
 
+/* Minimized/collapsed icon-rail state (Workstream 13) — the sidebar
+   shrinks to icon-only width; labels, brand text, and admin-info hide,
+   leaving just the icon column. Persisted via localStorage in app.js. */
+.sidebar.collapsed { width: var(--sidebar-collapsed-width); }
+.sidebar.collapsed .brand-text,
+.sidebar.collapsed .nav-label,
+.sidebar.collapsed .nav-badge,
+.sidebar.collapsed .nav-flyout-chevron,
+.sidebar.collapsed .admin-info { display: none; }
+.sidebar.collapsed .nav-item { justify-content: center; padding: 11px 0; }
+.sidebar.collapsed .sidebar-collapse-btn i { transform: rotate(180deg); }
+/* JS toggles this class on .admin-layout alongside .sidebar.collapsed,
+   rather than relying on :has() support, so the main content shifts left
+   reliably across browsers. */
+.admin-layout.sidebar-collapsed .main-content { margin-left: var(--sidebar-collapsed-width); }
+
 .sidebar-brand {
-  padding: 20px 20px 16px;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding: 16px 16px 14px;
+  border-bottom: 1px solid var(--border-color);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
+
+.sidebar-collapse-btn {
+  background: none;
+  border: none;
+  color: var(--text-sidebar-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 6px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: background 0.2s, color 0.2s;
+}
+.sidebar-collapse-btn:hover { background: var(--bg-hover); color: var(--brand-teal); }
+.sidebar-collapse-btn i { transition: transform 0.2s; display: block; }
 
 .sidebar-brand .brand-logo {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 4px;
+  gap: 10px;
+  min-width: 0;
 }
 
 .sidebar-brand .brand-icon {
-  width: 40px;
-  height: 40px;
-  background: linear-gradient(135deg, #e94560, #c62a47);
-  border-radius: 10px;
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  color: #fff;
-  font-family: 'Orbitron', sans-serif;
-  font-weight: 700;
   flex-shrink: 0;
 }
 
+.sidebar-brand .brand-icon img {
+  width: 100%;
+  height: 100%;
+  border-radius: 9px;
+  display: block;
+}
+
+.sidebar-brand .brand-text { min-width: 0; overflow: hidden; }
+
 .sidebar-brand .brand-name {
-  font-family: 'Orbitron', sans-serif;
-  font-size: 13px;
+  font-family: 'Roboto', sans-serif;
+  font-size: 12px;
   font-weight: 700;
-  color: #fff;
-  letter-spacing: 1px;
+  color: var(--text-sidebar);
+  letter-spacing: 0.5px;
   line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-brand .brand-sub {
-  font-size: 11px;
+  font-size: 10px;
   color: var(--text-sidebar-muted);
   letter-spacing: 1px;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .sidebar-nav {
   flex: 1;
-  padding: 16px 0;
+  padding: 10px 0;
   overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.nav-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 8px 14px;
+}
+
+.nav-badge {
+  margin-left: auto;
+  background: var(--accent-green);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
 }
 
 .nav-section { margin-bottom: 8px; }
 
+/* Accordion: each section's title toggles its own .nav-section-items.
+   Collapsed sections hide their items entirely (not just visually shrink)
+   so a long list (e.g. MikroTik Control Center's 13 tabs) doesn't force
+   scrolling past everything else to reach the sections below it. */
 .nav-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 2px;
   color: var(--text-sidebar-muted);
   padding: 8px 20px 4px;
   text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
 }
+
+.nav-section-title:hover { color: #fff; }
+
+.nav-section-title-static {
+  cursor: default;
+}
+.nav-section-title-static:hover { color: var(--text-sidebar-muted); }
+
+.nav-section-chevron {
+  font-size: 9px;
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+.nav-section.collapsed .nav-section-items { display: none; }
+.nav-section.collapsed .nav-section-chevron { transform: rotate(-90deg); }
 
 .nav-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 11px 20px;
+  padding: 11px 16px;
+  margin: 1px 8px;
+  border-radius: 8px;
   color: var(--text-sidebar-muted);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
   font-size: 14px;
   font-weight: 500;
-  border-left: 3px solid transparent;
 }
 
 .nav-item:hover {
-  background: rgba(255,255,255,0.05);
-  color: #fff;
+  background: var(--bg-hover);
+  color: var(--text-sidebar);
 }
 
-.nav-item.active {
-  background: rgba(233,69,96,0.15);
-  color: #fff;
-  border-left-color: #e94560;
+.nav-item.active,
+.nav-item.flyout-trigger-active {
+  background: var(--brand-teal-light);
+  color: var(--brand-teal-dark);
+  font-weight: 600;
 }
+
+.nav-item.active .nav-icon,
+.nav-item.flyout-trigger-active .nav-icon { color: var(--brand-teal); }
 
 .nav-item .nav-icon {
   font-size: 15px;
@@ -127,9 +215,23 @@ body {
   flex-shrink: 0;
 }
 
+.nav-flyout-chevron {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--text-sidebar-muted);
+  flex-shrink: 0;
+}
+
+/* Reboot/Shutdown — kept visually distinct (real danger colors) but on
+   the light sidebar now, not the old dark one. */
+.nav-item-danger { color: var(--accent-orange); }
+.nav-item-danger:nth-of-type(1) { color: var(--accent-orange); }
+.nav-item.nav-item-danger:last-of-type { color: var(--accent-red); }
+.nav-item-danger:hover { background: var(--card-orange-bg); }
+
 .sidebar-footer {
-  padding: 16px 20px;
-  border-top: 1px solid rgba(255,255,255,0.1);
+  padding: 14px 16px;
+  border-top: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -139,7 +241,7 @@ body {
 .sidebar-footer .admin-avatar {
   width: 36px;
   height: 36px;
-  background: linear-gradient(135deg, #e94560, #c62a47);
+  background: linear-gradient(135deg, var(--brand-teal), var(--brand-teal-dark));
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -153,13 +255,70 @@ body {
 .sidebar-footer .admin-name {
   font-size: 13px;
   font-weight: 600;
-  color: #fff;
+  color: var(--text-sidebar);
 }
 
 .sidebar-footer .admin-role {
   font-size: 11px;
   color: var(--text-sidebar-muted);
 }
+
+.sidebar.collapsed .sidebar-footer .admin-name,
+.sidebar.collapsed .sidebar-footer .admin-role { display: none; }
+.sidebar.collapsed .sidebar-footer { justify-content: center; padding: 14px 8px; }
+
+/* ===== FLYOUT MEGA-MENU (Workstream 13) ===== */
+.flyout-panel {
+  position: fixed;
+  z-index: 200;
+  display: flex;
+  gap: 28px;
+  background: var(--flyout-bg);
+  border: 1px solid var(--flyout-border);
+  border-radius: 10px;
+  box-shadow: var(--flyout-shadow);
+  padding: 18px 22px;
+  max-width: calc(100vw - 40px);
+  overflow-x: auto;
+  animation: flyoutIn 0.12s ease-out;
+}
+
+@keyframes flyoutIn {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.flyout-column { min-width: 190px; }
+
+.flyout-column-heading {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--flyout-column-heading);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.flyout-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 4px;
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.flyout-link:hover {
+  background: var(--brand-teal-light);
+  color: var(--brand-teal-dark);
+}
+
+.flyout-link i { width: 16px; text-align: center; font-size: 13px; flex-shrink: 0; }
 
 /* ===== MAIN CONTENT ===== */
 .main-content {
@@ -169,13 +328,14 @@ body {
   flex-direction: column;
   min-height: 100vh;
   min-width: 0;
+  transition: margin-left 0.2s ease;
 }
 
-/* ===== TOP HEADER ===== */
+/* ===== TOP HEADER (teal band, Workstream 13) ===== */
 .top-header {
   height: var(--header-height);
-  background: var(--bg-secondary);
-  border-bottom: 1px solid var(--border-color);
+  background: linear-gradient(135deg, var(--brand-teal), var(--brand-teal-dark));
+  border-bottom: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -194,6 +354,36 @@ body {
   min-width: 0;
   flex: 1;
 }
+
+.top-header .header-breadcrumb { color: rgba(255,255,255,0.75); }
+.top-header .header-breadcrumb span { color: #fff; }
+.top-header .menu-toggle { color: #fff; }
+.top-header .menu-toggle:hover { background: rgba(255,255,255,0.12); }
+
+.header-icon-btn {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.85);
+  font-size: 15px;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.header-icon-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.header-icon-btn.spinning i { animation: spin 0.6s linear; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.top-header .theme-toggle {
+  background: rgba(255,255,255,0.12);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #fff;
+}
+.top-header .theme-toggle:hover { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.3); color: #fff; }
 
 .header-breadcrumb {
   font-size: 13px;
@@ -454,7 +644,7 @@ tbody tr:hover { background: var(--bg-hover); }
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Roboto', sans-serif;
   white-space: nowrap;
 }
 
@@ -506,7 +696,7 @@ tbody tr:hover { background: var(--bg-hover); }
   border-radius: 8px;
   font-size: 14px;
   color: var(--text-primary);
-  font-family: 'Inter', sans-serif;
+  font-family: 'Roboto', sans-serif;
   transition: border-color 0.2s;
   outline: none;
 }
@@ -537,6 +727,63 @@ select.form-control { cursor: pointer; }
 .alert-error { background: var(--card-red-bg); color: var(--card-red-text); }
 .alert-warning { background: var(--card-orange-bg); color: var(--card-orange-text); }
 .alert-info { background: var(--card-blue-bg); color: var(--card-blue-text); }
+
+/* ===== NOTICE (accent-border, solid color, no pastel fill) =====
+   For new error/warning/info banners going forward - a neutral card with
+   a solid colored left border and a solid colored icon, body text stays
+   normal reading color. Not a full pastel-tinted box, which reads as
+   generic template styling rather than a real product. */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+}
+.notice i { margin-top: 1px; }
+.notice-error { border-left-color: var(--accent-red); }
+.notice-error i { color: var(--accent-red); }
+.notice-warning { border-left-color: var(--accent-orange); }
+.notice-warning i { color: var(--accent-orange); }
+.notice-info { border-left-color: var(--brand-teal); }
+.notice-info i { color: var(--brand-teal); }
+
+/* ===== FIELD HELP (small circular icon, click-to-open tooltip) =====
+   Replaces always-visible gray paragraph text under form fields - short
+   notes live behind a small "?" icon, longer guidance behind a book icon,
+   both open the same small popover on click. */
+.field-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 5px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  vertical-align: middle;
+}
+.field-help:hover { color: var(--brand-teal); }
+.field-help-popover {
+  position: fixed;
+  z-index: 10000;
+  max-width: 260px;
+  background: #1f1f1f;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+}
 
 /* ===== MODAL ===== */
 .modal-overlay {
@@ -641,22 +888,72 @@ select.form-control { cursor: pointer; }
   /* Show hamburger */
   .menu-toggle { display: flex !important; }
 
-  /* Hide sidebar by default */
-  .sidebar {
+  /* Hide sidebar by default — the icon-rail collapse (Workstream 13) is a
+     desktop-only affordance, mobile always uses this slide-over drawer
+     instead, so a stale .collapsed class from a prior desktop session
+     must not shrink it here. */
+  .sidebar, .sidebar.collapsed {
     transform: translateX(-100%);
     width: 280px;
     z-index: 200;
     box-shadow: none;
   }
+  .sidebar.collapsed .brand-text,
+  .sidebar.collapsed .nav-label,
+  .sidebar.collapsed .nav-badge,
+  .sidebar.collapsed .nav-flyout-chevron,
+  .sidebar.collapsed .admin-info { display: initial; }
+  .sidebar.collapsed .nav-item { justify-content: flex-start; padding: 11px 16px; }
+  .sidebar-collapse-btn { display: none; }
 
   /* Show sidebar when open */
-  .sidebar.open {
+  .sidebar.open, .sidebar.collapsed.open {
     transform: translateX(0);
     box-shadow: 4px 0 24px rgba(0,0,0,0.4);
   }
 
-  /* Main content takes full width */
-  .main-content { margin-left: 0 !important; }
+  /* Main content takes full width regardless of collapse state */
+  .main-content, .admin-layout.sidebar-collapsed .main-content { margin-left: 0 !important; }
+
+  /* Flyout mega-menus become full-screen panels on mobile — a flyout
+     anchored "beside the sidebar" makes no sense on a phone-width
+     screen. */
+  .flyout-panel {
+    position: fixed !important;
+    inset: 0 !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100vw;
+    height: 100vh;
+    max-width: 100vw;
+    border-radius: 0;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 0;
+  }
+  .flyout-mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    background: var(--flyout-bg);
+    z-index: 1;
+  }
+  .flyout-mobile-header .flyout-mobile-title { font-size: 16px; font-weight: 700; }
+  .flyout-mobile-header .flyout-mobile-close {
+    background: var(--bg-hover);
+    border: none;
+    border-radius: 8px;
+    width: 32px; height: 32px;
+    font-size: 16px;
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+  .flyout-panel .flyout-column { padding: 16px 18px 0; min-width: 0; }
+  .flyout-panel .flyout-link { padding: 12px 8px; font-size: 15px; }
 
   /* Header adjustments */
   .top-header { padding: 0 14px; }
@@ -802,16 +1099,16 @@ body {
 .stat-bar-fill.blue   { background: var(--accent-blue); }
 .stat-bar-fill.green  { background: var(--accent-green); }
 .stat-bar-fill.yellow { background: var(--accent-yellow); }
-.stat-bar-fill.red    { background: #e74c3c; }
+.stat-bar-fill.red    { background: var(--accent-red); }
 
 /* ===== PURPLE STAT CARD ===== */
 .stat-card.purple {
-  --card-bg: #f3e8ff;
-  --card-text: #7c3aed;
-  --card-icon-bg: #ede9fe;
+  --card-bg: #f1ecf5;
+  --card-text: var(--accent-purple);
+  --card-icon-bg: #ece4f2;
 }
 
 .badge-purple {
-  background: #ede9fe;
-  color: #7c3aed;
+  background: #ece4f2;
+  color: var(--accent-purple);
 }

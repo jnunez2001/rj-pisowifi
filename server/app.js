@@ -284,7 +284,7 @@ app.use('/api/portal', portalRoute);
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    name: 'R&J PisoWifi Server',
+    name: 'ZenFi Server',
     time: new Date().toISOString()
   });
 });
@@ -302,7 +302,7 @@ startTimer();
 // deployment target for this project) instead of IPv4 only.
 const server = app.listen(PORT, () => {
   console.log('');
-  console.log('🚀 R&J PisoWifi Server Started!');
+  console.log('🚀 ZenFi Server Started!');
   console.log(`📡 Running on port ${PORT}`);
   console.log(`🌐 Admin: http://localhost:${PORT}/admin`);
   console.log(`📱 Portal: http://localhost:${PORT}/portal`);
@@ -320,6 +320,28 @@ const server = app.listen(PORT, () => {
   // for too long - covers a client forgetting to switch back to DHCP
   // before moving the box to a different router or ISP.
   hostNetworkService.startConnectivityWatchdog(db);
+
+  // Direct-GPIO coin acceptor listener (Workstream 4) — no-ops cleanly when
+  // not configured/enabled (currentConfig().enabled false) or when gpiomon
+  // isn't installed, so this never blocks boot on boxes using the ESP32
+  // relay path instead. Matches the "boot always succeeds, subsystem
+  // failures degrade gracefully" pattern already used by the network
+  // watchdog above.
+  try {
+    require('./services/coinslotGpio').startListener();
+  } catch (e) {
+    console.warn('[CoinslotGPIO] Listener failed to start (non-fatal):', e.message);
+  }
+
+  // Self-heal watchdog — periodic health check + narrow auto-repair for the
+  // box's own network-access-control state (standalone/OpenWRT modes).
+  // Never blocks boot; a failure here just means health checks aren't
+  // running, not that vending stops working.
+  try {
+    require('./services/watchdogService').start();
+  } catch (e) {
+    console.warn('[Watchdog] Failed to start (non-fatal):', e.message);
+  }
 });
 
 // Graceful shutdown on SIGTERM (Bug #46)
