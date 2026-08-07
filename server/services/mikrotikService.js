@@ -434,6 +434,41 @@ async function getInterfaceTraffic(interfaceNames) {
   });
 }
 
+// Settings > Portal Settings > Customer Portal Address, router mode's
+// equivalent of setup-network.sh's dnsmasq address= line - the router owns
+// DNS in this mode (our own dnsmasq is disabled), so this server can't
+// answer that hostname itself. Adds/updates a static DNS record on the
+// router resolving it to THIS server's own current DHCP lease address (via
+// server_lan_mac, the same setting Ports and Roles auto-provisioning
+// already relies on to know which device on the router IS this server).
+// Best-effort: silently no-ops if server_lan_mac isn't set or has no
+// current lease yet, same as this file's other bandwidth/queue calls that
+// depend on a lease existing.
+async function setPortalDnsName(hostname) {
+  const config = getMikrotikConfig();
+  if (!config.ip || !hostname) return false;
+  const ownMac = db.prepare("SELECT value FROM settings WHERE key = 'server_lan_mac'").get()?.value;
+  if (!ownMac) return false;
+  try {
+    return await withMikrotik(config, async (client) => {
+      const leaseRes = await client.talk(['/ip/dhcp-server/lease/print', `?mac-address=${mikMac(ownMac)}`]);
+      if (leaseRes.re.length === 0) return false;
+      const ip = leaseRes.re[0].address;
+
+      const existing = await client.talk(['/ip/dns/static/print', `?name=${hostname}`]);
+      for (const row of existing.re) {
+        await client.talk(['/ip/dns/static/remove', `=.id=${row['.id']}`]);
+      }
+      await client.talk(['/ip/dns/static/add', `=name=${hostname}`, `=address=${ip}`]);
+      console.log(`[MikroTik] Portal address ${hostname} -> ${ip}`);
+      return true;
+    });
+  } catch (err) {
+    console.error('[MikroTik] setPortalDnsName failed:', err.message);
+    return false;
+  }
+}
+
 // "Test connection" button — just needs to prove login succeeds, doesn't
 // need the full status payload.
 async function testConnection() {
@@ -482,6 +517,7 @@ module.exports = {
   getLiveStatus,
   getInterfaceTraffic,
   pruneOrphanedQueues,
+  setPortalDnsName,
   testConnection,
   getMacFromIp,
 };
