@@ -156,6 +156,37 @@ const sounds = {
   coin: document.getElementById('soundCoin')
 };
 
+// ===== TAB TITLE ALERT =====
+// Real push notifications (Web Push) need HTTPS - captive portals need
+// plain HTTP so phones can auto-detect and redirect to the login page in
+// the first place, so those two requirements directly conflict here. This
+// gets most of the same benefit with none of that complexity: flashing the
+// BROWSER TAB TITLE is visible in the tab strip/app switcher whenever the
+// portal tab is still open, even backgrounded (someone switched to
+// Facebook but didn't close the tab - the overwhelmingly common case),
+// with no permission prompt and no HTTPS requirement.
+let baseTitle = document.title;
+let titleFlashInterval = null;
+let lowTimeWarned = false;
+
+function startTitleFlash(message) {
+  if (titleFlashInterval) return; // already flashing something
+  let showAlert = true;
+  document.title = message;
+  titleFlashInterval = setInterval(() => {
+    document.title = showAlert ? baseTitle : message;
+    showAlert = !showAlert;
+  }, 1000);
+}
+
+function stopTitleFlash() {
+  if (titleFlashInterval) {
+    clearInterval(titleFlashInterval);
+    titleFlashInterval = null;
+  }
+  document.title = baseTitle;
+}
+
 function playSound(type) {
   if (!soundEnabled) return;
   try {
@@ -496,6 +527,15 @@ function updateUI(session) {
       if (prev && prev.active) {
         welcomeMsg.textContent = portalSettings.disconnect_message;
         welcomeMsg.style.color = '#e94560';
+        // Real timeout (was connected, now isn't) - swap the 2-minute
+        // warning flash (if it was even running) for a distinct "time's up"
+        // one, visible in the tab title even if they've backgrounded the
+        // tab. Cleared the moment they reconnect (see the connected branch
+        // below), not left flashing forever.
+        lowTimeWarned = false;
+        stopTitleFlash();
+        playSound('coin');
+        startTitleFlash('⚠️ TIME\'S UP - Reconnect now');
       } else {
         welcomeMsg.textContent = portalSettings.welcome_message;
         welcomeMsg.style.color = '#888';
@@ -518,6 +558,14 @@ function updateUI(session) {
     document.getElementById('sectionPaused').style.display = 'block';
 
   } else {
+    // Connected with real time on the clock - clear any flash from a prior
+    // low-time warning or timeout (covers reconnecting, and topping up
+    // while the warning was already showing).
+    if (session.minutes_remaining > 2) {
+      lowTimeWarned = false;
+      stopTitleFlash();
+    }
+
     const coinModalOpen = document.getElementById('coinModal').classList.contains('show');
     if (!prev || !prev.active) {
       playSound('success');
@@ -589,7 +637,13 @@ function updateUI(session) {
         }, 5000);
       } else {
         timeDisplay.textContent = formatTime(remaining);
-        expiryWarning.style.display = remaining <= 2 ? 'block' : 'none';
+        const lowTime = remaining <= 2;
+        expiryWarning.style.display = lowTime ? 'block' : 'none';
+        if (lowTime && !lowTimeWarned) {
+          lowTimeWarned = true;
+          playSound('coin');
+          startTitleFlash('⏰ 2 MIN LEFT - Tap to add time!');
+        }
       }
     }, 1000);
   }
@@ -637,7 +691,8 @@ async function loadSettings() {
     applyPortalSettings();
 
     document.getElementById('cafeName').textContent = data.cafe_name.toUpperCase();
-    document.title = data.cafe_name;
+    baseTitle = data.cafe_name;
+    document.title = baseTitle;
 
     if (data.banner_text) {
       document.getElementById('bannerText').textContent = data.banner_text;
