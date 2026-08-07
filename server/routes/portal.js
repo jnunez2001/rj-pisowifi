@@ -121,10 +121,35 @@ router.get('/rates', (req, res) => {
       max_pause_minutes: getSetting('max_pause_minutes', '30'),
       grace_period_minutes: getSetting('grace_period_minutes', '0'),
       rates,
-      vendo_ip: getSetting('vendo_ip', '')
+      vendo_ip: getSetting('vendo_ip', ''),
+      vapid_public_key: getSetting('vapid_public_key', '')
     });
 
   } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/portal/push-subscribe - only reachable in practice over the
+// LAN-facing HTTPS port (setup/nginx.conf's 8443 block), since the browser
+// itself refuses to even attempt subscribing from a plain-HTTP page
+// (service workers require a secure context) - no need to re-check the
+// protocol here, an insecure-context caller physically can't produce a
+// valid subscription object to send in the first place.
+router.post('/push-subscribe', (req, res) => {
+  try {
+    const { mac, subscription } = req.body;
+    if (!mac || !subscription?.endpoint || !subscription?.keys?.p256dh || !subscription?.keys?.auth) {
+      return res.status(400).json({ success: false, message: 'Invalid subscription' });
+    }
+    db.prepare(`
+      INSERT INTO push_subscriptions (mac_address, endpoint, p256dh, auth)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(endpoint) DO UPDATE SET mac_address = excluded.mac_address
+    `).run(String(mac).trim().toLowerCase(), subscription.endpoint, subscription.keys.p256dh, subscription.keys.auth);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Push subscribe error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

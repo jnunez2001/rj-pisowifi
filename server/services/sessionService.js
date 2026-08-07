@@ -172,11 +172,15 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
     now + expirationMinutes * 60 * 1000
   ).toISOString();
 
+  // push_2min_sent reset to 0: a customer topping up before running out
+  // should get warned again the NEXT time they cross under 2 minutes, not
+  // have that suppressed forever because it already fired once earlier.
   db.prepare(`
     UPDATE sessions
     SET minutes_remaining = ?,
         expires_at = ?,
-        hard_expires_at = ?
+        hard_expires_at = ?,
+        push_2min_sent = 0
     WHERE mac_address = ?
   `).run(newMinutes, newExpiresAt, newHardExpiresAt, mac);
 
@@ -321,6 +325,12 @@ async function expireSession(voucherCode) {
     } catch(e) {
       console.error(`[Network] Failed to block ${session.mac_address}:`, e.message);
     }
+
+    require('./pushNotificationService').sendPush(
+      session.mac_address,
+      "⚠️ Time's Up",
+      'Your WiFi session has ended. Reconnect to keep browsing.'
+    ).catch(() => {});
   }
 }
 

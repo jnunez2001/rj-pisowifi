@@ -114,6 +114,22 @@ db.exec(`
     claimed_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Web Push subscriptions (portal's "Enable Notifications" opt-in, only
+  -- reachable over the LAN-facing HTTPS port since service workers require
+  -- a secure context). One MAC can have more than one live subscription
+  -- (multiple browsers/devices using the same phone's MAC isn't realistic,
+  -- but a customer re-subscribing after clearing site data would otherwise
+  -- collide on a UNIQUE mac_address) - endpoint itself is what's actually
+  -- unique per browser subscription.
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac_address TEXT NOT NULL,
+    endpoint TEXT UNIQUE NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS vlans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     base_interface TEXT NOT NULL,
@@ -380,6 +396,36 @@ try {
   db.exec('ALTER TABLE promo_vouchers ADD COLUMN upload_mbps INTEGER');
 } catch (e) {
   // already applied
+}
+
+// Tracks whether the 2-minutes-remaining push notification has already
+// been sent for THIS session, so timerService.js's 30s tick (which
+// re-checks every active session every cycle) doesn't re-send it over and
+// over for the same session while it sits under the threshold. Reset back
+// to 0 whenever more time is added (sessionService.js's addTimeToSession)
+// so a customer who tops up before running out can get warned again later.
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN push_2min_sent INTEGER DEFAULT 0');
+} catch (e) {
+  // already applied
+}
+
+// VAPID keypair for Web Push (server/services/pushNotificationService.js) -
+// generated once and persisted in settings, not regenerated on every boot,
+// since every customer's existing push subscription is cryptographically
+// tied to whatever public key they subscribed against - rotating it would
+// silently break every subscription made before the rotation.
+try {
+  const hasVapidKeys = db.prepare("SELECT value FROM settings WHERE key = 'vapid_public_key'").get();
+  if (!hasVapidKeys) {
+    const webpush = require('web-push');
+    const vapidKeys = webpush.generateVAPIDKeys();
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('vapid_public_key', vapidKeys.publicKey);
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('vapid_private_key', vapidKeys.privateKey);
+    console.log('🔑 Generated new VAPID keypair for Web Push notifications');
+  }
+} catch (e) {
+  console.error('⚠️ VAPID key generation failed:', e.message);
 }
 
 const rateCount = db.prepare(
