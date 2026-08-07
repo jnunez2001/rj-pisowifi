@@ -258,6 +258,21 @@ async function startTimer() {
           } catch (e) {
             console.error(`Failed to re-assert access for ${session.mac_address}:`, e.message);
           }
+
+          // Web Push "2 minutes left" alert - only for a customer who
+          // actually opted in (push_subscriptions has no row for anyone
+          // who didn't, and pushNotificationService.sendPush() just no-ops
+          // in that case). push_2min_sent stops this firing again every
+          // tick for the same low-time window; addTimeToSession() resets
+          // it if they top up, so a later low-time window warns again.
+          if (remaining <= 2 && !session.push_2min_sent) {
+            db.prepare('UPDATE sessions SET push_2min_sent = 1 WHERE voucher_code = ?').run(session.voucher_code);
+            require('./pushNotificationService').sendPush(
+              session.mac_address,
+              '⏰ 2 Minutes Left',
+              'Your WiFi time is almost up. Tap to add more.'
+            ).catch(() => {});
+          }
         }
       }
 

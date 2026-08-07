@@ -205,6 +205,39 @@ if [ "$NETWORK_MODE" = "mikrotik" ] && [ "$LAN_VIF" != "$LAN_IF" ]; then
     echo "LAN VLAN ($LAN_VIF): requesting DHCP from router" >> $LOG
 fi
 
+# ── ADMIN/PORTAL-HTTPS FIREWALL GUARD (always applied, both modes) ──
+# Real security gap found live: nginx (setup/nginx.conf) listens on port
+# 443 on EVERY interface, and nothing in this project's firewall ever
+# blocked LAN-sourced traffic from reaching it - only port 80 gets DNAT'd
+# away from nginx for LAN clients (captive-portal compatibility), port 443
+# was untouched. server/app.js's restrictAdminToLocalhost() assumes nginx
+# is WAN-only reachable (checks whether the request LOOKS local, which is
+# true for every request nginx proxies, regardless of who the original
+# visitor actually was) - a customer on this WiFi typing
+# https://<gateway-ip>/admin got the real admin login page, protected by
+# only the password, not the network-position restriction the code
+# actually assumes. Router mode doesn't even create an nftables table at
+# all (see the mikrotik branch far below), so this couldn't rely on
+# something mode-specific - a small always-applied table, independent of
+# NETWORK_MODE, rejecting non-WAN-sourced port 443 traffic. Only created
+# when WAN_VIF is confidently known - if it's ever empty, this leaves
+# today's existing (open) behavior unchanged rather than risk locking out
+# real WAN admin access on a false negative.
+if [ -n "$WAN_VIF" ]; then
+    nft delete table ip rj_admin_guard 2>/dev/null || true
+    nft -f - << NFTGUARD
+table ip rj_admin_guard {
+    chain input {
+        type filter hook input priority filter; policy accept;
+        iifname != "$WAN_VIF" tcp dport 443 reject
+    }
+}
+NFTGUARD
+    echo "Admin HTTPS guard: port 443 blocked from non-WAN interfaces (WAN_VIF=$WAN_VIF)" >> $LOG
+else
+    echo "Admin HTTPS guard: skipped, WAN_VIF unknown - leaving port 443 as-is" >> $LOG
+fi
+
 # ── STOP NODOGSPLASH COMPLETELY ───────────────────────────────
 pkill nodogsplash 2>/dev/null || true
 systemctl stop nodogsplash 2>/dev/null || true

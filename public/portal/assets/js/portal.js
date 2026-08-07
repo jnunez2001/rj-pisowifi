@@ -187,6 +187,68 @@ function stopTitleFlash() {
   document.title = baseTitle;
 }
 
+// ===== WEB PUSH NOTIFICATIONS (optional, needs HTTPS) =====
+// Real OS-level notifications (unlike the tab-title flash above, which
+// only works while the tab is still open). Service workers require a
+// secure context, which directly conflicts with captive portals needing
+// plain HTTP - the plain-HTTP portal can't register one at all. The
+// button below only appears when the browser actually supports the
+// pieces needed AND a VAPID key exists; tapping it on the plain-HTTP page
+// redirects to the LAN-facing HTTPS port (setup/nginx.conf's 8443 block)
+// first, where the real subscribe flow then runs.
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
+function updateNotificationsButton() {
+  const btn = document.getElementById('enableNotificationsBtn');
+  if (!btn) return;
+  const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const alreadyGranted = supported && Notification.permission === 'granted';
+  btn.style.display = (supported && portalSettings.vapid_public_key && !alreadyGranted) ? 'block' : 'none';
+}
+
+async function enableNotifications() {
+  if (location.protocol !== 'https:') {
+    // Carry the customer's session identity across the protocol switch -
+    // MAC detection on the HTTPS side re-derives from IP the same way the
+    // HTTP side does, so nothing extra needs to be passed here.
+    const httpsUrl = `https://${location.hostname}:8443${location.pathname}`;
+    alert('You\'ll see a one-time security warning on the next page - that\'s expected for this WiFi\'s own address, not a problem. Tap through it to continue.');
+    window.location.href = httpsUrl;
+    return;
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      showToast('Notifications permission denied.', 'error');
+      return;
+    }
+
+    const registration = await navigator.serviceWorker.register('/portal/assets/sw.js');
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(portalSettings.vapid_public_key)
+    });
+
+    const mac = getMac();
+    await fetch(`${SERVER}/api/portal/push-subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac, subscription })
+    });
+
+    updateNotificationsButton();
+    playSound('success');
+  } catch (e) {
+    console.error('Enable notifications failed:', e);
+  }
+}
+
 function playSound(type) {
   if (!soundEnabled) return;
   try {
@@ -688,7 +750,9 @@ async function loadSettings() {
     portalSettings.grace_period_minutes = data.grace_period_minutes || '0';
     portalSettings.vendo_ip = data.vendo_ip || '';
     portalSettings.payment_methods = data.payment_methods || 'both';
+    portalSettings.vapid_public_key = data.vapid_public_key || '';
     applyPortalSettings();
+    updateNotificationsButton();
 
     document.getElementById('cafeName').textContent = data.cafe_name.toUpperCase();
     baseTitle = data.cafe_name;
