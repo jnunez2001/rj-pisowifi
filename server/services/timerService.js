@@ -261,6 +261,29 @@ async function startTimer() {
         }
       }
 
+      // Bug found live: a customer's bandwidth queue survived on the
+      // router pointed at a stale IP long after their session had ended -
+      // normal cleanup (expireSession() -> removeClientBandwidth()) only
+      // fires when a session ends gracefully; a server restart, crash, or
+      // manual DB edit mid-session skips it, leaving an orphaned queue
+      // that permanently shadows whatever new IP that MAC gets later since
+      // nothing ever tells the router to drop it. Runs every tick so a
+      // stale queue is gone within 30s instead of surviving indefinitely.
+      const { isMikrotikModeEnabled, pruneOrphanedQueues } = require('./mikrotikService');
+      if (isMikrotikModeEnabled()) {
+        try {
+          // Bug avoidance: activeSessions above excludes paused sessions
+          // (is_paused=0) since a paused customer's bandwidth shouldn't be
+          // reasserted while blocked - but their queue is still legitimate
+          // and shouldn't be pruned as an orphan. Query every session
+          // (paused or not) for this allowlist, not just the active ones.
+          const allMacs = db.prepare('SELECT mac_address FROM sessions').all().map((s) => s.mac_address);
+          await pruneOrphanedQueues(allMacs);
+        } catch (e) {
+          console.error('Failed to prune orphaned bandwidth queues:', e.message);
+        }
+      }
+
     } catch (err) {
       console.error('Timer error:', err.message);
     } finally {

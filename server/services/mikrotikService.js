@@ -159,6 +159,40 @@ async function deleteQueue(client, mac) {
   }
 }
 
+// Global self-heal, not just per-session: found live that a customer's
+// queue survived on the router pointed at a stale IP long after their
+// session had ended (normal cleanup - expireSession() calling
+// removeClientBandwidth() - only fires when a session ends gracefully;
+// a server restart, crash, or manual DB edit mid-session skips it
+// entirely, leaving an orphaned queue that permanently shadows whatever
+// new IP that MAC gets later, since RouterOS just... never told anyone).
+// Called every tick (timerService.js) in mikrotik mode - removes any
+// rj-<mac> queue whose MAC isn't a currently active session, so a stale
+// queue is gone within one tick instead of surviving indefinitely.
+const PER_CLIENT_QUEUE_RE = /^rj-([0-9a-f]{12})(-udp|-other)?$/;
+
+async function pruneOrphanedQueues(activeMacs) {
+  const config = getMikrotikConfig();
+  if (!config.ip) return;
+  const activeSet = new Set(activeMacs.map((m) => m.toLowerCase().replace(/:/g, '')));
+  try {
+    await withMikrotik(config, async (client) => {
+      const res = await client.talk(['/queue/simple/print']);
+      // Parents first in the list, remove children before parents (RouterOS
+      // rejects removing a queue that still has children) - reverse order.
+      for (const q of res.re.slice().reverse()) {
+        const match = PER_CLIENT_QUEUE_RE.exec(q.name || '');
+        if (!match) continue; // not a per-client queue (e.g. a lane queue) - leave it alone
+        if (activeSet.has(match[1])) continue; // still a real active session
+        await client.talk(['/queue/simple/remove', `=.id=${q['.id']}`]);
+        console.log(`[MikroTik] Pruned orphaned bandwidth queue: ${q.name} (no matching active session)`);
+      }
+    });
+  } catch (err) {
+    console.error('[MikroTik] pruneOrphanedQueues failed:', err.message);
+  }
+}
+
 // Set bandwidth limit for a client.
 // NOTE: RouterOS simple queues target an IP address or address range, not a
 // MAC directly. We need the DHCP lease for this MAC to know its current IP.
@@ -447,6 +481,7 @@ module.exports = {
   getRouterPorts,
   getLiveStatus,
   getInterfaceTraffic,
+  pruneOrphanedQueues,
   testConnection,
   getMacFromIp,
 };
