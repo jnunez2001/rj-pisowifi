@@ -156,6 +156,99 @@ const sounds = {
   coin: document.getElementById('soundCoin')
 };
 
+// ===== TAB TITLE ALERT =====
+// Real push notifications (Web Push) need HTTPS - captive portals need
+// plain HTTP so phones can auto-detect and redirect to the login page in
+// the first place, so those two requirements directly conflict here. This
+// gets most of the same benefit with none of that complexity: flashing the
+// BROWSER TAB TITLE is visible in the tab strip/app switcher whenever the
+// portal tab is still open, even backgrounded (someone switched to
+// Facebook but didn't close the tab - the overwhelmingly common case),
+// with no permission prompt and no HTTPS requirement.
+let baseTitle = document.title;
+let titleFlashInterval = null;
+let lowTimeWarned = false;
+
+function startTitleFlash(message) {
+  if (titleFlashInterval) return; // already flashing something
+  let showAlert = true;
+  document.title = message;
+  titleFlashInterval = setInterval(() => {
+    document.title = showAlert ? baseTitle : message;
+    showAlert = !showAlert;
+  }, 1000);
+}
+
+function stopTitleFlash() {
+  if (titleFlashInterval) {
+    clearInterval(titleFlashInterval);
+    titleFlashInterval = null;
+  }
+  document.title = baseTitle;
+}
+
+// ===== WEB PUSH NOTIFICATIONS (optional, needs HTTPS) =====
+// Real OS-level notifications (unlike the tab-title flash above, which
+// only works while the tab is still open). Service workers require a
+// secure context, which directly conflicts with captive portals needing
+// plain HTTP - the plain-HTTP portal can't register one at all. The
+// button below only appears when the browser actually supports the
+// pieces needed AND a VAPID key exists; tapping it on the plain-HTTP page
+// redirects to the LAN-facing HTTPS port (setup/nginx.conf's 8443 block)
+// first, where the real subscribe flow then runs.
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
+function updateNotificationsButton() {
+  const btn = document.getElementById('enableNotificationsBtn');
+  if (!btn) return;
+  const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  const alreadyGranted = supported && Notification.permission === 'granted';
+  btn.style.display = (supported && portalSettings.vapid_public_key && !alreadyGranted) ? 'block' : 'none';
+}
+
+async function enableNotifications() {
+  if (location.protocol !== 'https:') {
+    // Carry the customer's session identity across the protocol switch -
+    // MAC detection on the HTTPS side re-derives from IP the same way the
+    // HTTP side does, so nothing extra needs to be passed here.
+    const httpsUrl = `https://${location.hostname}:8443${location.pathname}`;
+    alert('You\'ll see a one-time security warning on the next page - that\'s expected for this WiFi\'s own address, not a problem. Tap through it to continue.');
+    window.location.href = httpsUrl;
+    return;
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      showToast('Notifications permission denied.', 'error');
+      return;
+    }
+
+    const registration = await navigator.serviceWorker.register('/portal/assets/sw.js');
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(portalSettings.vapid_public_key)
+    });
+
+    const mac = getMac();
+    await fetch(`${SERVER}/api/portal/push-subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac, subscription })
+    });
+
+    updateNotificationsButton();
+    playSound('success');
+  } catch (e) {
+    console.error('Enable notifications failed:', e);
+  }
+}
+
 function playSound(type) {
   if (!soundEnabled) return;
   try {
@@ -434,6 +527,14 @@ function applyPortalSettings() {
   const vouchersBtn = document.getElementById('vouchersBtn');
   const voucherInputRow = document.getElementById('voucherInputRow');
 
+  // Connected-state "Add Time with Voucher" - same showVoucherEntry rule as
+  // the disconnected state's Vouchers button, just its own elements since
+  // both sections coexist in the DOM (only one visible at a time).
+  const vouchersBtnConnected = document.getElementById('vouchersBtnConnected');
+  const voucherInputRowConnected = document.getElementById('voucherInputRowConnected');
+  if (vouchersBtnConnected) vouchersBtnConnected.style.display = showVoucherEntry ? 'block' : 'none';
+  if (!showVoucherEntry && voucherInputRowConnected) voucherInputRowConnected.style.display = 'none';
+
   if (portalSettings.payment_methods === 'voucher') {
     // Voucher Only: the code entry box IS the primary action, not something
     // buried behind a small button below "Claim Free Time" - move it to the
@@ -488,6 +589,15 @@ function updateUI(session) {
       if (prev && prev.active) {
         welcomeMsg.textContent = portalSettings.disconnect_message;
         welcomeMsg.style.color = '#e94560';
+        // Real timeout (was connected, now isn't) - swap the 2-minute
+        // warning flash (if it was even running) for a distinct "time's up"
+        // one, visible in the tab title even if they've backgrounded the
+        // tab. Cleared the moment they reconnect (see the connected branch
+        // below), not left flashing forever.
+        lowTimeWarned = false;
+        stopTitleFlash();
+        playSound('coin');
+        startTitleFlash('⚠️ TIME\'S UP - Reconnect now');
       } else {
         welcomeMsg.textContent = portalSettings.welcome_message;
         welcomeMsg.style.color = '#888';
@@ -510,6 +620,14 @@ function updateUI(session) {
     document.getElementById('sectionPaused').style.display = 'block';
 
   } else {
+    // Connected with real time on the clock - clear any flash from a prior
+    // low-time warning or timeout (covers reconnecting, and topping up
+    // while the warning was already showing).
+    if (session.minutes_remaining > 2) {
+      lowTimeWarned = false;
+      stopTitleFlash();
+    }
+
     const coinModalOpen = document.getElementById('coinModal').classList.contains('show');
     if (!prev || !prev.active) {
       playSound('success');
@@ -581,7 +699,13 @@ function updateUI(session) {
         }, 5000);
       } else {
         timeDisplay.textContent = formatTime(remaining);
-        expiryWarning.style.display = remaining <= 2 ? 'block' : 'none';
+        const lowTime = remaining <= 2;
+        expiryWarning.style.display = lowTime ? 'block' : 'none';
+        if (lowTime && !lowTimeWarned) {
+          lowTimeWarned = true;
+          playSound('coin');
+          startTitleFlash('⏰ 2 MIN LEFT - Tap to add time!');
+        }
       }
     }, 1000);
   }
@@ -626,10 +750,13 @@ async function loadSettings() {
     portalSettings.grace_period_minutes = data.grace_period_minutes || '0';
     portalSettings.vendo_ip = data.vendo_ip || '';
     portalSettings.payment_methods = data.payment_methods || 'both';
+    portalSettings.vapid_public_key = data.vapid_public_key || '';
     applyPortalSettings();
+    updateNotificationsButton();
 
     document.getElementById('cafeName').textContent = data.cafe_name.toUpperCase();
-    document.title = data.cafe_name;
+    baseTitle = data.cafe_name;
+    document.title = baseTitle;
 
     if (data.banner_text) {
       document.getElementById('bannerText').textContent = data.banner_text;
@@ -785,6 +912,41 @@ async function redeemVoucher() {
     if (data.success) {
       document.getElementById('voucherInput').value = '';
       document.getElementById('voucherInputRow').style.display = 'none';
+      playSound('success');
+      checkSession();
+    } else {
+      alert(data.message || 'Invalid code');
+    }
+  } catch(e) {}
+}
+
+// Add-time-while-connected - server/routes/promo.js now adds this voucher's
+// minutes to the customer's existing session instead of rejecting it for
+// already having one, mirroring how the coin slot has always let a
+// connected customer top up. Separate input/button from the disconnected
+// state's (different element ids) since both sections can exist in the DOM
+// at once, just not both visible at the same time.
+function showVoucherInputConnected() {
+  const row = document.getElementById('voucherInputRowConnected');
+  row.style.display = row.style.display === 'flex' ? 'none' : 'flex';
+}
+
+async function redeemVoucherConnected() {
+  const raw = document.getElementById('voucherInputConnected').value.trim().toUpperCase();
+  const code = raw.includes('-') ? raw : raw.replace(/^(PROMO|RJ)/, '$1-');
+  if (!code) { alert('Enter a voucher code'); return; }
+  const mac = getMac();
+  if (!mac) { alert('Cannot detect device.'); return; }
+  try {
+    const res = await fetch(`${SERVER}/api/promo/redeem`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac, code, ip: '' })
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('voucherInputConnected').value = '';
+      document.getElementById('voucherInputRowConnected').style.display = 'none';
       playSound('success');
       checkSession();
     } else {

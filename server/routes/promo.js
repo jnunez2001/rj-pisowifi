@@ -4,6 +4,7 @@ const db = require('../config/database');
 const {
   getSessionByMac,
   createSession,
+  addTimeToSession,
   getBurstConfig
 } = require('../services/sessionService');
 const { setClientBandwidth } = require('../services/networkService');
@@ -79,52 +80,39 @@ router.post('/redeem', async (req, res) => {
       }
     }
 
-    // Check if MAC already has active session
-    const existing = getSessionByMac(mac);
-    if (existing) {
-      return res.status(400).json({
-        success: false,
-        message: 'You already have an active session'
-      });
-    }
-
-    // Bug: this included 'used' (a promo whose session already fully ended -
-    // sessionService.js's expireSession() marks it 'used' the moment that
-    // happens) alongside 'active' (a promo whose session is currently
-    // live). Meant to block redeeming a second code while one is still
-    // running - matches the error message's own "wait for your session to
-    // expire" wording - but including 'used' blocked every device from
-    // ever redeeming a second promo code again, forever, even long after
-    // its first session had completely ended. Only 'active' should block.
-    const previousPromo = db.prepare(`
-      SELECT id FROM promo_vouchers
-      WHERE mac_address = ? AND status = 'active'
-    `).get(mac);
-
-    if (previousPromo) {
-      return res.status(400).json({
-        success: false,
-        message: 'You have already redeemed a promo code. Please wait for your session to expire.'
-      });
-    }
-
-    // duration_days stores fractional days (minutes / 1440)
+    // Bug/feature: this used to reject outright the moment a MAC already
+    // had an active session ("You already have an active session"), and a
+    // second check below blocked a second promo/voucher from ever being
+    // redeemed while one was still running at all - there was no way to
+    // top up an existing session with another voucher code, only coins.
+    // Now: an existing session gets this voucher's time ADDED to it
+    // (mirrors exactly how coin.js already tops up a running session),
+    // instead of being rejected. duration_days stores fractional days
+    // (minutes / 1440).
     const minutes = Math.round(promo.duration_days * 1440);
-    const expirationMinutes = minutes;
+    const existing = getSessionByMac(mac);
 
-    // Create session
-    const session = await createSession(mac, ip || '', minutes, expirationMinutes);
+    let session;
+    if (existing) {
+      session = await addTimeToSession(mac, minutes, minutes);
+    } else {
+      session = await createSession(mac, ip || '', minutes, minutes);
+    }
 
     // Session gets its own internal RJ-XXXXXX id (voucher_code) regardless
     // of how it was paid for - record the actual code the customer typed
     // separately so an admin looking a customer up by the code they were
-    // handed can actually find the session it created.
+    // handed can actually find the session it created. On a top-up this
+    // overwrites the previous code with the newest one redeemed, matching
+    // how the bandwidth override just below also lets the newest voucher's
+    // numbers win.
     db.prepare('UPDATE sessions SET redeemed_code = ? WHERE voucher_code = ?').run(normalized, session.voucher_code);
 
     // Per-voucher bandwidth override (Create Voucher's optional Mbps
-    // fields). createSession() above already applied the GLOBAL cap if one
-    // is enabled - this replaces it with the voucher's own numbers, and
-    // saves them on the session itself so timerService.js's 30s
+    // fields). createSession()/addTimeToSession() above already applied
+    // the global cap (or the session's existing override, on a top-up) -
+    // this replaces it with the NEW voucher's numbers if it has its own,
+    // and saves them on the session itself so timerService.js's 30s
     // self-healing re-assertion keeps using THIS voucher's speed instead of
     // silently reverting to the global cap on its next tick.
     if (promo.download_mbps) {

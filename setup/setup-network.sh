@@ -45,6 +45,17 @@ WAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='wan_interface';" 2
 LAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='lan_interface';" 2>/dev/null)
 NETWORK_MODE=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='network_mode';" 2>/dev/null)
 
+# Settings > Portal Settings > Customer Portal Address - was a real, saved
+# setting the admin UI already let you configure ("Give customers an easy,
+# memorable address for checking or adding time later"), but nothing ever
+# actually made it resolve to anything - a customer closing the portal tab
+# had no way back in except knowing the raw gateway IP, since the OS's own
+# captive-portal auto-popup only fires before they have real internet, not
+# after they've already paid. dnsmasq (this server's own DNS for every
+# gated/open lane in standalone mode) can answer this hostname directly for
+# every connected customer with one address= line per lane's gateway.
+PORTAL_HOSTNAME=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='portal_hostname';" 2>/dev/null)
+
 # Pi-hole (setup/install-pihole.sh, opt-in, off by default): when enabled,
 # dnsmasq's UPSTREAM_DNS_LINES puts Pi-hole's loopback-only container
 # FIRST, with the same public DNS servers this project has always used
@@ -254,6 +265,39 @@ if [ "$NETWORK_MODE" = "mikrotik" ] && [ "$LAN_VIF" != "$LAN_IF" ]; then
     echo "LAN VLAN ($LAN_VIF): requesting DHCP from router" >> $LOG
 fi
 
+# ── ADMIN/PORTAL-HTTPS FIREWALL GUARD (always applied, both modes) ──
+# Real security gap found live: nginx (setup/nginx.conf) listens on port
+# 443 on EVERY interface, and nothing in this project's firewall ever
+# blocked LAN-sourced traffic from reaching it - only port 80 gets DNAT'd
+# away from nginx for LAN clients (captive-portal compatibility), port 443
+# was untouched. server/app.js's restrictAdminToLocalhost() assumes nginx
+# is WAN-only reachable (checks whether the request LOOKS local, which is
+# true for every request nginx proxies, regardless of who the original
+# visitor actually was) - a customer on this WiFi typing
+# https://<gateway-ip>/admin got the real admin login page, protected by
+# only the password, not the network-position restriction the code
+# actually assumes. Router mode doesn't even create an nftables table at
+# all (see the mikrotik branch far below), so this couldn't rely on
+# something mode-specific - a small always-applied table, independent of
+# NETWORK_MODE, rejecting non-WAN-sourced port 443 traffic. Only created
+# when WAN_VIF is confidently known - if it's ever empty, this leaves
+# today's existing (open) behavior unchanged rather than risk locking out
+# real WAN admin access on a false negative.
+if [ -n "$WAN_VIF" ]; then
+    nft delete table ip rj_admin_guard 2>/dev/null || true
+    nft -f - << NFTGUARD
+table ip rj_admin_guard {
+    chain input {
+        type filter hook input priority filter; policy accept;
+        iifname != "$WAN_VIF" tcp dport 443 reject
+    }
+}
+NFTGUARD
+    echo "Admin HTTPS guard: port 443 blocked from non-WAN interfaces (WAN_VIF=$WAN_VIF)" >> $LOG
+else
+    echo "Admin HTTPS guard: skipped, WAN_VIF unknown - leaving port 443 as-is" >> $LOG
+fi
+
 # ── STOP NODOGSPLASH COMPLETELY ───────────────────────────────
 pkill nodogsplash 2>/dev/null || true
 systemctl stop nodogsplash 2>/dev/null || true
@@ -454,6 +498,17 @@ dhcp-option=interface:${LANE_IF},6,8.8.8.8"
       if [ "$H_ROLE" = "gated" ]; then
           DNSMASQ_LANES="${DNSMASQ_LANES}
 dhcp-option=interface:${LANE_IF},114,http://${LANE_GATEWAY}:3000/portal"
+          # dnsmasq's address=/domain/ip is global (answered the same way
+          # regardless of which interface asked), not per-lane - can only
+          # point at ONE gateway. First gated lane wins; a customer on a
+          # different gated lane in a multi-lane setup should still use
+          # their own lane's gateway IP directly to get back to the portal.
+          if [ -n "$PORTAL_HOSTNAME" ] && [ -z "$PORTAL_HOSTNAME_APPLIED" ]; then
+              DNSMASQ_LANES="${DNSMASQ_LANES}
+address=/${PORTAL_HOSTNAME}/${LANE_GATEWAY}"
+              PORTAL_HOSTNAME_APPLIED=1
+              echo "Portal address ${PORTAL_HOSTNAME} -> ${LANE_GATEWAY} (lane $H_ID)" >> $LOG
+          fi
           # Shared allowed_macs set (defined once below) - a paid session
           # stays valid across every gated lane, not just the one it started
           # on, matching how this app has exactly one session system, not
@@ -628,6 +683,7 @@ dhcp-option=6,8.8.8.8
 dhcp-option=114,http://$GATEWAY_IP:3000/portal
 no-resolv
 $UPSTREAM_DNS_LINES
+$([ -n "$PORTAL_HOSTNAME" ] && echo "address=/${PORTAL_HOSTNAME}/${GATEWAY_IP}")
 EOF
 
   # Static DHCP leases (admin panel > Network > Static DHCP Leases) - one

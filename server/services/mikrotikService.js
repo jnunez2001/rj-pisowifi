@@ -159,6 +159,40 @@ async function deleteQueue(client, mac) {
   }
 }
 
+// Global self-heal, not just per-session: found live that a customer's
+// queue survived on the router pointed at a stale IP long after their
+// session had ended (normal cleanup - expireSession() calling
+// removeClientBandwidth() - only fires when a session ends gracefully;
+// a server restart, crash, or manual DB edit mid-session skips it
+// entirely, leaving an orphaned queue that permanently shadows whatever
+// new IP that MAC gets later, since RouterOS just... never told anyone).
+// Called every tick (timerService.js) in mikrotik mode - removes any
+// rj-<mac> queue whose MAC isn't a currently active session, so a stale
+// queue is gone within one tick instead of surviving indefinitely.
+const PER_CLIENT_QUEUE_RE = /^rj-([0-9a-f]{12})(-udp|-other)?$/;
+
+async function pruneOrphanedQueues(activeMacs) {
+  const config = getMikrotikConfig();
+  if (!config.ip) return;
+  const activeSet = new Set(activeMacs.map((m) => m.toLowerCase().replace(/:/g, '')));
+  try {
+    await withMikrotik(config, async (client) => {
+      const res = await client.talk(['/queue/simple/print']);
+      // Parents first in the list, remove children before parents (RouterOS
+      // rejects removing a queue that still has children) - reverse order.
+      for (const q of res.re.slice().reverse()) {
+        const match = PER_CLIENT_QUEUE_RE.exec(q.name || '');
+        if (!match) continue; // not a per-client queue (e.g. a lane queue) - leave it alone
+        if (activeSet.has(match[1])) continue; // still a real active session
+        await client.talk(['/queue/simple/remove', `=.id=${q['.id']}`]);
+        console.log(`[MikroTik] Pruned orphaned bandwidth queue: ${q.name} (no matching active session)`);
+      }
+    });
+  } catch (err) {
+    console.error('[MikroTik] pruneOrphanedQueues failed:', err.message);
+  }
+}
+
 // Set bandwidth limit for a client.
 // NOTE: RouterOS simple queues target an IP address or address range, not a
 // MAC directly. We need the DHCP lease for this MAC to know its current IP.
@@ -400,6 +434,41 @@ async function getInterfaceTraffic(interfaceNames) {
   });
 }
 
+// Settings > Portal Settings > Customer Portal Address, router mode's
+// equivalent of setup-network.sh's dnsmasq address= line - the router owns
+// DNS in this mode (our own dnsmasq is disabled), so this server can't
+// answer that hostname itself. Adds/updates a static DNS record on the
+// router resolving it to THIS server's own current DHCP lease address (via
+// server_lan_mac, the same setting Ports and Roles auto-provisioning
+// already relies on to know which device on the router IS this server).
+// Best-effort: silently no-ops if server_lan_mac isn't set or has no
+// current lease yet, same as this file's other bandwidth/queue calls that
+// depend on a lease existing.
+async function setPortalDnsName(hostname) {
+  const config = getMikrotikConfig();
+  if (!config.ip || !hostname) return false;
+  const ownMac = db.prepare("SELECT value FROM settings WHERE key = 'server_lan_mac'").get()?.value;
+  if (!ownMac) return false;
+  try {
+    return await withMikrotik(config, async (client) => {
+      const leaseRes = await client.talk(['/ip/dhcp-server/lease/print', `?mac-address=${mikMac(ownMac)}`]);
+      if (leaseRes.re.length === 0) return false;
+      const ip = leaseRes.re[0].address;
+
+      const existing = await client.talk(['/ip/dns/static/print', `?name=${hostname}`]);
+      for (const row of existing.re) {
+        await client.talk(['/ip/dns/static/remove', `=.id=${row['.id']}`]);
+      }
+      await client.talk(['/ip/dns/static/add', `=name=${hostname}`, `=address=${ip}`]);
+      console.log(`[MikroTik] Portal address ${hostname} -> ${ip}`);
+      return true;
+    });
+  } catch (err) {
+    console.error('[MikroTik] setPortalDnsName failed:', err.message);
+    return false;
+  }
+}
+
 // "Test connection" button — just needs to prove login succeeds, doesn't
 // need the full status payload.
 async function testConnection() {
@@ -447,6 +516,8 @@ module.exports = {
   getRouterPorts,
   getLiveStatus,
   getInterfaceTraffic,
+  pruneOrphanedQueues,
+  setPortalDnsName,
   testConnection,
   getMacFromIp,
 };

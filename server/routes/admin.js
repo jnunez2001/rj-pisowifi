@@ -994,6 +994,26 @@ router.post('/settings', adminAuth, (req, res) => {
       applyNetworkSetup();
     }
 
+    // Bug: Customer Portal Address ("Give customers an easy, memorable
+    // address for checking or adding time later") saved to the database
+    // and did nothing else - nothing ever made it actually resolve to
+    // anything. A customer closing the portal tab had no way back in
+    // except the raw gateway IP, since the OS's captive-portal auto-popup
+    // only fires before they have real internet, not after they've paid.
+    // Standalone mode: applyNetworkSetup() above already regenerates
+    // dnsmasq's address= line for it whenever network_mode/enable_pihole
+    // changed - but portal_hostname needs the same re-apply when changed
+    // on its own too. Router mode has no local dnsmasq to update; ask the
+    // router directly for a static DNS record instead.
+    if ('portal_hostname' in updates) {
+      const mode = db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
+      if (mode === 'mikrotik') {
+        require('../services/mikrotikService').setPortalDnsName(updates.portal_hostname);
+      } else {
+        applyNetworkSetup();
+      }
+    }
+
     return res.json({ success: true, message: 'Settings updated' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
