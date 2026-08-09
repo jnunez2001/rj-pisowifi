@@ -3,6 +3,7 @@ let startTime = Date.now();
 let currentChartRange = 'weekly';
 let networkChart = null;
 let networkStatsInterval = null;
+let uptimeInterval = null;
 
 async function loadDashboard() {
   // Bug: initChart() used to run AFTER loadSalesStats(), so on every fresh
@@ -128,6 +129,10 @@ function destroyDashboard() {
   if (networkStatsInterval) {
     clearInterval(networkStatsInterval);
     networkStatsInterval = null;
+  }
+  if (uptimeInterval) {
+    clearInterval(uptimeInterval);
+    uptimeInterval = null;
   }
   if (networkChart) {
     networkChart.destroy();
@@ -273,7 +278,7 @@ async function loadRecentTransactions() {
         <td>${formatMins(t.minutes_added)}</td>
         <td>
           <span class="badge ${t.type === 'coin' ? 'badge-blue' : 'badge-orange'}">
-            ${t.type === 'coin' ? '🪙 Coin' : '🎫 Promo'}
+            ${t.type === 'coin' ? '🪙 Coin' : t.type === 'voucher' ? '🎟️ Voucher' : t.type === 'free' ? '🎁 Free' : '🎫 Promo'}
           </span>
         </td>
         <td style="color:var(--text-muted);font-size:13px;">
@@ -298,7 +303,8 @@ function startUptimeCounter(realUptimeSeconds) {
   // ticking locally every second for a live counter without re-polling.
   startTime = Date.now() - (realUptimeSeconds || 0) * 1000;
   updateUptime();
-  setInterval(updateUptime, 1000);
+  if (uptimeInterval) clearInterval(uptimeInterval);
+  uptimeInterval = setInterval(updateUptime, 1000);
 }
 
 function updateUptime() {

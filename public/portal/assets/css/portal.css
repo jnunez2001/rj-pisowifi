@@ -1,10 +1,27 @@
-*, *:focus, *:active {
+/* :focus-visible (not a blanket :focus removal) so mouse/touch taps stay
+   clean with no ring, but keyboard/assistive navigation still gets a
+   clearly visible focus indicator - a blanket outline:none on *:focus
+   used to remove it for everyone, including someone tabbing through this
+   page with a keyboard, which is a real accessibility failure on a page
+   the general public uses. */
+*, *:active {
   outline: none;
   -webkit-tap-highlight-color: transparent;
 }
 
-button:focus, button:active {
+*:focus-visible {
+  outline: 2px solid #e94560;
+  outline-offset: 2px;
+}
+
+button:active {
   outline: none;
+  box-shadow: none;
+}
+
+button:focus-visible {
+  outline: 2px solid #e94560;
+  outline-offset: 2px;
   box-shadow: none;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }

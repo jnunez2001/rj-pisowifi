@@ -1,5 +1,12 @@
-<div class="page-title">Hotspot Dashboard</div>
-<div class="page-subtitle">Coin, voucher, and promo activity for this line only.</div>
+<div class="page-title">
+  Dashboard
+  <span class="field-help" data-help="Coin, voucher, and promo activity for the Hotspot line only."><i class="fas fa-circle-question"></i></span>
+</div>
+
+<div id="hsOfflineKioskAlert" class="notice notice-warning" style="display:none;">
+  <i class="fas fa-tower-broadcast"></i>
+  <span id="hsOfflineKioskMessage"></span>
+</div>
 
 <!-- STAT CARDS -->
 <div class="stat-grid">
@@ -125,8 +132,36 @@
         </span>
         <span style="font-size:13px;font-weight:700;color:var(--text-primary);" id="hsAvgPerTransaction">₱0</span>
       </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
+          <i class="fas fa-clock" style="margin-right:6px;"></i>Avg. Session Duration
+          <span class="field-help" data-help="How long a session actually ran before ending, not how many minutes it was sold. Only counts sessions that finished today."><i class="fas fa-circle-question"></i></span>
+        </span>
+        <span style="font-size:13px;font-weight:700;color:var(--text-primary);" id="hsAvgSessionDuration">--</span>
+      </div>
     </div>
   </div>
+</div>
+
+<!-- SESSION ACTIVITY (NEW VS RETURNING) -->
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-header">
+    <div>
+      <div class="card-title">
+        Session Activity
+        <span class="field-help" data-help="How many clients paying today are new versus have paid before. Follows the same date range as Revenue Analytics."><i class="fas fa-circle-question"></i></span>
+      </div>
+    </div>
+    <div style="display:flex;gap:14px;align-items:center;">
+      <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);font-weight:600;">
+        <span style="width:9px;height:9px;border-radius:50%;background:#0c8f6d;display:inline-block;"></span>New
+      </span>
+      <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);font-weight:600;">
+        <span style="width:9px;height:9px;border-radius:50%;background:#9e9e9e;display:inline-block;"></span>Returning
+      </span>
+    </div>
+  </div>
+  <canvas id="hsSessionActivityChart" height="70"></canvas>
 </div>
 
 <!-- RECENT TRANSACTIONS -->

@@ -11,6 +11,15 @@
       </div>
     </div>
     <div class="form-group">
+      <label class="form-label">Business Type</label>
+      <select id="venueType" class="form-control" onchange="onVenueTypeChange()">
+        <option value="piso_wifi">Piso WiFi</option>
+        <option value="cafe">Cafe / Coffee Shop</option>
+        <option value="coworking">Co-working Space</option>
+      </select>
+      <small style="color:var(--text-muted);">Changes labels and what's shown around the app to match how your business actually works.</small>
+    </div>
+    <div class="form-group">
       <label class="form-label">Site Name</label>
       <input type="text" id="cafeName" class="form-control" placeholder="e.g. Juan's PisoWifi">
     </div>
@@ -62,6 +71,54 @@
     <button class="btn btn-primary" onclick="saveAdminSettings()">
       <i class="fas fa-save"></i> Save Credentials
     </button>
+  </div>
+
+  <!-- 2FA (TOTP) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <i class="fas fa-shield-halved" style="margin-right:8px;color:var(--accent-blue);"></i>Two-Factor Authentication
+      </div>
+      <span id="twoFaStatusLabel" style="font-size:12px;color:var(--text-muted);">Loading...</span>
+    </div>
+    <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px;">
+      Adds a second code (from an authenticator app like Google Authenticator) on top of your password. Off by default - turn it on for real protection once this box handles real money.
+    </p>
+
+    <div id="twoFaOffState">
+      <button class="btn btn-primary" onclick="start2faSetup()">
+        <i class="fas fa-qrcode"></i> Enable 2FA
+      </button>
+    </div>
+
+    <div id="twoFaSetupState" style="display:none;">
+      <div class="form-group">
+        <label class="form-label">1. Add this to your authenticator app</label>
+        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 8px;">Most apps let you type in a "setup key" manually instead of scanning a QR code - paste this in:</p>
+        <input type="text" id="twoFaSecretDisplay" class="form-control" readonly style="font-family:monospace;letter-spacing:1px;">
+      </div>
+      <div class="form-group">
+        <label class="form-label">2. Enter the 6-digit code it shows</label>
+        <input type="text" id="twoFaConfirmToken" class="form-control" placeholder="123456" inputmode="numeric" maxlength="6">
+      </div>
+      <button class="btn btn-primary" onclick="confirm2faSetup()">
+        <i class="fas fa-check"></i> Confirm and Enable
+      </button>
+      <button class="btn btn-secondary" onclick="cancel2faSetup()">Cancel</button>
+    </div>
+
+    <div id="twoFaOnState" style="display:none;">
+      <div style="background:var(--bg-primary);padding:10px 12px;border-radius:6px;font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+        <i class="fas fa-check-circle" style="color:var(--accent-green);"></i> 2FA is enabled on this account.
+      </div>
+      <div class="form-group">
+        <label class="form-label">Current Password (required to disable)</label>
+        <input type="password" id="twoFaDisablePassword" class="form-control" placeholder="Enter your password">
+      </div>
+      <button class="btn btn-danger" onclick="disable2fa()">
+        <i class="fas fa-times"></i> Disable 2FA
+      </button>
+    </div>
   </div>
 
 </div>
@@ -219,4 +276,13 @@
 
   <!-- RESTORE STATUS -->
   <div id="restoreStatus" style="display:none;margin-top:16px;padding:12px;border-radius:6px;font-size:13px;"></div>
+
+  <!-- SCHEDULED AUTOMATIC BACKUPS -->
+  <div style="margin-top:20px;padding-top:16px;border-top:1px solid var(--border-color);">
+    <label class="form-label">Automatic Nightly Backups</label>
+    <p style="font-size:13px;color:var(--text-muted);margin:4px 0 12px;">
+      A full database snapshot is saved automatically every night, no action needed. The last 7 are kept, older ones are removed automatically.
+    </p>
+    <div id="scheduledBackupList" style="font-size:13px;color:var(--text-muted);">Loading...</div>
+  </div>
 </div>

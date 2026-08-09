@@ -66,6 +66,7 @@ async function uploadFirmware() {
 }
 
 async function loadDevices() {
+  startDevicesRefresh();
   loadFirmwareInfo();
   loadTrustedDevices();
   try {
@@ -220,5 +221,20 @@ async function removeTrustedDevice(id) {
   }
 }
 
-// Auto refresh every 30 seconds (loadDevices also refreshes trusted devices)
-setInterval(loadDevices, 30000);
+// Auto refresh every 30 seconds (loadDevices also refreshes trusted devices).
+// Bug: this ran forever from the moment the Devices page was ever visited
+// once, since this script only ever loads once per admin session (not
+// re-injected per navigateTo) - loadFirmwareInfo() kept firing on every
+// other page, throwing "Cannot set properties of null" trying to update
+// Devices-only DOM elements that no longer existed. Tracked and cleared on
+// navigation, same destroy<Page> pattern as hotspot-dashboard.js.
+let devicesRefreshInterval = null;
+
+function startDevicesRefresh() {
+  if (devicesRefreshInterval) clearInterval(devicesRefreshInterval);
+  devicesRefreshInterval = setInterval(loadDevices, 30000);
+}
+
+function destroyDevices() {
+  if (devicesRefreshInterval) { clearInterval(devicesRefreshInterval); devicesRefreshInterval = null; }
+}

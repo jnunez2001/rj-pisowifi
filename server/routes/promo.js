@@ -150,13 +150,23 @@ router.post('/redeem', async (req, res) => {
       WHERE code = ?
     `).run(mac, expiresAt, normalized);
 
+    // A promo_vouchers row with a group_id came from a printed Voucher
+    // batch (Vouchers tab -> voucher_groups) - a real prepaid product sold
+    // at a fixed price. One with no group_id is a standalone one-off promo
+    // code an admin typed in by hand (Promos tab), usually a free/marketing
+    // giveaway. Both redeem through this same route and used to log
+    // identically as 'promo', making them indistinguishable in Sales
+    // Report/Dashboard reporting - split at the point where the
+    // distinction is actually known.
+    const transactionType = promo.group_id ? 'voucher' : 'promo';
+
     // Log transaction
     db.prepare(`
       INSERT INTO transactions
-      (voucher_code, coin_value, minutes_added, type)
-      VALUES (?, ?, ?, 'promo')
-    `).run(session.voucher_code, promo.price || 0, minutes);
-    logFinancialEvent({ voucher_code: session.voucher_code, coin_value: promo.price || 0, minutes_added: minutes, type: 'promo', mac, promo_code: normalized });
+      (voucher_code, coin_value, minutes_added, type, mac_address)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(session.voucher_code, promo.price || 0, minutes, transactionType, mac);
+    logFinancialEvent({ voucher_code: session.voucher_code, coin_value: promo.price || 0, minutes_added: minutes, type: transactionType, mac, promo_code: normalized });
 
     console.log(`🎫 Promo redeemed: ${normalized} for ${mac}`);
 

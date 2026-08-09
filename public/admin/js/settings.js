@@ -14,11 +14,33 @@ function setToggle(checkboxId, labelId, value) {
   if (label) label.textContent = value ? 'Enabled' : 'Disabled';
 }
 
+async function loadScheduledBackups() {
+  const box = document.getElementById('scheduledBackupList');
+  if (!box) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/backup/scheduled/list');
+    if (!data.success || !data.backups || data.backups.length === 0) {
+      box.textContent = 'No automatic backup yet — the first one is taken shortly after the server starts, then nightly after that.';
+      return;
+    }
+    const latest = data.backups[0];
+    const sizeMb = (latest.sizeBytes / (1024 * 1024)).toFixed(1);
+    box.innerHTML = `Latest: <strong>${new Date(latest.createdAt).toLocaleString()}</strong> (${sizeMb} MB) &middot; ${data.backups.length} kept`;
+  } catch (e) {
+    box.textContent = 'Could not load backup status.';
+  }
+}
+
 async function loadSettings() {
   try {
     const data = await apiCall('GET', '/api/admin/settings');
     if (!data.success) return;
     const s = data.settings;
+    loadScheduledBackups();
+    load2faStatus();
+
+    // Business Type
+    document.getElementById('venueType').value = s.venue_type || 'piso_wifi';
 
     // Cafe Info
     document.getElementById('cafeName').value = s.cafe_name || '';
@@ -48,6 +70,21 @@ async function loadSettings() {
 
   } catch(e) {
     console.error('Settings load error:', e);
+  }
+}
+
+async function onVenueTypeChange() {
+  const venueType = document.getElementById('venueType').value;
+  try {
+    const data = await apiCall('POST', '/api/admin/settings', { venue_type: venueType });
+    if (data.success) {
+      window.currentVenueType = venueType;
+      showToast('Business type updated - nav labels will reflect this next time you open a menu.');
+    } else {
+      showToast(data.message || 'Failed to save.', 'error');
+    }
+  } catch (e) {
+    showToast('Server error.', 'error');
   }
 }
 
@@ -175,3 +212,76 @@ async function restoreSystem() {
 }
 
 // Network Configuration (DHCP/Static IP) moved to network.js
+
+// ===== 2FA (TOTP) =====
+function show2faState(state) {
+  document.getElementById('twoFaOffState').style.display = state === 'off' ? 'block' : 'none';
+  document.getElementById('twoFaSetupState').style.display = state === 'setup' ? 'block' : 'none';
+  document.getElementById('twoFaOnState').style.display = state === 'on' ? 'block' : 'none';
+}
+
+async function load2faStatus() {
+  try {
+    const data = await apiCall('GET', '/api/admin/2fa/status');
+    const label = document.getElementById('twoFaStatusLabel');
+    if (data.success && data.enabled) {
+      label.textContent = 'Enabled';
+      label.style.color = 'var(--accent-green)';
+      show2faState('on');
+    } else {
+      label.textContent = 'Disabled';
+      label.style.color = 'var(--text-muted)';
+      show2faState('off');
+    }
+  } catch (e) {
+    // Non-fatal - leave the off-state showing, matches other settings
+    // cards' quiet-failure pattern.
+  }
+}
+
+async function start2faSetup() {
+  try {
+    const data = await apiCall('POST', '/api/admin/2fa/setup');
+    if (!data.success) { showToast('Could not start 2FA setup.', 'error'); return; }
+    document.getElementById('twoFaSecretDisplay').value = data.secret;
+    document.getElementById('twoFaConfirmToken').value = '';
+    show2faState('setup');
+  } catch (e) {
+    showToast('Could not start 2FA setup.', 'error');
+  }
+}
+
+function cancel2faSetup() {
+  show2faState('off');
+}
+
+async function confirm2faSetup() {
+  const token = document.getElementById('twoFaConfirmToken').value.trim();
+  if (!/^\d{6}$/.test(token)) {
+    showToast('Enter the 6-digit code from your authenticator app.', 'error');
+    return;
+  }
+  try {
+    const data = await apiCall('POST', '/api/admin/2fa/confirm', { token });
+    if (!data.success) { showToast(data.message || 'That code doesn\'t match.', 'error'); return; }
+    showToast('2FA is now enabled!');
+    load2faStatus();
+  } catch (e) {
+    showToast('Could not confirm 2FA setup.', 'error');
+  }
+}
+
+async function disable2fa() {
+  const password = document.getElementById('twoFaDisablePassword').value;
+  if (!password) { showToast('Enter your current password first.', 'error'); return; }
+  if (!confirm('Disable 2FA on this account? Anyone with just the password will be able to log in.')) return;
+  try {
+    const data = await apiCall('POST', '/api/admin/2fa/disable', { password });
+    if (!data.success) { showToast(data.message || 'Incorrect password.', 'error'); return; }
+    showToast('2FA disabled.');
+    document.getElementById('twoFaDisablePassword').value = '';
+    load2faStatus();
+  } catch (e) {
+    showToast('Could not disable 2FA.', 'error');
+  }
+}

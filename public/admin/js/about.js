@@ -35,7 +35,19 @@ async function loadSysInfo() {
     document.getElementById('siIp').textContent = s.ip_address;
     document.getElementById('siGateway').textContent = s.gateway;
     document.getElementById('siMachineId').textContent = s.machine_id;
-    document.getElementById('siLicense').textContent = s.license;
+    document.getElementById('siDeviceId').textContent = s.device_id || '--';
+    // Bug (fixed): s.license was never a real field in the sysinfo response
+    // - this always displayed the literal text "undefined". Now reflects
+    // licenseService.js's real (currently inert) state.
+    const licenseEl = document.getElementById('siLicense');
+    const ls = s.license_status;
+    if (!ls || ls.state === 'unlicensed') {
+      licenseEl.textContent = 'Free (no license required)';
+    } else if (ls.state === 'licensed') {
+      licenseEl.textContent = 'Licensed - active';
+    } else {
+      licenseEl.textContent = `Grace period - ${ls.message || 'awaiting check-in'}`;
+    }
     document.getElementById('sysinfoUptime').textContent = 'Uptime: ' + s.uptime;
 
     // RAM
@@ -112,4 +124,25 @@ function destroyAbout() {
 }
 function loadAbout() {
   initAbout();
+}
+
+async function downloadSupportBundle() {
+  try {
+    const res = await fetch(`${API}/support-bundle`, {
+      headers: { 'password': authToken }
+    });
+    if (res.status === 401) { handleAuthFailure(); return; }
+    if (!res.ok) { showToast('Could not generate support bundle.', 'error'); return; }
+    const text = await res.text();
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `zenfi-support-bundle-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Support bundle downloaded!');
+  } catch (e) {
+    showToast('Support bundle error.', 'error');
+  }
 }

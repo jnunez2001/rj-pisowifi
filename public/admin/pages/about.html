@@ -47,9 +47,23 @@
         <span class="sysinfo-value" id="siMachineId" style="font-size:11px;word-break:break-all;">--</span>
       </div>
       <div class="sysinfo-row">
+        <span class="sysinfo-label">
+          Device ID
+          <span class="field-help" data-help="Identifies this specific box. Generated once and never changes. Support may ask for this."><i class="fas fa-circle-question"></i></span>
+        </span>
+        <span class="sysinfo-value" id="siDeviceId" style="font-size:11px;word-break:break-all;">--</span>
+      </div>
+      <div class="sysinfo-row">
         <span class="sysinfo-label">License</span>
         <span class="sysinfo-value" id="siLicense">--</span>
       </div>
+    </div>
+
+    <div style="padding:14px 16px 4px;border-top:1px solid var(--border-color);margin-top:8px;">
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Having a problem? Download a support bundle (recent logs, health check, network info, sanitized settings) and send it along with your report - one file instead of a dozen screenshots.</p>
+      <button class="btn btn-secondary" onclick="downloadSupportBundle()">
+        <i class="fas fa-file-arrow-down"></i> Download Support Bundle
+      </button>
     </div>
   </div>
 

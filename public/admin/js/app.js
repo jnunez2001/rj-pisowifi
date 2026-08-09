@@ -2,10 +2,40 @@ const API = '';
 let authToken = null;
 let currentPage = 'dashboard';
 
+// ===== ACCESSIBILITY: keyboard support for onclick-only elements =====
+// A real gap found in a design/accessibility audit: nav rows, cards, and
+// table actions throughout this app are plain `<div onclick="...">`
+// elements - clickable with a mouse, completely invisible and
+// unreachable to anyone navigating by keyboard (divs aren't focusable or
+// "Enter/Space activates it" by default, unlike a real <button>). Rather
+// than hand-edit every one of these across 16+ pages (high risk of
+// missing some, and they get added over time), this enhancement runs
+// once for the static sidebar and again after every dynamic page load,
+// adding real keyboard support to anything clickable that isn't already
+// a native focusable element - no visual change, purely additive.
+function makeClickableDivsKeyboardAccessible(root) {
+  const scope = root || document;
+  const NATIVE_FOCUSABLE = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
+  scope.querySelectorAll('[onclick]').forEach((el) => {
+    if (NATIVE_FOCUSABLE.has(el.tagName)) return;
+    if (el.dataset.kbdEnhanced) return;
+    el.dataset.kbdEnhanced = '1';
+    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+    if (!el.hasAttribute('role')) el.setAttribute('role', 'button');
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        el.click();
+      }
+    });
+  });
+}
+
 // ===== AUTH =====
 async function doLogin() {
   const username = document.getElementById('loginUsername').value.trim();
   const password = document.getElementById('loginPassword').value;
+  const otpToken = document.getElementById('login2faToken').value.trim();
 
   if (!username || !password) {
     showLoginError('Please enter username and password.');
@@ -13,16 +43,36 @@ async function doLogin() {
   }
 
   try {
-    const res = await fetch(`${API}/api/admin/settings`, {
-      headers: { 'password': password }
+    // POST /login is the one place that checks a 2FA code (if the account
+    // has it enabled) and issues a session token - installs that never
+    // turn 2FA on get exactly the same behavior as before (password
+    // checked, token issued, used identically to how the raw password
+    // itself used to be sent on every request).
+    const loginRes = await fetch(`${API}/api/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password, otp_token: otpToken || undefined }),
     });
+    const loginData = await loginRes.json();
 
-    if (res.status === 401) {
-      showLoginError('Invalid username or password.');
+    if (loginData.requires2fa && !otpToken) {
+      // Correct password, 2FA is on, code not entered yet - reveal the
+      // field instead of failing outright.
+      document.getElementById('login2faGroup').style.display = 'block';
+      document.getElementById('login2faToken').focus();
+      return;
+    }
+    if (!loginData.success) {
+      showLoginError(loginData.message || 'Invalid username or password.');
       return;
     }
 
-    // Verify username against settings
+    const sessionToken = loginData.token;
+
+    // Verify username + fetch settings using the freshly-issued token.
+    const res = await fetch(`${API}/api/admin/settings`, {
+      headers: { 'password': sessionToken }
+    });
     const data = await res.json();
     const savedUsername = data.settings?.admin_username || 'admin';
 
@@ -31,8 +81,8 @@ async function doLogin() {
       return;
     }
 
-    authToken = password;
-    sessionStorage.setItem('rj_admin_token', password);
+    authToken = sessionToken;
+    sessionStorage.setItem('rj_admin_token', sessionToken);
     sessionStorage.setItem('rj_admin_user', username);
 
     showAdmin();
@@ -91,6 +141,39 @@ function showAdmin() {
   navigateTo('dashboard');
   startSessionPolling();
   if (typeof refreshRouterFlyoutVisibility === 'function') refreshRouterFlyoutVisibility();
+  checkDiskSpaceBanner();
+  loadVenueType();
+}
+
+// Sets window.currentVenueType once per login, read by flyoutNav.js to
+// relabel/hide venue-specific nav items. Defaults to piso_wifi (matches
+// the DB default) so a failed fetch just means "no change," not broken nav.
+async function loadVenueType() {
+  try {
+    const data = await apiCall('GET', '/api/admin/settings');
+    window.currentVenueType = (data.success && data.settings?.venue_type) || 'piso_wifi';
+  } catch (e) {
+    window.currentVenueType = 'piso_wifi';
+  }
+}
+
+// Quiet background check, shown once per login rather than polled
+// continuously - a full SD card fills up slowly, not something that needs
+// second-by-second monitoring.
+async function checkDiskSpaceBanner() {
+  try {
+    const data = await apiCall('GET', '/api/admin/disk-space');
+    const banner = document.getElementById('diskSpaceBanner');
+    const text = document.getElementById('diskSpaceBannerText');
+    if (!data.success || !data.checked || !data.low) {
+      if (banner) banner.style.display = 'none';
+      return;
+    }
+    text.textContent = `This box is running low on disk space (${data.availMb} MB free, ${data.usePercent}% used). Free up space soon to avoid backups, logs, or the database failing to write.`;
+    banner.style.display = 'block';
+  } catch (e) {
+    // Non-fatal - a failed check just means the banner doesn't show.
+  }
 }
 
 // ===== THEME =====
@@ -201,6 +284,7 @@ async function navigateTo(page) {
   if (typeof destroySessions === 'function') destroySessions();
   if (typeof destroyDashboard === 'function') destroyDashboard();
   if (typeof destroyHotspotDashboard === 'function') destroyHotspotDashboard();
+  if (typeof destroyDevices === 'function') destroyDevices();
 
   currentPage = page;
 
@@ -243,6 +327,7 @@ async function navigateTo(page) {
     if (!res.ok) throw new Error('Page not found');
     const html = await res.text();
     content.innerHTML = html;
+    makeClickableDivsKeyboardAccessible(content);
 
     // Run page script
     const scripts = {
@@ -503,6 +588,7 @@ function initFieldHelp() {
 // ===== INIT =====
 function init() {
   initSidebarCollapse();
+  makeClickableDivsKeyboardAccessible(document);
 
   // Load saved theme
   const savedTheme = localStorage.getItem('rj_theme') || 'light';

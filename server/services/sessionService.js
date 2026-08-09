@@ -293,6 +293,29 @@ async function expireSession(voucherCode) {
     sseService.notify(session.mac_address);
   }
 
+  // Durable record of actual usage duration, written here since this is
+  // the one place every session-ending path (timer expiry, admin cut,
+  // customer cancel) already funnels through. session.created_at is the
+  // real moment the session started (first coin/voucher/promo, not the
+  // moment of a later top-up), so this captures true elapsed time, not
+  // "sum of minutes granted".
+  if (session && session.created_at) {
+    // created_at is stored as SQLite's bare UTC 'YYYY-MM-DD HH:MM:SS' (no
+    // offset) - same UTC-forcing parse pattern already used elsewhere
+    // (devices.js's timeAgo()), needed because Date() would otherwise
+    // interpret the bare string in the server's local timezone.
+    const startedAtMs = new Date(session.created_at.replace(' ', 'T') + 'Z').getTime();
+    const durationSeconds = Math.max(0, Math.round((Date.now() - startedAtMs) / 1000));
+    try {
+      db.prepare(`
+        INSERT INTO session_history (voucher_code, mac_address, started_at, duration_seconds)
+        VALUES (?, ?, ?, ?)
+      `).run(session.voucher_code, session.mac_address, session.created_at, durationSeconds);
+    } catch (e) {
+      console.error(`[SessionHistory] Failed to record duration for ${voucherCode}:`, e.message);
+    }
+  }
+
   // Bug found on real hardware: promo.js's /redeem route sets a redeemed
   // voucher's status to 'active' the moment it's used, but nothing ever
   // moved it out of that state once the session it created actually ended

@@ -136,6 +136,66 @@ fi
 
 echo "WAN: $WAN_IF  LAN: $LAN_IF  Mode: $NETWORK_MODE" >> $LOG
 
+# Bug (found via a real remote-access session, see setup/relink.sh and
+# rj-network-relink.service for the other half of this fix): this script
+# only ever ran once at boot. Ubuntu's own network stack (netplan and/or
+# NetworkManager) stays active in the background the whole time, and the
+# moment a cable is unplugged and replugged (or a VM's virtual NIC is
+# toggled), it "helpfully" reclaims the interface and hands it a fresh DHCP
+# lease, silently wiping out the static IP this script assigned - because
+# nothing had ever told it this interface wasn't its to manage in the first
+# place. Every physical interface this script is about to configure gets
+# explicitly excluded from both netplan and NetworkManager here, on every
+# run, so this script remains the single source of truth for it going
+# forward, the same way netfilter-persistent/nftables/dnsmasq are already
+# disabled above so this script owns those without a fight too.
+disable_os_network_management() {
+    local ifc="$1"
+    [ -z "$ifc" ] && return 0
+
+    # netplan: a small, separately-numbered override file rather than
+    # editing whatever config the OS image shipped with - netplan merges
+    # per-interface properties across files, so this wins for $ifc without
+    # having to know or touch the original file's contents/name.
+    if command -v netplan >/dev/null 2>&1; then
+        mkdir -p /etc/netplan
+        local NP_FILE="/etc/netplan/90-rj-pisowifi-${ifc}.yaml"
+        local NP_CONTENT="network:
+  version: 2
+  ethernets:
+    ${ifc}:
+      dhcp4: false
+      dhcp6: false
+      optional: true
+"
+        if [ ! -f "$NP_FILE" ] || [ "$(cat "$NP_FILE" 2>/dev/null)" != "$NP_CONTENT" ]; then
+            echo "$NP_CONTENT" > "$NP_FILE"
+            chmod 600 "$NP_FILE"
+            netplan apply >> $LOG 2>&1 || true
+            echo "netplan: $ifc set unmanaged (dhcp off)" >> $LOG
+        fi
+    fi
+
+    # NetworkManager: mark unmanaged via conf.d, separate from netplan's own
+    # renderer setting above so this works regardless of which one (or
+    # both) the base OS image actually runs.
+    if command -v nmcli >/dev/null 2>&1 && systemctl is-active --quiet NetworkManager 2>/dev/null; then
+        mkdir -p /etc/NetworkManager/conf.d
+        local NM_FILE="/etc/NetworkManager/conf.d/90-rj-pisowifi-unmanaged.conf"
+        if ! grep -q "interface-name:${ifc}" "$NM_FILE" 2>/dev/null; then
+            if [ -f "$NM_FILE" ] && grep -q "^unmanaged-devices=" "$NM_FILE" 2>/dev/null; then
+                sed -i "s/^unmanaged-devices=/unmanaged-devices=interface-name:${ifc};/" "$NM_FILE"
+            else
+                printf '[keyfile]\nunmanaged-devices=interface-name:%s\n' "$ifc" > "$NM_FILE"
+            fi
+            nmcli general reload >> $LOG 2>&1 || systemctl reload NetworkManager >> $LOG 2>&1 || true
+            echo "NetworkManager: $ifc marked unmanaged" >> $LOG
+        fi
+    fi
+}
+disable_os_network_management "$WAN_IF"
+disable_os_network_management "$LAN_IF"
+
 if [ -z "$LAN_IF" ]; then
     echo "ERROR: No LAN interface found." >> $LOG
     exit 0
@@ -698,5 +758,38 @@ EOF2
 systemctl daemon-reload >> $LOG 2>&1
 systemctl enable rj-nftables-restore >> $LOG 2>&1
 echo "nftables restore service installed" >> $LOG
+
+# ── SHOW CURRENT IP ON THE CONSOLE SCREEN ──────────────────────
+# /etc/issue is what Ubuntu/Debian prints on a physical console (HDMI
+# monitor, serial console, `login:` prompt) before anyone logs in - agetty
+# re-reads it fresh on every screen, so just keeping this file up to date
+# is enough, no service restart needed for it to show up. Regenerated here
+# (runs on every boot, and again on every link-change relink - see
+# relink.sh) rather than written once, so it never goes stale if an
+# interface's IP changes later (new DHCP lease, admin panel network-mode
+# switch, etc.). General "every interface with an IPv4" listing rather
+# than reusing only $WAN_IF/$LAN_IF, so it stays correct regardless of
+# which mode branch actually ran above, and still shows something useful
+# on a single-NIC box or an unusual wiring setup those two variables
+# don't fully capture.
+{
+    echo ""
+    echo "ZenFi - $(hostnamectl --static 2>/dev/null || hostname)"
+    echo "-----------------------------------------------"
+    FOUND_IP=0
+    for ifc in $(ls /sys/class/net/ | grep -vE '^(lo|docker|veth|br-)'); do
+        IP=$(ip -4 -o addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+        if [ -n "$IP" ]; then
+            echo "  $ifc: $IP"
+            FOUND_IP=1
+        fi
+    done
+    [ "$FOUND_IP" = "0" ] && echo "  (no IP assigned yet)"
+    echo ""
+    echo "Admin panel: http://<ip-above>:3000/admin (from this box only, or via SSH tunnel)"
+    echo "-----------------------------------------------"
+    echo ""
+} > /etc/issue
+echo "Console IP banner updated (/etc/issue)" >> $LOG
 
 echo "=== Setup complete ===" >> $LOG

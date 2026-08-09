@@ -1,5 +1,6 @@
 let hsRevenueChart = null;
 let hsAccessTypeDonut = null;
+let hsSessionActivityChart = null;
 let hsCurrentChartRange = 'weekly';
 
 function hsEscapeHtml(str) {
@@ -10,7 +11,9 @@ function hsEscapeHtml(str) {
 
 async function loadHotspotDashboard() {
   hsInitChart();
+  hsInitSessionActivityChart();
   await hsLoadKiosks();
+  hsRenderOfflineKioskAlert();
   await hsLoadSalesStats();
   await hsLoadRecentTransactions();
   await hsLoadActiveSessionsCount();
@@ -20,6 +23,7 @@ async function loadHotspotDashboard() {
 function destroyHotspotDashboard() {
   if (hsRevenueChart) { hsRevenueChart.destroy(); hsRevenueChart = null; }
   if (hsAccessTypeDonut) { hsAccessTypeDonut.destroy(); hsAccessTypeDonut = null; }
+  if (hsSessionActivityChart) { hsSessionActivityChart.destroy(); hsSessionActivityChart = null; }
 }
 
 async function hsLoadSystemStatus() {
@@ -74,6 +78,7 @@ async function hsLoadActiveSessionsCount() {
 const HS_SOURCE_CONFIG = [
   { key: 'main_kiosk', label: 'Main Kiosk', icon: 'fa-coins', color: '#0c8f6d' },
   { key: 'satellite_kiosks', label: 'Satellite Kiosks', icon: 'fa-tower-broadcast', color: '#1a9c63' },
+  { key: 'voucher', label: 'Vouchers', icon: 'fa-ticket', color: '#8a6d3d' },
   { key: 'promo', label: 'Promos', icon: 'fa-gift', color: '#3d6d94' },
   { key: 'free', label: 'Free Claims', icon: 'fa-hand-holding-heart', color: '#9e9e9e' },
 ];
@@ -88,6 +93,27 @@ async function hsLoadKiosks() {
   } catch (e) {
     hsKiosksCache = [];
   }
+}
+
+// A kiosk that has never checked in at all (last_seen null) was just
+// registered and hasn't been wired up yet - that's a setup step, not an
+// alert-worthy outage. Only flag one that WAS seen before and has since
+// gone quiet (matches satelliteKioskService.js's own isOnline() window).
+function hsRenderOfflineKioskAlert() {
+  const banner = document.getElementById('hsOfflineKioskAlert');
+  if (!banner) return;
+  const offline = hsKiosksCache.filter(k => k.last_seen && !k.online);
+  if (offline.length === 0) {
+    banner.style.display = 'none';
+    return;
+  }
+  // Set via textContent below, not innerHTML - no HTML-escaping needed
+  // (or wanted; escaping here would show literal "&amp;" instead of "&").
+  const names = offline.map(k => k.name).join(', ');
+  document.getElementById('hsOfflineKioskMessage').textContent = offline.length === 1
+    ? `${offline[0].name} has gone offline. Check its power and WiFi connection.`
+    : `${offline.length} Satellite Kiosks have gone offline: ${names}. Check their power and WiFi connections.`;
+  banner.style.display = 'flex';
 }
 
 async function hsLoadSalesStats() {
@@ -109,11 +135,12 @@ async function hsLoadSalesStats() {
     const sourceData = {
       main_kiosk: { amount: t.main_kiosk_income || 0, count: t.main_kiosk_transactions || 0 },
       satellite_kiosks: { amount: t.satellite_kiosk_income || 0, count: t.satellite_kiosk_transactions || 0 },
+      voucher: { amount: t.voucher_income || 0, count: t.voucher_transactions || 0 },
       promo: { amount: t.promo_income || 0, count: t.promo_transactions || 0 },
       free: { amount: 0, count: t.free_claims || 0 },
     };
     const grandTotal = t.total_income || 0;
-    const totalTransactions = (t.coin_transactions || 0) + (t.promo_transactions || 0) + (t.free_claims || 0);
+    const totalTransactions = (t.coin_transactions || 0) + (t.voucher_transactions || 0) + (t.promo_transactions || 0) + (t.free_claims || 0);
 
     // Satellite Kiosks only shows up at all if the operator has at least
     // one registered - progressive disclosure, same rule as everywhere
@@ -175,8 +202,19 @@ async function hsLoadSalesStats() {
     document.getElementById('hsAvgPerTransaction').textContent =
       totalTransactions > 0 ? `₱${(grandTotal / totalTransactions).toFixed(2)}` : '₱0';
 
+    const durationEl = document.getElementById('hsAvgSessionDuration');
+    if (durationEl) {
+      const durSec = t.avg_session_duration_seconds || 0;
+      durationEl.textContent = (t.sessions_ended_today || 0) === 0 ? 'No data yet'
+        : durSec < 60 ? `${durSec} sec`
+        : hsFormatMins(Math.round(durSec / 60));
+    }
+
     if (hsRevenueChart && data.chart) {
       hsUpdateChartData(data.chart, data.chart_format);
+    }
+    if (hsSessionActivityChart && data.session_activity) {
+      hsUpdateSessionActivityChart(data.session_activity, data.chart_format);
     }
   } catch (e) {
     console.error('Hotspot dashboard sales stats error:', e);
@@ -221,6 +259,7 @@ async function hsLoadRecentTransactions() {
     // coin credit with no kiosk_id, never a bare "Coin" that leaves the
     // source ambiguous once more than one kiosk exists.
     const sourceLabel = (t) => {
+      if (t.type === 'voucher') return '🎟️ Voucher';
       if (t.type === 'promo') return '🎫 Promo';
       if (t.type === 'free') return '🎁 Free';
       return t.kiosk_name ? `📡 ${hsEscapeHtml(t.kiosk_name)}` : '🪙 Main Kiosk';
@@ -347,6 +386,47 @@ function hsUpdateDonut(labels, values, colors, total) {
       }
     }
   });
+}
+
+function hsInitSessionActivityChart() {
+  const canvas = document.getElementById('hsSessionActivityChart');
+  if (!canvas) return;
+
+  if (hsSessionActivityChart) { hsSessionActivityChart.destroy(); hsSessionActivityChart = null; }
+
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const textColor = isDark ? '#888' : '#999';
+  const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+
+  hsSessionActivityChart = new Chart(canvas.getContext('2d'), {
+    type: 'bar',
+    data: {
+      labels: [],
+      datasets: [
+        { label: 'New', data: [], backgroundColor: '#0c8f6d', borderRadius: 4, stack: 'clients' },
+        { label: 'Returning', data: [], backgroundColor: '#9e9e9e', borderRadius: 4, stack: 'clients' }
+      ]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { stacked: true, grid: { display: false }, ticks: { color: textColor, font: { size: 12 } } },
+        y: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 12 }, precision: 0 }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+function hsUpdateSessionActivityChart(activity, format) {
+  if (!hsSessionActivityChart) return;
+  const labels = activity.map(d =>
+    format === 'hour' ? d.label : new Date(d.label).toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' })
+  );
+  hsSessionActivityChart.data.labels = labels;
+  hsSessionActivityChart.data.datasets[0].data = activity.map(d => d.new);
+  hsSessionActivityChart.data.datasets[1].data = activity.map(d => d.returning);
+  hsSessionActivityChart.update();
 }
 
 function setHsChartRange(range) {

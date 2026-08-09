@@ -189,7 +189,6 @@ const FLYOUT_MENUS = {
       {
         heading: 'System',
         items: [
-          { page: 'devices', label: 'Devices', icon: 'fa-microchip' },
           { page: 'update', label: 'System Update', icon: 'fa-sync-alt' },
           { page: 'about', label: 'About', icon: 'fa-info-circle' },
         ],
@@ -203,10 +202,32 @@ let _flyoutEl = null;
 
 const FLYOUT_MOBILE_BREAKPOINT = 768;
 
+// venue_type-driven overrides applied on top of FLYOUT_MENUS at render
+// time - kept as a small lookup table here rather than hardcoding
+// per-venue branches into the menu structure itself, so adding a new
+// venue type later means adding one entry here, not restructuring the
+// whole nav. `window.currentVenueType` is set once at login (see
+// app.js's showAdmin()), defaults to 'piso_wifi' so an install that never
+// touches the new Business Type setting sees zero change.
+const VENUE_LABEL_OVERRIDES = {
+  cafe: { vouchers: 'Guest Passes' },
+  coworking: { vouchers: 'Member Access' },
+};
+// Coin-slot hardware is Piso WiFi-specific - a cafe or co-working space
+// has no coin acceptor to configure. Hidden, not just relabeled, same
+// "don't show a card with nothing behind it" rule used elsewhere.
+const VENUE_HIDDEN_PAGES = {
+  cafe: ['coin-slot-gpio'],
+  coworking: ['coin-slot-gpio'],
+};
+
 function _buildFlyoutPanel(key) {
   const menu = FLYOUT_MENUS[key];
   if (!menu) return null;
   const isMobile = window.innerWidth <= FLYOUT_MOBILE_BREAKPOINT;
+  const venueType = window.currentVenueType || 'piso_wifi';
+  const labelOverrides = VENUE_LABEL_OVERRIDES[venueType] || {};
+  const hiddenPages = VENUE_HIDDEN_PAGES[venueType] || [];
 
   const panel = document.createElement('div');
   panel.className = 'flyout-panel';
@@ -222,10 +243,10 @@ function _buildFlyoutPanel(key) {
   panel.innerHTML = mobileHeader + menu.columns.map((col) => `
     <div class="flyout-column">
       <div class="flyout-column-heading">${col.heading}</div>
-      ${col.items.map((item) => `
+      ${col.items.filter((item) => !hiddenPages.includes(item.page)).map((item) => `
         <div class="flyout-link" data-page="${item.page}">
           <i class="fas ${item.icon}"></i>
-          <span>${item.label}</span>
+          <span>${labelOverrides[item.page] || item.label}</span>
         </div>
       `).join('')}
     </div>
@@ -255,6 +276,7 @@ function toggleFlyout(key, triggerEl) {
   if (!panel) return;
 
   document.body.appendChild(panel);
+  if (typeof makeClickableDivsKeyboardAccessible === 'function') makeClickableDivsKeyboardAccessible(panel);
   _flyoutEl = panel;
   _openFlyoutKey = key;
   triggerEl.classList.add('flyout-trigger-active');

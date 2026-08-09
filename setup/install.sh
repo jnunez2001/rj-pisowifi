@@ -25,13 +25,48 @@ echo "=============================================" | tee -a $LOG
 if [ ! -d "$APP_DIR/.git" ]; then
   echo "[0/8] Fetching application code (shallow clone, no history)..." | tee -a $LOG
   REPO_URL="${RJ_PISOWIFI_REPO_URL:-https://github.com/jnunez2001/rj-pisowifi.git}"
-  git clone --depth 1 "$REPO_URL" "$APP_DIR" >> $LOG 2>&1
+
+  # The repo is private (source protection, not a public open-source
+  # project) - a plain `git clone` would just fail with no credentials.
+  # RJ_PISOWIFI_REPO_TOKEN is a read-only, single-repo-scoped GitHub token,
+  # meant to be exported in the shell right before running this script
+  # (e.g. `export RJ_PISOWIFI_REPO_TOKEN=github_pat_xxx`), never hardcoded
+  # into this file or any file that ships to a customer's box. Only
+  # embedded into the URL for the single clone command below - never
+  # echoed, logged, or written to disk anywhere else.
+  if [ -n "$RJ_PISOWIFI_REPO_TOKEN" ]; then
+    AUTH_URL=$(echo "$REPO_URL" | sed "s#https://#https://${RJ_PISOWIFI_REPO_TOKEN}@#")
+    git clone --depth 1 "$AUTH_URL" "$APP_DIR" >> $LOG 2>&1
+  else
+    echo "ERROR: RJ_PISOWIFI_REPO_TOKEN is not set. This repo is private -" | tee -a $LOG
+    echo "export a read-only access token before running this script, e.g.:" | tee -a $LOG
+    echo "  export RJ_PISOWIFI_REPO_TOKEN=github_pat_xxxxxxxx" | tee -a $LOG
+    echo "  sudo -E bash setup/install.sh" | tee -a $LOG
+    exit 1
+  fi
 fi
 
 # ─── 1. CHECK ROOT ───────────────────────────────────────────
 if [ "$EUID" -ne 0 ]; then
   echo "Please run as root: sudo bash setup/install.sh"
   exit 1
+fi
+
+# ─── 1b. ENSURE THE SERVICE USER EXISTS ──────────────────────
+# Bug found during a fresh-install review: everything below assumes a
+# "$USER" ($USER=rjcyberzone) account already exists (sudo -u $USER npm
+# install, chown -R $USER:$USER, the systemd unit's User= line) - but
+# nothing ever created it, and SETUP_GUIDE.md never tells a real installer
+# to make one. A normal fresh Ubuntu/Raspberry Pi OS flash lets someone
+# pick their own username, so this would previously fail partway through
+# with a confusing "sudo: unknown user" error instead of a clear message
+# or just working. Auto-create it (no login password - this account only
+# ever runs the app as a service, never needs interactive login) so a
+# fresh install works regardless of what the box's actual login user is
+# named.
+if ! id "$USER" &>/dev/null; then
+  echo "Creating service user '$USER'..." | tee -a $LOG
+  useradd -m -s /bin/bash "$USER"
 fi
 
 # ─── 2. UPDATE ───────────────────────────────────────────────
@@ -192,6 +227,33 @@ RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# Auto re-run network setup on link change (cable unplug/replug, VM NIC
+# toggled) instead of needing a manual re-run or a full reboot - see
+# setup/relink.sh for the debounce logic and setup-network.sh's
+# disable_os_network_management() for the other half (stopping netplan/
+# NetworkManager from racing this with their own DHCP the moment the link
+# comes back).
+chmod +x $APP_DIR/setup/relink.sh
+
+cat > /etc/systemd/system/rj-network-relink.service << EOF
+[Unit]
+Description=R&J PisoWifi Network Relink (triggered by udev on link change)
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $APP_DIR/setup/relink.sh
+EOF
+
+cat > /etc/udev/rules.d/90-rj-pisowifi-relink.rules << EOF
+# Fires on any network interface link-state change (carrier up/down - cable
+# replugged, VM virtual NIC toggled). Starts a systemd unit rather than
+# running relink.sh directly from udev, since udev rules are expected to
+# return quickly and shouldn't block on something that itself waits/sleeps.
+SUBSYSTEM=="net", ACTION=="change", RUN+="/usr/bin/systemctl --no-block start rj-network-relink.service"
+EOF
+
+udevadm control --reload-rules >> $LOG 2>&1 || true
 
 # Cross-checked against an OpenWrt/rockchip reference build (see
 # setup/fix-clock.sh and setup/set-cpu-performance.sh for the reasoning

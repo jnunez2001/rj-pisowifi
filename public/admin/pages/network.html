@@ -180,7 +180,21 @@
   <div id="networkModeSwitch" class="zf-segmented">
     <button type="button" id="modeStandaloneCard" onclick="setNetworkMode('standalone')">Standalone</button>
     <button type="button" id="modeMikrotikCard" onclick="setNetworkMode('mikrotik')">MikroTik</button>
+    <!--
+      OpenWRT mode intentionally hidden from selection for the closed beta.
+      Unlike Standalone and MikroTik (both have a real-hardware bug-fix
+      history in their own driver files), the OpenWRT driver has never been
+      connected to real OpenWRT hardware or verified end-to-end - it's only
+      ever been code-reviewed. Per explicit instruction: bury untested
+      modes rather than ship them, keep the code in place for later once
+      it's actually tested, don't offer it as if it were ready.
+      Re-enable by uncommenting this button once OpenWRT mode has been
+      verified against real hardware. openwrtFields/onNetworkModeChange()
+      still handle it correctly if network_mode is ever set to 'openwrt'
+      directly (e.g. a pre-existing test install) - only the entry point
+      to newly select it from the UI is hidden.
     <button type="button" id="modeOpenwrtCard" onclick="setNetworkMode('openwrt')">OpenWRT</button>
+    -->
   </div>
 </div>
 
@@ -650,6 +664,18 @@
       <i class="fas fa-plus"></i> Save Name
     </button>
   </div>
+</div>
+
+<!-- SYSTEM HEALTH CHECK (plain-language pass/fail, no terminal needed) -->
+<div class="zf-card">
+  <div class="zf-card-title">System Health Check</div>
+  <div style="padding:0 16px 12px;font-size:13px;color:var(--text-muted);">Checks the network connection, internet access, and the tools this box needs to run correctly. Plain pass/fail, no terminal required.</div>
+  <div style="padding:0 16px 12px;">
+    <button class="btn btn-primary" id="runHealthCheckBtn" onclick="runHealthCheck()">
+      <i class="fas fa-stethoscope"></i> Run Health Check
+    </button>
+  </div>
+  <div id="healthCheckResults" style="padding:0 16px 16px;"></div>
 </div>
 
 <!-- NETWORK DIAGNOSTICS (both modes, always visible, not a popup or dropdown) -->

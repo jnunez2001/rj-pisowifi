@@ -33,9 +33,39 @@ ZENFI_ADMIN_PANEL_PLAN.md
 mockups/
 PRICING_AND_MARKETING_PLAN.md
 STANDALONE_ARCHITECTURE_PLAN.md
+ZENFI_ROADMAP_PLAN.md
+QUALITY_OF_LIFE_IDEAS.md
+BETA_LAUNCH_PLAN.md
 
 # Internal roadmap/tab-map/design-reference docs (Workstreams 0-13 planning) -
 # same reasoning as the plan docs above: dev-facing architecture notes, not
 # something that should ship to a client device or be visible in a public
 # repo history.
 docs/
+
+# Raw planning/brand-source material - not runtime code, never pushed. The
+# app's own logo copies live in public/admin/img/ (tracked normally); this
+# folder is the unprocessed source bible/assets, kept local-only.
+zentry assets/
+
+# Separate app with its own future GitHub repo (per ZENFI_ROADMAP_PLAN.md) -
+# doesn't belong in this repo's history at all, tracked or not. Renamed
+# from zenfi-beta-portal to zentry-hub (2026-08-03) - this is meant to
+# grow into the shared Zentry account hub across all products (ZenFi,
+# ZenCafe, ZenPOS...), not stay ZenFi/beta-specific.
+zentry-hub/
+
+# Nothing AI-tool-related ships in this repo's history - the codebase and
+# commit history should read as hand-written, not AI-assisted.
+CLAUDE.md
+.claude/
+.DS_Store
+
+# Internal architecture/handoff docs - same reasoning as the *_PLAN.md files
+# above: dev-facing notes, not something that should ship to a client
+# device or be visible in a public repo history.
+ZENTRY-ZENFI-DEVELOPER-HANDOFF-v2/
+
+# Local mini-PC provisioning material - contains a temp-password hash for
+# first-boot cloud-init, kept local-only rather than in repo history.
+setup/mini-pc-autoinstall/

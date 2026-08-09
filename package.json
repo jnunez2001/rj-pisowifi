@@ -23,5 +23,11 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "cpu-features@0.0.10": true,
+    "fsevents@2.3.3": true,
+    "ssh2@1.17.0": true
   }
 }

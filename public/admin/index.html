@@ -104,6 +104,22 @@
   </div>
 </div>
 
+      <!-- Only shown after a correct password, when 2FA is enabled on this
+           account - hidden by default so accounts that never turn 2FA on
+           see no change at all. -->
+      <div class="form-group" id="login2faGroup" style="text-align:left;display:none;">
+        <label class="form-label">2FA Code</label>
+        <input
+          type="text"
+          id="login2faToken"
+          class="form-control"
+          placeholder="6-digit code from your authenticator app"
+          inputmode="numeric"
+          maxlength="6"
+          onkeypress="if(event.key==='Enter') doLogin()"
+        >
+      </div>
+
       <button class="btn btn-primary" onclick="doLogin()" style="width:100%; justify-content:center; padding:12px;">
         <i class="fas fa-sign-in-alt"></i> Login
       </button>
@@ -168,12 +184,25 @@
         <span class="nav-label">Hotspot</span>
         <i class="fas fa-chevron-right nav-flyout-chevron"></i>
       </div>
-      <div class="nav-item nav-flyout-trigger" data-flyout="isp" onclick="toggleFlyout('isp', this)" title="ISP">
+      <!--
+        ISP and Device Rental hidden for the closed beta - only Hotspot is
+        being beta tested, and neither of these lines has any real backend
+        yet (pure Coming Soon placeholders throughout, not even the
+        code-reviewed-but-unverified state OpenWRT mode was in). Same
+        "bury what isn't ready, don't ship it as if it were" instruction as
+        network.js's OpenWRT mode-switch hiding. Markup/flyout content left
+        intact (not commented out, unlike the OpenWRT button) since this is
+        exactly the kind of per-line hiding Workstream 11's App Store/module
+        gating will eventually do properly - re-enable by removing
+        style="display:none" once each line actually has something real
+        behind it, or wire it to real module-install state at that point.
+      -->
+      <div class="nav-item nav-flyout-trigger" data-flyout="isp" onclick="toggleFlyout('isp', this)" title="ISP" style="display:none;">
         <span class="nav-icon"><i class="fas fa-globe"></i></span>
         <span class="nav-label">ISP</span>
         <i class="fas fa-chevron-right nav-flyout-chevron"></i>
       </div>
-      <div class="nav-item nav-flyout-trigger" data-flyout="rental" onclick="toggleFlyout('rental', this)" title="Device Rental">
+      <div class="nav-item nav-flyout-trigger" data-flyout="rental" onclick="toggleFlyout('rental', this)" title="Device Rental" style="display:none;">
         <span class="nav-icon"><i class="fas fa-mobile-screen"></i></span>
         <span class="nav-label">Device Rental</span>
         <i class="fas fa-chevron-right nav-flyout-chevron"></i>
@@ -193,7 +222,13 @@
         <span class="nav-label">Router</span>
         <i class="fas fa-chevron-right nav-flyout-chevron"></i>
       </div>
-      <div class="nav-item nav-flyout-trigger" data-flyout="wallet" onclick="toggleFlyout('wallet', this)" title="Wallet">
+      <!--
+        Wallet and AI Assistant hidden for the closed beta - both are
+        entirely Coming Soon placeholders (Workstream 5 and 7, neither
+        started), same reasoning as ISP/Rental above. Re-enable once either
+        actually has a real feature behind it.
+      -->
+      <div class="nav-item nav-flyout-trigger" data-flyout="wallet" onclick="toggleFlyout('wallet', this)" title="Wallet" style="display:none;">
         <span class="nav-icon"><i class="fas fa-wallet"></i></span>
         <span class="nav-label">Wallet</span>
         <i class="fas fa-chevron-right nav-flyout-chevron"></i>
@@ -201,7 +236,7 @@
 
       <div class="nav-divider"></div>
 
-      <div class="nav-item" onclick="navigateTo('ai-assistant')" title="AI Assistant">
+      <div class="nav-item" onclick="navigateTo('ai-assistant')" title="AI Assistant" style="display:none;">
         <span class="nav-icon"><i class="fas fa-robot"></i></span>
         <span class="nav-label">AI Assistant</span>
       </div>
@@ -287,7 +322,7 @@
            ================================================================ -->
       <div class="nav-section" data-nav-section="rental">
         <div class="nav-section-title">
-          <span>📱 WiFi Rental</span>
+          <span><i class="fas fa-mobile-screen" style="margin-right:6px;"></i>WiFi Rental</span>
         </div>
         <div class="nav-section-items">
           <div class="nav-item" onclick="navigateTo('rental')">
@@ -307,7 +342,7 @@
            ================================================================ -->
       <div class="nav-section" data-nav-section="isp">
         <div class="nav-section-title">
-          <span>🌐 ISP Tools</span>
+          <span><i class="fas fa-globe" style="margin-right:6px;"></i>ISP Tools</span>
         </div>
         <div class="nav-section-items">
           <div class="nav-item" onclick="navigateTo('isp-subscribers')">
@@ -471,6 +506,11 @@
         </button>
       </div>
     </header>
+
+    <!-- LOW DISK SPACE WARNING (hidden unless the box is actually running low) -->
+    <div id="diskSpaceBanner" style="display:none;background:#fdecea;color:#8a1f11;padding:10px 20px;font-size:13px;border-bottom:1px solid #f5c6cb;">
+      <i class="fas fa-triangle-exclamation" style="margin-right:8px;"></i><span id="diskSpaceBannerText"></span>
+    </div>
 
     <!-- PAGE CONTENT AREA -->
     <div class="page-content" id="pageContent">

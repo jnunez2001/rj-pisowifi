@@ -868,6 +868,29 @@ async function claimFreeMinutes() {
   }
 }
 
+// Same accessibility gap as the admin panel (see app.js's own version of
+// this): a plain `<div onclick="...">` (the expiry-warning banner) is
+// clickable with a mouse but invisible to keyboard/assistive navigation.
+// This is the general public's own page, so this matters more here, not
+// less.
+function makeClickableDivsKeyboardAccessible(root) {
+  const scope = root || document;
+  const NATIVE_FOCUSABLE = new Set(['A', 'BUTTON', 'INPUT', 'SELECT', 'TEXTAREA']);
+  scope.querySelectorAll('[onclick]').forEach((el) => {
+    if (NATIVE_FOCUSABLE.has(el.tagName)) return;
+    if (el.dataset.kbdEnhanced) return;
+    el.dataset.kbdEnhanced = '1';
+    if (!el.hasAttribute('tabindex')) el.setAttribute('tabindex', '0');
+    if (!el.hasAttribute('role')) el.setAttribute('role', 'button');
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        el.click();
+      }
+    });
+  });
+}
+
 // ===== INIT =====
 async function init() {
   await loadSettings();
@@ -876,6 +899,7 @@ async function init() {
   await checkSession();
   await checkFreeClaimEligibility();
   startPolling();
+  makeClickableDivsKeyboardAccessible(document);
 }
 
 init();

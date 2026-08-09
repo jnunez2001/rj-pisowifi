@@ -839,6 +839,25 @@ async function loadNetworkModeSettings() {
     document.getElementById('mikrotikInterface').value = s.mikrotik_interface || 'ether1';
     document.getElementById('mikrotikSsl').checked = s.mikrotik_ssl === '1';
     document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
+
+    // Free tier is Standalone-only - MikroTik/OpenWRT router control is a
+    // Premium feature. Hide the entry point to newly select it (same "bury,
+    // don't break" pattern as OpenWRT being hidden for the beta) - an
+    // existing install already in mikrotik mode keeps working untouched,
+    // this only prevents a free-tier account from switching INTO it.
+    const tier = s.account_tier || 'free';
+    const mikrotikCard = document.getElementById('modeMikrotikCard');
+    if (mikrotikCard) {
+      if (tier !== 'premium' && mode !== 'mikrotik') {
+        mikrotikCard.disabled = true;
+        mikrotikCard.title = 'MikroTik router mode is a Premium feature';
+        mikrotikCard.innerHTML = 'MikroTik <i class="fas fa-lock" style="margin-left:4px;font-size:11px;"></i>';
+      } else {
+        mikrotikCard.disabled = false;
+        mikrotikCard.title = '';
+        mikrotikCard.innerHTML = 'MikroTik';
+      }
+    }
     document.getElementById('openwrtHost').value = s.openwrt_host || '';
     document.getElementById('openwrtPort').value = s.openwrt_port || '22';
     document.getElementById('openwrtUser').value = s.openwrt_user || 'root';
@@ -1166,11 +1185,18 @@ function updateNetworkModeCards(mode) {
   const cards = {
     standalone: document.getElementById('modeStandaloneCard'),
     mikrotik: document.getElementById('modeMikrotikCard'),
+    // OpenWRT's button is currently commented out of network.html (buried
+    // for the closed beta, see that file's comment) - may be null, and
+    // that must not stop Standalone/MikroTik's own highlighting from
+    // working (bug: the old `if (!cards.standalone || !cards.mikrotik ||
+    // !cards.openwrt) return;` guard bailed out of this ENTIRE function
+    // the moment any one card was missing, silently breaking every mode's
+    // active-highlight styling, not just OpenWRT's).
     openwrt: document.getElementById('modeOpenwrtCard'),
   };
-  if (!cards.standalone || !cards.mikrotik || !cards.openwrt) return;
   const colors = { standalone: 'var(--accent-green)', mikrotik: 'var(--accent-blue)', openwrt: 'var(--accent-orange, #ff9800)' };
   Object.entries(cards).forEach(([key, btn]) => {
+    if (!btn) return;
     const active = key === mode;
     btn.style.background = active ? colors[key] : 'transparent';
     btn.style.color = active ? '#fff' : 'var(--text-muted)';
@@ -1563,6 +1589,38 @@ async function deleteClientLabel(mac) {
 }
 
 // ===== NETWORK DIAGNOSTICS =====
+
+async function runHealthCheck() {
+  const btn = document.getElementById('runHealthCheckBtn');
+  const box = document.getElementById('healthCheckResults');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Checking...';
+  box.innerHTML = '';
+  try {
+    const data = await apiCall('GET', '/api/admin/diagnostics/run');
+    if (!data.success) {
+      box.innerHTML = `<div style="color:var(--danger,#e74c3c);font-size:13px;">${data.message || 'Health check failed to run.'}</div>`;
+      return;
+    }
+    const r = data.report;
+    const summary = `<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:${r.overallOk ? 'var(--success,#27ae60)' : 'var(--danger,#e74c3c)'};">${r.passCount}/${r.totalCount} checks passed</div>`;
+    const rows = r.results.map((item) => `
+      <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-top:1px solid var(--border-color);">
+        <i class="fas ${item.pass ? 'fa-check-circle' : 'fa-times-circle'}" style="color:${item.pass ? 'var(--success,#27ae60)' : 'var(--danger,#e74c3c)'};margin-top:2px;"></i>
+        <div>
+          <div style="font-size:13px;font-weight:500;">${item.label}</div>
+          <div style="font-size:12px;color:var(--text-muted);">${item.detail}</div>
+        </div>
+      </div>
+    `).join('');
+    box.innerHTML = summary + rows;
+  } catch (e) {
+    box.innerHTML = '<div style="color:var(--danger,#e74c3c);font-size:13px;">Server error running health check.</div>';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-stethoscope"></i> Run Health Check';
+  }
+}
 
 async function runDiagnostic(type) {
   const target = document.getElementById('diagTarget').value.trim();

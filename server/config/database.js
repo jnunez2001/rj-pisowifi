@@ -64,7 +64,13 @@ db.exec(`
     coin_value INTEGER NOT NULL,
     minutes_added REAL NOT NULL,
     type TEXT DEFAULT 'coin',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    -- Client identity at the moment of purchase. Not derivable from
+    -- sessions.mac_address since sessions are deleted on expiry (see the
+    -- FK-removal note below) - this is the only permanent record of which
+    -- client made a given transaction, needed for New vs Returning
+    -- reporting on the Hotspot Dashboard.
+    mac_address TEXT
   );
 
   CREATE TABLE IF NOT EXISTS promo_vouchers (
@@ -105,6 +111,21 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
+  );
+
+  -- Durable record of how long a session actually ran, written once at the
+  -- single point every session-ending path already funnels through
+  -- (sessionService.js's expireSession) - sessions themselves are deleted
+  -- on expiry (by design), so this is the only way "average session
+  -- duration" can ever be computed instead of faked from minutes_added
+  -- (minutes *granted*, not minutes *used*).
+  CREATE TABLE IF NOT EXISTS session_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    voucher_code TEXT NOT NULL,
+    mac_address TEXT,
+    started_at DATETIME,
+    ended_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    duration_seconds INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS free_claims (
@@ -319,6 +340,16 @@ try {
   // already applied
 }
 
+try {
+  // See the mac_address column comment on the CREATE TABLE above - rows
+  // from before this migration stay NULL (no way to backfill client
+  // identity for already-deleted sessions), so New vs Returning reporting
+  // only starts counting from the point this column exists onward.
+  db.exec('ALTER TABLE transactions ADD COLUMN mac_address TEXT');
+} catch (e) {
+  // already applied
+}
+
 // Bug fix migration: a database created before this fix still has the old
 // FOREIGN KEY(voucher_code) REFERENCES sessions(voucher_code) baked into
 // transactions (SQLite doesn't support dropping a constraint in place -
@@ -460,6 +491,23 @@ if (settingCount.count === 0) {
   insertSetting.run('bandwidth_burst_mbps', '20');
   insertSetting.run('bandwidth_burst_seconds', '8');
 
+  // Account tier ('free' or 'premium') - gates MikroTik/OpenWRT router mode
+  // to Premium only (free tier is Standalone-only). No real licensing/
+  // payment system exists yet (see licenseService.js's own "inert until a
+  // real server exists" pattern) - this is the same shape, a real flag
+  // ready to be driven by a payment system later, defaulting to the
+  // permissive/current-beta behavior until then.
+  insertSetting.run('account_tier', 'free');
+
+  // Venue type ('piso_wifi', 'cafe', 'coworking') - changes portal/Overview
+  // behavior and labels. Defaults to piso_wifi so every existing install's
+  // behavior is completely unchanged until this is explicitly changed.
+  insertSetting.run('venue_type', 'piso_wifi');
+
+  // Admin login 2FA (TOTP) - opt-in, off by default.
+  insertSetting.run('admin_2fa_enabled', '0');
+  insertSetting.run('admin_2fa_secret', '');
+
   // Network mode ('standalone' = built-in nftables/tc, no external router needed)
   insertSetting.run('network_mode', 'standalone');
   insertSetting.run('mikrotik_ip', '');
@@ -546,6 +594,14 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('mikrotik_port', '');
   upsertIfMissing('isp_plan_mbps', '0');
   upsertIfMissing('server_lan_mac', '');
+  upsertIfMissing('account_tier', 'free');
+  // Admin login 2FA (TOTP) - opt-in, off by default so nothing changes for
+  // anyone who doesn't turn it on. admin_2fa_secret is encrypted at rest
+  // the same way mikrotik_pass is (secretCrypto.js) - it's effectively a
+  // credential, same resale/misuse risk class.
+  upsertIfMissing('admin_2fa_enabled', '0');
+  upsertIfMissing('admin_2fa_secret', '');
+  upsertIfMissing('venue_type', 'piso_wifi');
 }
 
 console.log('✅ Database initialized successfully');

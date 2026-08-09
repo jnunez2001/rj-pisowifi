@@ -34,7 +34,7 @@
   <div class="modal">
     <div class="modal-header">
       <div class="modal-title">Add Satellite Kiosk</div>
-      <button class="modal-close" onclick="closeModal('addKioskModal')"><i class="fas fa-times"></i></button>
+      <button class="modal-close" onclick="closeModal('addKioskModal')" aria-label="Close"><i class="fas fa-times"></i></button>
     </div>
     <div class="form-group">
       <label class="form-label">Name</label>
@@ -54,7 +54,7 @@
   <div class="modal">
     <div class="modal-header">
       <div class="modal-title">Kiosk Added</div>
-      <button class="modal-close" onclick="closeModal('kioskKeyModal')"><i class="fas fa-times"></i></button>
+      <button class="modal-close" onclick="closeModal('kioskKeyModal')" aria-label="Close"><i class="fas fa-times"></i></button>
     </div>
     <div class="notice notice-error" style="margin-bottom:14px;">
       <i class="fas fa-triangle-exclamation"></i>
@@ -64,7 +64,7 @@
       <label class="form-label">Pairing Key for "<span id="kioskKeyName"></span>"</label>
       <div style="display:flex;gap:8px;">
         <input type="text" id="kioskKeyValue" class="form-control" readonly style="font-family:monospace;font-size:13px;">
-        <button class="btn btn-secondary btn-sm" onclick="copyKioskKey()"><i class="fas fa-copy"></i></button>
+        <button class="btn btn-secondary btn-sm" onclick="copyKioskKey()" aria-label="Copy kiosk key"><i class="fas fa-copy"></i></button>
       </div>
     </div>
     <div style="display:flex;justify-content:flex-end;">
@@ -78,7 +78,7 @@
   <div class="modal">
     <div class="modal-header">
       <div class="modal-title">Rename Kiosk</div>
-      <button class="modal-close" onclick="closeModal('renameKioskModal')"><i class="fas fa-times"></i></button>
+      <button class="modal-close" onclick="closeModal('renameKioskModal')" aria-label="Close"><i class="fas fa-times"></i></button>
     </div>
     <div class="form-group">
       <label class="form-label">Name</label>

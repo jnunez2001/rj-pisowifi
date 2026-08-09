@@ -27,4 +27,31 @@ function logFinancialEvent(event) {
   }
 }
 
-module.exports = { logFinancialEvent };
+// These are money-audit records, not debug noise, so retention is generous
+// (a year) - the goal is only to stop unbounded growth from slowly filling
+// the disk (the same class of problem as the SD card silently running out
+// of space), not to prune anything an operator might still need to see.
+const RETENTION_DAYS = parseInt(process.env.FINANCIAL_LOG_RETENTION_DAYS, 10) || 365;
+
+function rotateOldLogs() {
+  try {
+    const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    fs.readdirSync(LOG_DIR)
+      .filter((f) => /^financial-\d{4}-\d{2}-\d{2}\.log$/.test(f))
+      .forEach((f) => {
+        const filePath = path.join(LOG_DIR, f);
+        try {
+          if (fs.statSync(filePath).mtimeMs < cutoff) {
+            fs.unlinkSync(filePath);
+            console.log(`🗑️  [FinancialLog] Rotated out old log (past ${RETENTION_DAYS}-day retention): ${f}`);
+          }
+        } catch (e) {
+          // Non-fatal - skip this file, keep checking the rest.
+        }
+      });
+  } catch (e) {
+    console.warn('[FinancialLog] Log rotation check failed (non-fatal):', e.message);
+  }
+}
+
+module.exports = { logFinancialEvent, rotateOldLogs };

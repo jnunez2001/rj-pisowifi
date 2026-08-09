@@ -6,6 +6,7 @@
 const { exec } = require('child_process');
 const fs = require('fs');
 const { defineDriver } = require('./driverInterface');
+const { getClassId, peekClassId, releaseClassId } = require('./classIdAllocator');
 
 // Bug found via a comparable project's own production stabilization notes
 // (not yet hit here, fixed proactively): tc flower's MAC-based matching
@@ -53,91 +54,10 @@ function normalizeMac(mac) {
   return normalizedMac;
 }
 
-// Bug found via client-capacity audit: this used to hash the MAC into a
-// 900-slot range (100-999) with no collision handling. The birthday
-// paradox makes a collision ~38% likely at just 30 concurrent shaped
-// clients on one lane, ~99.6% by 100 - and a collision is a real service
-// bug, not a cosmetic one: two different customers silently share one HTB
-// bandwidth class (whichever's setClientBandwidth ran last overwrites the
-// other's rate), and if either disconnects, removeClientBandwidth() deletes
-// the class both were using, killing the other's still-active shaping
-// while they're still connected and paying.
-//
-// Fixed by making classId a real, persistent, collision-free allocation
-// (server/config/database.js's tc_class_allocations table) instead of a
-// hash - the smallest unused id in range gets assigned and reused once
-// freed, seeded from the DB once per boot so IDs don't reshuffle
-// pointlessly across reconnects within the same uptime. Range widened to
-// 100-65000 (tc's classid minor number is a 16-bit value) since real
-// allocation no longer needs to fit an arbitrary small hash space.
-const CLASS_ID_MIN = 100;
-const CLASS_ID_MAX = 65000;
-let _classIdCache = null; // Map<mac, classId>, lazily seeded from DB
-let _usedClassIds = null; // Set<classId>
-
-function loadClassIdState() {
-  if (_classIdCache) return;
-  _classIdCache = new Map();
-  _usedClassIds = new Set();
-  try {
-    const db = require('../../config/database');
-    const rows = db.prepare('SELECT mac_address, class_id FROM tc_class_allocations').all();
-    for (const row of rows) {
-      _classIdCache.set(row.mac_address, row.class_id);
-      _usedClassIds.add(row.class_id);
-    }
-  } catch (e) {
-    console.error('[TC] Failed to load class ID allocations, starting fresh:', e.message);
-  }
-}
-
-function getClassId(mac) {
-  loadClassIdState();
-  const existing = _classIdCache.get(mac);
-  if (existing !== undefined) return existing;
-
-  let candidate = CLASS_ID_MIN;
-  while (_usedClassIds.has(candidate) && candidate <= CLASS_ID_MAX) candidate++;
-  if (candidate > CLASS_ID_MAX) {
-    // Practically unreachable (65,000 concurrently-tracked MACs on one
-    // lane) but fail loudly rather than silently reintroducing a collision
-    // if it somehow ever happens.
-    throw new Error('No free tc class IDs available (exhausted 100-65000)');
-  }
-
-  _classIdCache.set(mac, candidate);
-  _usedClassIds.add(candidate);
-  try {
-    const db = require('../../config/database');
-    db.prepare('INSERT OR REPLACE INTO tc_class_allocations (mac_address, class_id) VALUES (?, ?)').run(mac, candidate);
-  } catch (e) {
-    console.error(`[TC] Failed to persist class ID allocation for ${mac}:`, e.message);
-  }
-  return candidate;
-}
-
-// Looks up an existing allocation without creating one - removeClientBandwidth
-// must never allocate a fresh ID just to immediately try deleting a tc class
-// that was never created (e.g. cleanup called on a MAC whose bandwidth cap
-// was never applied), which would otherwise leak an allocation forever.
-function peekClassId(mac) {
-  loadClassIdState();
-  return _classIdCache.get(mac);
-}
-
-function releaseClassId(mac) {
-  loadClassIdState();
-  const classId = _classIdCache.get(mac);
-  if (classId === undefined) return;
-  _classIdCache.delete(mac);
-  _usedClassIds.delete(classId);
-  try {
-    const db = require('../../config/database');
-    db.prepare('DELETE FROM tc_class_allocations WHERE mac_address = ?').run(mac);
-  } catch (e) {
-    console.error(`[TC] Failed to release class ID allocation for ${mac}:`, e.message);
-  }
-}
+// getClassId/peekClassId/releaseClassId now live in classIdAllocator.js -
+// extracted so openwrtDriver.js can share this exact fix instead of
+// drifting back to a hash-based classId (see the client-capacity-audit bug
+// this originally closed, documented in that shared module now).
 
 // Bug: setup-network.sh binds the tc root qdisc (and everything else) to a
 // VLAN sub-interface like "enp0s8.13" when a LAN-mode VLAN is configured
@@ -209,8 +129,14 @@ function getLanInterface(clientIp) {
 // smoothing bucket (which was never meant to represent a real burst window).
 function burstBucketBytes(burst, fallbackMbps) {
   if (!burst || !burst.mbps || !burst.seconds) return { ceilMbps: fallbackMbps, bytes: 32 * 1024 };
-  const bytes = Math.round((burst.mbps * 1000000 / 8) * burst.seconds);
-  return { ceilMbps: burst.mbps, bytes };
+  // HTB requires ceil >= rate - a burst rate configured below the base cap
+  // (operator typo, or a cap raised after burst was already set lower)
+  // would otherwise make `tc class replace` fail outright, silently
+  // leaving that client with NO bandwidth shaping applied at all rather
+  // than just no burst. Clamping is strictly better than that failure mode.
+  const ceilMbps = Math.max(burst.mbps, fallbackMbps);
+  const bytes = Math.round((ceilMbps * 1000000 / 8) * burst.seconds);
+  return { ceilMbps, bytes };
 }
 
 async function ping() {

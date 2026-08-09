@@ -145,6 +145,8 @@ function buildTransactionTable(transactions) {
       typeBadge = t.kiosk_name
         ? `<span class="badge badge-blue">📡 ${escapeSalesHtml(t.kiosk_name)}</span>`
         : '<span class="badge badge-blue">🪙 Main Kiosk</span>';
+    } else if (t.type === 'voucher') {
+      typeBadge = '<span class="badge badge-orange">🎟️ Voucher</span>';
     } else if (t.type === 'promo') {
       typeBadge = '<span class="badge badge-orange">🎫 Promo</span>';
     } else if (t.type === 'free') {

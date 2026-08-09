@@ -378,9 +378,9 @@ router.post('/free-claim', async (req, res) => {
     db.prepare(`INSERT INTO free_claims (mac_address, ip_address) VALUES (?, ?)`).run(mac, ip || null);
 
     db.prepare(`
-      INSERT INTO transactions (voucher_code, coin_value, minutes_added, type)
-      VALUES (?, 0, ?, 'free')
-    `).run(session.voucher_code, freeMinutes);
+      INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, mac_address)
+      VALUES (?, 0, ?, 'free', ?)
+    `).run(session.voucher_code, freeMinutes, mac);
     logFinancialEvent({ voucher_code: session.voucher_code, coin_value: 0, minutes_added: freeMinutes, type: 'free', mac });
 
     console.log(`🎁 Free ${freeMinutes} mins claimed by ${mac} → ${session.voucher_code}`);

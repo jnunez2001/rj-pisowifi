@@ -70,7 +70,9 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { hashPassword, verifyPassword } = require('../utils/passwordHash');
-const { encryptSecret } = require('../utils/secretCrypto');
+const { encryptSecret, decryptSecret } = require('../utils/secretCrypto');
+const totpService = require('../services/totpService');
+const crypto = require('crypto');
 const { getActiveSessions, expireSession, pauseSession, resumeSession } = require('../services/sessionService');
 const { getRates } = require('../services/voucherService');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
@@ -97,6 +99,39 @@ function getRealClientIp(req) {
   return raw;
 }
 
+// ===== 2FA SESSION TOKENS =====
+// Only relevant once admin_2fa_enabled is turned on (opt-in, off by
+// default - see Phase 9 of BETA_LAUNCH_PLAN.md). When 2FA is off, nothing
+// below is touched and adminAuth behaves exactly as it always has (raw
+// password on every request) - zero change, zero risk to what's already
+// tested. When 2FA is on, POST /login (below) is the one place that
+// checks the OTP code, then issues a short-lived session token; every
+// other request authenticates with that token instead of re-sending the
+// password+OTP on every single API call (which would break within 30s of
+// the OTP rotating, since the SPA makes many rapid successive requests).
+// In-memory only, same pattern as spamService's attempt tracking - a
+// restart simply requires logging in again, which is an acceptable
+// tradeoff for a login-session store, not a security gap.
+const sessionTokens = new Map();
+const SESSION_TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+function issueSessionToken() {
+  const token = 'sess_' + crypto.randomBytes(32).toString('hex');
+  sessionTokens.set(token, Date.now() + SESSION_TOKEN_TTL_MS);
+  return token;
+}
+
+function isValidSessionToken(token) {
+  if (!token || !token.startsWith('sess_')) return false;
+  const expiresAt = sessionTokens.get(token);
+  if (!expiresAt) return false;
+  if (Date.now() > expiresAt) {
+    sessionTokens.delete(token);
+    return false;
+  }
+  return true;
+}
+
 // Admin auth middleware
 // NOTE: Passwords stored in plaintext (Bug #10). Acceptable for offline single-admin deployments.
 // For wider deployment, consider: bcrypt hashing, OAuth2, or certificate-based auth.
@@ -114,6 +149,18 @@ function adminAuth(req, res, next) {
   }
 
   const { password } = req.headers;
+
+  // A valid session token (issued by POST /login once 2FA passed) is
+  // accepted in the exact same header slot the raw password already uses
+  // - no new header needed, no frontend change required for installs that
+  // never enable 2FA. A "sess_" prefix can never collide with a real
+  // password (verifyPassword would just fail on it normally), so checking
+  // this first is safe either way.
+  if (isValidSessionToken(password)) {
+    clearAttempts(`admin-auth:${ip}`);
+    return next();
+  }
+
   const settings = db.prepare(
     "SELECT value FROM settings WHERE key = 'admin_password'"
   ).get();
@@ -121,9 +168,58 @@ function adminAuth(req, res, next) {
     recordAttempt(`admin-auth:${ip}`);
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
+
+  // If 2FA is enabled, a raw password alone is no longer sufficient on its
+  // own for ANY request - it must come through POST /login (which checks
+  // the OTP too) and use the resulting session token instead. This closes
+  // the gap where enabling 2FA would otherwise only protect the login
+  // screen while every other endpoint still accepted the bare password.
+  const twoFaEnabled = db.prepare("SELECT value FROM settings WHERE key = 'admin_2fa_enabled'").get()?.value === '1';
+  if (twoFaEnabled) {
+    return res.status(401).json({ success: false, message: 'This account requires 2FA login. Use the login screen.', requires2fa: true });
+  }
+
   clearAttempts(`admin-auth:${ip}`);
   next();
 }
+
+// POST /api/admin/login - the only place an OTP code is ever checked.
+// Rate-limited the same way as adminAuth itself (same spamService key
+// namespace scoped by IP) so this doesn't open a second brute-force door.
+router.post('/login', (req, res) => {
+  const ip = getRealClientIp(req);
+  const spamCheck = checkSpam(`admin-auth:${ip}`);
+  if (spamCheck.blocked) {
+    return res.status(429).json({ success: false, message: spamCheck.message });
+  }
+
+  const { password, otp_token } = req.body || {};
+  const settings = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get();
+  if (!password || !settings || !verifyPassword(password, settings.value)) {
+    recordAttempt(`admin-auth:${ip}`);
+    return res.status(401).json({ success: false, message: 'Invalid username or password.' });
+  }
+
+  const twoFaEnabled = db.prepare("SELECT value FROM settings WHERE key = 'admin_2fa_enabled'").get()?.value === '1';
+  if (twoFaEnabled) {
+    if (!otp_token) {
+      // Password was correct - tell the frontend to prompt for the code
+      // next, without yet revealing whether the eventual code will be
+      // right or wrong (that check happens below, still rate-limited).
+      return res.json({ success: false, requires2fa: true, message: '2FA code required.' });
+    }
+    const secretRow = db.prepare("SELECT value FROM settings WHERE key = 'admin_2fa_secret'").get();
+    const secret = secretRow && secretRow.value ? decryptSecret(secretRow.value) : '';
+    if (!secret || !totpService.verifyToken(secret, otp_token)) {
+      recordAttempt(`admin-auth:${ip}`);
+      return res.status(401).json({ success: false, requires2fa: true, message: 'Invalid 2FA code.' });
+    }
+  }
+
+  clearAttempts(`admin-auth:${ip}`);
+  const token = issueSessionToken();
+  res.json({ success: true, token });
+});
 
 // GET /api/admin/sessions
 router.get('/sessions', adminAuth, (req, res) => {
@@ -325,9 +421,29 @@ router.get('/sales', adminAuth, (req, res) => {
       FROM transactions WHERE date(created_at) = ? AND type = 'promo'
     `).get(today);
 
+    // Vouchers (printed batches, see the Move-log note in promo.js) are a
+    // distinct product from a standalone one-off Promo code, split into
+    // their own type at redemption time - broken out here the same way
+    // Main Kiosk/Satellite Kiosks are, rather than staying folded into
+    // 'promo' and being indistinguishable in reporting.
+    const todayVoucher = db.prepare(`
+      SELECT COUNT(*) as voucher_count, SUM(coin_value) as voucher_income
+      FROM transactions WHERE date(created_at) = ? AND type = 'voucher'
+    `).get(today);
+
     const todayFree = db.prepare(`
       SELECT COUNT(*) as free_count, SUM(minutes_added) as free_minutes
       FROM transactions WHERE date(created_at) = ? AND type = 'free'
+    `).get(today);
+
+    // Real average session duration - see session_history's column comment
+    // in database.js. Scoped to sessions that actually ENDED today, not
+    // ones that started today (a session that started yesterday and just
+    // ended belongs in today's average of "how long did a session that
+    // just wrapped up actually run").
+    const todaySessionDuration = db.prepare(`
+      SELECT AVG(duration_seconds) as avg_seconds, COUNT(*) as ended_count
+      FROM session_history WHERE date(ended_at) = ?
     `).get(today);
 
     const weekSales = db.prepare(`
@@ -377,6 +493,54 @@ router.get('/sales', adminAuth, (req, res) => {
       chartFormat = 'date';
     }
 
+    // New vs Returning client activity, bucketed on the same labels as the
+    // revenue chart above (hour for daily, date for weekly/monthly). A
+    // client is "new" in a bucket if this is the earliest date it has ever
+    // transacted (across all history, not just the visible range) -
+    // "returning" otherwise. Only counts transactions with a mac_address
+    // (see the column comment in database.js) - rows from before that
+    // migration are silently excluded, not miscounted.
+    const firstSeenRows = db.prepare(`
+      SELECT mac_address, MIN(date(created_at)) as first_date
+      FROM transactions WHERE mac_address IS NOT NULL
+      GROUP BY mac_address
+    `).all();
+    const firstSeenByMac = new Map(firstSeenRows.map(r => [r.mac_address, r.first_date]));
+
+    const rangeStartClause = range === 'daily' ? "date('now')"
+      : range === 'monthly' ? "date('now', '-30 days')"
+      : "date('now', '-7 days')";
+    const activityRows = db.prepare(`
+      SELECT mac_address, created_at,
+        ${range === 'daily' ? "strftime('%H:00', created_at)" : "date(created_at)"} as bucket
+      FROM transactions
+      WHERE mac_address IS NOT NULL AND date(created_at) >= ${rangeStartClause}
+      ORDER BY created_at ASC
+    `).all();
+
+    // One entry per (bucket, mac) - a client active twice in the same
+    // bucket only counts once, matching "how many distinct clients", not
+    // "how many transactions".
+    const seenInBucket = new Set();
+    const bucketCounts = new Map(); // bucket -> { new, returning }
+    for (const row of activityRows) {
+      const key = `${row.bucket}|${row.mac_address}`;
+      if (seenInBucket.has(key)) continue;
+      seenInBucket.add(key);
+      // created_at is stored as 'YYYY-MM-DD HH:MM:SS' (SQLite CURRENT_TIMESTAMP) -
+      // slicing is equivalent to date(created_at) without a second SQL call.
+      const txDate = row.created_at.slice(0, 10);
+      const isNew = firstSeenByMac.get(row.mac_address) === txDate;
+      if (!bucketCounts.has(row.bucket)) bucketCounts.set(row.bucket, { new: 0, returning: 0 });
+      const counts = bucketCounts.get(row.bucket);
+      if (isNew) counts.new++; else counts.returning++;
+    }
+    const sessionActivity = chart.map(c => ({
+      label: c.label,
+      new: bucketCounts.get(c.label)?.new || 0,
+      returning: bucketCounts.get(c.label)?.returning || 0
+    }));
+
     // Named kiosk attribution for the Recent Transactions table - a plain
     // JOIN rather than a second round-trip from the frontend to resolve
     // kiosk_id -> name.
@@ -401,16 +565,21 @@ router.get('/sales', adminAuth, (req, res) => {
         // the Hotspot Dashboard's Revenue by Source breakdown needs a
         // per-category transaction count, not just income.
         promo_transactions: todayPromo.promo_count || 0,
-        total_income: (todaySales.total_coins || 0) + (todayPromo.promo_income || 0),
+        voucher_income: todayVoucher.voucher_income || 0,
+        voucher_transactions: todayVoucher.voucher_count || 0,
+        total_income: (todaySales.total_coins || 0) + (todayPromo.promo_income || 0) + (todayVoucher.voucher_income || 0),
         transactions: todaySales.transaction_count || 0,
         minutes_sold: todaySales.total_minutes || 0,
         free_claims: todayFree.free_count || 0,
-        free_minutes: todayFree.free_minutes || 0
+        free_minutes: todayFree.free_minutes || 0,
+        avg_session_duration_seconds: Math.round(todaySessionDuration.avg_seconds || 0),
+        sessions_ended_today: todaySessionDuration.ended_count || 0
       },
       week: weekSales,
       month: { total_income: monthSales.total || 0 },
       chart,
       chart_format: chartFormat,
+      session_activity: sessionActivity,
       recent_transactions: recent
     });
 
@@ -773,6 +942,23 @@ router.get('/router/password', adminAuth, (req, res) => {
 router.post('/settings', adminAuth, (req, res) => {
   try {
     const updates = req.body;
+
+    // Server-side enforcement of the free-tier Standalone-only lock - the
+    // Network page's UI disables the MikroTik button for free-tier
+    // accounts, but that's only a UX hint. The real gate has to be here,
+    // since a client is never trusted to enforce its own restrictions
+    // (same principle as the admin/wallet security discussion - the
+    // browser asks, the server decides). Existing installs already in
+    // mikrotik/openwrt mode are untouched - this only blocks newly
+    // switching INTO a router mode without Premium.
+    if (updates.network_mode === 'mikrotik' || updates.network_mode === 'openwrt') {
+      const tier = db.prepare("SELECT value FROM settings WHERE key = 'account_tier'").get()?.value || 'free';
+      const currentMode = db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
+      if (tier !== 'premium' && currentMode !== updates.network_mode) {
+        return res.status(403).json({ success: false, message: 'Router mode (MikroTik/OpenWRT) is a Premium feature. Upgrade to unlock it.' });
+      }
+    }
+
     const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
     for (const [key, value] of Object.entries(updates)) {
       if (key === 'admin_password') {
@@ -926,14 +1112,27 @@ router.get('/backup', adminAuth, (req, res) => {
     const rates = db.prepare('SELECT * FROM rates ORDER BY coin_value ASC').all();
     const promos = db.prepare('SELECT * FROM promo_vouchers ORDER BY created_at DESC').all();
     const transactions = db.prepare('SELECT * FROM transactions ORDER BY created_at DESC').all();
+    // Bug found during pre-beta backup/restore drill: this backup silently
+    // omitted every table added after the original backup/restore routes
+    // were written - voucher_groups (batch names/pricing), satellite_kiosks
+    // (device keys, unrecoverable once lost - a kiosk would need to be
+    // re-paired), session_history (average session duration data). A
+    // "restore my backup after a disaster" flow would have permanently
+    // lost all of it with no warning.
+    const voucherGroups = db.prepare('SELECT * FROM voucher_groups ORDER BY created_at DESC').all();
+    const satelliteKiosks = db.prepare('SELECT * FROM satellite_kiosks ORDER BY created_at DESC').all();
+    const sessionHistory = db.prepare('SELECT * FROM session_history ORDER BY id DESC').all();
 
     const backup = {
-      version: '1.0.0',
+      version: '1.1.0',
       exported_at: new Date().toISOString(),
       settings: settingsObj,
       rates,
       promo_vouchers: promos,
-      transactions
+      transactions,
+      voucher_groups: voucherGroups,
+      satellite_kiosks: satelliteKiosks,
+      session_history: sessionHistory,
     };
 
     console.log('💾 Backup exported');
@@ -954,70 +1153,139 @@ router.post('/restore', adminAuth, (req, res) => {
     }
 
     // Validate backup structure (Bug #18)
-    if (backup.rates && !Array.isArray(backup.rates)) {
-      return res.status(400).json({ success: false, message: 'Invalid rates format' });
-    }
-    if (backup.promo_vouchers && !Array.isArray(backup.promo_vouchers)) {
-      return res.status(400).json({ success: false, message: 'Invalid promo_vouchers format' });
-    }
-    if (backup.transactions && !Array.isArray(backup.transactions)) {
-      return res.status(400).json({ success: false, message: 'Invalid transactions format' });
-    }
-
-    if (backup.settings) {
-      const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-      for (const [key, value] of Object.entries(backup.settings)) {
-        upsert.run(key, String(value));
+    for (const key of ['rates', 'promo_vouchers', 'transactions', 'voucher_groups', 'satellite_kiosks', 'session_history']) {
+      if (backup[key] && !Array.isArray(backup[key])) {
+        return res.status(400).json({ success: false, message: `Invalid ${key} format` });
       }
     }
 
-    if (backup.rates && backup.rates.length > 0) {
-      db.prepare('DELETE FROM rates').run();
-      const insertRate = db.prepare(
-        'INSERT INTO rates (coin_value, minutes, expiration_minutes, label) VALUES (?, ?, ?, ?)'
-      );
-      for (const r of backup.rates) {
-        // Skip ID to prevent conflicts (Bug #19) — let DB auto-increment
-        if (!r.coin_value || !r.minutes || !r.expiration_minutes || !r.label) {
-          throw new Error('Invalid rate data');
+    // Bug found during pre-beta backup/restore drill: everything below used
+    // to run as a sequence of separate, uncommitted statements outside any
+    // transaction. If validation of a LATER table threw (a malformed row,
+    // caught below by the same per-row checks that already existed), every
+    // table processed BEFORE that point had already been DELETEd and
+    // reinserted - the operator was left with a database that was neither
+    // the original data nor the backup, mid-restore, with no way back
+    // short of a file-level DB backup they may not have. Verified live:
+    // reproduced this exact corruption with a 3-row promo_vouchers backup
+    // where the 2nd row was malformed - the table ended up with different
+    // contents than either the pre-restore state or the intended backup.
+    // db.transaction() makes the whole restore atomic: any throw anywhere
+    // below rolls back every change made so far in this call, leaving the
+    // original data completely untouched.
+    //
+    // Also restores voucher_groups/satellite_kiosks/session_history (were
+    // silently dropped by both backup and restore before this fix - see
+    // GET /backup above) and preserves original row IDs for
+    // voucher_groups/satellite_kiosks/promo_vouchers/transactions instead
+    // of letting them re-auto-increment, since promo_vouchers.group_id and
+    // transactions.kiosk_id are real references to those tables' ids - the
+    // previous "skip ID to avoid conflicts" approach silently orphaned
+    // every voucher batch grouping and kiosk attribution on restore, since
+    // the restored group_id/kiosk_id no longer pointed at anything. Every
+    // table here is already DELETEd before reinsert, so there's no actual
+    // ID-collision risk being avoided by skipping IDs in the first place.
+    const runRestore = db.transaction(() => {
+      // Bug found running this exact drill: promo_vouchers.group_id has a
+      // real enforced FOREIGN KEY to voucher_groups(id) (`PRAGMA
+      // foreign_key_list(promo_vouchers)` confirms it). Deleting
+      // voucher_groups BEFORE promo_vouchers - the natural order if you
+      // restore table-by-table - fails immediately with "FOREIGN KEY
+      // constraint failed", since the old promo_vouchers rows still
+      // reference the voucher_groups rows being deleted. Fixed by doing
+      // every DELETE first, children before parents, then every INSERT,
+      // parents before children - the two orders are opposites of each
+      // other and can't be done table-by-table in one pass.
+      if (backup.transactions) db.prepare('DELETE FROM transactions').run();
+      if (backup.promo_vouchers) db.prepare('DELETE FROM promo_vouchers').run();
+      if (backup.session_history) db.prepare('DELETE FROM session_history').run();
+      if (backup.rates) db.prepare('DELETE FROM rates').run();
+      if (backup.satellite_kiosks) db.prepare('DELETE FROM satellite_kiosks').run();
+      if (backup.voucher_groups) db.prepare('DELETE FROM voucher_groups').run();
+
+      if (backup.settings) {
+        const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+        for (const [key, value] of Object.entries(backup.settings)) {
+          upsert.run(key, String(value));
         }
-        insertRate.run(r.coin_value, r.minutes, r.expiration_minutes, r.label);
       }
-    }
 
-    if (backup.promo_vouchers && backup.promo_vouchers.length > 0) {
-      db.prepare('DELETE FROM promo_vouchers').run();
-      const insertPromo = db.prepare(
-        'INSERT INTO promo_vouchers (code, duration_days, price, status, mac_address, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      );
-      for (const p of backup.promo_vouchers) {
-        // Skip ID to prevent conflicts (Bug #19)
-        if (!p.code || !p.duration_days) {
-          throw new Error('Invalid promo data');
+      if (backup.rates && backup.rates.length > 0) {
+        const insertRate = db.prepare(
+          'INSERT INTO rates (coin_value, minutes, expiration_minutes, label) VALUES (?, ?, ?, ?)'
+        );
+        for (const r of backup.rates) {
+          if (!r.coin_value || !r.minutes || !r.expiration_minutes || !r.label) {
+            throw new Error('Invalid rate data');
+          }
+          insertRate.run(r.coin_value, r.minutes, r.expiration_minutes, r.label);
         }
-        insertPromo.run(p.code, p.duration_days, p.price || 0, p.status || 'unused', p.mac_address || null, p.created_at || new Date().toISOString(), p.expires_at || null);
       }
-    }
 
-    if (backup.transactions && backup.transactions.length > 0) {
-      db.prepare('DELETE FROM transactions').run();
-      const insertTx = db.prepare(
-        'INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, created_at) VALUES (?, ?, ?, ?, ?)'
-      );
-      for (const t of backup.transactions) {
-        // Skip ID to prevent conflicts (Bug #19)
-        if (!t.voucher_code || typeof t.minutes_added !== 'number') {
-          throw new Error('Invalid transaction data');
+      // Restored before promo_vouchers/transactions since both reference
+      // these tables' ids.
+      if (backup.voucher_groups && backup.voucher_groups.length > 0) {
+        const insertGroup = db.prepare(
+          'INSERT INTO voucher_groups (id, name, quantity, duration_minutes, price, print_caption, print_logo_url, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        for (const g of backup.voucher_groups) {
+          if (!g.id || !g.name) throw new Error('Invalid voucher group data');
+          insertGroup.run(g.id, g.name, g.quantity || 0, g.duration_minutes || 0, g.price || 0, g.print_caption || null, g.print_logo_url || null, g.created_at || new Date().toISOString());
         }
-        insertTx.run(t.voucher_code, t.coin_value || 0, t.minutes_added, t.type || 'coin', t.created_at || new Date().toISOString());
       }
-    }
 
-    console.log('♻️ Restore completed with validation');
+      if (backup.satellite_kiosks && backup.satellite_kiosks.length > 0) {
+        const insertKiosk = db.prepare(
+          'INSERT INTO satellite_kiosks (id, name, device_key, last_seen, created_at) VALUES (?, ?, ?, ?, ?)'
+        );
+        for (const k of backup.satellite_kiosks) {
+          if (!k.id || !k.name || !k.device_key) throw new Error('Invalid satellite kiosk data');
+          insertKiosk.run(k.id, k.name, k.device_key, k.last_seen || null, k.created_at || new Date().toISOString());
+        }
+      }
+
+      if (backup.promo_vouchers && backup.promo_vouchers.length > 0) {
+        const insertPromo = db.prepare(`
+          INSERT INTO promo_vouchers
+          (id, code, duration_days, price, status, mac_address, created_at, expires_at, group_id, download_mbps, upload_mbps)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const p of backup.promo_vouchers) {
+          if (!p.id || !p.code || !p.duration_days) throw new Error('Invalid promo data');
+          insertPromo.run(p.id, p.code, p.duration_days, p.price || 0, p.status || 'unused', p.mac_address || null, p.created_at || new Date().toISOString(), p.expires_at || null, p.group_id || null, p.download_mbps || null, p.upload_mbps || null);
+        }
+      }
+
+      if (backup.transactions && backup.transactions.length > 0) {
+        const insertTx = db.prepare(`
+          INSERT INTO transactions
+          (id, voucher_code, coin_value, minutes_added, type, created_at, kiosk_id, mac_address)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const t of backup.transactions) {
+          if (!t.id || !t.voucher_code || typeof t.minutes_added !== 'number') throw new Error('Invalid transaction data');
+          insertTx.run(t.id, t.voucher_code, t.coin_value || 0, t.minutes_added, t.type || 'coin', t.created_at || new Date().toISOString(), t.kiosk_id || null, t.mac_address || null);
+        }
+      }
+
+      if (backup.session_history && backup.session_history.length > 0) {
+        const insertHist = db.prepare(
+          'INSERT INTO session_history (id, voucher_code, mac_address, started_at, ended_at, duration_seconds) VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        for (const h of backup.session_history) {
+          if (!h.id || !h.voucher_code) throw new Error('Invalid session history data');
+          insertHist.run(h.id, h.voucher_code, h.mac_address || null, h.started_at || null, h.ended_at || new Date().toISOString(), h.duration_seconds || 0);
+        }
+      }
+    });
+
+    runRestore();
+
+    console.log('♻️ Restore completed with validation (transactional)');
     return res.json({ success: true, message: 'Restore completed successfully' });
   } catch (err) {
-    console.error('Restore error:', err);
-    res.status(500).json({ success: false, message: 'Restore failed: ' + err.message });
+    console.error('Restore error (rolled back, original data untouched):', err);
+    res.status(500).json({ success: false, message: 'Restore failed, no changes were made: ' + err.message });
   }
 });
 
@@ -1240,6 +1508,8 @@ router.get('/sysinfo', adminAuth, async (req, res) => {
         ip_address: ipAddress,
         gateway,
         machine_id: machineId,
+        device_id: require('../services/deviceIdentity').getDeviceIdentity().id,
+        license_status: require('../services/licenseService').getLicenseStatus(),
         storage,
         version: 'v' + require('../../package.json').version,
         license,
@@ -1562,9 +1832,56 @@ router.post('/install-update', adminAuth, (req, res) => {
       console.error('❌ Remote URL mismatch:', remoteUrl);
       return res.status(400).json({ success: false, message: 'Git remote misconfigured' });
     }
+    // Bug found during pre-beta update-resilience drill: nothing checked
+    // for uncommitted local changes before pulling. `git pull` on a dirty
+    // working tree can fail outright ("local changes would be overwritten
+    // by merge") or, worse, silently merge in a way that leaves the box
+    // running a hybrid of two versions - neither the old nor the new code
+    // cleanly. Refusing up front is the safe failure mode; this should
+    // never happen in practice (an appliance-style deployment has no
+    // reason to have local edits) but costs nothing to check.
+    const dirty = execSync('git status --porcelain', { cwd: appDir }).toString().trim();
+    if (dirty) {
+      console.error('❌ Refusing update: uncommitted local changes present:', dirty);
+      return res.status(400).json({ success: false, message: 'This box has uncommitted local file changes. Resolve them first (contact support if unsure) before updating.' });
+    }
   } catch(e) {
     console.error('❌ Git verification failed:', e.message);
     return res.status(400).json({ success: false, message: 'Git repository invalid' });
+  }
+
+  // Bug found during the same drill: an update that includes a database
+  // migration had no rollback point if that migration went wrong - the
+  // Reliability Practices section of the roadmap plan explicitly calls
+  // for "backup before risky changes, always" and this risky change
+  // (arbitrary new code plus whatever schema migrations it runs on next
+  // boot) had none. A plain file copy, not the JSON export the admin
+  // Backup & Restore feature uses - faster, and correct even if the new
+  // code's migration logic itself is what's broken (a JSON export/import
+  // round-trip depends on the OLD code's route still existing to restore
+  // through, a raw file copy doesn't).
+  let preUpdateBackupPath = null;
+  try {
+    const dbPath = process.env.DB_PATH || path.join(appDir, 'server/database/rjpisowifi.db');
+    if (fs.existsSync(dbPath)) {
+      preUpdateBackupPath = `${dbPath}.pre-update-${Date.now()}.bak`;
+      fs.copyFileSync(dbPath, preUpdateBackupPath);
+      console.log(`💾 Pre-update database backup: ${preUpdateBackupPath}`);
+    }
+  } catch (e) {
+    // Non-fatal - log it, but a failed backup attempt shouldn't block an
+    // otherwise-valid update forever (matches this file's own pattern for
+    // every other non-critical background step).
+    console.error('⚠️ Pre-update DB backup failed (continuing anyway):', e.message);
+  }
+
+  // Record what to roll back to if the new code boots but turns out to be
+  // broken - see updateRollbackService.js, checked on the next boot.
+  try {
+    const previousCommit = execSync('git rev-parse HEAD', { cwd: appDir }).toString().trim();
+    require('../services/updateRollbackService').recordPendingUpdate(appDir, previousCommit, preUpdateBackupPath);
+  } catch (e) {
+    console.error('⚠️ Could not record rollback state (continuing anyway):', e.message);
   }
 
   res.json({ success: true, message: 'Update started! Server will restart shortly.' });
@@ -1578,6 +1895,65 @@ router.post('/install-update', adminAuth, (req, res) => {
       });
     });
   }, 500);
+});
+
+// ===== 2FA MANAGEMENT (opt-in, off by default) =====
+// Single pending-secret slot, not per-session - matches this app's current
+// single-admin-account reality (no multi-staff accounts yet). A generated
+// secret is NOT saved to the database until POST /2fa/confirm proves the
+// admin actually scanned it and can produce a valid code - otherwise a
+// half-finished setup (secret generated, browser closed before scanning)
+// could lock the admin out with a 2FA flag pointing at a secret nobody
+// ever actually saved into their authenticator app.
+let pending2faSecret = null;
+
+// POST /api/admin/2fa/setup - generates a new secret, does not enable
+// anything yet.
+router.post('/2fa/setup', adminAuth, (req, res) => {
+  pending2faSecret = totpService.generateSecret();
+  const otpauthUrl = totpService.buildOtpAuthUrl(pending2faSecret, 'admin', 'ZenFi');
+  res.json({ success: true, secret: pending2faSecret, otpauth_url: otpauthUrl });
+});
+
+// POST /api/admin/2fa/confirm - proves the admin actually scanned the
+// secret above and can produce a valid code before it's saved/enabled.
+router.post('/2fa/confirm', adminAuth, (req, res) => {
+  const { token } = req.body || {};
+  if (!pending2faSecret) {
+    return res.status(400).json({ success: false, message: 'No pending 2FA setup - call /2fa/setup first.' });
+  }
+  if (!totpService.verifyToken(pending2faSecret, token)) {
+    return res.status(401).json({ success: false, message: 'That code doesn\'t match. Check your authenticator app and try again.' });
+  }
+  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+  upsert.run('admin_2fa_secret', encryptSecret(pending2faSecret));
+  upsert.run('admin_2fa_enabled', '1');
+  pending2faSecret = null;
+  console.log('🔐 Admin 2FA enabled');
+  res.json({ success: true, message: '2FA is now enabled.' });
+});
+
+// POST /api/admin/2fa/disable - requires the current password again as
+// confirmation (a security-lowering action, same "ask again" principle as
+// the withdrawal-confirmation design from the wallet security discussion),
+// even though the caller is already authenticated via adminAuth.
+router.post('/2fa/disable', adminAuth, (req, res) => {
+  const { password } = req.body || {};
+  const settings = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get();
+  if (!password || !settings || !verifyPassword(password, settings.value)) {
+    return res.status(401).json({ success: false, message: 'Incorrect password.' });
+  }
+  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+  upsert.run('admin_2fa_enabled', '0');
+  upsert.run('admin_2fa_secret', '');
+  console.log('🔓 Admin 2FA disabled');
+  res.json({ success: true, message: '2FA has been disabled.' });
+});
+
+// GET /api/admin/2fa/status
+router.get('/2fa/status', adminAuth, (req, res) => {
+  const enabled = db.prepare("SELECT value FROM settings WHERE key = 'admin_2fa_enabled'").get()?.value === '1';
+  res.json({ success: true, enabled });
 });
 
 // GET /api/admin/version
@@ -2068,6 +2444,54 @@ router.post('/network/diagnostics/traceroute', adminAuth, (req, res) => {
   execFile('traceroute', ['-m', '15', '-w', '2', target], { timeout: 30000 }, (err, stdout, stderr) => {
     res.json({ success: true, output: (stdout || '') + (stderr || '') || (err ? err.message : '') });
   });
+});
+
+router.get('/diagnostics/run', adminAuth, (req, res) => {
+  try {
+    const report = require('../services/systemDiagnosticsService').runChecks();
+    res.json({ success: true, report });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+router.get('/support-bundle', adminAuth, (req, res) => {
+  try {
+    const bundle = require('../services/supportBundleService').buildBundle();
+    const filename = `zenfi-support-bundle-${Date.now()}.txt`;
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(bundle);
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+router.get('/disk-space', adminAuth, (req, res) => {
+  try {
+    const info = require('../services/systemDiagnosticsService').getDiskSpace();
+    res.json({ success: true, ...info });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+router.get('/backup/scheduled/list', adminAuth, (req, res) => {
+  try {
+    const backups = require('../services/scheduledBackupService').listBackups();
+    res.json({ success: true, backups });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
+});
+
+router.get('/diagnostics/last-boot', adminAuth, (req, res) => {
+  try {
+    const report = require('../services/systemDiagnosticsService').getLastBootReport();
+    res.json({ success: true, report });
+  } catch (e) {
+    res.status(500).json({ success: false, message: e.message });
+  }
 });
 
 // ===== STANDALONE PORTS AND ROLES + PROVISIONING

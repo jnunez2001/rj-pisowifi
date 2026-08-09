@@ -306,6 +306,12 @@ const server = app.listen(PORT, () => {
   console.log(`📡 Running on port ${PORT}`);
   console.log(`🌐 Admin: http://localhost:${PORT}/admin`);
   console.log(`📱 Portal: http://localhost:${PORT}/portal`);
+  try {
+    const { getDeviceIdentity } = require('./services/deviceIdentity');
+    console.log(`🔑 Device ID: ${getDeviceIdentity().id}`);
+  } catch (e) {
+    console.error('[DeviceIdentity] Failed to read/generate device ID:', e.message);
+  }
   console.log('');
 
   // Re-apply the saved static IP (if any) on every boot - closes the gap
@@ -341,6 +347,77 @@ const server = app.listen(PORT, () => {
     require('./services/watchdogService').start();
   } catch (e) {
     console.warn('[Watchdog] Failed to start (non-fatal):', e.message);
+  }
+
+  // Preflight dependency check — verifies nft/tc/gpio tools and basic
+  // network readiness exist before the app is trusted to vend. Deliberately
+  // non-blocking (matches this app's "boot always succeeds, subsystems
+  // degrade gracefully" pattern) but fails LOUDLY in the console/log
+  // instead of the previous behavior of silently misbehaving on
+  // unsupported hardware. Result is cached for the admin panel's Health
+  // Check card and About page to surface without re-running it.
+  try {
+    const diagnostics = require('./services/systemDiagnosticsService');
+    const report = diagnostics.runChecks();
+    diagnostics.setLastBootReport(report);
+    if (!report.overallOk) {
+      console.warn('');
+      console.warn('⚠️  PREFLIGHT CHECK FAILED — this box is missing something it needs:');
+      report.results.filter((r) => !r.pass).forEach((r) => {
+        console.warn(`   ✗ ${r.label}: ${r.detail}`);
+      });
+      console.warn('   The app will still start, but vending may not work correctly until this is fixed.');
+      console.warn('   See Network > System Health Check in the admin panel for details.');
+      console.warn('');
+    } else {
+      console.log(`✅ Preflight check passed (${report.passCount}/${report.totalCount})`);
+    }
+  } catch (e) {
+    console.warn('[Preflight] Check failed to run (non-fatal):', e.message);
+  }
+
+  // Post-update health check + auto-rollback — only does anything if
+  // /install-update recorded a pending update on the previous boot (see
+  // updateRollbackService.js). Closes the "new code boots but runs
+  // incorrectly, not an outright crash" gap that systemd's Restart=always
+  // and the watchdog's hang-detection don't cover.
+  try {
+    require('./services/updateRollbackService').checkAndVerify(process.cwd(), PORT);
+  } catch (e) {
+    console.warn('[UpdateRollback] Post-update check failed to run (non-fatal):', e.message);
+  }
+
+  // Scheduled nightly database backup (rotated, keeps last 7) — see
+  // scheduledBackupService.js. Separate from the on-demand JSON export and
+  // the pre-update snapshot, so an operator never has to remember to click
+  // "Backup" themselves to avoid losing data to a corrupted DB or SD card.
+  try {
+    require('./services/scheduledBackupService').start();
+  } catch (e) {
+    console.warn('[ScheduledBackup] Failed to start (non-fatal):', e.message);
+  }
+
+  // Daily log rotation (financial logs, kept 1 year, see
+  // financialLogService.js) - same "prevent unbounded disk growth" goal as
+  // the scheduled backup above, on the same daily cadence.
+  try {
+    const financialLogService = require('./services/financialLogService');
+    financialLogService.rotateOldLogs();
+    setInterval(() => financialLogService.rotateOldLogs(), 24 * 60 * 60 * 1000);
+  } catch (e) {
+    console.warn('[FinancialLog] Rotation failed to start (non-fatal):', e.message);
+  }
+
+  // License check-in (see licenseService.js) — genuinely inert today, no
+  // LICENSE_SERVER_URL is configured anywhere yet, so this never makes a
+  // network call. Every 6 hours once a real server exists, comfortably
+  // inside the 72h grace period even if one attempt is missed.
+  try {
+    const licenseService = require('./services/licenseService');
+    licenseService.checkIn();
+    setInterval(() => licenseService.checkIn(), 6 * 60 * 60 * 1000);
+  } catch (e) {
+    console.warn('[License] Check-in failed to start (non-fatal):', e.message);
   }
 });
 

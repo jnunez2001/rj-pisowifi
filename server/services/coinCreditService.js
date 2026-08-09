@@ -71,9 +71,9 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null) {
 
     db.prepare(`
       INSERT INTO transactions
-      (voucher_code, coin_value, minutes_added, type, kiosk_id)
-      VALUES (?, ?, ?, 'coin', ?)
-    `).run(existingSession.voucher_code, coinValue, totalMinutes, kioskId);
+      (voucher_code, coin_value, minutes_added, type, kiosk_id, mac_address)
+      VALUES (?, ?, ?, 'coin', ?, ?)
+    `).run(existingSession.voucher_code, coinValue, totalMinutes, kioskId, mac);
     logFinancialEvent({ voucher_code: existingSession.voucher_code, coin_value: coinValue, minutes_added: totalMinutes, type: 'coin', mac });
 
     console.log(`💰 Added ${totalMinutes} mins to ${existingSession.voucher_code}`);
@@ -93,9 +93,9 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null) {
 
     db.prepare(`
       INSERT INTO transactions
-      (voucher_code, coin_value, minutes_added, type, kiosk_id)
-      VALUES (?, ?, ?, 'coin', ?)
-    `).run(session.voucher_code, coinValue, totalMinutes, kioskId);
+      (voucher_code, coin_value, minutes_added, type, kiosk_id, mac_address)
+      VALUES (?, ?, ?, 'coin', ?, ?)
+    `).run(session.voucher_code, coinValue, totalMinutes, kioskId, mac);
     logFinancialEvent({ voucher_code: session.voucher_code, coin_value: coinValue, minutes_added: totalMinutes, type: 'coin', mac });
 
     console.log(`🆕 New session: ${session.voucher_code} for ${mac}`);
