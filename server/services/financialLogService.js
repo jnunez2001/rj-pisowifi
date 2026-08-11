@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { hashMac } = require('../utils/macPrivacy');
 
 // Redundant, append-only backup of every row written to the `transactions`
 // table — plain text on disk, separate from SQLite, so a corrupted database
@@ -18,7 +19,13 @@ function logFinancialEvent(event) {
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
     const file = path.join(LOG_DIR, `financial-${dateStr}.log`);
-    const line = JSON.stringify({ time: now.toISOString(), ...event }) + '\n';
+    // Hash the MAC before it hits disk here - this log keeps up to a year
+    // of history and feeds the Support Bundle export, so a plaintext MAC
+    // here is a real presence/behavior trail combined with the timestamp
+    // already on every line. The live DB (transactions.mac_address etc.)
+    // is untouched - that's a separate, operationally-needed store.
+    const safeEvent = event.mac ? { ...event, mac: hashMac(event.mac) } : event;
+    const line = JSON.stringify({ time: now.toISOString(), ...safeEvent }) + '\n';
     fs.appendFileSync(file, line);
   } catch (e) {
     // Never let logging failure break the actual transaction (Bug #38 pattern:

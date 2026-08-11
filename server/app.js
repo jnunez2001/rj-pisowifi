@@ -438,6 +438,15 @@ const server = app.listen(PORT, () => {
     console.warn('[Multi-WAN] Failed to start (non-fatal):', e.message);
   }
 
+  // Data retention cleanup (privacy) - ages out old session_history/
+  // free_claims/watchdog_events/network_config_versions rows on a daily
+  // schedule. Never touches the financial transactions ledger.
+  try {
+    require('./services/dataRetentionService').start();
+  } catch (e) {
+    console.warn('[DataRetention] Failed to start (non-fatal):', e.message);
+  }
+
   // Preflight dependency check — verifies nft/tc/gpio tools and basic
   // network readiness exist before the app is trusted to vend. Deliberately
   // non-blocking (matches this app's "boot always succeeds, subsystems

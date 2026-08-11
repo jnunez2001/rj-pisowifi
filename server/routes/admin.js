@@ -2148,6 +2148,49 @@ router.post('/storage/encrypt', adminAuth, async (req, res) => {
   }
 });
 
+// ===== DATA RETENTION POLICY (Settings > Storage) =====
+
+const retentionSchema = z.object({
+  table: z.enum(['session_history', 'free_claims', 'watchdog_events', 'network_config_versions']),
+  days: z.coerce.number().int().min(1).max(3650),
+});
+
+// GET /api/admin/storage/retention-policy
+router.get('/storage/retention-policy', adminAuth, (req, res) => {
+  try {
+    const dataRetentionService = require('../services/dataRetentionService');
+    return res.json({ success: true, policy: dataRetentionService.getPolicy() });
+  } catch (err) {
+    console.error('Retention policy read error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/storage/retention-policy
+router.post('/storage/retention-policy', adminAuth, validateBody(retentionSchema), (req, res) => {
+  try {
+    const dataRetentionService = require('../services/dataRetentionService');
+    dataRetentionService.setRetentionDays(req.body.table, req.body.days);
+    return res.json({ success: true, message: 'Retention policy updated' });
+  } catch (err) {
+    console.error('Retention policy update error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/storage/retention-cleanup-now — manual trigger, doesn't
+// wait for the daily 03:00 cron.
+router.post('/storage/retention-cleanup-now', adminAuth, (req, res) => {
+  try {
+    const dataRetentionService = require('../services/dataRetentionService');
+    const results = dataRetentionService.runCleanup();
+    return res.json({ success: true, results });
+  } catch (err) {
+    console.error('Retention cleanup error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/network
 router.get('/network', adminAuth, (req, res) => {
   try {
