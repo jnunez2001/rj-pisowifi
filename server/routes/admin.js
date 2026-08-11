@@ -2613,6 +2613,61 @@ router.delete('/network/mikrotik/port-forwards/:id', adminAuth, async (req, res)
   }
 });
 
+// ===== DNS MANAGER (network power parity - both modes) =====
+// Previously hardcoded to 8.8.8.8/8.8.4.4 in setup-network.sh with no
+// operator control at all. dns_upstream_1/2 settings are the source of
+// truth for Standalone mode (read by setup-network.sh); when MikroTik
+// mode is active, the same values are also pushed live to the router's
+// own /ip/dns, so one setting covers whichever mode is actually running.
+
+const dnsSchema = z.object({
+  dns1: z.string().trim().regex(IPV4_REGEX, 'Invalid primary DNS IP'),
+  dns2: z.string().trim().regex(IPV4_REGEX, 'Invalid secondary DNS IP').optional().or(z.literal('')),
+});
+
+// GET /api/admin/network/dns
+router.get('/network/dns', adminAuth, async (req, res) => {
+  try {
+    const dns1 = db.prepare("SELECT value FROM settings WHERE key = 'dns_upstream_1'").get()?.value || '8.8.8.8';
+    const dns2 = db.prepare("SELECT value FROM settings WHERE key = 'dns_upstream_2'").get()?.value || '8.8.4.4';
+    const mikrotikService = require('../services/mikrotikService');
+    let live = null;
+    if (mikrotikService.isMikrotikModeEnabled()) {
+      try {
+        live = await mikrotikService.getDnsServers();
+      } catch (e) {
+        console.error('MikroTik DNS read failed (showing saved settings instead):', e.message);
+      }
+    }
+    return res.json({ success: true, dns1, dns2, live });
+  } catch (err) {
+    console.error('DNS settings read error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/network/dns
+router.post('/network/dns', adminAuth, validateBody(dnsSchema), async (req, res) => {
+  try {
+    const { dns1, dns2 } = req.body;
+    db.prepare("INSERT INTO settings (key, value) VALUES ('dns_upstream_1', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(dns1);
+    db.prepare("INSERT INTO settings (key, value) VALUES ('dns_upstream_2', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(dns2 || '');
+
+    const mikrotikService = require('../services/mikrotikService');
+    if (mikrotikService.isMikrotikModeEnabled()) {
+      const servers = [dns1, dns2].filter(Boolean);
+      await mikrotikService.setDnsServers(servers);
+      console.log(`🌐 DNS servers updated (MikroTik live + saved): ${servers.join(', ')}`);
+    } else {
+      console.log(`🌐 DNS servers saved (applies on next Standalone network apply): ${[dns1, dns2].filter(Boolean).join(', ')}`);
+    }
+    return res.json({ success: true, message: 'DNS settings saved' });
+  } catch (err) {
+    console.error('DNS settings save error:', err);
+    res.status(500).json({ success: false, message: 'Failed to save DNS settings: ' + err.message });
+  }
+});
+
 // ===== TIER 1 STANDALONE FEATURES: static DHCP leases, client naming,
 // port forwarding, diagnostics (STANDALONE_ARCHITECTURE_PLAN.md) =====
 

@@ -64,13 +64,21 @@ PORTAL_HOSTNAME=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='portal_ho
 # for customers (see settings default in database.js, and the
 # fail-open-by-design rule this app's add-ons all follow).
 ENABLE_PIHOLE=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='enable_pihole';" 2>/dev/null)
+# DNS manager (admin panel > Network > DNS): previously hardcoded to
+# 8.8.8.8/8.8.4.4 here with no operator control at all. Falls back to
+# those same defaults if the settings are somehow empty, so an install
+# that predates this still behaves exactly as before.
+DNS_UPSTREAM_1=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='dns_upstream_1';" 2>/dev/null)
+DNS_UPSTREAM_2=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='dns_upstream_2';" 2>/dev/null)
+[ -z "$DNS_UPSTREAM_1" ] && DNS_UPSTREAM_1="8.8.8.8"
+[ -z "$DNS_UPSTREAM_2" ] && DNS_UPSTREAM_2="8.8.4.4"
 if [ "$ENABLE_PIHOLE" = "1" ]; then
     UPSTREAM_DNS_LINES="server=127.0.0.1#5335
-server=8.8.8.8
-server=8.8.4.4"
+server=$DNS_UPSTREAM_1
+server=$DNS_UPSTREAM_2"
 else
-    UPSTREAM_DNS_LINES="server=8.8.8.8
-server=8.8.4.4"
+    UPSTREAM_DNS_LINES="server=$DNS_UPSTREAM_1
+server=$DNS_UPSTREAM_2"
 fi
 
 # VLAN Management (admin panel > Network > VLAN Management): supports the

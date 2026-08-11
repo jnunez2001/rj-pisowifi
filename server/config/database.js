@@ -585,6 +585,13 @@ if (settingCount.count === 0) {
   // down, dnsmasq just stops getting answers from that upstream and uses
   // the next one - no customer loses DNS because Pi-hole crashed.
   insertSetting.run('enable_pihole', '0');
+
+  // Upstream DNS servers - previously hardcoded to 8.8.8.8/8.8.4.4 in
+  // setup-network.sh with no operator control at all (only Pi-hole
+  // on/off). These are the real, editable defaults now; Pi-hole (when
+  // enabled) still gets prepended ahead of these, unchanged.
+  insertSetting.run('dns_upstream_1', '8.8.8.8');
+  insertSetting.run('dns_upstream_2', '8.8.4.4');
 }
 
 // One-time migration for existing installs: 'nodogsplash' was the old
@@ -666,6 +673,16 @@ try {
   db.exec('ALTER TABLE router_ports ADD COLUMN isolate_from_other_lanes INTEGER DEFAULT 1');
 } catch (e) {
   // already applied
+}
+
+{
+  // Backfill for existing installs that predate the DNS manager - same
+  // upsertIfMissing pattern already used for mikrotik_ssl/account_tier
+  // etc. above.
+  const dnsRow1 = db.prepare("SELECT key FROM settings WHERE key = 'dns_upstream_1'").get();
+  if (!dnsRow1) db.prepare("INSERT INTO settings (key, value) VALUES ('dns_upstream_1', '8.8.8.8')").run();
+  const dnsRow2 = db.prepare("SELECT key FROM settings WHERE key = 'dns_upstream_2'").get();
+  if (!dnsRow2) db.prepare("INSERT INTO settings (key, value) VALUES ('dns_upstream_2', '8.8.4.4')").run();
 }
 
 // VAPID keypair for Web Push (server/services/pushNotificationService.js) -

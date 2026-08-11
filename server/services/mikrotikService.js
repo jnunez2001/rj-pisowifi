@@ -1026,6 +1026,35 @@ async function deletePortForward(mikrotikId) {
   });
 }
 
+// ===== DNS MANAGER (network power parity) - MikroTik side. RouterOS DNS
+// is a single global setting (/ip/dns set), simpler than Standalone's
+// per-lane dnsmasq config - one function each way rather than a whole
+// CRUD surface. =====
+
+async function getDnsServers() {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const res = await client.talk(['/ip/dns/print']);
+    const servers = (res.re[0] && res.re[0].servers) || '';
+    return { servers: servers.split(',').filter(Boolean) };
+  });
+}
+
+async function setDnsServers(servers) {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    await client.talk(['/ip/dns/set', `=servers=${servers.join(',')}`]);
+    const confirm = await client.talk(['/ip/dns/print']);
+    const actual = (confirm.re[0] && confirm.re[0].servers) || '';
+    if (actual.split(',').filter(Boolean).join(',') !== servers.join(',')) {
+      throw new Error('DNS servers appeared to be set but do not match on re-check');
+    }
+    return { servers };
+  });
+}
+
 module.exports = {
   allowClient,
   blockClient,
@@ -1058,4 +1087,6 @@ module.exports = {
   createPortForward,
   deletePortForward,
   MikrotikPortForwardConflictError,
+  getDnsServers,
+  setDnsServers,
 };
