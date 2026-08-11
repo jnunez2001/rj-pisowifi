@@ -71,6 +71,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { hashPassword, verifyPassword } = require('../utils/passwordHash');
+const { z, validateBody } = require('../utils/validation');
 const { encryptSecret, decryptSecret } = require('../utils/secretCrypto');
 const totpService = require('../services/totpService');
 const crypto = require('crypto');
@@ -2274,6 +2275,78 @@ router.delete('/network/vlans/:id', adminAuth, (req, res) => {
   } catch (err) {
     console.error('VLAN delete error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ===== MIKROTIK VLAN MANAGER (network power parity with Standalone) =====
+// Same conceptual shape as the Standalone /network/vlans endpoints just
+// above, but executes over the RouterOS API instead of local `ip link`,
+// via mikrotikService.js's listVlans/createVlan/deleteVlan. Router Mode
+// previously had no VLAN configuration surface at all - an operator had
+// to set VLANs up by hand in WinBox before ZenFi could do anything with
+// them.
+
+const mikrotikVlanSchema = z.object({
+  parentInterface: z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid interface name'),
+  vlanId: z.coerce.number().int().min(1).max(4094),
+  name: z.string().trim().max(64).optional(),
+  ipAddress: z.string().trim().regex(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/, 'Must be CIDR form, e.g. 192.168.13.1/24').optional().or(z.literal('')),
+});
+
+// GET /api/admin/network/mikrotik/vlans
+router.get('/network/mikrotik/vlans', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const vlans = await mikrotikService.listVlans();
+    return res.json({ success: true, vlans });
+  } catch (err) {
+    console.error('MikroTik VLAN list error:', err);
+    res.status(500).json({ success: false, message: 'Failed to reach router: ' + err.message });
+  }
+});
+
+// POST /api/admin/network/mikrotik/vlans
+router.post('/network/mikrotik/vlans', adminAuth, validateBody(mikrotikVlanSchema), async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const { parentInterface, vlanId, name, ipAddress } = req.body;
+    const created = await mikrotikService.createVlan({ parentInterface, vlanId, name, ipAddress: ipAddress || null });
+    console.log(`🔀 MikroTik VLAN created: ${created.name} (VLAN ${created.vlan_id} on ${created.parent_interface})`);
+    return res.json({ success: true, vlan: created });
+  } catch (err) {
+    if (err instanceof (require('../services/mikrotikService').MikrotikVlanConflictError)) {
+      return res.status(409).json({ success: false, message: err.message });
+    }
+    console.error('MikroTik VLAN create error:', err);
+    res.status(500).json({ success: false, message: 'Failed to create VLAN: ' + err.message });
+  }
+});
+
+// DELETE /api/admin/network/mikrotik/vlans/:id — :id is RouterOS's own
+// ".id" (e.g. "*3"), not a local database row id, since this table isn't
+// mirrored locally at all - MikroTik itself is the only source of truth
+// for its own VLAN interfaces.
+router.delete('/network/mikrotik/vlans/:id', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const result = await mikrotikService.deleteVlan(req.params.id);
+    if (!result.removed) {
+      return res.status(404).json({ success: false, message: 'VLAN not found on router' });
+    }
+    console.log(`🔀 MikroTik VLAN deleted: ${req.params.id}`);
+    return res.json({ success: true, message: 'VLAN deleted' });
+  } catch (err) {
+    console.error('MikroTik VLAN delete error:', err);
+    res.status(500).json({ success: false, message: 'Failed to delete VLAN: ' + err.message });
   }
 });
 

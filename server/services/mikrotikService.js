@@ -506,6 +506,124 @@ async function getMacFromIp(ip) {
   }
 }
 
+// ===== VLAN MANAGER (network power parity with Standalone mode) =====
+// Standalone mode already lets an operator create/list/delete VLANs
+// locally (server/routes/admin.js's /network/vlans endpoints, backed by
+// the `vlans` table + setup-network.sh). MikroTik mode had nothing
+// equivalent - the operator had to configure VLANs by hand in WinBox
+// first. This brings the same capability to Router Mode over the RouterOS
+// API: a VLAN interface (/interface/vlan) plus, for a "lan" VLAN, an IP
+// address on it (/ip/address) so it's actually a usable network, not just
+// a bare tagged interface.
+//
+// Scope note: this is the VLAN interface + addressing only. DHCP server
+// provisioning for the VLAN and firewall/NAT policy are separate,
+// not-yet-built network-power items (see BETA_LAUNCH_PLAN.md group 4) -
+// creating a VLAN here does not yet make it hand out addresses or have
+// any firewall policy of its own.
+
+// Lists VLAN interfaces along with whatever IP address (if any) RouterOS
+// has assigned directly to each one.
+async function listVlans() {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const [vlanRes, addrRes] = await Promise.all([
+      client.talk(['/interface/vlan/print']),
+      client.talk(['/ip/address/print']),
+    ]);
+    return vlanRes.re.map((v) => {
+      const addr = addrRes.re.find((a) => a.interface === v.name);
+      return {
+        id: v['.id'],
+        name: v.name,
+        vlan_id: parseInt(v['vlan-id'], 10),
+        parent_interface: v.interface,
+        disabled: v.disabled === 'true',
+        running: v.running === 'true',
+        ip_address: addr ? addr.address : null,
+      };
+    });
+  });
+}
+
+class MikrotikVlanConflictError extends Error {
+  constructor(msg) {
+    super(msg);
+    this.name = 'MikrotikVlanConflictError';
+  }
+}
+
+// Creates a VLAN interface on `parentInterface`, optionally with a
+// directly-assigned IP (CIDR form, e.g. "192.168.13.1/24") to make it a
+// real addressable LAN. Idempotency/conflict check first - RouterOS
+// itself would reject a duplicate vlan-id+interface combination, but a
+// pre-check gives a clear, specific error instead of a raw RouterOS
+// rejection message.
+async function createVlan({ parentInterface, vlanId, name, ipAddress }) {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  const vlanName = name || `vlan${vlanId}-${parentInterface}`;
+
+  return withMikrotik(config, async (client) => {
+    const existing = await client.talk(['/interface/vlan/print', `?vlan-id=${vlanId}`, `?interface=${parentInterface}`]);
+    if (existing.re.length > 0) {
+      throw new MikrotikVlanConflictError(`VLAN ${vlanId} already exists on ${parentInterface}`);
+    }
+
+    await client.talk([
+      '/interface/vlan/add',
+      `=name=${vlanName}`,
+      `=vlan-id=${vlanId}`,
+      `=interface=${parentInterface}`,
+    ]);
+
+    if (ipAddress) {
+      try {
+        await client.talk(['/ip/address/add', `=address=${ipAddress}`, `=interface=${vlanName}`]);
+      } catch (err) {
+        // Roll back the just-created VLAN interface rather than leaving a
+        // half-configured VLAN (interface exists, no address) behind -
+        // same "don't leave a dangling half-applied change" principle the
+        // Standalone config-safety engine follows, scaled to what a
+        // single API call here actually needs.
+        try {
+          const created = await client.talk(['/interface/vlan/print', `?name=${vlanName}`]);
+          if (created.re[0]) await client.talk(['/interface/vlan/remove', `=.id=${created.re[0]['.id']}`]);
+        } catch (cleanupErr) {
+          console.error('MikroTik VLAN rollback-after-address-failure also failed:', cleanupErr.message);
+        }
+        throw err;
+      }
+    }
+
+    // Verify: re-fetch rather than trust the add call's own response, same
+    // "don't assume, confirm" discipline used elsewhere in this codebase.
+    const confirm = await client.talk(['/interface/vlan/print', `?name=${vlanName}`]);
+    if (confirm.re.length === 0) {
+      throw new Error('VLAN creation appeared to succeed but the interface is not present on re-check');
+    }
+    return { name: vlanName, vlan_id: vlanId, parent_interface: parentInterface, ip_address: ipAddress || null };
+  });
+}
+
+async function deleteVlan(mikrotikId) {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const vlan = await client.talk(['/interface/vlan/print', `?.id=${mikrotikId}`]);
+    if (vlan.re.length === 0) return { removed: false, reason: 'not_found' };
+    const vlanName = vlan.re[0].name;
+
+    const addr = await client.talk(['/ip/address/print', `?interface=${vlanName}`]);
+    for (const a of addr.re) {
+      await client.talk(['/ip/address/remove', `=.id=${a['.id']}`]);
+    }
+    await client.talk(['/interface/vlan/remove', `=.id=${mikrotikId}`]);
+    return { removed: true };
+  });
+}
+
 module.exports = {
   allowClient,
   blockClient,
@@ -520,4 +638,8 @@ module.exports = {
   setPortalDnsName,
   testConnection,
   getMacFromIp,
+  listVlans,
+  createVlan,
+  deleteVlan,
+  MikrotikVlanConflictError,
 };
