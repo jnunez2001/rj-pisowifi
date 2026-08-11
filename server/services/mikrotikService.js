@@ -770,6 +770,90 @@ async function deleteDhcpServer(mikrotikId) {
   });
 }
 
+// ===== PORT/INTERFACE ROLE ASSIGNMENT (network power parity) =====
+// Uses RouterOS interface-lists (/interface/list + /interface/list/member)
+// - the standard, idiomatic RouterOS mechanism for grouping interfaces
+// into roles, and the same building block the firewall zone builder and
+// NAT manager below reference (in-interface-list=/out-interface-list=).
+// Mirrors Standalone mode's router_ports.role concept (wan/gated/open/
+// unused) with role names adjusted to match how they're actually used in
+// RouterOS firewall rules: wan/lan/guest/unused.
+
+const MIKROTIK_ROLE_LISTS = { wan: 'WAN', lan: 'LAN', guest: 'GUEST' };
+
+async function ensureInterfaceList(client, listName) {
+  const existing = await client.talk(['/interface/list/print', `?name=${listName}`]);
+  if (existing.re.length === 0) {
+    await client.talk(['/interface/list/add', `=name=${listName}`]);
+  }
+}
+
+// Lists every physical ethernet interface with its current role, derived
+// from which (if any) of the three managed lists it's a member of. An
+// interface in none of them is 'unused'.
+async function listInterfaceRoles() {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const [ifaces, members] = await Promise.all([
+      client.talk(['/interface/ethernet/print']),
+      client.talk(['/interface/list/member/print']),
+    ]);
+    return ifaces.re.map((iface) => {
+      const membership = members.re.find((m) =>
+        m.interface === iface.name && Object.values(MIKROTIK_ROLE_LISTS).includes(m.list)
+      );
+      const role = membership
+        ? Object.keys(MIKROTIK_ROLE_LISTS).find((r) => MIKROTIK_ROLE_LISTS[r] === membership.list)
+        : 'unused';
+      return {
+        name: iface.name,
+        mac: iface['mac-address'] || '',
+        running: iface.running === 'true',
+        role,
+      };
+    });
+  });
+}
+
+// Sets interfaceName's role - removes it from any OTHER managed role-list
+// membership first (an interface should only ever be in one role at a
+// time), then adds it to the requested one. role='unused' just removes
+// membership from all three, no list added.
+async function setInterfaceRole(interfaceName, role) {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  if (role !== 'unused' && !MIKROTIK_ROLE_LISTS[role]) {
+    throw new Error(`Invalid role: ${role}`);
+  }
+
+  return withMikrotik(config, async (client) => {
+    // Remove any existing membership in one of our managed lists first.
+    const members = await client.talk(['/interface/list/member/print', `?interface=${interfaceName}`]);
+    for (const m of members.re) {
+      if (Object.values(MIKROTIK_ROLE_LISTS).includes(m.list)) {
+        await client.talk(['/interface/list/member/remove', `=.id=${m['.id']}`]);
+      }
+    }
+
+    if (role === 'unused') {
+      return { interface: interfaceName, role: 'unused' };
+    }
+
+    const listName = MIKROTIK_ROLE_LISTS[role];
+    await ensureInterfaceList(client, listName);
+    await client.talk(['/interface/list/member/add', `=list=${listName}`, `=interface=${interfaceName}`]);
+
+    // Verify - re-fetch rather than trust the add call, same discipline
+    // as the VLAN/DHCP managers above.
+    const confirm = await client.talk(['/interface/list/member/print', `?interface=${interfaceName}`, `?list=${listName}`]);
+    if (confirm.re.length === 0) {
+      throw new Error('Role assignment appeared to succeed but membership is not present on re-check');
+    }
+    return { interface: interfaceName, role };
+  });
+}
+
 module.exports = {
   allowClient,
   blockClient,
@@ -792,4 +876,6 @@ module.exports = {
   createDhcpServer,
   deleteDhcpServer,
   MikrotikDhcpConflictError,
+  listInterfaceRoles,
+  setInterfaceRole,
 };

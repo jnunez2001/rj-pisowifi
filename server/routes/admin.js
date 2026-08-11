@@ -2438,6 +2438,48 @@ router.delete('/network/mikrotik/dhcp/:id', adminAuth, async (req, res) => {
   }
 });
 
+// ===== MIKROTIK PORT/INTERFACE ROLE ASSIGNMENT (network power parity) =====
+// Uses RouterOS interface-lists via mikrotikService.js's
+// listInterfaceRoles/setInterfaceRole - the building block the firewall
+// zone builder and NAT manager below reference.
+
+const mikrotikRoleSchema = z.object({
+  interfaceName: z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid interface name'),
+  role: z.enum(['wan', 'lan', 'guest', 'unused']),
+});
+
+// GET /api/admin/network/mikrotik/roles
+router.get('/network/mikrotik/roles', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const roles = await mikrotikService.listInterfaceRoles();
+    return res.json({ success: true, roles });
+  } catch (err) {
+    console.error('MikroTik role list error:', err);
+    res.status(500).json({ success: false, message: 'Failed to reach router: ' + err.message });
+  }
+});
+
+// POST /api/admin/network/mikrotik/roles
+router.post('/network/mikrotik/roles', adminAuth, validateBody(mikrotikRoleSchema), async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const { interfaceName, role } = req.body;
+    const result = await mikrotikService.setInterfaceRole(interfaceName, role);
+    console.log(`🔌 MikroTik interface role set: ${result.interface} → ${result.role}`);
+    return res.json({ success: true, result });
+  } catch (err) {
+    console.error('MikroTik role assign error:', err);
+    res.status(500).json({ success: false, message: 'Failed to set role: ' + err.message });
+  }
+});
+
 // ===== TIER 1 STANDALONE FEATURES: static DHCP leases, client naming,
 // port forwarding, diagnostics (STANDALONE_ARCHITECTURE_PLAN.md) =====
 
