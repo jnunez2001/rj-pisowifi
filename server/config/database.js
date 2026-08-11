@@ -288,6 +288,24 @@ db.exec(`
     label TEXT NOT NULL DEFAULT '',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- Config safety engine (server/services/configSafety.js) audit trail.
+  -- One row per attempted network configuration change (Standalone mode
+  -- lane/port-role apply), win or lose - snapshot_json is the FULL
+  -- pre-change state of every network table, enough to manually replay a
+  -- restore even outside the app if something is ever really stuck.
+  CREATE TABLE IF NOT EXISTS network_config_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    operator TEXT DEFAULT 'admin',
+    reason TEXT DEFAULT '',
+    snapshot_json TEXT NOT NULL,
+    risk_reasons_json TEXT DEFAULT '[]',
+    applied INTEGER DEFAULT 0,
+    rolled_back INTEGER DEFAULT 0,
+    verify_status TEXT,
+    verify_detail TEXT
+  );
 `);
 
 // router_ports' shape changed from "one row per port" to "one row per lane

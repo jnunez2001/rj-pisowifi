@@ -2713,21 +2713,43 @@ router.get('/network/standalone/provision/preview', adminAuth, (req, res) => {
 });
 
 // POST /api/admin/network/standalone/provision/apply — the actual
-// "Configure" action. setup-network.sh always does a full rebuild from the
-// database on every run (already true for VLANs/leases/port-forwards), so
-// there's no separate backup/rollback step the way MikroTik provisioning
-// needs — re-running it is the same idempotent operation the boot-time
-// systemd service already performs.
-router.post('/network/standalone/provision/apply', adminAuth, (req, res) => {
-  const scriptPath = path.join(__dirname, '../../setup/setup-network.sh');
-  execFile('sudo', ['bash', scriptPath], { timeout: 30000 }, (err, stdout, stderr) => {
-    if (err) {
-      console.error('Standalone provision apply error:', err.message);
-      return res.status(500).json({ success: false, message: 'Provisioning failed: ' + err.message });
+// "Configure" action. Previously ran setup-network.sh directly with no
+// safety net (idempotent re-runs were the only protection, which doesn't
+// help if the NEW desired state itself is dangerous - e.g. removing the
+// only WAN role). Now goes through configSafety.js: risk check ->
+// require confirmation on a management-path-risky change -> apply ->
+// verify connectivity -> automatic rollback to the last known-good
+// configuration if verification fails.
+router.post('/network/standalone/provision/apply', adminAuth, async (req, res) => {
+  try {
+    const { confirmed, reason } = req.body || {};
+    const { applyNetworkChangeTransaction } = require('../services/configSafety');
+    const result = await applyNetworkChangeTransaction({
+      operator: 'admin',
+      reason: reason || '',
+      riskConfirmed: !!confirmed,
+    });
+
+    if (result.requiresConfirmation) {
+      return res.status(409).json({
+        success: false,
+        requiresConfirmation: true,
+        reasons: result.reasons,
+        message: 'This change affects the box\'s own network reachability. Review and confirm to proceed.',
+      });
     }
-    console.log('⚡ Standalone lane engine provisioned');
-    res.json({ success: true, message: 'Configuration applied' });
-  });
+
+    if (!result.success) {
+      console.error('Standalone provision apply failed:', result.message);
+      return res.status(500).json({ success: false, message: result.message, rolledBack: result.rolledBack });
+    }
+
+    console.log('⚡ Standalone lane engine provisioned (verified reachable)');
+    res.json({ success: true, message: 'Configuration applied and verified' });
+  } catch (err) {
+    console.error('Standalone provision apply error:', err);
+    res.status(500).json({ success: false, message: 'Provisioning failed: ' + err.message });
+  }
 });
 
 // ===== ROUTER MODE (MikroTik) — ROUTER_MODE_PLAN.md Stage 3 =====

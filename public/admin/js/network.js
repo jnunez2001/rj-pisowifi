@@ -755,17 +755,29 @@ async function previewStandaloneProvisioning() {
   }
 }
 
-async function applyStandaloneProvisioning() {
-  if (!confirm("This applies your saved lane configuration to this server's own network stack right now. You're likely connected through it, so a mistake here can cut off access until you're physically at the machine. Any device with a manually-saved server address (e.g. an ESP32 coin-slot vendo) will need it updated to match its lane's new gateway afterward. Continue?")) return;
+async function applyStandaloneProvisioning(confirmed) {
+  if (!confirmed && !confirm("This applies your saved lane configuration to this server's own network stack right now. You're likely connected through it, so a mistake here can cut off access until you're physically at the machine. Any device with a manually-saved server address (e.g. an ESP32 coin-slot vendo) will need it updated to match its lane's new gateway afterward. Continue?")) return;
   const el = document.getElementById('standaloneProvisionResult');
   el.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> Applying configuration...</div>';
   try {
-    const data = await apiCall('POST', '/api/admin/network/standalone/provision/apply');
+    const data = await apiCall('POST', '/api/admin/network/standalone/provision/apply', confirmed ? { confirmed: true } : undefined);
     if (data.success) {
-      el.innerHTML = '<div style="color:var(--accent-green);"><i class="fas fa-check"></i> Configuration applied.</div>';
+      el.innerHTML = '<div style="color:var(--accent-green);"><i class="fas fa-check"></i> Configuration applied and verified reachable.</div>';
       showToast('Standalone network configured!');
+    } else if (data.requiresConfirmation) {
+      // The config-safety engine flagged this as management-path risky
+      // (e.g. removing the box's only WAN role) - a second, specific
+      // confirmation naming the actual reason, not just the generic
+      // warning above.
+      const reasons = (data.reasons || []).map(r => `• ${r}`).join('\n');
+      el.innerHTML = '<div style="color:var(--accent-orange);"><i class="fas fa-triangle-exclamation"></i> ' + escapeHtml(data.message || 'This change is risky.') + '</div>';
+      if (confirm(`${data.message}\n\n${reasons}\n\nApply anyway?`)) {
+        return applyStandaloneProvisioning(true);
+      }
+      showToast('Apply cancelled.', 'warning');
     } else {
-      el.innerHTML = '<div style="color:var(--accent-red);">' + escapeHtml(data.message || 'Failed.') + '</div>';
+      el.innerHTML = '<div style="color:var(--accent-red);">' + escapeHtml(data.message || 'Failed.') +
+        (data.rolledBack ? ' <strong>Rolled back to the previous working configuration.</strong>' : '') + '</div>';
       showToast(data.message || 'Provisioning failed.', 'error');
     }
   } catch(e) {
