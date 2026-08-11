@@ -2700,6 +2700,12 @@ router.get('/network/standalone/ports', adminAuth, (req, res) => {
       speed_mbps: l.speed_mbps,
       burst_mbps: l.burst_mbps,
       isolate_clients: !!l.isolate_clients,
+      // Lane-to-lane firewall isolation (distinct from isolate_clients'
+      // AP/bridge-level client-to-client isolation) - see the column
+      // comment in database.js and setup-network.sh's NFT_ISOLATION_RULES.
+      // Standalone-mode only for now - MikroTik mode has no equivalent
+      // enforcement yet.
+      isolate_from_other_lanes: l.isolate_from_other_lanes === null || l.isolate_from_other_lanes === undefined ? true : !!l.isolate_from_other_lanes,
       bridge_with_id: l.bridge_with_id,
     }));
 
@@ -2776,14 +2782,15 @@ router.post('/network/standalone/ports', adminAuth, (req, res) => {
     }
 
     const upsert = db.prepare(`
-      INSERT INTO router_ports (port_name, vlan_id, role, lane_name, speed_mbps, burst_mbps, isolate_clients, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      INSERT INTO router_ports (port_name, vlan_id, role, lane_name, speed_mbps, burst_mbps, isolate_clients, isolate_from_other_lanes, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(port_name, vlan_id) DO UPDATE SET
         role = excluded.role,
         lane_name = excluded.lane_name,
         speed_mbps = excluded.speed_mbps,
         burst_mbps = excluded.burst_mbps,
         isolate_clients = excluded.isolate_clients,
+        isolate_from_other_lanes = excluded.isolate_from_other_lanes,
         updated_at = CURRENT_TIMESTAMP
     `);
     for (const l of lanes) {
@@ -2794,7 +2801,8 @@ router.post('/network/standalone/ports', adminAuth, (req, res) => {
         String(l.lane_name || ''),
         parseInt(l.speed_mbps, 10) || 0,
         parseInt(l.burst_mbps, 10) || 0,
-        l.isolate_clients === false ? 0 : 1
+        l.isolate_clients === false ? 0 : 1,
+        l.isolate_from_other_lanes === false ? 0 : 1
       );
     }
     const findId = db.prepare('SELECT id FROM router_ports WHERE port_name = ? AND vlan_id = ?');

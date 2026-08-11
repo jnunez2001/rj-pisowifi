@@ -249,6 +249,15 @@ db.exec(`
     speed_mbps INTEGER DEFAULT 0,
     burst_mbps INTEGER DEFAULT 0,
     isolate_clients INTEGER DEFAULT 1,
+    -- Distinct from isolate_clients above: that one is AP/bridge-level
+    -- (client-to-client on the SAME lane). This is lane-to-lane isolation
+    -- (this lane's traffic to every OTHER lane's subnet is dropped) - the
+    -- firewall zone gap found 2026-08-09: an authenticated/paid gated-lane
+    -- customer previously had no restriction reaching another lane's
+    -- private subnet (e.g. a staff/home "open" lane) once past the
+    -- paid-or-not check, since the forward chain only ever checked source
+    -- lane (iifname), never destination lane (oifname).
+    isolate_from_other_lanes INTEGER DEFAULT 1,
     bridge_with_id INTEGER DEFAULT NULL REFERENCES router_ports(id), -- another lane definition (by row id) this one joins into
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(port_name, vlan_id)
@@ -646,6 +655,15 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
 // so a customer who tops up before running out can get warned again later.
 try {
   db.exec('ALTER TABLE sessions ADD COLUMN push_2min_sent INTEGER DEFAULT 0');
+} catch (e) {
+  // already applied
+}
+
+try {
+  // Default 1 (isolated) matches the safe default a gated/guest lane
+  // should have; an existing install's rows all backfill to this same
+  // safe default rather than silently staying unisolated after upgrade.
+  db.exec('ALTER TABLE router_ports ADD COLUMN isolate_from_other_lanes INTEGER DEFAULT 1');
 } catch (e) {
   // already applied
 }

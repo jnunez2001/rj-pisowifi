@@ -403,6 +403,13 @@ if [ "$NETWORK_MODE" = "standalone" ] && [ "$MULTI_LANE_MODE" = "1" ]; then
   DNSMASQ_LANES=""
   NFT_FORWARD_RULES=""
   NFT_PREROUTING_RULES=""
+  # Lane-to-lane isolation (distinct from isolate_clients' AP/bridge-level
+  # client-to-client isolation) - collected during the loop below, then
+  # turned into nftables oifname-drop rules in a second pass once every
+  # lane's interface name is known (a lane can't reference "every OTHER
+  # lane" while some of those other lanes haven't been processed yet).
+  ALL_LANE_IFS=""
+  ISOLATED_LANE_IFS=""
   LANE_MAP_JSON="["
   LANE_MAP_SEP=""
   LANE_INDEX=0
@@ -414,7 +421,7 @@ if [ "$NETWORK_MODE" = "standalone" ] && [ "$MULTI_LANE_MODE" = "1" ]; then
   # WAN_VIF is always a member; each lane interface joins as its loop runs.
   FLOWTABLE_DEVICES="\"$WAN_VIF\""
 
-  while IFS='|' read -r H_ID H_PORT H_VLAN H_ROLE H_NAME H_SPEED H_ISOLATE; do
+  while IFS='|' read -r H_ID H_PORT H_VLAN H_ROLE H_NAME H_SPEED H_ISOLATE H_ISOLATE_LANES; do
       [ -z "$H_ID" ] && continue
       is_local_iface "$H_PORT" || continue
 
@@ -542,11 +549,36 @@ address=/${PORTAL_HOSTNAME}/${LANE_GATEWAY}"
       LANE_MAP_JSON="${LANE_MAP_JSON}{\"headId\":${H_ID},\"interface\":\"${LANE_IF}\",\"subnet\":\"10.${OCTET}.0.0\",\"gateway\":\"${LANE_GATEWAY}\",\"role\":\"${H_ROLE}\"}"
       LANE_MAP_SEP="1"
       FLOWTABLE_DEVICES="${FLOWTABLE_DEVICES}, \"$LANE_IF\""
-  done <<< "$(sqlite3 -separator '|' "$DB" "SELECT id, port_name, vlan_id, role, lane_name, speed_mbps, isolate_clients FROM router_ports WHERE role IN ('gated','open') AND bridge_with_id IS NULL ORDER BY id;" 2>/dev/null)"
+
+      ALL_LANE_IFS="$ALL_LANE_IFS $LANE_IF"
+      [ "$H_ISOLATE_LANES" = "1" ] && ISOLATED_LANE_IFS="$ISOLATED_LANE_IFS $LANE_IF"
+  done <<< "$(sqlite3 -separator '|' "$DB" "SELECT id, port_name, vlan_id, role, lane_name, speed_mbps, isolate_clients, isolate_from_other_lanes FROM router_ports WHERE role IN ('gated','open') AND bridge_with_id IS NULL ORDER BY id;" 2>/dev/null)"
 
   LANE_MAP_JSON="${LANE_MAP_JSON}]"
   sqlite3 "$DB" "INSERT OR REPLACE INTO settings (key, value) VALUES ('standalone_lane_map', '$(echo "$LANE_MAP_JSON" | sed "s/'/''/g")')" 2>/dev/null
   echo "Lane map saved: $LANE_MAP_JSON" >> $LOG
+
+  # Second pass: turn the collected isolation list into nftables rules, now
+  # that every lane's interface name is known. For each lane that opted
+  # into isolate_from_other_lanes, traffic FROM it TO any other lane's
+  # interface is dropped - the fix for the firewall gap found 2026-08-09
+  # (an authenticated gated-lane customer could otherwise reach any other
+  # lane's private subnet, since the existing rules only ever checked
+  # source lane, never destination). Internet access is unaffected - WAN_VIF
+  # is never a member of ALL_LANE_IFS, so this never blocks outbound traffic.
+  NFT_ISOLATION_RULES=""
+  for ISO_IF in $ISOLATED_LANE_IFS; do
+      OTHER_IFS=""
+      for CHECK_IF in $ALL_LANE_IFS; do
+          [ "$CHECK_IF" = "$ISO_IF" ] && continue
+          [ -n "$OTHER_IFS" ] && OTHER_IFS="${OTHER_IFS}, "
+          OTHER_IFS="${OTHER_IFS}\"$CHECK_IF\""
+      done
+      if [ -n "$OTHER_IFS" ]; then
+          NFT_ISOLATION_RULES="${NFT_ISOLATION_RULES}
+        iifname \"$ISO_IF\" oifname { $OTHER_IFS } drop"
+      fi
+  done
 
   cat > /etc/dnsmasq.d/rj-pisowifi.conf << EOF
 bind-interfaces
@@ -588,6 +620,7 @@ table ip rj_piso {
         type filter hook forward priority filter; policy accept;
         ct state established,related accept
         ip protocol { tcp, udp } flow add @ft
+$NFT_ISOLATION_RULES
 $NFT_FORWARD_RULES
     }
     chain postrouting {
