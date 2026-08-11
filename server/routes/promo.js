@@ -9,6 +9,18 @@ const {
 } = require('../services/sessionService');
 const { setClientBandwidth } = require('../services/networkService');
 const { logFinancialEvent } = require('../services/financialLogService');
+const { z, macAddress, validateBody } = require('../utils/validation');
+
+// Real voucher codes are RJ-XXXXXX (see voucherService.js's own generator)
+// or a promo/manual code entered by an admin - both go through the same
+// normalize step below (dash-insertion), so this only needs to bound
+// length/charset generously enough to cover both, not match one exact
+// format. Prevents a huge/garbage payload from ever reaching the DB query
+// or the normalize regex.
+const redeemSchema = z.object({
+  mac: macAddress,
+  code: z.string().trim().min(3).max(40).regex(/^[A-Za-z0-9-]+$/, 'Invalid code format'),
+});
 
 // Promo redemption is a LAN-only flow — nftables DNATs it straight to this
 // app, bypassing nginx (setup/nginx.conf, WAN admin access only) entirely —
@@ -21,7 +33,7 @@ function getRealClientIp(req) {
 }
 
 // POST /api/promo/redeem
-router.post('/redeem', async (req, res) => {
+router.post('/redeem', validateBody(redeemSchema), async (req, res) => {
   try {
     const ip = getRealClientIp(req);
 
@@ -37,19 +49,12 @@ router.post('/redeem', async (req, res) => {
       });
     }
 
-    if (!req.body.mac || !req.body.code) {
-      return res.status(400).json({
-        success: false,
-        message: 'MAC address and code required'
-      });
-    }
-
     // Bug: promo_vouchers.mac_address is looked up/stored with whatever
     // case the client sent — coin.js lowercases MACs before touching the
     // sessions table, but this route didn't, so the same device could look
     // "new" here just from a casing difference against its own coin-created
     // history. Normalize to match the rest of the system.
-    const mac = String(req.body.mac).trim().toLowerCase();
+    const mac = req.body.mac.toLowerCase();
     const code = req.body.code;
 
     // Normalize code — accept with or without dash

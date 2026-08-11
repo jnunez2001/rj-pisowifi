@@ -29,12 +29,92 @@ const APP_VERSION = packageJson.version;
 const app = express();
 const PORT = 3000;
 
-app.use(helmet({ contentSecurityPolicy: false }));
-app.use(cors());
+// CSP was previously disabled outright. A real policy is now enforced,
+// but script-src still needs 'unsafe-inline': the admin UI has 50+
+// existing onclick="..." handlers across every page's JS, and CSP's
+// script-src-attr directive (which could isolate just those handlers
+// without allowing inline <script> blocks) isn't supported in Safari -
+// unreliable for operators administering from a Mac/iPhone/iPad. Removing
+// the inline handlers in favor of addEventListener is real, separate
+// follow-up work, not something to half-do here. What this DOES still
+// block that `false` did not: any injected <script src="https://attacker...">
+// pointing off this small known allowlist, framing this page in another
+// site (clickjacking), and form submissions to a foreign origin.
+const CSP_SCRIPT_SOURCES = ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com'];
+const CSP_STYLE_SOURCES = ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://fonts.googleapis.com'];
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: CSP_SCRIPT_SOURCES,
+      scriptSrcElem: CSP_SCRIPT_SOURCES,
+      // Helmet defaults script-src-attr/style-src-attr to 'none'
+      // independently of script-src/style-src - Chrome and Firefox
+      // enforce that strict default even when script-src itself allows
+      // 'unsafe-inline' (only Safari falls back to script-src for this).
+      // Must be set explicitly or the 50+ onclick="..." handlers break in
+      // Chrome/Firefox while silently working in Safari.
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: CSP_STYLE_SOURCES,
+      styleSrcElem: CSP_STYLE_SOURCES,
+      styleSrcAttr: ["'unsafe-inline'"],
+      fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'data:'],
+      imgSrc: ["'self'", 'data:', 'blob:'],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+      frameAncestors: ["'self'"],
+      upgradeInsecureRequests: [],
+    },
+  },
+}));
+
+// cors() with no options reflects and allows ANY origin. Nothing in this
+// app actually needs cross-origin browser access - the admin/portal HTML
+// and JS are served by this same Express server, so legitimate requests
+// are always same-origin (no CORS headers required at all for those).
+// The only thing wide-open CORS was doing was letting a page on any OTHER
+// site make credentialed requests against this API from a victim's
+// browser. ZENFI_ALLOWED_ORIGINS is available as an escape hatch for a
+// genuine future cross-origin integration (e.g. zentry-hub calling a
+// box's API directly), comma-separated, empty/unset by default.
+const allowedOrigins = (process.env.ZENFI_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+app.use(cors({
+  origin: allowedOrigins.length > 0 ? allowedOrigins : false,
+}));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Bug: /admin (the login page and every admin UI asset) and /api/admin/*
+// Trust only the loopback interface as a proxy source - nginx (WAN admin
+// front door, see setup/nginx.conf) always connects from 127.0.0.1 and
+// correctly sets X-Forwarded-For to the real remote address ($remote_addr,
+// not blindly relayed from the client). An external attacker can't spoof a
+// loopback TCP source, so this is safe and makes req.ip accurate for both
+// WAN-via-nginx admin traffic and direct LAN/portal traffic - required for
+// per-client rate limiting below to actually bucket by real client, not by
+// nginx's own address for every WAN request.
+app.set('trust proxy', 'loopback');
+
+// General flood/DoS safety net across the whole API - separate from
+// spamService.js, which targets repeated failed attempts on specific
+// sensitive actions (login, coin, voucher redemption) and is unaffected by
+// this. This just caps raw request volume per client. Sized generously
+// above the portal's own fastest legitimate polling (coin-pending checks
+// every 1.5s = ~40/min) so real customers never get caught by it.
+const { rateLimit } = require('express-rate-limit');
+app.use('/api', rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: 600,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: { success: false, message: 'Too many requests, please slow down.' },
+}));
+
+// Bug: /admin (the login page and every admin UI assets) and /api/admin/*
 // were reachable by anyone on any lane who guessed the URL - nginx.conf's
 // own comment states admin access is meant to go exclusively through its
 // WAN-facing TLS front door, but nothing on this side ever actually
