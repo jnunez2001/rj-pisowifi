@@ -1,6 +1,7 @@
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const { randomInt } = require('crypto');
 
 // Pre-create upload directory on startup (Bug #16)
 const uploadPath = path.join(__dirname, '../../public/portal/assets');
@@ -688,12 +689,14 @@ function generateCustomVoucherCode(length, charset, caseOption) {
   for (let attempt = 0; attempt < 50; attempt++) {
     let code = '';
     for (let i = 0; i < length; i++) {
-      code += pool.charAt(Math.floor(Math.random() * pool.length));
+      // crypto.randomInt(), not Math.random() - these are real,
+      // customer-redeemable secrets (₱ value attached), not cosmetic IDs.
+      code += pool.charAt(randomInt(pool.length));
     }
     if (caseOption === 'lower') {
       code = code.toLowerCase();
     } else if (caseOption === 'mixed') {
-      code = code.split('').map(c => Math.random() < 0.5 ? c.toLowerCase() : c.toUpperCase()).join('');
+      code = code.split('').map(c => randomInt(2) === 0 ? c.toLowerCase() : c.toUpperCase()).join('');
     }
     // Bug-avoidance: promo.js's redeem normalization treats a code starting
     // with the literal prefixes "PROMO" or "RJ" specially (inserts a dash).

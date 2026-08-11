@@ -47,10 +47,22 @@ void postCoin(int coinValue) {
   Serial.println("Posting coin: P" + String(coinValue));
   lcdPrint(2, "Coin: P" + String(coinValue));
 
+  // One event_id minted per physical coin event (this call), reused across
+  // every retry attempt below for THIS same event - the other half of the
+  // idempotency fix the comment above already flagged as missing. The
+  // server (coinCreditService.js) dedupes on this so a retried-but-already-
+  // credited coin (server got it, response got lost) is answered with the
+  // original result instead of being credited a second time. esp_random()
+  // is the ESP32 hardware RNG; combined with millis() and the coin value
+  // it's unique enough for a short in-memory dedupe window, not meant to be
+  // cryptographically unguessable.
+  String eventId = String(esp_random(), HEX) + "-" + String(millis(), HEX);
+
   String payload = "{";
   payload += "\"mac\":\"" + WiFi.macAddress() + "\",";
   payload += "\"coin_value\":" + String(coinValue) + ",";
-  payload += "\"ip\":\"" + WiFi.localIP().toString() + "\"";
+  payload += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
+  payload += "\"event_id\":\"" + eventId + "\"";
   payload += "}";
 
   const int maxAttempts = 3;

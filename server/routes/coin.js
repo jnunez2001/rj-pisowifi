@@ -21,6 +21,25 @@ let pendingSetAt = 0;
 let pendingTotal = 0;
 const PENDING_TIMEOUT_MS = 40000; // must match/slightly exceed portal's 30s coin timer
 
+// Idempotency cache for coin.cpp's postCoin() event_id. The ESP32 retries
+// a coin POST only when it never received a response (network-level
+// failure - see coin.cpp's own comment), which means the server may have
+// already successfully credited it before the retry arrives. Without this,
+// a retry is indistinguishable from a second real coin and gets credited
+// twice. Keyed on event_id -> the exact response object first returned for
+// it, replayed verbatim on a repeat instead of crediting again. 5 minutes
+// covers the firmware's worst case (3 attempts, 5s timeout + 1s delay each,
+// well under 30s) with generous margin, and old entries are swept so this
+// never grows unbounded on a box that runs for months.
+const coinEventCache = new Map();
+const COIN_EVENT_TTL_MS = 5 * 60 * 1000;
+function pruneCoinEventCache() {
+  const cutoff = Date.now() - COIN_EVENT_TTL_MS;
+  for (const [id, entry] of coinEventCache) {
+    if (entry.at < cutoff) coinEventCache.delete(id);
+  }
+}
+
 // POST /api/coin/pending — portal calls this right when INSERT COIN modal opens
 router.post('/pending', (req, res) => {
   const { mac } = req.body;
@@ -45,7 +64,22 @@ router.get('/pending/:mac', (req, res) => {
 // POST /api/coin — ESP32 calls this when a coin is detected
 router.post('/', async (req, res) => {
   try {
-    const { mac: deviceMac, coin_value, ip, device_key } = req.body;
+    const { mac: deviceMac, coin_value, ip, device_key, event_id } = req.body;
+
+    // Idempotency replay: event_id is optional (absent on any ESP32
+    // running older firmware, which must keep working exactly as before -
+    // same "optional, unaffected if missing" contract as device_key
+    // below). If present and already seen, this is a retry of a coin the
+    // server already credited - answer with the original result instead
+    // of running creditCoinValue() again.
+    if (event_id) {
+      pruneCoinEventCache();
+      const cached = coinEventCache.get(String(event_id));
+      if (cached) {
+        console.log(`🔁 Duplicate coin event_id ${event_id}, replaying original result (no double-credit)`);
+        return res.json(cached.result);
+      }
+    }
 
     // Optional - absent on every existing ESP32 deployment in the field,
     // which must keep working exactly as before. Only a request that
@@ -112,6 +146,10 @@ router.post('/', async (req, res) => {
         });
       }
       throw err;
+    }
+
+    if (event_id) {
+      coinEventCache.set(String(event_id), { result, at: Date.now() });
     }
 
     clearAttempts(mac);

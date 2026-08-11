@@ -1,10 +1,14 @@
 const db = require('../config/database');
+const { randomInt } = require('crypto');
 
 function generateVoucherCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let code = 'RJ-';
   for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
+    // crypto.randomInt(), not Math.random() - this is a real, guessable
+    // secret (looked up directly by promo.js/session lookups), not just
+    // an internal counter.
+    code += chars.charAt(randomInt(chars.length));
   }
   const existing = db.prepare(
     'SELECT id FROM sessions WHERE voucher_code = ?'
