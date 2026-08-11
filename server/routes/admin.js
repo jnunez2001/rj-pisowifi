@@ -2058,6 +2058,22 @@ router.post('/network', adminAuth, (req, res) => {
   }
 });
 
+// GET /api/admin/network/wan-health — real, measured latency/packet-loss/
+// link-state check against a public host, scored 0-100 with each
+// deduction traceable to a stated reason (never fabricated). Standalone
+// mode also reports the local WAN interface's link state; MikroTik mode's
+// WAN health (would need RouterOS-side data) isn't built yet.
+router.get('/network/wan-health', adminAuth, async (req, res) => {
+  try {
+    const { checkWanHealth } = require('../services/wanHealthService');
+    const health = await checkWanHealth();
+    return res.json({ success: true, health });
+  } catch (err) {
+    console.error('WAN health check error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/network
 router.get('/network', adminAuth, (req, res) => {
   try {
