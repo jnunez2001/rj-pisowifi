@@ -2350,6 +2350,78 @@ router.delete('/network/mikrotik/vlans/:id', adminAuth, async (req, res) => {
   }
 });
 
+// ===== MIKROTIK DHCP MANAGER (network power parity with Standalone) =====
+// A VLAN from the manager above is just an addressed interface until it
+// can hand out addresses - this is the other half. mikrotikService.js's
+// listDhcpServers/createDhcpServer/deleteDhcpServer create/remove the
+// linked pool + DHCP server + network objects together.
+
+const CIDR_REGEX = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\/\d{1,2}$/;
+const IPV4_REGEX = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+const mikrotikDhcpSchema = z.object({
+  interfaceName: z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_.-]+$/, 'Invalid interface name'),
+  poolRange: z.string().trim().regex(new RegExp(`^${IPV4_REGEX.source.slice(1, -1)}-${IPV4_REGEX.source.slice(1, -1)}$`), 'Must be IP-IP form, e.g. 192.168.13.10-192.168.13.250'),
+  network: z.string().trim().regex(CIDR_REGEX, 'Must be CIDR form, e.g. 192.168.13.0/24'),
+  gateway: z.string().trim().regex(IPV4_REGEX, 'Invalid gateway IP'),
+  dnsServers: z.string().trim().regex(IPV4_REGEX).optional().or(z.literal('')),
+  name: z.string().trim().max(64).optional(),
+});
+
+// GET /api/admin/network/mikrotik/dhcp
+router.get('/network/mikrotik/dhcp', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const servers = await mikrotikService.listDhcpServers();
+    return res.json({ success: true, servers });
+  } catch (err) {
+    console.error('MikroTik DHCP list error:', err);
+    res.status(500).json({ success: false, message: 'Failed to reach router: ' + err.message });
+  }
+});
+
+// POST /api/admin/network/mikrotik/dhcp
+router.post('/network/mikrotik/dhcp', adminAuth, validateBody(mikrotikDhcpSchema), async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const { interfaceName, poolRange, network, gateway, dnsServers, name } = req.body;
+    const created = await mikrotikService.createDhcpServer({ interfaceName, poolRange, network, gateway, dnsServers: dnsServers || null, name });
+    console.log(`📡 MikroTik DHCP server created: ${created.name} on ${created.interface}`);
+    return res.json({ success: true, server: created });
+  } catch (err) {
+    if (err instanceof (require('../services/mikrotikService').MikrotikDhcpConflictError)) {
+      return res.status(409).json({ success: false, message: err.message });
+    }
+    console.error('MikroTik DHCP create error:', err);
+    res.status(500).json({ success: false, message: 'Failed to create DHCP server: ' + err.message });
+  }
+});
+
+// DELETE /api/admin/network/mikrotik/dhcp/:id — RouterOS ".id", same
+// reasoning as the VLAN delete route above (no local mirror table).
+router.delete('/network/mikrotik/dhcp/:id', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const result = await mikrotikService.deleteDhcpServer(req.params.id);
+    if (!result.removed) {
+      return res.status(404).json({ success: false, message: 'DHCP server not found on router' });
+    }
+    console.log(`📡 MikroTik DHCP server deleted: ${req.params.id}`);
+    return res.json({ success: true, message: 'DHCP server deleted' });
+  } catch (err) {
+    console.error('MikroTik DHCP delete error:', err);
+    res.status(500).json({ success: false, message: 'Failed to delete DHCP server: ' + err.message });
+  }
+});
+
 // ===== TIER 1 STANDALONE FEATURES: static DHCP leases, client naming,
 // port forwarding, diagnostics (STANDALONE_ARCHITECTURE_PLAN.md) =====
 

@@ -624,6 +624,152 @@ async function deleteVlan(mikrotikId) {
   });
 }
 
+// ===== DHCP MANAGER (network power parity with Standalone mode) =====
+// A VLAN created above is just an addressed interface until it can
+// actually hand out addresses - this is the other half of "make a usable
+// network." Creates the three linked RouterOS objects a working DHCP
+// server needs: an address pool (/ip/pool), the server itself bound to an
+// interface (/ip/dhcp-server), and the network definition telling clients
+// their gateway/DNS (/ip/dhcp-server/network). All three are created
+// together and rolled back together on partial failure, same discipline
+// as createVlan() above.
+
+class MikrotikDhcpConflictError extends Error {
+  constructor(msg) {
+    super(msg);
+    this.name = 'MikrotikDhcpConflictError';
+  }
+}
+
+async function listDhcpServers() {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const [serversRes, poolsRes, networksRes] = await Promise.all([
+      client.talk(['/ip/dhcp-server/print']),
+      client.talk(['/ip/pool/print']),
+      client.talk(['/ip/dhcp-server/network/print']),
+    ]);
+    return serversRes.re.map((s) => {
+      const pool = poolsRes.re.find((p) => p.name === s['address-pool']);
+      const network = networksRes.re.find((n) => pool && n.address && pool.ranges && pool.ranges.startsWith(n.address.split('/')[0].split('.').slice(0, 3).join('.')));
+      return {
+        id: s['.id'],
+        name: s.name,
+        interface: s.interface,
+        disabled: s.disabled === 'true',
+        pool_name: s['address-pool'] || null,
+        pool_ranges: pool ? pool.ranges : null,
+        network: network ? network.address : null,
+        gateway: network ? network.gateway : null,
+        dns_servers: network ? network['dns-server'] : null,
+      };
+    });
+  });
+}
+
+// poolRange: "192.168.13.10-192.168.13.250". network: "192.168.13.0/24".
+// gateway: "192.168.13.1". dnsServers defaults to gateway if not given -
+// same "sane default, overridable" pattern the rest of this app uses for
+// bandwidth/QoS settings.
+async function createDhcpServer({ interfaceName, poolRange, network, gateway, dnsServers, name }) {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  const serverName = name || `dhcp-${interfaceName}`;
+  const poolName = `pool-${interfaceName}`;
+
+  return withMikrotik(config, async (client) => {
+    const existing = await client.talk(['/ip/dhcp-server/print', `?interface=${interfaceName}`]);
+    if (existing.re.length > 0) {
+      throw new MikrotikDhcpConflictError(`A DHCP server already exists on ${interfaceName}`);
+    }
+
+    await client.talk(['/ip/pool/add', `=name=${poolName}`, `=ranges=${poolRange}`]);
+
+    try {
+      await client.talk([
+        '/ip/dhcp-server/add',
+        `=name=${serverName}`,
+        `=interface=${interfaceName}`,
+        `=address-pool=${poolName}`,
+        '=disabled=no',
+      ]);
+    } catch (err) {
+      await rollbackPool(client, poolName);
+      throw err;
+    }
+
+    try {
+      await client.talk([
+        '/ip/dhcp-server/network/add',
+        `=address=${network}`,
+        `=gateway=${gateway}`,
+        `=dns-server=${dnsServers || gateway}`,
+      ]);
+    } catch (err) {
+      // Roll back both the server and the pool - same "don't leave a
+      // half-configured object behind" discipline as createVlan().
+      await rollbackDhcpServer(client, serverName);
+      await rollbackPool(client, poolName);
+      throw err;
+    }
+
+    const confirm = await client.talk(['/ip/dhcp-server/print', `?name=${serverName}`]);
+    if (confirm.re.length === 0) {
+      throw new Error('DHCP server creation appeared to succeed but is not present on re-check');
+    }
+    return { name: serverName, interface: interfaceName, pool_name: poolName, network, gateway };
+  });
+}
+
+async function rollbackPool(client, poolName) {
+  try {
+    const pool = await client.talk(['/ip/pool/print', `?name=${poolName}`]);
+    if (pool.re[0]) await client.talk(['/ip/pool/remove', `=.id=${pool.re[0]['.id']}`]);
+  } catch (e) {
+    console.error('MikroTik DHCP pool rollback failed:', e.message);
+  }
+}
+
+async function rollbackDhcpServer(client, serverName) {
+  try {
+    const server = await client.talk(['/ip/dhcp-server/print', `?name=${serverName}`]);
+    if (server.re[0]) await client.talk(['/ip/dhcp-server/remove', `=.id=${server.re[0]['.id']}`]);
+  } catch (e) {
+    console.error('MikroTik DHCP server rollback failed:', e.message);
+  }
+}
+
+async function deleteDhcpServer(mikrotikId) {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const server = await client.talk(['/ip/dhcp-server/print', `?.id=${mikrotikId}`]);
+    if (server.re.length === 0) return { removed: false, reason: 'not_found' };
+    const { name: serverName, 'address-pool': poolName } = server.re[0];
+
+    const networks = await client.talk(['/ip/dhcp-server/network/print']);
+    // Network entries aren't linked to a server by id in RouterOS - they're
+    // matched by address range against the pool's own range, same join
+    // listDhcpServers() above does for display. Best-effort cleanup: only
+    // remove a network entry if it's unambiguously this pool's own.
+    const pool = poolName ? (await client.talk(['/ip/pool/print', `?name=${poolName}`])).re[0] : null;
+    if (pool && pool.ranges) {
+      const poolSubnet = pool.ranges.split('.').slice(0, 3).join('.');
+      for (const n of networks.re) {
+        if (n.address && n.address.split('.').slice(0, 3).join('.') === poolSubnet) {
+          await client.talk(['/ip/dhcp-server/network/remove', `=.id=${n['.id']}`]);
+        }
+      }
+    }
+
+    await client.talk(['/ip/dhcp-server/remove', `=.id=${mikrotikId}`]);
+    if (poolName) await rollbackPool(client, poolName);
+
+    return { removed: true };
+  });
+}
+
 module.exports = {
   allowClient,
   blockClient,
@@ -642,4 +788,8 @@ module.exports = {
   createVlan,
   deleteVlan,
   MikrotikVlanConflictError,
+  listDhcpServers,
+  createDhcpServer,
+  deleteDhcpServer,
+  MikrotikDhcpConflictError,
 };
