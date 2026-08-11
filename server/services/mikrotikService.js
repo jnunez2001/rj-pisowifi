@@ -854,6 +854,97 @@ async function setInterfaceRole(interfaceName, role) {
   });
 }
 
+// ===== FIREWALL ZONE BUILDER (network power parity - the MikroTik half
+// of the gap found while building Standalone's lane-isolation fix) =====
+// Zone-to-zone policy ("Guest -> LAN: DENY") using the interface-lists
+// from the role manager above, same shape the dev-handoff specs describe
+// (a simple ALLOW/DENY builder, not raw RouterOS rule syntax). Every rule
+// this creates is tagged with a distinct comment prefix so it's always
+// identifiable as ZenFi-managed and never confused with (or silently
+// overwritten alongside) rules an operator configured by hand in WinBox.
+
+class MikrotikZonePolicyConflictError extends Error {
+  constructor(msg) {
+    super(msg);
+    this.name = 'MikrotikZonePolicyConflictError';
+  }
+}
+
+const ZONE_POLICY_COMMENT_PREFIX = 'zenfi-zone-policy:';
+
+function zonePolicyComment(fromZone, toZone) {
+  return `${ZONE_POLICY_COMMENT_PREFIX}${fromZone}->${toZone}`;
+}
+
+async function listFirewallZonePolicies() {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const res = await client.talk(['/ip/firewall/filter/print']);
+    return res.re
+      .filter((r) => (r.comment || '').startsWith(ZONE_POLICY_COMMENT_PREFIX))
+      .map((r) => {
+        const [fromZone, toZone] = (r.comment || '').slice(ZONE_POLICY_COMMENT_PREFIX.length).split('->');
+        return { id: r['.id'], from_zone: fromZone, to_zone: toZone, action: r.action, disabled: r.disabled === 'true' };
+      });
+  });
+}
+
+// Inserted at the TOP of the forward chain (place=0 - RouterOS evaluates
+// filter rules top to bottom, first match wins) so a zone policy actually
+// takes precedence over any general accept rule already there, the same
+// "isolation must actually take effect, not just exist" concern the
+// Standalone nftables fix addressed.
+async function createFirewallZonePolicy({ fromZone, toZone, action }) {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  const fromList = MIKROTIK_ROLE_LISTS[fromZone];
+  const toList = MIKROTIK_ROLE_LISTS[toZone];
+  if (!fromList || !toList) throw new Error(`Unknown zone: ${fromZone} or ${toZone}`);
+
+  return withMikrotik(config, async (client) => {
+    const comment = zonePolicyComment(fromZone, toZone);
+    const existing = await client.talk(['/ip/firewall/filter/print', `?comment=${comment}`]);
+    if (existing.re.length > 0) {
+      throw new MikrotikZonePolicyConflictError(`A policy for ${fromZone} -> ${toZone} already exists`);
+    }
+
+    await client.talk([
+      '/ip/firewall/filter/add',
+      '=chain=forward',
+      `=in-interface-list=${fromList}`,
+      `=out-interface-list=${toList}`,
+      `=action=${action}`,
+      `=comment=${comment}`,
+      '=place-before=0',
+    ]);
+
+    const confirm = await client.talk(['/ip/firewall/filter/print', `?comment=${comment}`]);
+    if (confirm.re.length === 0) {
+      throw new Error('Zone policy creation appeared to succeed but is not present on re-check');
+    }
+    return { from_zone: fromZone, to_zone: toZone, action };
+  });
+}
+
+async function deleteFirewallZonePolicy(mikrotikId) {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const rule = await client.talk(['/ip/firewall/filter/print', `?.id=${mikrotikId}`]);
+    if (rule.re.length === 0) return { removed: false, reason: 'not_found' };
+    // Safety: only ever remove a rule this feature itself created (the
+    // comment prefix check), never an arbitrary firewall rule an operator
+    // might pass an id for - this endpoint must not become a generic
+    // "delete any firewall rule" primitive.
+    if (!(rule.re[0].comment || '').startsWith(ZONE_POLICY_COMMENT_PREFIX)) {
+      return { removed: false, reason: 'not_a_zone_policy' };
+    }
+    await client.talk(['/ip/firewall/filter/remove', `=.id=${mikrotikId}`]);
+    return { removed: true };
+  });
+}
+
 module.exports = {
   allowClient,
   blockClient,
@@ -878,4 +969,8 @@ module.exports = {
   MikrotikDhcpConflictError,
   listInterfaceRoles,
   setInterfaceRole,
+  listFirewallZonePolicies,
+  createFirewallZonePolicy,
+  deleteFirewallZonePolicy,
+  MikrotikZonePolicyConflictError,
 };

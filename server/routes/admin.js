@@ -2480,6 +2480,73 @@ router.post('/network/mikrotik/roles', adminAuth, validateBody(mikrotikRoleSchem
   }
 });
 
+// ===== MIKROTIK FIREWALL ZONE BUILDER (network power parity - MikroTik
+// half of the isolation gap found while building Standalone's fix) =====
+// Simple ALLOW/DENY between zones (interface-list roles from above), not
+// raw firewall rule syntax - matches the dev-handoff spec's own "Guest ->
+// LAN: DENY" example. Every rule is tagged and only ever deleted by this
+// feature if it created it (mikrotikService.js's own safety check).
+
+const mikrotikZonePolicySchema = z.object({
+  fromZone: z.enum(['wan', 'lan', 'guest']),
+  toZone: z.enum(['wan', 'lan', 'guest']),
+  action: z.enum(['accept', 'drop', 'reject']),
+});
+
+// GET /api/admin/network/mikrotik/firewall-zones
+router.get('/network/mikrotik/firewall-zones', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const policies = await mikrotikService.listFirewallZonePolicies();
+    return res.json({ success: true, policies });
+  } catch (err) {
+    console.error('MikroTik zone policy list error:', err);
+    res.status(500).json({ success: false, message: 'Failed to reach router: ' + err.message });
+  }
+});
+
+// POST /api/admin/network/mikrotik/firewall-zones
+router.post('/network/mikrotik/firewall-zones', adminAuth, validateBody(mikrotikZonePolicySchema), async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const { fromZone, toZone, action } = req.body;
+    const created = await mikrotikService.createFirewallZonePolicy({ fromZone, toZone, action });
+    console.log(`🛡️ MikroTik zone policy created: ${created.from_zone} → ${created.to_zone} = ${created.action}`);
+    return res.json({ success: true, policy: created });
+  } catch (err) {
+    if (err instanceof (require('../services/mikrotikService').MikrotikZonePolicyConflictError)) {
+      return res.status(409).json({ success: false, message: err.message });
+    }
+    console.error('MikroTik zone policy create error:', err);
+    res.status(500).json({ success: false, message: 'Failed to create policy: ' + err.message });
+  }
+});
+
+// DELETE /api/admin/network/mikrotik/firewall-zones/:id
+router.delete('/network/mikrotik/firewall-zones/:id', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const result = await mikrotikService.deleteFirewallZonePolicy(req.params.id);
+    if (!result.removed) {
+      return res.status(404).json({ success: false, message: result.reason === 'not_a_zone_policy' ? 'That rule was not created by this feature' : 'Policy not found on router' });
+    }
+    console.log(`🛡️ MikroTik zone policy deleted: ${req.params.id}`);
+    return res.json({ success: true, message: 'Policy deleted' });
+  } catch (err) {
+    console.error('MikroTik zone policy delete error:', err);
+    res.status(500).json({ success: false, message: 'Failed to delete policy: ' + err.message });
+  }
+});
+
 // ===== TIER 1 STANDALONE FEATURES: static DHCP leases, client naming,
 // port forwarding, diagnostics (STANDALONE_ARCHITECTURE_PLAN.md) =====
 
