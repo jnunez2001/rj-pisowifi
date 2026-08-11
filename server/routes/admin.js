@@ -2668,6 +2668,65 @@ router.post('/network/dns', adminAuth, validateBody(dnsSchema), async (req, res)
   }
 });
 
+// ===== NAMED BANDWIDTH PROFILES (network power) =====
+// Previously an admin had to type raw Mbps numbers into every voucher's
+// optional override fields by hand each time - no saved "Premium: 30/15"
+// preset to pick from. A voucher can optionally reference a profile
+// (bandwidth_profile_id) instead of/alongside its own direct
+// download_mbps/upload_mbps fields; promo.js's redeem route resolves the
+// profile's numbers when the voucher itself doesn't have direct values.
+
+const bandwidthProfileSchema = z.object({
+  name: z.string().trim().min(1).max(64),
+  downloadMbps: z.coerce.number().int().min(1).max(10000),
+  uploadMbps: z.coerce.number().int().min(1).max(10000),
+  burstMbps: z.coerce.number().int().min(0).max(10000).optional(),
+});
+
+// GET /api/admin/bandwidth-profiles
+router.get('/bandwidth-profiles', adminAuth, (req, res) => {
+  try {
+    const profiles = db.prepare('SELECT * FROM bandwidth_profiles ORDER BY name').all();
+    return res.json({ success: true, profiles });
+  } catch (err) {
+    console.error('Bandwidth profile list error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/bandwidth-profiles
+router.post('/bandwidth-profiles', adminAuth, validateBody(bandwidthProfileSchema), (req, res) => {
+  try {
+    const { name, downloadMbps, uploadMbps, burstMbps } = req.body;
+    const result = db.prepare(
+      'INSERT INTO bandwidth_profiles (name, download_mbps, upload_mbps, burst_mbps) VALUES (?, ?, ?, ?)'
+    ).run(name, downloadMbps, uploadMbps, burstMbps || 0);
+    console.log(`📶 Bandwidth profile created: ${name} (${downloadMbps}/${uploadMbps}Mbps)`);
+    return res.json({ success: true, id: result.lastInsertRowid });
+  } catch (err) {
+    console.error('Bandwidth profile create error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// DELETE /api/admin/bandwidth-profiles/:id — vouchers referencing this
+// profile keep working: the FK has no ON DELETE CASCADE/RESTRICT, so a
+// deleted profile just leaves bandwidth_profile_id pointing at nothing;
+// promo.js's resolution falls back to the voucher's own direct fields (or
+// the global cap) in that case, same fail-open pattern used elsewhere.
+router.delete('/bandwidth-profiles/:id', adminAuth, (req, res) => {
+  try {
+    const result = db.prepare('DELETE FROM bandwidth_profiles WHERE id = ?').run(req.params.id);
+    if (result.changes === 0) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+    return res.json({ success: true, message: 'Profile deleted' });
+  } catch (err) {
+    console.error('Bandwidth profile delete error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // ===== TIER 1 STANDALONE FEATURES: static DHCP leases, client naming,
 // port forwarding, diagnostics (STANDALONE_ARCHITECTURE_PLAN.md) =====
 

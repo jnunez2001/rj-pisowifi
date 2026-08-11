@@ -315,6 +315,19 @@ db.exec(`
     verify_status TEXT,
     verify_detail TEXT
   );
+
+  -- Named, reusable bandwidth profiles (network power) - previously an
+  -- admin had to type raw Mbps numbers into every voucher's optional
+  -- override fields by hand, no saved "Premium: 30/15" preset to pick
+  -- from. Referenced by promo_vouchers.bandwidth_profile_id below.
+  CREATE TABLE IF NOT EXISTS bandwidth_profiles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    download_mbps INTEGER NOT NULL,
+    upload_mbps INTEGER NOT NULL,
+    burst_mbps INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
 
 // router_ports' shape changed from "one row per port" to "one row per lane
@@ -683,6 +696,16 @@ try {
   if (!dnsRow1) db.prepare("INSERT INTO settings (key, value) VALUES ('dns_upstream_1', '8.8.8.8')").run();
   const dnsRow2 = db.prepare("SELECT key FROM settings WHERE key = 'dns_upstream_2'").get();
   if (!dnsRow2) db.prepare("INSERT INTO settings (key, value) VALUES ('dns_upstream_2', '8.8.4.4')").run();
+}
+
+try {
+  // Optional link to a saved bandwidth_profiles row - NULL means "use the
+  // voucher's own download_mbps/upload_mbps fields directly" (unchanged
+  // existing behavior), same "opt-in, nothing breaks" pattern as every
+  // other additive column in this file.
+  db.exec('ALTER TABLE promo_vouchers ADD COLUMN bandwidth_profile_id INTEGER REFERENCES bandwidth_profiles(id)');
+} catch (e) {
+  // already applied
 }
 
 // VAPID keypair for Web Push (server/services/pushNotificationService.js) -

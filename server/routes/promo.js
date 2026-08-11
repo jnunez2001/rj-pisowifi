@@ -113,16 +113,28 @@ router.post('/redeem', validateBody(redeemSchema), async (req, res) => {
     // numbers win.
     db.prepare('UPDATE sessions SET redeemed_code = ? WHERE voucher_code = ?').run(normalized, session.voucher_code);
 
-    // Per-voucher bandwidth override (Create Voucher's optional Mbps
-    // fields). createSession()/addTimeToSession() above already applied
-    // the global cap (or the session's existing override, on a top-up) -
-    // this replaces it with the NEW voucher's numbers if it has its own,
-    // and saves them on the session itself so timerService.js's 30s
+    // Per-voucher bandwidth override: either the voucher's own direct
+    // Mbps fields, or (network power feature) a named bandwidth_profiles
+    // row it references - direct fields win if somehow both are set,
+    // since they're the more specific/explicit choice. A profile that's
+    // since been deleted just resolves to nothing here (no dangling-FK
+    // crash), same fail-open pattern the rest of this app follows.
+    let profileOverride = null;
+    if (!promo.download_mbps && promo.bandwidth_profile_id) {
+      profileOverride = db.prepare('SELECT download_mbps, upload_mbps FROM bandwidth_profiles WHERE id = ?').get(promo.bandwidth_profile_id);
+    }
+    const effectiveDownload = promo.download_mbps || (profileOverride && profileOverride.download_mbps);
+    const effectiveUpload = promo.upload_mbps || (profileOverride && profileOverride.upload_mbps);
+
+    // createSession()/addTimeToSession() above already applied the global
+    // cap (or the session's existing override, on a top-up) - this
+    // replaces it with the NEW voucher's numbers if it has its own, and
+    // saves them on the session itself so timerService.js's 30s
     // self-healing re-assertion keeps using THIS voucher's speed instead of
     // silently reverting to the global cap on its next tick.
-    if (promo.download_mbps) {
-      const overrideDown = promo.download_mbps;
-      const overrideUp = promo.upload_mbps || promo.download_mbps;
+    if (effectiveDownload) {
+      const overrideDown = effectiveDownload;
+      const overrideUp = effectiveUpload || effectiveDownload;
       db.prepare('UPDATE sessions SET download_mbps = ?, upload_mbps = ? WHERE voucher_code = ?')
         .run(overrideDown, overrideUp, session.voucher_code);
       try {
