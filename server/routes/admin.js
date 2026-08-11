@@ -2547,6 +2547,72 @@ router.delete('/network/mikrotik/firewall-zones/:id', adminAuth, async (req, res
   }
 });
 
+// ===== MIKROTIK NAT/PORT-FORWARD MANAGER (network power parity) =====
+// Mirrors Standalone mode's Port Forwarding UI. RouterOS dstnat rules
+// scoped to the WAN interface list, tagged and only-delete-your-own,
+// same discipline as the firewall zone manager above.
+
+const mikrotikPortForwardSchema = z.object({
+  protocol: z.enum(['tcp', 'udp']),
+  externalPort: z.coerce.number().int().min(1).max(65535),
+  internalIp: z.string().trim().regex(IPV4_REGEX, 'Invalid internal IP'),
+  internalPort: z.coerce.number().int().min(1).max(65535),
+});
+
+// GET /api/admin/network/mikrotik/port-forwards
+router.get('/network/mikrotik/port-forwards', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const forwards = await mikrotikService.listPortForwards();
+    return res.json({ success: true, forwards });
+  } catch (err) {
+    console.error('MikroTik port forward list error:', err);
+    res.status(500).json({ success: false, message: 'Failed to reach router: ' + err.message });
+  }
+});
+
+// POST /api/admin/network/mikrotik/port-forwards
+router.post('/network/mikrotik/port-forwards', adminAuth, validateBody(mikrotikPortForwardSchema), async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const { protocol, externalPort, internalIp, internalPort } = req.body;
+    const created = await mikrotikService.createPortForward({ protocol, externalPort, internalIp, internalPort });
+    console.log(`🔀 MikroTik port forward created: ${created.protocol}/${created.external_port} → ${created.internal_ip}:${created.internal_port}`);
+    return res.json({ success: true, forward: created });
+  } catch (err) {
+    if (err instanceof (require('../services/mikrotikService').MikrotikPortForwardConflictError)) {
+      return res.status(409).json({ success: false, message: err.message });
+    }
+    console.error('MikroTik port forward create error:', err);
+    res.status(500).json({ success: false, message: 'Failed to create forward: ' + err.message });
+  }
+});
+
+// DELETE /api/admin/network/mikrotik/port-forwards/:id
+router.delete('/network/mikrotik/port-forwards/:id', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const result = await mikrotikService.deletePortForward(req.params.id);
+    if (!result.removed) {
+      return res.status(404).json({ success: false, message: result.reason === 'not_a_port_forward' ? 'That rule was not created by this feature' : 'Forward not found on router' });
+    }
+    console.log(`🔀 MikroTik port forward deleted: ${req.params.id}`);
+    return res.json({ success: true, message: 'Port forward deleted' });
+  } catch (err) {
+    console.error('MikroTik port forward delete error:', err);
+    res.status(500).json({ success: false, message: 'Failed to delete forward: ' + err.message });
+  }
+});
+
 // ===== TIER 1 STANDALONE FEATURES: static DHCP leases, client naming,
 // port forwarding, diagnostics (STANDALONE_ARCHITECTURE_PLAN.md) =====
 

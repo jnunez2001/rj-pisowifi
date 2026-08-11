@@ -945,6 +945,87 @@ async function deleteFirewallZonePolicy(mikrotikId) {
   });
 }
 
+// ===== NAT/PORT-FORWARD MANAGER (network power parity) =====
+// Mirrors Standalone mode's port_forwards table/UI. RouterOS dst-nat
+// rules in the /ip/firewall/nat dstnat chain, scoped to the WAN interface
+// list so a forward never accidentally matches traffic arriving from the
+// LAN/GUEST side (same "never on the wrong side" principle Standalone's
+// existing port-forward rules already follow, scoped to WAN_VIF there).
+// Same tag-and-only-delete-your-own-rules discipline as the firewall
+// zone manager above.
+
+class MikrotikPortForwardConflictError extends Error {
+  constructor(msg) {
+    super(msg);
+    this.name = 'MikrotikPortForwardConflictError';
+  }
+}
+
+const PORT_FORWARD_COMMENT_PREFIX = 'zenfi-port-forward:';
+
+async function listPortForwards() {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const res = await client.talk(['/ip/firewall/nat/print']);
+    return res.re
+      .filter((r) => (r.comment || '').startsWith(PORT_FORWARD_COMMENT_PREFIX))
+      .map((r) => ({
+        id: r['.id'],
+        protocol: r.protocol,
+        external_port: parseInt(r['dst-port'], 10),
+        internal_ip: r['to-addresses'],
+        internal_port: parseInt(r['to-ports'], 10),
+        disabled: r.disabled === 'true',
+      }));
+  });
+}
+
+async function createPortForward({ protocol, externalPort, internalIp, internalPort }) {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  const comment = `${PORT_FORWARD_COMMENT_PREFIX}${protocol}:${externalPort}`;
+
+  return withMikrotik(config, async (client) => {
+    const existing = await client.talk(['/ip/firewall/nat/print', `?comment=${comment}`]);
+    if (existing.re.length > 0) {
+      throw new MikrotikPortForwardConflictError(`A forward for ${protocol}/${externalPort} already exists`);
+    }
+
+    await client.talk([
+      '/ip/firewall/nat/add',
+      '=chain=dstnat',
+      `=in-interface-list=${MIKROTIK_ROLE_LISTS.wan}`,
+      `=protocol=${protocol}`,
+      `=dst-port=${externalPort}`,
+      '=action=dst-nat',
+      `=to-addresses=${internalIp}`,
+      `=to-ports=${internalPort}`,
+      `=comment=${comment}`,
+    ]);
+
+    const confirm = await client.talk(['/ip/firewall/nat/print', `?comment=${comment}`]);
+    if (confirm.re.length === 0) {
+      throw new Error('Port forward creation appeared to succeed but is not present on re-check');
+    }
+    return { protocol, external_port: externalPort, internal_ip: internalIp, internal_port: internalPort };
+  });
+}
+
+async function deletePortForward(mikrotikId) {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const rule = await client.talk(['/ip/firewall/nat/print', `?.id=${mikrotikId}`]);
+    if (rule.re.length === 0) return { removed: false, reason: 'not_found' };
+    if (!(rule.re[0].comment || '').startsWith(PORT_FORWARD_COMMENT_PREFIX)) {
+      return { removed: false, reason: 'not_a_port_forward' };
+    }
+    await client.talk(['/ip/firewall/nat/remove', `=.id=${mikrotikId}`]);
+    return { removed: true };
+  });
+}
+
 module.exports = {
   allowClient,
   blockClient,
@@ -973,4 +1054,8 @@ module.exports = {
   createFirewallZonePolicy,
   deleteFirewallZonePolicy,
   MikrotikZonePolicyConflictError,
+  listPortForwards,
+  createPortForward,
+  deletePortForward,
+  MikrotikPortForwardConflictError,
 };
