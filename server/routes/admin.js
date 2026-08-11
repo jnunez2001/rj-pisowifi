@@ -2091,6 +2091,63 @@ router.get('/network/multi-wan', adminAuth, (req, res) => {
   }
 });
 
+// ===== DATABASE ENCRYPTION AT REST (opt-in, Settings > Storage) =====
+
+// GET /api/admin/storage/encryption-status
+router.get('/storage/encryption-status', adminAuth, (req, res) => {
+  try {
+    const { hasEncryptionKey } = require('../utils/dbEncryption');
+    const dbPath = process.env.DB_PATH || path.join(__dirname, '../database/rjpisowifi.db');
+    return res.json({ success: true, encrypted: hasEncryptionKey(dbPath) });
+  } catch (err) {
+    console.error('Encryption status error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/storage/encrypt — one-way migration, requires explicit
+// confirmation. Makes its own fresh pre-migration backup copy (separate
+// from the nightly scheduled one) immediately before migrating, so the
+// backup dbEncryption.js requires can never be stale relative to what's
+// about to be migrated. The server process must be restarted after this
+// completes - config/database.js decides which driver to load once, at
+// require time, at boot.
+router.post('/storage/encrypt', adminAuth, async (req, res) => {
+  try {
+    const { confirmed } = req.body || {};
+    if (!confirmed) {
+      return res.status(400).json({
+        success: false,
+        message: 'This is a one-way database migration. Re-submit with {"confirmed": true} to proceed. The server must be restarted afterward.',
+      });
+    }
+
+    const { hasEncryptionKey, migrateToEncrypted } = require('../utils/dbEncryption');
+    const dbPath = process.env.DB_PATH || path.join(__dirname, '../database/rjpisowifi.db');
+    if (hasEncryptionKey(dbPath)) {
+      return res.status(409).json({ success: false, message: 'This database is already encrypted.' });
+    }
+
+    const backupDir = path.join(path.dirname(dbPath), 'auto-backups');
+    fs.mkdirSync(backupDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(backupDir, `pre-encryption-${stamp}.db.bak`);
+    fs.copyFileSync(dbPath, backupPath);
+
+    const result = migrateToEncrypted(dbPath, backupPath);
+    console.log(`🔒 Database encrypted at rest. Backup: ${backupPath}. Plaintext copy kept at: ${result.plaintextBackupKeptAt}`);
+    return res.json({
+      success: true,
+      message: 'Database encrypted successfully. Restart the server now for it to take effect.',
+      backupPath,
+      plaintextBackupKeptAt: result.plaintextBackupKeptAt,
+    });
+  } catch (err) {
+    console.error('Database encryption error:', err);
+    res.status(500).json({ success: false, message: 'Encryption failed: ' + err.message });
+  }
+});
+
 // GET /api/admin/network
 router.get('/network', adminAuth, (req, res) => {
   try {

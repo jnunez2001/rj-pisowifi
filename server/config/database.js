@@ -1,4 +1,3 @@
-const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const { hashPassword, isHashed } = require('../utils/passwordHash');
@@ -15,7 +14,22 @@ if (!fs.existsSync(dbDir)) {
   fs.mkdirSync(dbDir, { recursive: true });
 }
 
+// Database encryption at rest (opt-in, server/utils/dbEncryption.js) - if
+// this box was migrated to an encrypted database, a key file sits next to
+// the .db file and better-sqlite3-multiple-ciphers (API-compatible drop-in
+// for better-sqlite3, confirmed) is used with that key applied
+// immediately after opening. An install that never opted in has no key
+// file, uses plain better-sqlite3 exactly as before, and none of this
+// branch ever runs - zero behavior change for every existing install.
+const { hasEncryptionKey, readEncryptionKey } = require('../utils/dbEncryption');
+const dbIsEncrypted = hasEncryptionKey(DB_PATH);
+const Database = dbIsEncrypted ? require('better-sqlite3-multiple-ciphers') : require('better-sqlite3');
+
 const db = new Database(DB_PATH);
+if (dbIsEncrypted) {
+  const key = readEncryptionKey(DB_PATH);
+  db.pragma(`key='${key}'`);
+}
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
