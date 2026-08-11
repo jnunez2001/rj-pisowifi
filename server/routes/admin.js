@@ -2074,6 +2074,23 @@ router.get('/network/wan-health', adminAuth, async (req, res) => {
   }
 });
 
+// GET /api/admin/network/multi-wan — status only (primary/backup lanes,
+// which is currently active, failure/success streak counters). Failover
+// itself runs on multiWanService.js's own 2-minute cron, not triggered by
+// this endpoint - there's no "apply" action here, just visibility. A
+// second router_ports row with role='wan' (lowest id = primary) is what
+// makes multi-WAN active at all; with 0 or 1 WAN lanes this just reports
+// there's no backup configured.
+router.get('/network/multi-wan', adminAuth, (req, res) => {
+  try {
+    const multiWanService = require('../services/multiWanService');
+    return res.json({ success: true, status: multiWanService.getStatus() });
+  } catch (err) {
+    console.error('Multi-WAN status error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/network
 router.get('/network', adminAuth, (req, res) => {
   try {

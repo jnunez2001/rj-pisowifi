@@ -429,6 +429,15 @@ const server = app.listen(PORT, () => {
     console.warn('[Watchdog] Failed to start (non-fatal):', e.message);
   }
 
+  // Multi-WAN failover monitor (Standalone mode, network power) - only
+  // does anything once a second router_ports row with role='wan' exists;
+  // otherwise its periodic check is a cheap no-op. Never blocks boot.
+  try {
+    require('./services/multiWanService').start();
+  } catch (e) {
+    console.warn('[Multi-WAN] Failed to start (non-fatal):', e.message);
+  }
+
   // Preflight dependency check — verifies nft/tc/gpio tools and basic
   // network readiness exist before the app is trusted to vend. Deliberately
   // non-blocking (matches this app's "boot always succeeds, subsystems
