@@ -1,116 +1,122 @@
-/* ===== LIGHT THEME (default) ===== */
+/* ===== LIGHT THEME (default) =====
+   Neutral SaaS palette per the ZenFi Web App Frontend Development &
+   Design Guide (2026-08-12) - primary blue (#2563EB), neutral grays,
+   restrained semantic color only for status. Same variable names kept
+   throughout so every existing page that reads these updates
+   automatically without per-page edits - this is the single source of
+   truth for color across the whole admin app. */
 :root {
-  --bg-primary: #f8f9fa;
+  --bg-primary: #f8fafc;
   --bg-secondary: #ffffff;
-  /* Sidebar is now light (icon-rail, Omada-style) rather than dark navy —
-     same variable names kept so every existing page that reads these
-     doesn't need touching, only the values change. */
-  --bg-sidebar: #f5f6f7;
+  --bg-sidebar: #ffffff;
   --bg-card: #ffffff;
-  --bg-hover: #f0f0f0;
-  --bg-active: #e6f4ef;
+  --bg-hover: #f1f5f9;
+  --bg-active: #eff6ff;
 
-  --text-primary: #1a1a1a;
-  --text-secondary: #666666;
-  --text-muted: #999999;
-  --text-sidebar: #2b2f33;
-  --text-sidebar-muted: #6b7075;
+  --text-primary: #111827;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --text-sidebar: #111827;
+  --text-sidebar-muted: #64748b;
 
-  --border-color: #e0e0e0;
-  --border-light: #f0f0f0;
+  --border-color: #e2e8f0;
+  --border-light: #f1f5f9;
 
-  /* Brand primary shifts from hot-pink-red to a restrained teal — the
-     "not kids colors" direction. --accent-green stays as the general
-     positive/success color; --brand-teal is specifically the top-bar/
-     primary-action/active-state color, since Omada's own reference uses
-     one teal throughout rather than reusing its "good" status green for
-     branding too. */
-  --brand-teal: #0c8f6d;
-  --brand-teal-dark: #0a7259;
-  --brand-teal-light: #e6f4ef;
+  /* --brand-teal keeps its name (read throughout the app for the top
+     bar/primary actions/active nav state) but now holds the guide's
+     primary blue - a value-only change, not a rename, so nothing else
+     needed touching. */
+  --brand-teal: #2563eb;
+  --brand-teal-dark: #1d4ed8;
+  --brand-teal-light: #eff6ff;
 
-  /* Muted, professional status colors - Omada uses green/orange/red/gray
-     functionally (health, alerts), never as decoration, and never at full
-     saturation. These were previously near-neon Material Design defaults
-     (#00c853, #2196f3, etc.) which read as "playful," not "clean." */
-  --accent-green: #1a9c63;
-  --accent-red: #c4453f;
-  --accent-blue: #3d6d94;
-  --accent-orange: #a8660a;
-  --accent-purple: #6b4c85;
+  --accent-green: #16a34a;
+  --accent-red: #dc2626;
+  --accent-blue: #2563eb;
+  --accent-orange: #d97706;
+  --accent-purple: #7c3aed;
 
-  --shadow-sm: 0 2px 8px rgba(0,0,0,0.06);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.1);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
 
-  --sidebar-width: 260px;
+  --sidebar-width: 250px;
   --sidebar-collapsed-width: 64px;
   --header-height: 60px;
 
-  --card-green-bg: #e8f5e9;
-  --card-green-text: #1a9c63;
-  --card-red-bg: #fbe9ea;
-  --card-red-text: #c4453f;
-  --card-blue-bg: #e3f2fd;
-  --card-blue-text: #3d6d94;
-  --card-orange-bg: #fdf3e2;
-  --card-orange-text: #a8660a;
+  /* KPI/status card tints - kept as light semantic tints (not a rainbow
+     per card), only ever used for a status badge/icon now, never as a
+     whole card's background per the guide's "do not make each KPI card
+     a different color" rule. */
+  --card-green-bg: #f0fdf4;
+  --card-green-text: #16a34a;
+  --card-red-bg: #fef2f2;
+  --card-red-text: #dc2626;
+  --card-blue-bg: #eff6ff;
+  --card-blue-text: #2563eb;
+  --card-orange-bg: #fffbeb;
+  --card-orange-text: #d97706;
 
-  /* Flyout mega-menu (Workstream 13) */
+  /* Flyout mega-menu (legacy, mostly unused post nav-rebuild) */
   --flyout-bg: #ffffff;
-  --flyout-border: #e0e0e0;
-  --flyout-column-heading: #1a1a1a;
-  --flyout-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  --flyout-border: #e2e8f0;
+  --flyout-column-heading: #111827;
+  --flyout-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
 
-  /* Flat-form layout (Workstream 13) */
   --form-label-width: 220px;
-  --info-callout-bg: #e8f2fc;
-  --info-callout-border: #b6d9f5;
-  --info-callout-text: #2c5c85;
+  --info-callout-bg: #eff6ff;
+  --info-callout-border: #bfdbfe;
+  --info-callout-text: #1d4ed8;
 }
 
-/* ===== DARK THEME ===== */
+/* ===== DARK THEME =====
+   Deliberately designed per the guide, not an inversion - a professional
+   monitoring-console dark mode, not a gaming interface. No neon, no
+   purple glow, no bright accents beyond the same restrained blue. */
 [data-theme="dark"] {
-  --bg-primary: #0f0f0f;
-  --bg-secondary: #1a1a1a;
-  --bg-sidebar: #111111;
-  --bg-card: #1e1e1e;
-  --bg-hover: #252525;
-  --bg-active: #10261f;
+  --bg-primary: #0b0f14;
+  --bg-secondary: #11161d;
+  --bg-sidebar: #0d1117;
+  --bg-card: #11161d;
+  --bg-hover: #151b23;
+  --bg-active: #17233a;
 
-  --text-primary: #ffffff;
-  --text-secondary: #aaaaaa;
-  --text-muted: #666666;
-  --text-sidebar: #ffffff;
-  --text-sidebar-muted: #888888;
+  --text-primary: #f8fafc;
+  --text-secondary: #a7b0bd;
+  --text-muted: #6b7280;
+  --text-sidebar: #f8fafc;
+  --text-sidebar-muted: #a7b0bd;
 
-  --border-color: #2a2a2a;
-  --border-light: #222222;
+  --border-color: #252d38;
+  --border-light: #1c2430;
 
-  --brand-teal: #14a67f;
-  --brand-teal-dark: #0c8f6d;
-  --brand-teal-light: #10261f;
+  --brand-teal: #3b82f6;
+  --brand-teal-dark: #2563eb;
+  --brand-teal-light: #17233a;
 
-  --accent-red: #d1615c;
-  --accent-orange: #c9832e;
+  --accent-green: #22c55e;
+  --accent-red: #ef4444;
+  --accent-blue: #3b82f6;
+  --accent-orange: #f59e0b;
+  --accent-purple: #a78bfa;
 
-  --shadow-sm: 0 2px 8px rgba(0,0,0,0.3);
-  --shadow-md: 0 4px 16px rgba(0,0,0,0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
 
-  --card-green-bg: #0a2a0a;
-  --card-green-text: #2bb87a;
-  --card-red-bg: #2a0a0a;
-  --card-red-text: #d1615c;
-  --card-blue-bg: #0a1a2a;
-  --card-blue-text: #5b8fc2;
-  --card-orange-bg: #2a1a00;
-  --card-orange-text: #c9832e;
+  --card-green-bg: #0f2419;
+  --card-green-text: #22c55e;
+  --card-red-bg: #2a1416;
+  --card-red-text: #ef4444;
+  --card-blue-bg: #14213a;
+  --card-blue-text: #3b82f6;
+  --card-orange-bg: #2a1f0c;
+  --card-orange-text: #f59e0b;
 
-  --flyout-bg: #1e1e1e;
-  --flyout-border: #2a2a2a;
-  --flyout-column-heading: #ffffff;
-  --flyout-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  --flyout-bg: #11161d;
+  --flyout-border: #252d38;
+  --flyout-column-heading: #f8fafc;
+  --flyout-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
 
-  --info-callout-bg: #0f1f2b;
-  --info-callout-border: #1d3a52;
-  --info-callout-text: #8fc3e8;
+  --info-callout-bg: #14213a;
+  --info-callout-border: #1e3a63;
+  --info-callout-text: #93c5fd;
 }

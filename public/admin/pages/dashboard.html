@@ -13,18 +13,18 @@
 
 .zf3-stat-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:16px; margin-bottom:16px; }
 @media (max-width: 1100px) { .zf3-stat-grid { grid-template-columns:repeat(2,1fr); } }
-.zf3-stat-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:18px; }
+.zf3-stat-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:20px; box-shadow:var(--shadow-sm); }
 .zf3-stat-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; }
-.zf3-stat-label { font-size:11px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:var(--text-muted); }
-.zf3-stat-icon { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:15px; flex-shrink:0; }
-.zf3-stat-value { font-size:26px; font-weight:700; color:var(--text-primary); margin-bottom:6px; }
-.zf3-stat-trend { font-size:12px; font-weight:600; color:var(--text-muted); }
+.zf3-stat-label { font-size:11px; font-weight:600; letter-spacing:0.4px; text-transform:uppercase; color:var(--text-muted); }
+.zf3-stat-icon { color:var(--text-muted); font-size:18px; flex-shrink:0; line-height:1; }
+.zf3-stat-value { font-size:26px; font-weight:600; color:var(--text-primary); margin-bottom:6px; }
+.zf3-stat-trend { font-size:12px; font-weight:500; color:var(--text-secondary); }
 .zf3-stat-trend .up { color:var(--accent-green); }
 .zf3-stat-trend .down { color:var(--accent-red); }
 
 .zf3-row3 { display:grid; grid-template-columns:2fr 1fr 1fr; gap:16px; margin-bottom:16px; }
 @media (max-width: 1100px) { .zf3-row3 { grid-template-columns:1fr; } }
-.zf3-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:18px; }
+.zf3-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:20px; box-shadow:var(--shadow-sm); }
 .zf3-card-title { font-size:12px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:var(--text-muted); }
 .zf3-card-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
 
@@ -38,7 +38,7 @@
 .zf3-list-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; }
 .zf3-list-left { display:flex; align-items:center; gap:10px; color:var(--text-primary); font-weight:600; font-size:13px; min-width:0; }
 .zf3-rank { width:20px; height:20px; border-radius:50%; background:var(--bg-primary); color:var(--text-muted); font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
-.zf3-avatar { width:26px; height:26px; border-radius:50%; background:var(--brand-teal-light); color:var(--brand-teal-dark); display:flex; align-items:center; justify-content:center; font-size:11px; flex-shrink:0; }
+.zf3-avatar { width:26px; height:26px; border-radius:50%; background:var(--bg-primary); border:1px solid var(--border-color); color:var(--text-muted); display:flex; align-items:center; justify-content:center; font-size:11px; flex-shrink:0; }
 .zf3-bar-track { flex:1; height:6px; background:var(--bg-primary); border-radius:3px; overflow:hidden; margin:0 10px; min-width:40px; }
 .zf3-bar-fill { height:100%; background:var(--accent-blue); border-radius:3px; }
 .zf3-list-value { font-size:13px; font-weight:700; color:var(--text-primary); flex-shrink:0; }
@@ -81,7 +81,7 @@ table.zf3-table td:last-child, table.zf3-table th:last-child { text-align:right;
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
       <div class="zf3-stat-label">Today's Revenue</div>
-      <div class="zf3-stat-icon" style="background:var(--card-green-bg);color:var(--card-green-text);"><i class="fas fa-wallet"></i></div>
+      <i class="fa-regular fa-wallet zf3-stat-icon"></i>
     </div>
     <div class="zf3-stat-value" id="todaySales">₱0</div>
     <div class="zf3-stat-trend" id="revenueTrend">vs yesterday</div>
@@ -89,7 +89,7 @@ table.zf3-table td:last-child, table.zf3-table th:last-child { text-align:right;
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
       <div class="zf3-stat-label">Active Sessions</div>
-      <div class="zf3-stat-icon" style="background:var(--card-blue-bg);color:var(--card-blue-text);"><i class="fas fa-user-group"></i></div>
+      <i class="fa-regular fa-user-group zf3-stat-icon"></i>
     </div>
     <div class="zf3-stat-value" id="activeSessions">0</div>
     <div class="zf3-stat-trend">Currently connected</div>
@@ -97,7 +97,7 @@ table.zf3-table td:last-child, table.zf3-table th:last-child { text-align:right;
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
       <div class="zf3-stat-label">Today's Transactions</div>
-      <div class="zf3-stat-icon" style="background:var(--card-orange-bg);color:var(--card-orange-text);"><i class="fas fa-receipt"></i></div>
+      <i class="fa-regular fa-receipt zf3-stat-icon"></i>
     </div>
     <div class="zf3-stat-value" id="todayTransactions">0</div>
     <div class="zf3-stat-trend">Coin & voucher</div>
@@ -105,7 +105,7 @@ table.zf3-table td:last-child, table.zf3-table th:last-child { text-align:right;
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
       <div class="zf3-stat-label">Minutes Sold Today</div>
-      <div class="zf3-stat-icon" style="background:var(--card-red-bg);color:var(--card-red-text);"><i class="fas fa-hourglass-half"></i></div>
+      <i class="fa-regular fa-hourglass-half zf3-stat-icon"></i>
     </div>
     <div class="zf3-stat-value" id="minutesSold">0</div>
     <div class="zf3-stat-trend">Total minutes</div>
@@ -113,10 +113,10 @@ table.zf3-table td:last-child, table.zf3-table th:last-child { text-align:right;
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
       <div class="zf3-stat-label">Bandwidth Usage</div>
-      <div class="zf3-stat-icon" style="background:var(--card-blue-bg);color:var(--card-blue-text);"><i class="fas fa-gauge-high"></i></div>
+      <i class="fa-regular fa-gauge-high zf3-stat-icon"></i>
     </div>
     <div class="zf3-stat-value"><span id="currentDownload">0</span> Mbps</div>
-    <div class="zf3-stat-trend"><i class="fas fa-arrow-down" style="color:var(--accent-green);"></i> Down &nbsp; <i class="fas fa-arrow-up" style="color:var(--accent-blue);"></i> <span id="currentUpload">0</span> Mbps Up</div>
+    <div class="zf3-stat-trend"><i class="fas fa-arrow-down"></i> Down &nbsp; <i class="fas fa-arrow-up"></i> <span id="currentUpload">0</span> Mbps Up</div>
   </div>
 </div>
 

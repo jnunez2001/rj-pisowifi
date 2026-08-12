@@ -1205,7 +1205,9 @@ function updateNetworkModeCards(mode) {
   const standaloneBtn = document.getElementById('modeStandaloneCard');
   const controllerBtn = document.getElementById('modeControllerCard');
   if (standaloneBtn) {
-    standaloneBtn.style.background = mode === 'standalone' ? 'var(--accent-green)' : 'transparent';
+    // Blue for "selected", not green - green is reserved for online/
+    // success status per the design guide, not a general active state.
+    standaloneBtn.style.background = mode === 'standalone' ? 'var(--accent-blue)' : 'transparent';
     standaloneBtn.style.color = mode === 'standalone' ? '#fff' : 'var(--text-muted)';
   }
   if (controllerBtn) {

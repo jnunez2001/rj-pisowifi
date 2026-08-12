@@ -1,9 +1,9 @@
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Inter', sans-serif;
   background: var(--bg-primary);
   color: var(--text-primary);
   transition: background 0.3s, color 0.3s;
@@ -101,7 +101,7 @@ body {
 .sidebar-brand .brand-text { min-width: 0; overflow: hidden; }
 
 .sidebar-brand .brand-name {
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Inter', sans-serif;
   font-size: 12px;
   font-weight: 700;
   color: var(--text-sidebar);
@@ -331,11 +331,15 @@ body {
   transition: margin-left 0.2s ease;
 }
 
-/* ===== TOP HEADER (teal band, Workstream 13) ===== */
+/* ===== TOP HEADER =====
+   Neutral per the design guide ("keep it minimal," "avoid gradients") -
+   was a teal gradient band, now a plain surface with a hairline border,
+   consistent with every card/sidebar in the app rather than a separate
+   colored zone. */
 .top-header {
   height: var(--header-height);
-  background: linear-gradient(135deg, var(--brand-teal), var(--brand-teal-dark));
-  border-bottom: none;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -343,7 +347,6 @@ body {
   position: sticky;
   top: 0;
   z-index: 50;
-  box-shadow: var(--shadow-sm);
   gap: 12px;
 }
 
@@ -355,15 +358,13 @@ body {
   flex: 1;
 }
 
-.top-header .header-breadcrumb { color: rgba(255,255,255,0.75); }
-.top-header .header-breadcrumb span { color: #fff; }
-.top-header .menu-toggle { color: #fff; }
-.top-header .menu-toggle:hover { background: rgba(255,255,255,0.12); }
+.top-header .menu-toggle { color: var(--text-primary); }
+.top-header .menu-toggle:hover { background: var(--bg-hover); }
 
 .header-icon-btn {
   background: none;
   border: none;
-  color: rgba(255,255,255,0.85);
+  color: var(--text-secondary);
   font-size: 15px;
   cursor: pointer;
   padding: 8px;
@@ -374,16 +375,16 @@ body {
   align-items: center;
   justify-content: center;
 }
-.header-icon-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.header-icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 .header-icon-btn.spinning i { animation: spin 0.6s linear; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .top-header .theme-toggle {
-  background: rgba(255,255,255,0.12);
-  border: 1px solid rgba(255,255,255,0.2);
-  color: #fff;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
 }
-.top-header .theme-toggle:hover { background: rgba(255,255,255,0.2); border-color: rgba(255,255,255,0.3); color: #fff; }
+.top-header .theme-toggle:hover { background: var(--bg-hover); border-color: var(--border-color); color: var(--text-primary); }
 
 .header-breadcrumb {
   font-size: 13px;
@@ -485,7 +486,7 @@ body {
 .card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 20px;
   box-shadow: var(--shadow-sm);
 }
@@ -522,7 +523,7 @@ body {
 .stat-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 14px;
+  border-radius: 12px;
   padding: 20px;
   box-shadow: var(--shadow-sm);
   transition: transform 0.2s;
@@ -644,19 +645,18 @@ tbody tr:hover { background: var(--bg-hover); }
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Inter', sans-serif;
   white-space: nowrap;
 }
 
 .btn:active { transform: scale(0.97); }
 
 .btn-primary {
-  background: var(--accent-green);
+  background: var(--brand-teal);
   color: #fff;
-  box-shadow: 0 4px 12px rgba(0,200,83,0.3);
 }
 
-.btn-primary:hover { background: #009624; }
+.btn-primary:hover { background: var(--brand-teal-dark); }
 
 .btn-danger {
   background: var(--card-red-bg);
@@ -696,7 +696,7 @@ tbody tr:hover { background: var(--bg-hover); }
   border-radius: 8px;
   font-size: 14px;
   color: var(--text-primary);
-  font-family: 'Roboto', sans-serif;
+  font-family: 'Inter', sans-serif;
   transition: border-color 0.2s;
   outline: none;
 }
