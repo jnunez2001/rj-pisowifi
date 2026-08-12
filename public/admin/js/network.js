@@ -796,7 +796,7 @@ function renderProvisionLog(data, success) {
   }
   if (data.log && data.log.length) {
     html += '<ol style="font-size:13px;padding-left:20px;">' +
-      data.log.map(l => `<li style="color:${l.ok ? 'inherit' : 'var(--accent-red)'};">${l.ok ? '<i class="fas fa-check" style="color:var(--accent-green);"></i>' : '<i class="fas fa-times"></i>'} ${escapeHtml(l.step)}${l.detail && !l.ok ? ' — ' + escapeHtml(l.detail) : ''}</li>`).join('') +
+      data.log.map(l => `<li style="color:${l.ok ? 'inherit' : 'var(--accent-red)'};">${l.ok ? '<i class="fas fa-check" style="color:var(--accent-green);"></i>' : '<i class="fas fa-times"></i>'} ${escapeHtml(l.step)}${l.detail && !l.ok ? ' (' + escapeHtml(l.detail) + ')' : ''}</li>`).join('') +
       '</ol>';
   }
   el.innerHTML = html;
@@ -1052,8 +1052,8 @@ async function loadLocalInterfaces(savedMac) {
     }
 
     group.style.display = 'block';
-    select.innerHTML = '<option value="">Not selected — pick one below</option>' +
-      data.interfaces.map(i => `<option value="${i.mac}" ${i.mac === savedMac ? 'selected' : ''}>${i.name} — ${i.address} (${i.mac})</option>`).join('');
+    select.innerHTML = '<option value="">Not selected, pick one below</option>' +
+      data.interfaces.map(i => `<option value="${i.mac}" ${i.mac === savedMac ? 'selected' : ''}>${i.name} (${i.address}, ${i.mac})</option>`).join('');
   } catch(e) {
     group.style.display = 'block';
     select.innerHTML = '<option value="">Failed to load</option>';

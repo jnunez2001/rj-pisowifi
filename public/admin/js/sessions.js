@@ -91,10 +91,23 @@ function renderKpis() {
   document.getElementById('lsActiveSessions').textContent = active.length;
   document.getElementById('lsUniqueUsers').textContent = uniqueMacs.size;
   document.getElementById('lsPaused').textContent = paused.length;
-  const dl = document.getElementById('currentDownload');
-  const ul = document.getElementById('currentUpload');
-  document.getElementById('lsDownload').textContent = dl ? dl.textContent : '0';
-  document.getElementById('lsUpload').textContent = ul ? ul.textContent : '0';
+  loadBandwidthKpis();
+}
+
+// Bug found live (code review): this used to read #currentDownload/
+// #currentUpload, elements that only exist on the Dashboard page's HTML.
+// Since each admin page is fetched independently into #pageContent, those
+// elements are never in the DOM while Live Sessions is open, so the
+// Downloading/Uploading KPI cards silently showed 0 Mbps always. Polls the
+// same real endpoint dashboard.js's pollNetworkStats() uses instead of
+// depending on another page's DOM.
+async function loadBandwidthKpis() {
+  try {
+    const data = await apiCall('GET', '/api/admin/network-stats');
+    if (!data.success) return;
+    document.getElementById('lsDownload').textContent = data.download_mbps;
+    document.getElementById('lsUpload').textContent = data.upload_mbps;
+  } catch (e) {}
 }
 
 function sessionStatus(s) {

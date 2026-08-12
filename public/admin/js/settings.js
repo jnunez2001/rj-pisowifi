@@ -20,7 +20,7 @@ async function loadScheduledBackups() {
   try {
     const data = await apiCall('GET', '/api/admin/backup/scheduled/list');
     if (!data.success || !data.backups || data.backups.length === 0) {
-      box.textContent = 'No automatic backup yet — the first one is taken shortly after the server starts, then nightly after that.';
+      box.textContent = 'No automatic backup yet. The first one is taken shortly after the server starts, then nightly after that.';
       return;
     }
     const latest = data.backups[0];
