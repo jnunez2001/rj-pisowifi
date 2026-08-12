@@ -18,6 +18,37 @@ async function loadHotspotDashboard() {
   await hsLoadRecentTransactions();
   await hsLoadActiveSessionsCount();
   await hsLoadSystemStatus();
+  // Must run LAST - hsRenderOfflineKioskAlert() above can set the offline
+  // alert banner back to visible (display:flex) if stale kiosk records
+  // exist, which would silently undo an earlier suppression. Applying the
+  // venue-type hide/suppress after everything else guarantees nothing
+  // later in this sequence can override it.
+  hsApplyVenueTypeCards();
+}
+
+// Overview tab per venue_type (network power / cafe+coworking parity,
+// first slice - the coin slot is the one clearly Piso-WiFi-specific card
+// on this page). Same "don't show a card with nothing behind it" rule
+// already used elsewhere for venue_type (Main Kiosk Coin Slot hidden from
+// Settings for Cafe/Co-working, since there's no coin acceptor to
+// configure for those venue types) - a cafe or coworking space has no
+// coin slot to show status for either.
+function hsApplyVenueTypeCards() {
+  const venueType = window.currentVenueType || 'piso_wifi';
+  const isPisoWifi = venueType === 'piso_wifi';
+
+  const coinSlotRow = document.getElementById('hsCoinSlotRow');
+  if (coinSlotRow) coinSlotRow.style.display = isPisoWifi ? '' : 'none';
+
+  // hsRenderOfflineKioskAlert() (called later in loadHotspotDashboard via
+  // hsLoadKiosks) would otherwise show a permanently-offline kiosk
+  // warning for coin-slot hardware that was never supposed to exist on a
+  // cafe/coworking venue - suppress it the same way the row itself is
+  // hidden, rather than leaving a confusing false alarm on the dashboard.
+  if (!isPisoWifi) {
+    const alertEl = document.getElementById('hsOfflineKioskAlert');
+    if (alertEl) alertEl.style.display = 'none';
+  }
 }
 
 function destroyHotspotDashboard() {
