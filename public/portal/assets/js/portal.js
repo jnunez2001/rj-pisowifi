@@ -1054,6 +1054,27 @@ function makeClickableDivsKeyboardAccessible(root) {
 }
 
 // ===== INIT =====
+// Voucher Login QR support (Voucher Designer's QR element) - a printed
+// voucher's QR encodes this portal's own URL with ?code=<voucher code>,
+// scanned by the customer's phone camera. Auto-fills and submits the
+// same real redeemVoucher() flow a customer typing the code by hand
+// already uses - no separate/duplicate redemption path.
+function tryAutoRedeemFromQr() {
+  const code = new URLSearchParams(window.location.search).get('code');
+  if (!code) return;
+  const input = document.getElementById('voucherInput');
+  if (input) {
+    input.value = code;
+    redeemVoucher();
+  }
+  // Strip the code from the URL after attempting it once, so a page
+  // refresh (or the customer sharing the link) doesn't silently retry
+  // an already-used/invalid code.
+  const url = new URL(window.location.href);
+  url.searchParams.delete('code');
+  window.history.replaceState({}, '', url);
+}
+
 async function init() {
   await loadSettings();
   await detectDevice();
@@ -1062,6 +1083,7 @@ async function init() {
   await checkFreeClaimEligibility();
   startPolling();
   makeClickableDivsKeyboardAccessible(document);
+  tryAutoRedeemFromQr();
 }
 
 init();

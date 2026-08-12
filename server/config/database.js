@@ -343,6 +343,26 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Voucher Designer templates (Vouchers > Templates). elements_json is
+  -- the full canvas layout - an array of {id,type,field,x,y,w,h,fontSize,
+  -- fontWeight,color,align,content}, in inches relative to the template's
+  -- own width_in/height_in so the same template scales correctly across
+  -- different print sizes. is_system=1 templates ship with the app and
+  -- can't be deleted (see the DELETE route's own check) - an operator
+  -- edits a copy instead (Save as New Template), never the original.
+  CREATE TABLE IF NOT EXISTS voucher_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    width_in REAL NOT NULL DEFAULT 3.5,
+    height_in REAL NOT NULL DEFAULT 2,
+    background_color TEXT DEFAULT '#ffffff',
+    elements_json TEXT NOT NULL DEFAULT '[]',
+    is_system INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Telemetry Tier 1 (server/services/telemetryService.js) - local-first
   -- outbox. Every event is written here FIRST, synced later, same
   -- "box must never depend on cloud connectivity" principle as
@@ -888,6 +908,32 @@ try {
   }
 } catch (e) {
   console.error('⚠️ Multi-tenant data model migration failed:', e.message);
+}
+
+// Seed exactly one real system template ("ZenFi Standard") - not the
+// full 8-template gallery a complete Voucher Designer would eventually
+// ship, since designing 7 more fully-styled layouts by hand here would
+// be inventing content, not building the feature. An operator can
+// duplicate/edit this one and save their own from it.
+try {
+  const hasSystemTemplate = db.prepare("SELECT id FROM voucher_templates WHERE is_system = 1 LIMIT 1").get();
+  if (!hasSystemTemplate) {
+    const standardElements = [
+      { id: 'el1', type: 'text', field: null, x: 0.15, y: 0.12, w: 3.2, h: 0.35, fontSize: 20, fontWeight: '700', color: '#0c8f6d', align: 'left', content: 'ZenFi WiFi' },
+      { id: 'el2', type: 'voucher_code', field: 'voucher.code', x: 0.15, y: 0.55, w: 2.0, h: 0.4, fontSize: 22, fontWeight: '900', color: '#111827', align: 'left', content: 'SAMPLE-CODE' },
+      { id: 'el3', type: 'price', field: 'voucher.price', x: 0.15, y: 1.0, w: 1.0, h: 0.3, fontSize: 14, fontWeight: '600', color: '#374151', align: 'left', content: '₱10' },
+      { id: 'el4', type: 'duration', field: 'voucher.duration', x: 1.2, y: 1.0, w: 1.2, h: 0.3, fontSize: 14, fontWeight: '600', color: '#374151', align: 'left', content: '30 Minutes' },
+      { id: 'el5', type: 'qr_code', field: 'voucher.qr_url', x: 2.35, y: 0.12, w: 1.0, h: 1.0, fontSize: 0, fontWeight: '400', color: '#000000', align: 'center', content: '' },
+      { id: 'el6', type: 'text', field: null, x: 0.15, y: 1.4, w: 3.2, h: 0.3, fontSize: 10, fontWeight: '400', color: '#6b7280', align: 'left', content: 'Scan the QR code or enter the code above to connect.' },
+    ];
+    db.prepare(`
+      INSERT INTO voucher_templates (name, description, width_in, height_in, background_color, elements_json, is_system)
+      VALUES (?, ?, ?, ?, ?, ?, 1)
+    `).run('ZenFi Standard', 'Clean general-purpose voucher with a QR code.', 3.5, 2, '#ffffff', JSON.stringify(standardElements));
+    console.log('🎫 Seeded default "ZenFi Standard" voucher template');
+  }
+} catch (e) {
+  console.error('⚠️ Voucher template seed failed:', e.message);
 }
 
 console.log('✅ Database initialized successfully');

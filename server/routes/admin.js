@@ -1173,6 +1173,99 @@ router.delete('/vouchers/groups/:id', adminAuth, (req, res) => {
   }
 });
 
+// ===== VOUCHER DESIGNER (Vouchers > Templates) =====
+// v1 scope only: curated element set, no shapes/images/layers/undo -
+// see this session's scoping decision. elements_json stores the full
+// canvas layout, never the resolved voucher value itself (dynamic
+// fields like {Voucher Code} stay symbolic - "field": "voucher.code" -
+// resolved at print time from the real voucher record, never baked into
+// the template as static text).
+
+router.get('/voucher-templates', adminAuth, (req, res) => {
+  try {
+    const templates = db.prepare('SELECT id, name, description, width_in, height_in, background_color, is_system, created_at, updated_at FROM voucher_templates ORDER BY is_system DESC, created_at DESC').all();
+    return res.json({ success: true, templates });
+  } catch (err) {
+    console.error('List voucher templates error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.get('/voucher-templates/:id', adminAuth, (req, res) => {
+  try {
+    const template = db.prepare('SELECT * FROM voucher_templates WHERE id = ?').get(req.params.id);
+    if (!template) return res.status(404).json({ success: false, message: 'Template not found' });
+    template.elements = JSON.parse(template.elements_json);
+    return res.json({ success: true, template });
+  } catch (err) {
+    console.error('Get voucher template error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/voucher-templates', adminAuth, (req, res) => {
+  try {
+    const { name, description, width_in, height_in, background_color, elements } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ success: false, message: 'Template name is required' });
+    if (!Array.isArray(elements)) return res.status(400).json({ success: false, message: 'elements must be an array' });
+
+    const result = db.prepare(`
+      INSERT INTO voucher_templates (name, description, width_in, height_in, background_color, elements_json, is_system)
+      VALUES (?, ?, ?, ?, ?, ?, 0)
+    `).run(
+      name.trim(), description || '',
+      parseFloat(width_in) || 3.5, parseFloat(height_in) || 2,
+      background_color || '#ffffff', JSON.stringify(elements)
+    );
+    return res.json({ success: true, id: result.lastInsertRowid });
+  } catch (err) {
+    console.error('Create voucher template error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// PATCH /api/admin/voucher-templates/:id - system templates (is_system=1)
+// can't be overwritten in place, only duplicated via a fresh POST (Save
+// as New Template) - matches the spec's "built-in templates should be
+// protected" rule and this app's existing "never silently mutate a
+// system default" convention elsewhere (e.g. rates.js's own defaults).
+router.patch('/voucher-templates/:id', adminAuth, (req, res) => {
+  try {
+    const existing = db.prepare('SELECT is_system FROM voucher_templates WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Template not found' });
+    if (existing.is_system) return res.status(403).json({ success: false, message: 'System templates can\'t be edited directly - use "Save as New Template".' });
+
+    const { name, description, width_in, height_in, background_color, elements } = req.body;
+    if (!Array.isArray(elements)) return res.status(400).json({ success: false, message: 'elements must be an array' });
+
+    db.prepare(`
+      UPDATE voucher_templates SET name = ?, description = ?, width_in = ?, height_in = ?, background_color = ?, elements_json = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      (name || '').trim(), description || '',
+      parseFloat(width_in) || 3.5, parseFloat(height_in) || 2,
+      background_color || '#ffffff', JSON.stringify(elements), req.params.id
+    );
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Update voucher template error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/voucher-templates/:id', adminAuth, (req, res) => {
+  try {
+    const existing = db.prepare('SELECT is_system FROM voucher_templates WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Template not found' });
+    if (existing.is_system) return res.status(403).json({ success: false, message: 'System templates can\'t be deleted.' });
+    db.prepare('DELETE FROM voucher_templates WHERE id = ?').run(req.params.id);
+    return res.json({ success: true, message: 'Template deleted' });
+  } catch (err) {
+    console.error('Delete voucher template error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/rates
 router.get('/rates', adminAuth, (req, res) => {
   try {

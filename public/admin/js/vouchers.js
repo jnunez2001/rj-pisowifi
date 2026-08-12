@@ -54,6 +54,7 @@ function switchVoucherTab(tab) {
     const panel = document.getElementById(`voucher${label}Panel`);
     if (panel) panel.style.display = t === tab ? 'block' : 'none';
   });
+  if (tab === 'templates' && typeof vtLoadGallery === 'function') vtLoadGallery();
 }
 
 async function loadVoucherOverview() {

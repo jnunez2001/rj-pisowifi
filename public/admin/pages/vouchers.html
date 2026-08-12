@@ -130,16 +130,73 @@
   </div>
 </div>
 
-<!-- TEMPLATES TAB - Voucher Designer (full drag-and-drop canvas editor) is
-     a separate, large undertaking (element library, position/size/style
-     property panel, print-layout engine) not attempted in this pass -
-     honest placeholder rather than a half-built editor. -->
+<!-- TEMPLATES TAB - Voucher Designer v1 (core drag-and-drop scope only,
+     per this session's explicit scoping decision - no undo/redo, no
+     layers panel, no shapes/image-crop, no multi-select, no QR mode
+     switching). Two sub-views: gallery (vtGalleryView) and editor
+     (vtEditorView). -->
 <div id="voucherTemplatesPanel" style="display:none;">
-  <div class="zf3-card" style="text-align:center;padding:48px 24px;">
-    <i class="fas fa-palette" style="font-size:22px;color:var(--text-muted);margin-bottom:12px;display:block;"></i>
-    <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:6px;">Voucher Designer not built yet</div>
-    <div style="font-size:13px;color:var(--text-muted);max-width:420px;margin:0 auto;">
-      A drag-and-drop template editor (logo, QR code, dynamic fields, print layout) is a real, separate piece of work. Today, printed vouchers use a fixed layout - see Groups &gt; Print.
+
+  <div id="vtGalleryView">
+    <div id="vtGalleryGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:16px;">
+      <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading templates...</div>
+    </div>
+  </div>
+
+  <div id="vtEditorView" style="display:none;">
+    <div class="zf3-header" style="margin-bottom:12px;">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button class="btn btn-sm btn-secondary" onclick="vtBackToGallery()"><i class="fas fa-arrow-left"></i> Templates</button>
+        <input type="text" id="vtTemplateName" class="form-control" placeholder="Template name" style="width:220px;">
+      </div>
+      <div class="zf3-header-right">
+        <span id="vtSaveStatus" style="font-size:12px;color:var(--text-muted);"></span>
+        <button class="btn btn-sm btn-secondary" onclick="vtPreview()"><i class="fas fa-eye"></i> Preview</button>
+        <button class="btn btn-sm btn-secondary" onclick="vtSaveTemplate(false)" id="vtSaveBtn"><i class="fas fa-save"></i> Save Template</button>
+        <button class="btn btn-primary" onclick="vtOpenPrintModal()"><i class="fas fa-print"></i> Save &amp; Print</button>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:200px 1fr 260px;gap:16px;align-items:start;">
+      <!-- ELEMENTS PALETTE -->
+      <div class="zf3-card">
+        <div class="zf3-card-title" style="margin-bottom:10px;">Elements</div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+          <button class="btn btn-sm btn-secondary" style="justify-content:flex-start;" onclick="vtAddElement('text')"><i class="fas fa-font" style="width:16px;"></i> Text</button>
+          <button class="btn btn-sm btn-secondary" style="justify-content:flex-start;" onclick="vtAddElement('logo')"><i class="fas fa-image" style="width:16px;"></i> Logo</button>
+          <div style="font-size:10px;font-weight:700;color:var(--text-muted);text-transform:uppercase;margin:8px 0 2px;">Voucher Data</div>
+          <button class="btn btn-sm btn-secondary" style="justify-content:flex-start;" onclick="vtAddElement('voucher_code')"><i class="fas fa-hashtag" style="width:16px;"></i> Voucher Code</button>
+          <button class="btn btn-sm btn-secondary" style="justify-content:flex-start;" onclick="vtAddElement('qr_code')"><i class="fas fa-qrcode" style="width:16px;"></i> QR Code</button>
+          <button class="btn btn-sm btn-secondary" style="justify-content:flex-start;" onclick="vtAddElement('price')"><i class="fas fa-peso-sign" style="width:16px;"></i> Price</button>
+          <button class="btn btn-sm btn-secondary" style="justify-content:flex-start;" onclick="vtAddElement('duration')"><i class="fas fa-clock" style="width:16px;"></i> Duration</button>
+          <button class="btn btn-sm btn-secondary" style="justify-content:flex-start;" onclick="vtAddElement('plan_name')"><i class="fas fa-tag" style="width:16px;"></i> Plan Name</button>
+          <button class="btn btn-sm btn-secondary" style="justify-content:flex-start;" onclick="vtAddElement('ssid')"><i class="fas fa-wifi" style="width:16px;"></i> SSID</button>
+        </div>
+      </div>
+
+      <!-- CANVAS -->
+      <div class="zf3-card" style="display:flex;flex-direction:column;align-items:center;">
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;font-size:12px;color:var(--text-muted);">
+          <span>Size:</span>
+          <select id="vtSizePreset" class="form-control" style="width:auto;" onchange="vtApplySizePreset()">
+            <option value="3.5x2">3.5 × 2 in (Standard)</option>
+            <option value="4x2.5">4 × 2.5 in</option>
+            <option value="2.5x1.5">2.5 × 1.5 in (Small Ticket)</option>
+          </select>
+        </div>
+        <div id="vtCanvasWrap" style="border:1px dashed var(--border-color);padding:20px;background:var(--bg-primary);">
+          <div id="vtCanvas" style="position:relative;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,0.15);overflow:hidden;"></div>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:10px;">Click an element on the canvas to select it. Drag to move, drag the bottom-right handle to resize.</div>
+      </div>
+
+      <!-- PROPERTIES -->
+      <div class="zf3-card">
+        <div class="zf3-card-title" style="margin-bottom:10px;">Properties</div>
+        <div id="vtPropertiesPanel">
+          <div style="font-size:13px;color:var(--text-muted);">Select an element to edit it.</div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -333,6 +390,27 @@
         </thead>
         <tbody id="groupDetailsTable"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- VOUCHER DESIGNER: SAVE & PRINT MODAL -->
+<div class="modal-overlay" id="vtPrintModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Print with This Template</div>
+      <button class="modal-close" onclick="closeModal('vtPrintModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Voucher Group</label>
+      <select id="vtPrintGroupSelect" class="form-control">
+        <option value="">Select a group...</option>
+      </select>
+      <small style="color:var(--text-muted);">Each printed voucher uses its own real code and QR link.</small>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px;">
+      <button class="btn btn-secondary" onclick="closeModal('vtPrintModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="vtPrintGroup()"><i class="fas fa-print"></i> Save Template &amp; Print</button>
     </div>
   </div>
 </div>
