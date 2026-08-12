@@ -74,7 +74,18 @@ async function checkIn() {
   try {
     const device = getDeviceIdentity();
     const version = require('../../package.json').version;
-    const res = await fetch(`${LICENSE_SERVER_URL}/api/license/checkin`, {
+    // Bug found 2026-08-10: this used to append '/api/license/checkin' to
+    // LICENSE_SERVER_URL, but the actual deployed Cloud Function
+    // (zentry-hub/functions/index.js's exports.checkin) has its own
+    // dedicated Firebase-generated URL with no such path
+    // (https://us-central1-<project>.cloudfunctions.net/checkin) - every
+    // Firebase Functions v2 onRequest function gets its own full URL, not
+    // a shared REST API base to append routes onto. LICENSE_SERVER_URL is
+    // now expected to be set to that complete checkin URL directly. This
+    // was never caught before because LICENSE_SERVER_URL has never been
+    // set on any real box yet (checkIn() no-ops without it - see file
+    // header), so the mismatch had zero live impact until now.
+    const res = await fetch(LICENSE_SERVER_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ device_id: device.id, version, uptime_seconds: Math.floor(process.uptime()) }),
@@ -91,6 +102,15 @@ async function checkIn() {
     // surface added here.
     cachedStatus.update_available = !!data.update_available;
     cachedStatus.latest_version = data.latest_version || null;
+    // Subscription tier (network power / Free-Grow-Pro entitlements) -
+    // surfaced from the checkin response the same pull-based way
+    // update_available already is. Defaults to 'free' if the server
+    // doesn't return one (an unregistered device, or an account with no
+    // active subscription) - never silently grants a paid tier just
+    // because the field was missing.
+    cachedStatus.subscription_tier = data.subscription_tier || 'free';
+    cachedStatus.subscription_status = data.subscription_status || 'none';
+    cachedStatus.subscription_expires_at = data.subscription_expires_at || null;
     saveStatus();
     return { attempted: true, success: true };
   } catch (e) {
@@ -115,12 +135,17 @@ function getLicenseStatus() {
   }
   loadStatus();
   const updateInfo = { update_available: !!cachedStatus.update_available, latest_version: cachedStatus.latest_version || null };
+  const subscriptionInfo = {
+    subscription_tier: cachedStatus.subscription_tier || 'free',
+    subscription_status: cachedStatus.subscription_status || 'none',
+    subscription_expires_at: cachedStatus.subscription_expires_at || null,
+  };
   if (!cachedStatus.last_successful_checkin) {
-    return { state: 'grace_period', message: 'Has not checked in with the license server yet.', last_successful_checkin: null, ...updateInfo };
+    return { state: 'grace_period', message: 'Has not checked in with the license server yet.', last_successful_checkin: null, ...updateInfo, ...subscriptionInfo };
   }
   const elapsedMs = Date.now() - new Date(cachedStatus.last_successful_checkin).getTime();
   if (elapsedMs <= GRACE_PERIOD_MS) {
-    return { state: 'licensed', last_successful_checkin: cachedStatus.last_successful_checkin, ...updateInfo };
+    return { state: 'licensed', last_successful_checkin: cachedStatus.last_successful_checkin, ...updateInfo, ...subscriptionInfo };
   }
   const hoursOver = Math.round((elapsedMs - GRACE_PERIOD_MS) / (60 * 60 * 1000));
   return {
@@ -128,6 +153,7 @@ function getLicenseStatus() {
     message: `Last successful check-in was over ${Math.round(elapsedMs / (60 * 60 * 1000))}h ago (${hoursOver}h past the ${GRACE_PERIOD_MS / (60 * 60 * 1000)}h grace period).`,
     last_successful_checkin: cachedStatus.last_successful_checkin,
     ...updateInfo,
+    ...subscriptionInfo,
   };
 }
 
