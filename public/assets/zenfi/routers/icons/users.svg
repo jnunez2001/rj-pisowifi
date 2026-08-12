@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Users">
+  <title>Users</title>
+  
+<circle cx="25" cy="24" r="8" fill="#fff" stroke="#172033" stroke-width="3"/><circle cx="44" cy="27" r="6" fill="#fff" stroke="#172033" stroke-width="3"/><path d="M11 49c1-10 7-15 14-15s13 5 14 15M38 36c8 0 13 5 14 13" fill="none" stroke="#172033" stroke-width="3" stroke-linecap="round"/>
+
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Wi-Fi Hotspot">
+  <title>Wi-Fi Hotspot</title>
+  
+<path d="M12 27c11-11 29-11 40 0M19 34c7-7 19-7 26 0M27 41c3-3 7-3 10 0" fill="none" stroke="#172033" stroke-width="4" stroke-linecap="round"/>
+<circle cx="32" cy="48" r="3.5" fill="#1769FF"/>
+
+</svg>

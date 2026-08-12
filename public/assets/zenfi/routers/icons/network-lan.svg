@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Network LAN">
+  <title>Network LAN</title>
+  
+<g fill="#fff" stroke="#1769FF" stroke-width="3">
+<rect x="26" y="8" width="12" height="12" rx="2"/>
+<rect x="8" y="44" width="12" height="12" rx="2"/>
+<rect x="26" y="44" width="12" height="12" rx="2"/>
+<rect x="44" y="44" width="12" height="12" rx="2"/>
+</g><g stroke="#1769FF" stroke-width="3" fill="none"><path d="M32 20v12M14 38h36M14 38v6M32 32v12M50 38v6"/></g>
+
+</svg>

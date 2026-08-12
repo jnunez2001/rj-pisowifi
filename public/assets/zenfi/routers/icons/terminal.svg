@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Terminal">
+  <title>Terminal</title>
+  
+<rect x="8" y="12" width="48" height="40" rx="5" fill="#111827"/>
+<path d="M18 24l8 8-8 8M31 40h14" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+
+</svg>
