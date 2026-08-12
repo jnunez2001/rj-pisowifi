@@ -1,106 +1,136 @@
-<div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
+<style>
+/* Scoped to Dashboard only - visual replica of the shared mockup
+   (5-card stat row, 3-col bandwidth/WAN/hotspot row, 3-col sessions/
+   activity/actions row). Reuses theme CSS variables so dark mode keeps
+   working automatically. */
+.zf2-header-row { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:20px; }
+.zf2-header-actions { display:flex; align-items:center; gap:10px; }
+.zf2-date-pill { display:flex; align-items:center; gap:8px; padding:9px 14px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; font-size:13px; font-weight:600; color:var(--text-primary); }
+.zf2-icon-btn { width:38px; height:38px; display:flex; align-items:center; justify-content:center; background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; color:var(--text-muted); cursor:pointer; }
+.zf2-icon-btn:hover { color:var(--text-primary); }
+
+.zf2-stat-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:16px; margin-bottom:16px; }
+@media (max-width: 1100px) { .zf2-stat-grid { grid-template-columns:repeat(2,1fr); } }
+.zf2-stat-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:18px; }
+.zf2-stat-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; }
+.zf2-stat-label { font-size:11px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:var(--text-muted); }
+.zf2-stat-icon { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
+.zf2-stat-value { font-size:26px; font-weight:700; color:var(--text-primary); margin-bottom:4px; }
+.zf2-stat-desc { font-size:12px; color:var(--text-muted); font-weight:600; }
+
+.zf2-row3 { display:grid; grid-template-columns:2fr 1fr 1fr; gap:16px; margin-bottom:16px; }
+@media (max-width: 1100px) { .zf2-row3 { grid-template-columns:1fr; } }
+.zf2-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:14px; padding:18px; }
+.zf2-card-title { font-size:12px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:var(--text-muted); margin-bottom:14px; }
+
+.zf2-wan-lane { margin-bottom:12px; }
+.zf2-wan-lane:last-child { margin-bottom:0; }
+.zf2-wan-lane-head { display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:700; color:var(--text-primary); margin-bottom:8px; }
+.zf2-wan-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; }
+.zf2-wan-item-label { font-size:11px; color:var(--text-muted); font-weight:600; }
+.zf2-wan-item-value { font-size:13px; color:var(--text-primary); font-weight:700; }
+
+.zf2-list-row { display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-top:1px solid var(--border-color); font-size:13px; }
+.zf2-list-row:first-of-type { border-top:none; }
+.zf2-list-left { display:flex; align-items:center; gap:8px; color:var(--text-primary); font-weight:600; min-width:0; }
+.zf2-list-left span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.zf2-list-value { font-size:13px; font-weight:700; color:var(--text-primary); flex-shrink:0; }
+
+.zf2-activity-row { display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-top:1px solid var(--border-color); }
+.zf2-activity-row:first-of-type { border-top:none; }
+.zf2-activity-dot { width:8px; height:8px; border-radius:50%; margin-top:5px; flex-shrink:0; }
+.zf2-activity-text { font-size:13px; color:var(--text-primary); font-weight:600; }
+.zf2-activity-meta { font-size:12px; color:var(--text-muted); margin-top:2px; }
+
+.zf2-actions-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.zf2-action-btn { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:16px 8px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:10px; color:var(--text-primary); font-size:12px; font-weight:600; cursor:pointer; }
+.zf2-action-btn:hover { border-color:var(--brand-teal); color:var(--brand-teal); }
+.zf2-action-btn i { font-size:16px; }
+</style>
+
+<div class="zf2-header-row">
   <div>
     <div class="page-title">Dashboard</div>
     <div class="page-subtitle">Overview of your network and hotspot performance</div>
   </div>
+  <div class="zf2-header-actions">
+    <div class="zf2-date-pill"><i class="fas fa-calendar-days"></i> <span id="dashboardToday">--</span></div>
+    <div class="zf2-icon-btn" onclick="loadDashboard()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
+  </div>
 </div>
 
 <!-- STAT CARDS -->
-<div class="stat-grid">
-  <div class="stat-card green">
-    <div class="stat-icon"><i class="fas fa-coins"></i></div>
-    <div class="stat-label">Today's Revenue</div>
-    <div class="stat-value" id="todaySales">₱0</div>
-    <div class="stat-desc">Daily Revenue</div>
+<div class="zf2-stat-grid">
+  <div class="zf2-stat-card">
+    <div class="zf2-stat-top">
+      <div class="zf2-stat-label">Today's Revenue</div>
+      <div class="zf2-stat-icon" style="background:var(--card-green-bg);color:var(--card-green-text);"><i class="fas fa-wallet"></i></div>
+    </div>
+    <div class="zf2-stat-value" id="todaySales">₱0</div>
+    <div class="zf2-stat-desc">Daily Revenue</div>
   </div>
-  <div class="stat-card blue">
-    <div class="stat-icon"><i class="fas fa-users"></i></div>
-    <div class="stat-label">Active Sessions</div>
-    <div class="stat-value" id="activeSessions">0</div>
-    <div class="stat-desc">Currently Connected</div>
+  <div class="zf2-stat-card">
+    <div class="zf2-stat-top">
+      <div class="zf2-stat-label">Active Sessions</div>
+      <div class="zf2-stat-icon" style="background:var(--card-blue-bg);color:var(--card-blue-text);"><i class="fas fa-user-group"></i></div>
+    </div>
+    <div class="zf2-stat-value" id="activeSessions">0</div>
+    <div class="zf2-stat-desc">Currently Connected</div>
   </div>
-  <div class="stat-card orange">
-    <div class="stat-icon"><i class="fas fa-receipt"></i></div>
-    <div class="stat-label">Today's Transactions</div>
-    <div class="stat-value" id="todayTransactions">0</div>
-    <div class="stat-desc">Coin & Voucher</div>
+  <div class="zf2-stat-card">
+    <div class="zf2-stat-top">
+      <div class="zf2-stat-label">Today's Transactions</div>
+      <div class="zf2-stat-icon" style="background:var(--card-orange-bg);color:var(--card-orange-text);"><i class="fas fa-receipt"></i></div>
+    </div>
+    <div class="zf2-stat-value" id="todayTransactions">0</div>
+    <div class="zf2-stat-desc">Coin & Voucher</div>
   </div>
-  <div class="stat-card red">
-    <div class="stat-icon"><i class="fas fa-hourglass-half"></i></div>
-    <div class="stat-label">Minutes Sold Today</div>
-    <div class="stat-value" id="minutesSold">0</div>
-    <div class="stat-desc">Total Minutes</div>
+  <div class="zf2-stat-card">
+    <div class="zf2-stat-top">
+      <div class="zf2-stat-label">Minutes Sold Today</div>
+      <div class="zf2-stat-icon" style="background:var(--card-red-bg);color:var(--card-red-text);"><i class="fas fa-hourglass-half"></i></div>
+    </div>
+    <div class="zf2-stat-value" id="minutesSold">0 mins</div>
+    <div class="zf2-stat-desc">Total Minutes</div>
   </div>
-  <div class="stat-card blue">
-    <div class="stat-icon"><i class="fas fa-gauge-high"></i></div>
-    <div class="stat-label">Bandwidth Usage</div>
-    <div class="stat-value"><span id="currentDownload">0</span>/<span id="currentUpload">0</span></div>
-    <div class="stat-desc">Mbps Down/Up</div>
+  <div class="zf2-stat-card">
+    <div class="zf2-stat-top">
+      <div class="zf2-stat-label">Bandwidth Usage</div>
+      <div class="zf2-stat-icon" style="background:var(--card-blue-bg);color:var(--card-blue-text);"><i class="fas fa-gauge-high"></i></div>
+    </div>
+    <div class="zf2-stat-value"><span id="currentDownload">0</span>/<span id="currentUpload">0</span> Mbps</div>
+    <div class="zf2-stat-desc">Down / Up</div>
   </div>
 </div>
 
 <!-- BANDWIDTH + WAN STATUS + HOTSPOT OVERVIEW -->
-<div class="dashboard-row" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:16px;margin-bottom:16px;">
+<div class="zf2-row3">
 
-  <div class="card">
-    <div class="card-header">
-      <div>
-        <div class="card-title">Bandwidth Usage</div>
-        <div class="card-subtitle">Live, updated every few seconds</div>
-      </div>
-    </div>
+  <div class="zf2-card">
+    <div class="zf2-card-title">Bandwidth Usage</div>
     <canvas id="networkChart" height="90"></canvas>
   </div>
 
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">Internet / WAN Status</div>
-    </div>
-    <div id="wanStatusBody" style="display:flex;flex-direction:column;gap:14px;">
-      <div class="loading"><i class="fas fa-spinner fa-spin"></i></div>
-    </div>
+  <div class="zf2-card">
+    <div class="zf2-card-title">Internet / WAN Status</div>
+    <div id="wanStatusBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
   </div>
 
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">Hotspot Overview</div>
-    </div>
-    <div style="display:flex;flex-direction:column;gap:14px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
-          <i class="fas fa-clock" style="margin-right:6px;"></i>Server Uptime
-        </span>
-        <span style="font-size:13px;font-weight:700;color:var(--text-primary);" id="uptime">--</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;" title="" id="wifiApRow">
-        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
-          <i class="fas fa-wifi" style="margin-right:6px;"></i>WiFi AP
-        </span>
-        <span class="badge badge-orange" id="wifiApStatus">Unknown</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;" id="coinSlotRow">
-        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
-          <i class="fas fa-microchip" style="margin-right:6px;"></i>Coin Slot
-        </span>
-        <span class="badge badge-orange" id="coinSlotStatus">Unknown</span>
-      </div>
-      <hr style="border:none;border-top:1px solid var(--border-color);">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
-          <i class="fas fa-tag" style="margin-right:6px;"></i>System Version
-        </span>
-        <span style="font-size:13px;font-weight:700;color:var(--text-primary);" id="systemVersion">v1.0.0</span>
-      </div>
-    </div>
+  <div class="zf2-card">
+    <div class="zf2-card-title">Hotspot Overview</div>
+    <div class="zf2-list-row"><div class="zf2-list-left"><i class="fas fa-clock"></i> <span>Server Uptime</span></div><span class="zf2-list-value" id="uptime">--</span></div>
+    <div class="zf2-list-row" id="wifiApRow"><div class="zf2-list-left"><i class="fas fa-wifi"></i> <span>WiFi AP</span></div><span class="badge badge-orange" id="wifiApStatus">Unknown</span></div>
+    <div class="zf2-list-row" id="coinSlotRow"><div class="zf2-list-left"><i class="fas fa-microchip"></i> <span>Coin Slot</span></div><span class="badge badge-orange" id="coinSlotStatus">Unknown</span></div>
+    <div class="zf2-list-row"><div class="zf2-list-left"><i class="fas fa-tag"></i> <span>System Version</span></div><span class="zf2-list-value" id="systemVersion">v1.0.0</span></div>
   </div>
 </div>
 
 <!-- REVENUE CHART -->
-<div class="card" style="margin-bottom:16px;">
-  <div class="card-header">
+<div class="zf2-card" style="margin-bottom:16px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
     <div>
-      <div class="card-title">Revenue Analytics</div>
-      <div class="card-subtitle" id="chartRangeSubtitle">Last 7 days performance</div>
+      <div class="zf2-card-title" style="margin-bottom:2px;">Revenue Analytics</div>
+      <div class="page-subtitle" id="chartRangeSubtitle" style="font-size:12px;">Last 7 days performance</div>
     </div>
     <div style="display:flex;gap:8px;">
       <button class="btn btn-sm btn-secondary" onclick="setChartRange('daily')" id="btnDaily">Daily</button>
@@ -111,51 +141,29 @@
   <canvas id="revenueChart" height="120"></canvas>
 </div>
 
-<!-- RECENT ACTIVITY + QUICK ACTIONS -->
-<div class="dashboard-row" style="display:grid;grid-template-columns:2fr 1fr;gap:16px;">
+<!-- ACTIVE SESSIONS + RECENT ACTIVITY + QUICK ACTIONS -->
+<div class="zf2-row3">
 
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">Recent Activity</div>
-      <button class="btn btn-sm btn-secondary" onclick="navigateTo('sales')">
-        View All <i class="fas fa-arrow-right"></i>
-      </button>
+  <div class="zf2-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div class="zf2-card-title" style="margin-bottom:0;">Active Sessions</div>
+      <button class="btn btn-sm btn-secondary" onclick="navigateTo('sessions')">View All</button>
     </div>
-    <div class="table-wrapper">
-      <table>
-        <thead>
-          <tr>
-            <th>Session ID</th>
-            <th>Amount</th>
-            <th>Time Added</th>
-            <th>Type</th>
-            <th>Time</th>
-          </tr>
-        </thead>
-        <tbody id="recentTransactions">
-          <tr><td colspan="5"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
-        </tbody>
-      </table>
-    </div>
+    <div id="dashActiveSessions"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
   </div>
 
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">Quick Actions</div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px 16px;">
-      <button class="btn btn-secondary" style="flex-direction:column;padding:16px 8px;gap:6px;" onclick="navigateTo('vouchers')">
-        <i class="fas fa-ticket"></i> Add Voucher
-      </button>
-      <button class="btn btn-secondary" style="flex-direction:column;padding:16px 8px;gap:6px;" onclick="navigateTo('sessions')">
-        <i class="fas fa-wifi"></i> View Sessions
-      </button>
-      <button class="btn btn-secondary" style="flex-direction:column;padding:16px 8px;gap:6px;" onclick="navigateTo('settings')">
-        <i class="fas fa-gear"></i> System Settings
-      </button>
-      <button class="btn btn-secondary" style="flex-direction:column;padding:16px 8px;gap:6px;" onclick="openPowerConfirm('reboot')">
-        <i class="fas fa-sync-alt"></i> Reboot Server
-      </button>
+  <div class="zf2-card">
+    <div class="zf2-card-title">Recent Activity</div>
+    <div id="recentTransactions"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+  </div>
+
+  <div class="zf2-card">
+    <div class="zf2-card-title">Quick Actions</div>
+    <div class="zf2-actions-grid">
+      <div class="zf2-action-btn" onclick="navigateTo('vouchers')"><i class="fas fa-ticket"></i> Add Voucher</div>
+      <div class="zf2-action-btn" onclick="navigateTo('sessions')"><i class="fas fa-wifi"></i> View Sessions</div>
+      <div class="zf2-action-btn" onclick="navigateTo('settings')"><i class="fas fa-gear"></i> System Settings</div>
+      <div class="zf2-action-btn" onclick="openPowerConfirm('reboot')"><i class="fas fa-sync-alt"></i> Reboot Server</div>
     </div>
   </div>
 

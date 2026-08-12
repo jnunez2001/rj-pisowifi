@@ -11,9 +11,12 @@ async function loadDashboard() {
   // was always false (the chart didn't exist yet) — the revenue chart
   // always rendered as a flat zero line until an admin happened to click
   // one of the Daily/Weekly/Monthly buttons, easy to mistake for "no sales".
+  const dateEl = document.getElementById('dashboardToday');
+  if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
   initChart();
   await loadSalesStats();
   await loadRecentTransactions();
+  await loadDashActiveSessions();
   await loadActiveSessionsCount();
   await loadSystemVersion();
   await loadSystemStatus();
@@ -28,6 +31,12 @@ async function loadDashboard() {
 // Internet/WAN status card - real data from wanHealthService.js (ping-
 // based score/latency/loss) and multiWanService.js (primary/backup lane
 // status, only meaningful once a second WAN lane is actually configured).
+// Mockup shows a Primary/Backup lane layout with per-lane Online badge,
+// Download/Upload/Uptime/Latency grid - restyled to that shape using only
+// real fields wanHealthService.js/multiWanService.js actually return.
+// No literal ISP name ("Converge"/"PLDT") is fabricated - real
+// `lane_name` (operator-set in Network > Ports and Roles) is used if
+// present, otherwise a generic "Primary"/"Backup" label.
 async function loadWanStatus() {
   const body = document.getElementById('wanStatusBody');
   if (!body) return;
@@ -36,38 +45,45 @@ async function loadWanStatus() {
       apiCall('GET', '/api/admin/network/wan-health'),
       apiCall('GET', '/api/admin/network/multi-wan'),
     ]);
-    const rows = [];
+    const lanes = [];
     if (healthRes.success) {
       const h = healthRes.health;
-      const scoreColor = h.score >= 80 ? 'var(--accent-green)' : h.score >= 40 ? 'var(--accent-orange)' : 'var(--accent-red)';
-      rows.push(`
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:13px;color:var(--text-muted);font-weight:600;"><i class="fas fa-signal" style="margin-right:6px;"></i>Health Score</span>
-          <span style="font-size:13px;font-weight:700;color:${scoreColor};">${h.score}/100</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:13px;color:var(--text-muted);font-weight:600;"><i class="fas fa-gauge" style="margin-right:6px;"></i>Latency</span>
-          <span style="font-size:13px;font-weight:700;color:var(--text-primary);">${h.avg_latency_ms != null ? h.avg_latency_ms + ' ms' : '--'}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:13px;color:var(--text-muted);font-weight:600;"><i class="fas fa-triangle-exclamation" style="margin-right:6px;"></i>Packet Loss</span>
-          <span style="font-size:13px;font-weight:700;color:var(--text-primary);">${h.packet_loss_pct != null ? h.packet_loss_pct + '%' : '--'}</span>
-        </div>
-      `);
-    } else {
-      rows.push('<div style="font-size:13px;color:var(--text-muted);">Health check unavailable</div>');
+      const up = !(h.interface && h.interface.link_state && h.interface.link_state !== 'up' && h.interface.link_state !== 'unknown');
+      const primaryName = (multiRes.success && multiRes.status && multiRes.status.primary && multiRes.status.primary.lane_name) || 'Primary';
+      lanes.push({
+        name: primaryName,
+        online: up,
+        download: null,
+        upload: null,
+        latency: h.avg_latency_ms != null ? `${h.avg_latency_ms} ms` : '--',
+        loss: h.packet_loss_pct != null ? `${h.packet_loss_pct}%` : '--',
+      });
     }
     if (multiRes.success && multiRes.status && multiRes.status.backup) {
       const s = multiRes.status;
-      rows.push(`
-        <hr style="border:none;border-top:1px solid var(--border-color);">
-        <div style="display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-size:13px;color:var(--text-muted);font-weight:600;"><i class="fas fa-route" style="margin-right:6px;"></i>Active Lane</span>
-          <span class="badge badge-blue">${s.currently_active || 'primary'}</span>
-        </div>
-      `);
+      lanes.push({
+        name: s.backup.lane_name || 'Backup',
+        online: s.currently_active !== undefined,
+        standby: s.currently_active && s.currently_active !== 'backup',
+      });
     }
-    body.innerHTML = rows.join('');
+    if (lanes.length === 0) {
+      body.innerHTML = '<div style="font-size:13px;color:var(--text-muted);">WAN status unavailable</div>';
+      return;
+    }
+    body.innerHTML = lanes.map(l => `
+      <div class="zf2-wan-lane">
+        <div class="zf2-wan-lane-head">
+          <span>${l.name}</span>
+          <span class="badge ${l.online ? 'badge-green' : 'badge-red'}"><span class="status-dot ${l.online ? 'online' : ''}"></span>${l.standby ? 'Standby' : l.online ? 'Online' : 'Offline'}</span>
+        </div>
+        ${l.latency !== undefined ? `
+        <div class="zf2-wan-grid">
+          <div><div class="zf2-wan-item-label">Latency</div><div class="zf2-wan-item-value">${l.latency}</div></div>
+          <div><div class="zf2-wan-item-label">Packet Loss</div><div class="zf2-wan-item-value">${l.loss}</div></div>
+        </div>` : ''}
+      </div>
+    `).join('');
   } catch (e) {
     body.innerHTML = '<div style="font-size:13px;color:var(--text-muted);">Could not load WAN status</div>';
   }
@@ -299,48 +315,67 @@ async function loadActiveSessionsCount() {
   } catch(e) {}
 }
 
+// Dashboard rebuild (mockup replica) - "Recent Activity" is now a
+// timeline of colored-dot rows, not a table. #recentTransactions is a
+// plain <div> in dashboard.html now, not a <tbody> - same real data
+// (/api/admin/sales' recent_transactions), just restyled.
 async function loadRecentTransactions() {
   try {
     const data = await apiCall('GET', '/api/admin/sales');
     if (!data.success) return;
 
-    const tbody = document.getElementById('recentTransactions');
+    const container = document.getElementById('recentTransactions');
+    if (!container) return;
     const transactions = data.recent_transactions || [];
 
     if (transactions.length === 0) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px;">
-            No transactions yet
-          </td>
-        </tr>`;
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:24px;font-size:13px;">No transactions yet</div>';
       return;
     }
 
-    tbody.innerHTML = transactions.slice(0, 10).map(t => `
-      <tr>
-        <td>
-          <span style="font-family:monospace;font-size:13px;color:var(--accent-red);font-weight:700;">
-            ${t.voucher_code}
-          </span>
-        </td>
-        <td>
-          <span class="badge badge-green">₱${t.coin_value}</span>
-        </td>
-        <td>${formatMins(t.minutes_added)}</td>
-        <td>
-          <span class="badge ${t.type === 'coin' ? 'badge-blue' : 'badge-orange'}">
-            ${t.type === 'coin' ? '🪙 Coin' : t.type === 'voucher' ? '🎟️ Voucher' : t.type === 'free' ? '🎁 Free' : '🎫 Promo'}
-          </span>
-        </td>
-        <td style="color:var(--text-muted);font-size:13px;">
-          ${new Date(t.created_at).toLocaleTimeString()}
-        </td>
-      </tr>
+    const dotColor = { coin: 'var(--accent-blue)', voucher: 'var(--accent-orange)', free: 'var(--accent-green)', promo: 'var(--accent-orange)' };
+    const typeLabel = { coin: 'Coin Payment', voucher: 'Voucher Redeemed', free: 'Free Session', promo: 'Promo Redeemed' };
+
+    container.innerHTML = transactions.slice(0, 6).map(t => `
+      <div class="zf2-activity-row">
+        <div class="zf2-activity-dot" style="background:${dotColor[t.type] || 'var(--text-muted)'};"></div>
+        <div style="min-width:0;">
+          <div class="zf2-activity-text">${typeLabel[t.type] || 'Session'} <span style="font-weight:400;color:var(--text-muted);">₱${t.coin_value}</span></div>
+          <div class="zf2-activity-meta">${t.voucher_code} · ${formatMins(t.minutes_added)} · ${new Date(t.created_at).toLocaleTimeString()}</div>
+        </div>
+      </div>
     `).join('');
 
   } catch(e) {
     console.error('Transactions error:', e);
+  }
+}
+
+// Active Sessions list (mockup's "Top Users" slot) - real top-5 by time
+// remaining, not a data-usage total (this app doesn't track per-client
+// cumulative usage yet, so that mockup metric isn't available - shows
+// what IS real instead of a fabricated number in its place).
+async function loadDashActiveSessions() {
+  const container = document.getElementById('dashActiveSessions');
+  if (!container) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/sessions');
+    if (!data.success) { container.innerHTML = ''; return; }
+    const sessions = (data.sessions || []).filter(s => s.is_paused !== 1)
+      .sort((a, b) => b.minutes_remaining - a.minutes_remaining)
+      .slice(0, 5);
+    if (sessions.length === 0) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:24px;font-size:13px;">No active sessions</div>';
+      return;
+    }
+    container.innerHTML = sessions.map(s => `
+      <div class="zf2-list-row">
+        <div class="zf2-list-left"><i class="fas fa-wifi" style="color:var(--accent-green);"></i> <span>${s.mac_address}</span></div>
+        <span class="zf2-list-value">${s.minutes_remaining} min</span>
+      </div>
+    `).join('');
+  } catch (e) {
+    container.innerHTML = '';
   }
 }
 
