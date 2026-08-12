@@ -11,12 +11,20 @@ async function loadDashboard() {
   // was always false (the chart didn't exist yet) — the revenue chart
   // always rendered as a flat zero line until an admin happened to click
   // one of the Daily/Weekly/Monthly buttons, easy to mistake for "no sales".
-  const dateEl = document.getElementById('dashboardToday');
-  if (dateEl) dateEl.textContent = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  const rangeEl = document.getElementById('dashboardDateRange');
+  if (rangeEl) {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - 6);
+    const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    rangeEl.textContent = `${fmt(start)} - ${fmt(end)}`;
+  }
   initChart();
   await loadSalesStats();
   await loadRecentTransactions();
-  await loadDashActiveSessions();
+  await loadTopSpenders();
+  await loadNetworkLanes();
+  await loadNetworkDevicesSummary();
   await loadActiveSessionsCount();
   await loadSystemVersion();
   await loadSystemStatus();
@@ -26,6 +34,96 @@ async function loadDashboard() {
   // gate it is gone from the page; setDashboardMode(true) still does the
   // real init/polling work, just unconditionally.
   setDashboardMode(true);
+}
+
+// "Top Spenders (Today)" - mockup's "Top Users (By Data Usage)" slot.
+// This app doesn't track per-client cumulative data usage, so real
+// today's revenue per client (from the same transactions table
+// loadSalesStats() already reads) fills the same "ranked list of top
+// customers" role honestly instead of a fabricated GB figure.
+async function loadTopSpenders() {
+  const el = document.getElementById('topSpenders');
+  if (!el) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/dashboard/top-spenders-today');
+    if (!data.success || !data.spenders || data.spenders.length === 0) {
+      el.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px 0;font-size:13px;">No spenders yet today</div>';
+      return;
+    }
+    const max = Math.max(...data.spenders.map(s => s.total));
+    el.innerHTML = data.spenders.map((s, i) => `
+      <div class="zf3-list-row">
+        <div class="zf3-list-left">
+          <div class="zf3-rank">${i + 1}</div>
+          <div class="zf3-avatar"><i class="fas fa-user"></i></div>
+          <span style="font-family:monospace;">${s.mac_address}</span>
+        </div>
+        <div class="zf3-bar-track"><div class="zf3-bar-fill" style="width:${Math.round((s.total / max) * 100)}%;"></div></div>
+        <span class="zf3-list-value">₱${s.total}</span>
+      </div>
+    `).join('');
+  } catch (e) {
+    el.innerHTML = '';
+  }
+}
+
+// "Network Lanes" - mockup's "Top Access Points" slot. This app has no
+// access-point concept in Standalone/Router Mode (that's MikroTik
+// Controller Mode's Wireless/AP page, itself not built yet - see
+// comingSoon.js's 'mikrotik-wireless' entry) - real configured physical
+// ports/lanes (Network > Ports and Roles) fill the same "list of network
+// hardware with live status" role instead.
+async function loadNetworkLanes() {
+  const el = document.getElementById('networkLanes');
+  if (!el) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/network/standalone/ports');
+    const ports = (data.success && data.physical_ports) || [];
+    if (ports.length === 0) {
+      el.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px 0;font-size:13px;">No lanes configured yet</div>';
+      return;
+    }
+    el.innerHTML = `<table class="zf3-table"><thead><tr><th>Interface</th><th>MAC</th><th>Status</th></tr></thead><tbody>` +
+      ports.map(p => `
+        <tr>
+          <td>${p.name}</td>
+          <td style="font-family:monospace;font-size:11px;color:var(--text-muted);">${p.mac || '--'}</td>
+          <td><span class="badge ${p.status === 'up' ? 'badge-green' : 'badge-red'}">${p.status === 'up' ? 'Online' : p.status === 'down' ? 'Offline' : p.status}</span></td>
+        </tr>
+      `).join('') + `</tbody></table>`;
+  } catch (e) {
+    el.innerHTML = '';
+  }
+}
+
+// "Network Devices" - mockup's device-inventory-with-online/offline-
+// counts slot. This app doesn't categorize devices into Routers/APs/
+// Switches/Controllers (that's Controller Mode device management, group
+// 12d, not built) - real registered kiosks/coin-slot boards (vendos
+// table, the same online-window logic devices.html already uses) fill
+// the "hardware online/offline summary" role instead.
+async function loadNetworkDevicesSummary() {
+  try {
+    const data = await apiCall('GET', '/api/admin/vendos');
+    const vendos = (data.success && data.vendos) || [];
+    const online = vendos.filter(v => isOnline(v.last_seen)).length;
+    document.getElementById('ndTotal').textContent = vendos.length;
+    document.getElementById('ndOnline').textContent = online;
+    document.getElementById('ndOffline').textContent = vendos.length - online;
+    const list = document.getElementById('ndList');
+    if (list) {
+      if (vendos.length === 0) {
+        list.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:8px 0;font-size:13px;">No registered kiosks yet</div>';
+      } else {
+        list.innerHTML = vendos.slice(0, 4).map(v => `
+          <div class="zf3-list-row">
+            <div class="zf3-list-left"><i class="fas fa-microchip" style="color:var(--text-muted);width:14px;"></i> <span>${v.name || v.mac_address || 'Kiosk #' + v.id}</span></div>
+            <span class="badge ${isOnline(v.last_seen) ? 'badge-green' : 'badge-red'}">${isOnline(v.last_seen) ? 'Online' : 'Offline'}</span>
+          </div>
+        `).join('');
+      }
+    }
+  } catch (e) {}
 }
 
 // Internet/WAN status card - real data from wanHealthService.js (ping-
@@ -50,11 +148,17 @@ async function loadWanStatus() {
       const h = healthRes.health;
       const up = !(h.interface && h.interface.link_state && h.interface.link_state !== 'up' && h.interface.link_state !== 'unknown');
       const primaryName = (multiRes.success && multiRes.status && multiRes.status.primary && multiRes.status.primary.lane_name) || 'Primary';
+      // Download/Upload here reuse the same live throughput figures the
+      // Bandwidth Usage stat card/chart already show (this box's total
+      // live interface throughput) - real, not a fabricated per-lane
+      // split (RouterOS/nft don't report that separately per-WAN today).
+      const dl = document.getElementById('currentDownload');
+      const ul = document.getElementById('currentUpload');
       lanes.push({
         name: primaryName,
         online: up,
-        download: null,
-        upload: null,
+        download: dl ? `${dl.textContent} Mbps` : '--',
+        upload: ul ? `${ul.textContent} Mbps` : '--',
         latency: h.avg_latency_ms != null ? `${h.avg_latency_ms} ms` : '--',
         loss: h.packet_loss_pct != null ? `${h.packet_loss_pct}%` : '--',
       });
@@ -72,15 +176,18 @@ async function loadWanStatus() {
       return;
     }
     body.innerHTML = lanes.map(l => `
-      <div class="zf2-wan-lane">
-        <div class="zf2-wan-lane-head">
+      <div class="zf3-wan-lane">
+        <div class="zf3-wan-lane-head">
           <span>${l.name}</span>
           <span class="badge ${l.online ? 'badge-green' : 'badge-red'}"><span class="status-dot ${l.online ? 'online' : ''}"></span>${l.standby ? 'Standby' : l.online ? 'Online' : 'Offline'}</span>
         </div>
         ${l.latency !== undefined ? `
-        <div class="zf2-wan-grid">
-          <div><div class="zf2-wan-item-label">Latency</div><div class="zf2-wan-item-value">${l.latency}</div></div>
-          <div><div class="zf2-wan-item-label">Packet Loss</div><div class="zf2-wan-item-value">${l.loss}</div></div>
+        <div class="zf3-wan-grid">
+          ${l.download !== undefined ? `
+          <div><div class="zf3-wan-item-label">Download</div><div class="zf3-wan-item-value">${l.download}</div></div>
+          <div><div class="zf3-wan-item-label">Upload</div><div class="zf3-wan-item-value">${l.upload}</div></div>` : ''}
+          <div><div class="zf3-wan-item-label">Latency</div><div class="zf3-wan-item-value">${l.latency}</div></div>
+          <div><div class="zf3-wan-item-label">Packet Loss</div><div class="zf3-wan-item-value">${l.loss}</div></div>
         </div>` : ''}
       </div>
     `).join('');
@@ -277,20 +384,41 @@ async function loadSalesStats() {
     const data = await apiCall('GET', `/api/admin/sales?range=${currentChartRange}`);
     if (!data.success) return;
 
-    document.getElementById('todaySales').textContent =
-      `₱${(data.today.total_income || 0).toFixed(2)}`;
-    document.getElementById('todayTransactions').textContent =
-      data.today.transactions || 0;
-    document.getElementById('minutesSold').textContent =
-      `${Math.round(data.today.minutes_sold || 0)} mins`;
+    const todayIncome = data.today.total_income || 0;
+    const todayTx = data.today.transactions || 0;
+    const todayMinutes = Math.round(data.today.minutes_sold || 0);
 
-    // Weekly/monthly totals no longer have their own stat cards (dashboard
-    // rebuild per the shared mockup - Today's Revenue/Active Sessions/
-    // Today's Transactions/Minutes Sold/Bandwidth Usage replaced the old
-    // Today/Weekly/Monthly Sales row) - still computed here since
-    // Revenue Analytics' chart range buttons below use the same
-    // currentChartRange state, just no longer written to weeklySales/
-    // monthlySales elements that don't exist in the page anymore.
+    document.getElementById('todaySales').textContent = `₱${todayIncome.toFixed(2)}`;
+    document.getElementById('todayTransactions').textContent = todayTx;
+    document.getElementById('minutesSold').textContent = `${todayMinutes} mins`;
+    // Hotspot Overview card mirrors the same real today-figures (separate
+    // element ids from the stat cards above, so both can render without
+    // duplicate-id conflicts).
+    const hoTx = document.getElementById('hoTransactions');
+    const hoMin = document.getElementById('hoMinutes');
+    if (hoTx) hoTx.textContent = todayTx;
+    if (hoMin) hoMin.textContent = `${todayMinutes} mins`;
+
+    // Real "vs yesterday" revenue trend - data.week is ordered DESC by
+    // date (today first, if any transactions happened today), so the
+    // first row after today's own is yesterday's actual total. No
+    // fabricated week-over-week % here (this app has no prior-7-days
+    // query to compare against) - "vs yesterday" is the honest
+    // comparison the data actually supports.
+    const trendEl = document.getElementById('revenueTrend');
+    if (trendEl && Array.isArray(data.week)) {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const yesterday = data.week.find((d) => d.date !== todayStr);
+      if (yesterday) {
+        const diff = todayIncome - (yesterday.total || 0);
+        const pct = yesterday.total ? Math.round((diff / yesterday.total) * 100) : null;
+        if (pct !== null) {
+          trendEl.innerHTML = `<span class="${diff >= 0 ? 'up' : 'down'}"><i class="fas fa-arrow-${diff >= 0 ? 'up' : 'down'}"></i> ${Math.abs(pct)}%</span> vs yesterday`;
+        } else {
+          trendEl.textContent = 'vs yesterday';
+        }
+      }
+    }
 
     // Bug: the Daily/Weekly/Monthly buttons never changed what was charted
     // — every click re-rendered the same fixed 7-day view. data.chart is
@@ -310,7 +438,10 @@ async function loadActiveSessionsCount() {
     if (data.success) {
       // Bug: this used to be `count` (all sessions, including paused —
       // internet blocked), but the card is labeled "Currently Connected".
-      document.getElementById('activeSessions').textContent = data.active_count ?? data.count ?? 0;
+      const count = data.active_count ?? data.count ?? 0;
+      document.getElementById('activeSessions').textContent = count;
+      const hoEl = document.getElementById('hoActiveUsers');
+      if (hoEl) hoEl.textContent = count;
     }
   } catch(e) {}
 }
@@ -337,11 +468,11 @@ async function loadRecentTransactions() {
     const typeLabel = { coin: 'Coin Payment', voucher: 'Voucher Redeemed', free: 'Free Session', promo: 'Promo Redeemed' };
 
     container.innerHTML = transactions.slice(0, 6).map(t => `
-      <div class="zf2-activity-row">
-        <div class="zf2-activity-dot" style="background:${dotColor[t.type] || 'var(--text-muted)'};"></div>
+      <div class="zf3-activity-row">
+        <div class="zf3-activity-dot" style="background:${dotColor[t.type] || 'var(--text-muted)'};"></div>
         <div style="min-width:0;">
-          <div class="zf2-activity-text">${typeLabel[t.type] || 'Session'} <span style="font-weight:400;color:var(--text-muted);">₱${t.coin_value}</span></div>
-          <div class="zf2-activity-meta">${t.voucher_code} · ${formatMins(t.minutes_added)} · ${new Date(t.created_at).toLocaleTimeString()}</div>
+          <div class="zf3-activity-text">${typeLabel[t.type] || 'Session'} <span style="font-weight:400;color:var(--text-muted);">₱${t.coin_value}</span></div>
+          <div class="zf3-activity-meta">${t.voucher_code} · ${formatMins(t.minutes_added)} · ${new Date(t.created_at).toLocaleTimeString()}</div>
         </div>
       </div>
     `).join('');
@@ -355,30 +486,6 @@ async function loadRecentTransactions() {
 // remaining, not a data-usage total (this app doesn't track per-client
 // cumulative usage yet, so that mockup metric isn't available - shows
 // what IS real instead of a fabricated number in its place).
-async function loadDashActiveSessions() {
-  const container = document.getElementById('dashActiveSessions');
-  if (!container) return;
-  try {
-    const data = await apiCall('GET', '/api/admin/sessions');
-    if (!data.success) { container.innerHTML = ''; return; }
-    const sessions = (data.sessions || []).filter(s => s.is_paused !== 1)
-      .sort((a, b) => b.minutes_remaining - a.minutes_remaining)
-      .slice(0, 5);
-    if (sessions.length === 0) {
-      container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:24px;font-size:13px;">No active sessions</div>';
-      return;
-    }
-    container.innerHTML = sessions.map(s => `
-      <div class="zf2-list-row">
-        <div class="zf2-list-left"><i class="fas fa-wifi" style="color:var(--accent-green);"></i> <span>${s.mac_address}</span></div>
-        <span class="zf2-list-value">${s.minutes_remaining} min</span>
-      </div>
-    `).join('');
-  } catch (e) {
-    container.innerHTML = '';
-  }
-}
-
 function formatMins(mins) {
   if (mins >= 1440) return `${Math.round(mins/1440)} days`;
   if (mins >= 60) return `${Math.round(mins/60)} hrs`;

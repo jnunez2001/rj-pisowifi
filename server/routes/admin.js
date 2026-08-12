@@ -591,6 +591,29 @@ router.get('/sales', adminAuth, (req, res) => {
   }
 });
 
+// GET /api/admin/dashboard/top-spenders-today — real per-client revenue
+// ranking for today (Dashboard's "Top Users" slot in the mockup asked for
+// data-usage-in-GB, which this app doesn't track per client; revenue is
+// the closest real per-client ranking this app actually has, grouped
+// from the same transactions table sales stats already use).
+router.get('/dashboard/top-spenders-today', adminAuth, (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const rows = db.prepare(`
+      SELECT mac_address, SUM(coin_value) as total, COUNT(*) as transaction_count
+      FROM transactions
+      WHERE date(created_at) = ? AND mac_address IS NOT NULL AND mac_address != ''
+      GROUP BY mac_address
+      ORDER BY total DESC
+      LIMIT 5
+    `).all(today);
+    return res.json({ success: true, spenders: rows });
+  } catch (err) {
+    console.error('Top spenders error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/transactions/export — full transaction history for CSV
 // export. /sales' recent_transactions is capped at 20 for the dashboard
 // preview table; this returns everything for bookkeeping purposes.
