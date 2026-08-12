@@ -446,6 +446,19 @@ function handleAuthFailure() {
   if (authToken === null) return; // already logged out, avoid repeat triggers
   authToken = null;
   stopSessionPolling();
+  // Also stop whichever page-specific poll interval is currently running
+  // (Dashboard's bandwidth chart, Live Sessions' auto-refresh, Users',
+  // Devices', About's sysinfo) - stopSessionPolling() above only covers
+  // app.js's own interval. Without this, the page you're sitting on keeps
+  // polling with the now-null token every few seconds, forever.
+  if (typeof destroyDashboard === 'function') destroyDashboard();
+  if (typeof destroySessions === 'function') destroySessions();
+  if (typeof destroyUsersPage === 'function') destroyUsersPage();
+  if (typeof destroyDevices === 'function') destroyDevices();
+  if (typeof destroyAbout === 'function') destroyAbout();
+  if (typeof destroyAnalytics === 'function') destroyAnalytics();
+  if (typeof destroyVouchersPage === 'function') destroyVouchersPage();
+  if (typeof destroyHotspotDashboard === 'function') destroyHotspotDashboard();
   sessionStorage.removeItem('rj_admin_token');
   sessionStorage.removeItem('rj_admin_user');
   document.getElementById('adminLayout').style.display = 'none';
@@ -454,7 +467,20 @@ function handleAuthFailure() {
 }
 
 // ===== API HELPER =====
+// Bug: background poll intervals (Dashboard's bandwidth chart, Live
+// Sessions' auto-refresh, etc.) only get cleared when navigateTo() switches
+// pages - a tab left open in the background keeps polling forever. Once
+// auth failed once and authToken was cleared to null, this function still
+// fired the fetch anyway, sending the literal string "null" as the
+// password header. That fails auth again, records another spam attempt,
+// and repeats every few seconds indefinitely - silently re-triggering the
+// "Too many attempts" block over and over from a tab nobody is looking at.
+// Short-circuiting here (the one shared place every poll goes through)
+// stops every caller at once instead of having to fix each interval.
 async function apiCall(method, endpoint, body = null) {
+  if (!authToken) {
+    return { success: false, message: 'Not authenticated' };
+  }
   const options = {
     method,
     headers: {
