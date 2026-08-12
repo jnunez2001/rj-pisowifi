@@ -20,15 +20,21 @@ async function loadDashboard() {
     rangeEl.textContent = `${fmt(start)} - ${fmt(end)}`;
   }
   initChart();
-  await loadSalesStats();
-  await loadRecentTransactions();
-  await loadTopSpenders();
-  await loadNetworkLanes();
-  await loadNetworkDevicesSummary();
-  await loadActiveSessionsCount();
-  await loadSystemVersion();
-  await loadSystemStatus();
-  await loadWanStatus();
+  // These each hit their own endpoint and write to their own DOM elements,
+  // no shared state between them, so they don't need to run one-at-a-time.
+  // Sequential awaits here used to make total load time the sum of every
+  // request's latency instead of the slowest one.
+  await Promise.all([
+    loadSalesStats(),
+    loadRecentTransactions(),
+    loadTopSpenders(),
+    loadNetworkLanes(),
+    loadNetworkDevicesSummary(),
+    loadActiveSessionsCount(),
+    loadSystemVersion(),
+    loadSystemStatus(),
+    loadWanStatus(),
+  ]);
   // Bandwidth Usage chart is always visible now (matches the current
   // dashboard layout) - the old "Comprehensive View" toggle that used to
   // gate it is gone from the page; setDashboardMode(true) still does the

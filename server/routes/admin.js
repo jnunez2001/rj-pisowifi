@@ -134,6 +134,36 @@ function isValidSessionToken(token) {
   return true;
 }
 
+// Bug: the admin SPA sends the raw password header on every single API
+// call (dozens per page - see comment below), and verifyPassword() runs
+// crypto.scryptSync on every one of them. scryptSync is deliberately slow
+// and CPU-blocking, and Node is single-threaded, so a page that fires many
+// requests at once (e.g. the dashboard's Promise.all) couldn't actually run
+// them in parallel server-side - each one blocked the whole process for its
+// full hash duration, serializing everything and making "fast" pages take
+// several seconds to load. This cache lets repeat requests with the same
+// already-verified password skip re-hashing for a few seconds, without
+// changing the auth model or requiring any frontend change - the real
+// scrypt check still runs on first use per password, and the cache entry
+// disappears fast enough that a password change is never meaningfully
+// delayed in taking effect.
+const verifiedPasswordCache = new Map();
+const VERIFIED_PASSWORD_TTL_MS = 10 * 1000;
+
+function isRecentlyVerified(password, expectedHash) {
+  const entry = verifiedPasswordCache.get(password);
+  if (!entry) return false;
+  if (entry.hash !== expectedHash || Date.now() > entry.expiresAt) {
+    verifiedPasswordCache.delete(password);
+    return false;
+  }
+  return true;
+}
+
+function rememberVerified(password, hash) {
+  verifiedPasswordCache.set(password, { hash, expiresAt: Date.now() + VERIFIED_PASSWORD_TTL_MS });
+}
+
 // Admin auth middleware
 // NOTE: Passwords stored in plaintext (Bug #10). Acceptable for offline single-admin deployments.
 // For wider deployment, consider: bcrypt hashing, OAuth2, or certificate-based auth.
@@ -166,10 +196,16 @@ function adminAuth(req, res, next) {
   const settings = db.prepare(
     "SELECT value FROM settings WHERE key = 'admin_password'"
   ).get();
-  if (!password || !settings || !verifyPassword(password, settings.value)) {
+  if (!password || !settings) {
     recordAttempt(`admin-auth:${ip}`);
     return res.status(401).json({ success: false, message: 'Unauthorized' });
   }
+  const passwordOk = isRecentlyVerified(password, settings.value) || verifyPassword(password, settings.value);
+  if (!passwordOk) {
+    recordAttempt(`admin-auth:${ip}`);
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+  rememberVerified(password, settings.value);
 
   // If 2FA is enabled, a raw password alone is no longer sufficient on its
   // own for ANY request - it must come through POST /login (which checks
@@ -1420,6 +1456,7 @@ router.post('/settings', adminAuth, (req, res) => {
         // requirement, whether this is the first change or a routine one.
         upsert.run('admin_password', hashPassword(String(value)));
         upsert.run('must_change_password', '0');
+        verifiedPasswordCache.clear();
         continue;
       }
       if (key === 'mikrotik_pass' || key === 'openwrt_pass') {
