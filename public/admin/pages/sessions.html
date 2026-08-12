@@ -1,66 +1,140 @@
-<div class="page-title">Active Sessions</div>
-<div class="page-subtitle">Manage currently connected clients.</div>
-
-<div class="card">
-  <div class="card-header">
-    <div>
-      <div class="card-title">Connected Clients</div>
-      <div class="card-subtitle" id="sessionSummary">Loading...</div>
-    </div>
-    <button class="btn btn-primary" onclick="loadSessions()">
-      <i class="fas fa-sync-alt"></i> Refresh
-    </button>
+<div class="zf3-header">
+  <div>
+    <div class="page-title">Live Sessions</div>
+    <div class="page-subtitle">Monitor and manage all active WiFi sessions in real-time</div>
   </div>
+  <div class="zf3-header-right">
+    <span id="sessionsLiveIndicator" style="font-size:12px;color:var(--text-muted);font-weight:600;display:flex;align-items:center;gap:6px;">
+      <span class="status-dot online"></span> Live · updated just now
+    </span>
+    <div class="zf3-icon-btn" onclick="loadSessions()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
+  </div>
+</div>
 
+<!-- KPI CARDS - real data only. No per-session data-usage/AP-throughput
+     tracking exists in this app, so "Total Data Usage" from the original
+     spec is replaced with a real, actionable operational stat (Paused
+     Sessions) instead of a fabricated GB figure. Down/Up are this box's
+     real live aggregate throughput (already polled elsewhere), not a
+     per-session breakdown - nothing meters bandwidth per client. -->
+<div class="zf3-stat-grid" style="grid-template-columns:repeat(5,1fr);">
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Active Sessions</div>
+      <i class="fas fa-user-group zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="lsActiveSessions">0</div>
+    <div class="zf3-stat-trend"><span class="status-dot online"></span> Live right now</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Unique Users</div>
+      <i class="fas fa-user zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="lsUniqueUsers">0</div>
+    <div class="zf3-stat-trend">Currently connected</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Downloading</div>
+      <i class="fas fa-arrow-down zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value"><span id="lsDownload">0</span> Mbps</div>
+    <div class="zf3-stat-trend">Total download</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Uploading</div>
+      <i class="fas fa-arrow-up zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value"><span id="lsUpload">0</span> Mbps</div>
+    <div class="zf3-stat-trend">Total upload</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Paused Sessions</div>
+      <i class="fas fa-pause zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="lsPaused">0</div>
+    <div class="zf3-stat-trend">Blocked, not counted as active</div>
+  </div>
+</div>
+
+<!-- TOOLBAR -->
+<div class="zf3-card" style="padding:14px 20px;margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+  <input type="text" id="lsSearch" placeholder="Search by MAC, IP, or session ID..." class="form-control" style="flex:1;min-width:220px;" oninput="renderSessionsTable()">
+  <select id="lsStatusFilter" class="form-control" style="width:auto;" onchange="renderSessionsTable()">
+    <option value="">All Status</option>
+    <option value="active">Active</option>
+    <option value="expiring">Expiring Soon</option>
+    <option value="paused">Paused</option>
+  </select>
+  <select id="lsTypeFilter" class="form-control" style="width:auto;" onchange="renderSessionsTable()">
+    <option value="">All Types</option>
+    <option value="voucher">Voucher</option>
+    <option value="coin">Coin</option>
+  </select>
+</div>
+
+<!-- BULK ACTIONS BAR -->
+<div class="zf3-card" id="lsBulkBar" style="display:none;padding:12px 20px;margin-bottom:12px;justify-content:space-between;align-items:center;">
+  <span style="font-size:13px;font-weight:600;color:var(--text-primary);"><span id="lsSelectedCount">0</span> session(s) selected</span>
+  <div style="display:flex;gap:8px;">
+    <button class="btn btn-sm btn-secondary" onclick="bulkAddTime()"><i class="fas fa-clock"></i> Add Time</button>
+    <button class="btn btn-sm btn-danger" onclick="bulkDisconnect()"><i class="fas fa-plug-circle-xmark"></i> Disconnect</button>
+  </div>
+</div>
+
+<!-- SESSION TABLE -->
+<div class="zf3-card" style="padding:0;">
   <div class="table-wrapper">
     <table>
       <thead>
         <tr>
-          <th>Voucher ID</th>
+          <th style="width:32px;"><input type="checkbox" id="lsSelectAll" onchange="toggleSelectAll(this)"></th>
+          <th>Session ID</th>
           <th>MAC Address</th>
+          <th>IP Address</th>
+          <th>Plan</th>
+          <th>Duration</th>
           <th>Time Remaining</th>
-          <th>Hard Expiry</th>
+          <th>Rate Limit</th>
           <th>Status</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody id="sessionsTable">
-        <tr>
-          <td colspan="6">
-            <div class="loading">
-              <i class="fas fa-spinner fa-spin"></i> Loading sessions...
-            </div>
-          </td>
-        </tr>
+        <tr><td colspan="10"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading sessions...</div></td></tr>
       </tbody>
     </table>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-top:1px solid var(--border-color);font-size:13px;color:var(--text-muted);">
+    <span id="sessionSummary">Loading...</span>
+    <button class="btn btn-sm btn-danger" id="lsDisconnectAllBtn" onclick="confirmDisconnectAll()" style="display:none;">
+      <i class="fas fa-power-off"></i> Disconnect All (<span id="lsTotalCount">0</span>)
+    </button>
   </div>
 </div>
 
 <!-- ADD TIME MODAL -->
-<!-- Bug: this modal's markup was truncated mid-tag in the committed file —
-     the actual minutes input, quick-set buttons, and confirm button never
-     existed at all. Clicking "Add Time" called openAddTime(), which tried
-     to set .value on a null #addTimeMinutes element and threw immediately —
-     this whole feature was completely non-functional. -->
 <div class="modal-overlay" id="addTimeModal">
   <div class="modal">
     <div class="modal-header">
       <div class="modal-title">
-        <i class="fas fa-clock" style="color:var(--accent-green);margin-right:8px;"></i>
+        <i class="fas fa-clock" style="color:var(--brand-teal);margin-right:8px;"></i>
         Add / Reduce Time
       </div>
       <button class="modal-close" onclick="closeModal('addTimeModal')">
         <i class="fas fa-times"></i>
       </button>
     </div>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;">
-      Adjusting time for: <strong id="addTimeVoucher" style="color:var(--accent-red);font-family:monospace;"></strong>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:16px;" id="addTimeContext">
+      Adjusting time for: <strong id="addTimeVoucher" style="color:var(--text-primary);font-family:monospace;"></strong>
     </p>
     <div class="form-group">
       <label class="form-label">Minutes</label>
       <input type="number" id="addTimeMinutes" class="form-control" placeholder="e.g. 30 to add, -15 to reduce">
-      <small style="color:var(--text-muted);">Use a negative number to reduce a client's remaining time.</small>
+      <small style="color:var(--text-muted);">Use a negative number to reduce remaining time.</small>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
       <button class="btn btn-sm btn-secondary" onclick="setMinutes(10)">+10 min</button>
@@ -74,6 +148,38 @@
       <button class="btn btn-primary" onclick="confirmAddTime()">
         <i class="fas fa-save"></i> Apply
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- DISCONNECT CONFIRM MODAL (single or bulk) -->
+<div class="modal-overlay" id="disconnectConfirmModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title"><i class="fas fa-plug-circle-xmark" style="color:var(--accent-red);margin-right:8px;"></i> Disconnect Session<span id="disconnectPluralS"></span>?</div>
+      <button class="modal-close" onclick="closeModal('disconnectConfirmModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;" id="disconnectConfirmText"></p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeModal('disconnectConfirmModal')">Cancel</button>
+      <button class="btn btn-danger" onclick="executeDisconnectConfirm()"><i class="fas fa-plug-circle-xmark"></i> Disconnect</button>
+    </div>
+  </div>
+</div>
+
+<!-- DISCONNECT ALL CONFIRM MODAL -->
+<div class="modal-overlay" id="disconnectAllModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title"><i class="fas fa-triangle-exclamation" style="color:var(--accent-red);margin-right:8px;"></i> Disconnect All Sessions?</div>
+      <button class="modal-close" onclick="closeModal('disconnectAllModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:20px;">
+      This will disconnect all <strong id="disconnectAllCount">0</strong> active WiFi sessions. Connected users will lose internet access immediately. This action cannot be undone.
+    </p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeModal('disconnectAllModal')">Cancel</button>
+      <button class="btn btn-danger" onclick="executeDisconnectAll()"><i class="fas fa-power-off"></i> Disconnect All</button>
     </div>
   </div>
 </div>
