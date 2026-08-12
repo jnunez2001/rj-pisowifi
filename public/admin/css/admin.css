@@ -870,6 +870,8 @@ select.form-control { cursor: pointer; }
 .empty-state h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary); }
 .empty-state p { font-size: 14px; }
 
+.dropdown-item:hover { background: var(--bg-primary); }
+
 /* ===== SCROLLBAR ===== */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

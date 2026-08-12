@@ -1070,7 +1070,21 @@ function generateCustomVoucherCode(length, charset, caseOption) {
 // can be viewed and printed as one batch later.
 router.post('/vouchers/groups', adminAuth, (req, res) => {
   try {
-    const { name, quantity, duration_minutes, price, code_length, code_charset, code_case, print_caption, print_logo_url } = req.body;
+    let { name, quantity, duration_minutes, price, code_length, code_charset, code_case, print_caption, print_logo_url, plan_id } = req.body;
+
+    // A selected Plan is the source of truth for duration/price (spec:
+    // "a voucher group should reference an existing Plan, do not duplicate
+    // all plan configuration inside each voucher group") - still copied
+    // into the group's own columns so every existing read site (redemption,
+    // printing, exports) keeps working unchanged without a join.
+    let planIdInt = null;
+    if (plan_id !== undefined && plan_id !== null && plan_id !== '') {
+      planIdInt = parseInt(plan_id, 10);
+      const plan = Number.isFinite(planIdInt) ? db.prepare('SELECT * FROM plans WHERE id = ?').get(planIdInt) : null;
+      if (!plan) return res.status(400).json({ success: false, message: 'Selected plan was not found.' });
+      duration_minutes = plan.duration_minutes;
+      price = plan.price;
+    }
 
     const qty = parseInt(quantity, 10);
     const minutes = parseFloat(duration_minutes);
@@ -1096,10 +1110,10 @@ router.post('/vouchers/groups', adminAuth, (req, res) => {
     }
 
     const insertGroup = db.prepare(`
-      INSERT INTO voucher_groups (name, quantity, duration_minutes, price, print_caption, print_logo_url)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO voucher_groups (name, quantity, duration_minutes, price, print_caption, print_logo_url, plan_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
-    const groupResult = insertGroup.run(name.trim(), qty, minutes, p, print_caption || null, print_logo_url || null);
+    const groupResult = insertGroup.run(name.trim(), qty, minutes, p, print_caption || null, print_logo_url || null, planIdInt);
     const groupId = groupResult.lastInsertRowid;
 
     const durationDays = minutes / 1440;
@@ -1205,6 +1219,319 @@ router.delete('/vouchers/groups/:id', adminAuth, (req, res) => {
     return res.json({ success: true, message: 'Voucher group deleted' });
   } catch (err) {
     console.error('Admin delete voucher group error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ===== PLANS =====
+// The single source of truth for an internet access product. Voucher
+// groups optionally reference a plan (voucher_groups.plan_id) instead of
+// duplicating price/duration; Client Portal, Coin Vendo, and ZenPay
+// integration are real roadmap items and are NOT wired up here - the
+// "channel_*" columns just record operator intent for when they are.
+
+function planRowToJson(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    type: row.type,
+    status: row.status,
+    price: row.price,
+    duration_minutes: row.duration_minutes,
+    validity_minutes: row.validity_minutes,
+    download_mbps: row.download_mbps,
+    upload_mbps: row.upload_mbps,
+    data_limit_mb: row.data_limit_mb,
+    device_limit: row.device_limit,
+    session_limit: row.session_limit,
+    schedule_start: row.schedule_start,
+    schedule_end: row.schedule_end,
+    channels: {
+      voucher: !!row.channel_voucher,
+      portal: !!row.channel_portal,
+      coin_vendo: !!row.channel_coin_vendo,
+      account: !!row.channel_account,
+    },
+    display_order: row.display_order,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+const PLAN_TYPES = ['time', 'data', 'unlimited', 'custom'];
+
+function validatePlanInput(body, { partial = false } = {}) {
+  const errors = [];
+  const out = {};
+
+  if (!partial || body.name !== undefined) {
+    const name = String(body.name || '').trim();
+    if (!name) errors.push('Plan name is required.');
+    if (name.length > 80) errors.push('Plan name must be 80 characters or fewer.');
+    out.name = name;
+  }
+  if (body.description !== undefined) out.description = String(body.description || '').trim().slice(0, 300) || null;
+
+  if (!partial || body.type !== undefined) {
+    const type = PLAN_TYPES.includes(body.type) ? body.type : null;
+    if (!type) errors.push('Plan type must be one of: ' + PLAN_TYPES.join(', '));
+    out.type = type;
+  }
+
+  if (body.status !== undefined) {
+    out.status = ['active', 'inactive'].includes(body.status) ? body.status : 'active';
+  } else if (!partial) {
+    out.status = 'active';
+  }
+
+  if (!partial || body.price !== undefined) {
+    const price = Number(body.price);
+    if (!Number.isFinite(price) || price < 0) errors.push('Price must be a non-negative number.');
+    out.price = price;
+  }
+
+  if (body.duration_minutes !== undefined) {
+    const v = body.duration_minutes === null || body.duration_minutes === '' ? null : Number(body.duration_minutes);
+    if (v !== null && (!Number.isFinite(v) || v <= 0)) errors.push('Duration must be greater than zero.');
+    out.duration_minutes = v;
+  }
+  if (body.validity_minutes !== undefined) {
+    const v = body.validity_minutes === null || body.validity_minutes === '' ? null : Number(body.validity_minutes);
+    if (v !== null && (!Number.isFinite(v) || v <= 0)) errors.push('Validity must be greater than zero.');
+    out.validity_minutes = v;
+  }
+  if (body.download_mbps !== undefined) {
+    const v = body.download_mbps === null || body.download_mbps === '' ? null : Number(body.download_mbps);
+    if (v !== null && (!Number.isFinite(v) || v < 0)) errors.push('Download speed cannot be negative.');
+    out.download_mbps = v;
+  }
+  if (body.upload_mbps !== undefined) {
+    const v = body.upload_mbps === null || body.upload_mbps === '' ? null : Number(body.upload_mbps);
+    if (v !== null && (!Number.isFinite(v) || v < 0)) errors.push('Upload speed cannot be negative.');
+    out.upload_mbps = v;
+  }
+  if (body.data_limit_mb !== undefined) {
+    const v = body.data_limit_mb === null || body.data_limit_mb === '' ? null : Number(body.data_limit_mb);
+    if (v !== null && (!Number.isFinite(v) || v < 0)) errors.push('Data limit cannot be negative.');
+    out.data_limit_mb = v;
+  }
+  if (body.device_limit !== undefined) {
+    const v = body.device_limit === null || body.device_limit === '' ? 1 : Number(body.device_limit);
+    if (!Number.isFinite(v) || v < 1) errors.push('Device limit must be at least 1.');
+    out.device_limit = v;
+  }
+  if (body.session_limit !== undefined) {
+    const v = body.session_limit === null || body.session_limit === '' ? null : Number(body.session_limit);
+    if (v !== null && (!Number.isFinite(v) || v < 1)) errors.push('Session limit must be at least 1.');
+    out.session_limit = v;
+  }
+  if (body.schedule_start !== undefined) out.schedule_start = body.schedule_start || null;
+  if (body.schedule_end !== undefined) out.schedule_end = body.schedule_end || null;
+
+  const channels = body.channels || {};
+  if (body.channels !== undefined || !partial) {
+    out.channel_voucher = channels.voucher !== false ? 1 : 0;
+    out.channel_portal = channels.portal ? 1 : 0;
+    out.channel_coin_vendo = channels.coin_vendo ? 1 : 0;
+    out.channel_account = channels.account ? 1 : 0;
+  }
+
+  if (body.display_order !== undefined) {
+    const v = Number(body.display_order);
+    out.display_order = Number.isFinite(v) ? v : 0;
+  }
+
+  return { errors, out };
+}
+
+// GET /api/admin/plans — list all plans with real "used today" / total
+// usage counts, derived from session_history joined through promo_vouchers
+// -> voucher_groups.plan_id. Coin-vendo/portal usage isn't counted since
+// those channels aren't wired to a plan yet (would be double-counting or
+// fabricating a number that doesn't map to anything real).
+router.get('/plans', adminAuth, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT p.*,
+        COALESCE(u.used_today, 0) as used_today,
+        COALESCE(u.used_total, 0) as used_total
+      FROM plans p
+      LEFT JOIN (
+        SELECT vg.plan_id as plan_id,
+          SUM(CASE WHEN date(sh.ended_at) = date('now') THEN 1 ELSE 0 END) as used_today,
+          COUNT(sh.id) as used_total
+        FROM session_history sh
+        JOIN promo_vouchers pv ON pv.code = sh.voucher_code
+        JOIN voucher_groups vg ON vg.id = pv.group_id
+        WHERE vg.plan_id IS NOT NULL
+        GROUP BY vg.plan_id
+      ) u ON u.plan_id = p.id
+      ORDER BY p.display_order ASC, p.created_at DESC
+    `).all();
+    return res.json({ success: true, plans: rows.map(r => ({ ...planRowToJson(r), used_today: r.used_today, used_total: r.used_total })) });
+  } catch (err) {
+    console.error('Admin list plans error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.get('/plans/:id', adminAuth, (req, res) => {
+  try {
+    const row = db.prepare('SELECT * FROM plans WHERE id = ?').get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, message: 'Plan not found' });
+    const groupCount = db.prepare('SELECT COUNT(*) as c FROM voucher_groups WHERE plan_id = ?').get(req.params.id).c;
+    return res.json({ success: true, plan: planRowToJson(row), voucher_group_count: groupCount });
+  } catch (err) {
+    console.error('Admin get plan error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/plans', adminAuth, (req, res) => {
+  try {
+    const { errors, out } = validatePlanInput(req.body);
+    if (errors.length) return res.status(400).json({ success: false, message: errors[0], errors });
+
+    const result = db.prepare(`
+      INSERT INTO plans (
+        name, description, type, status, price, duration_minutes, validity_minutes,
+        download_mbps, upload_mbps, data_limit_mb, device_limit, session_limit,
+        schedule_start, schedule_end, channel_voucher, channel_portal, channel_coin_vendo,
+        channel_account, display_order
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      out.name, out.description || null, out.type, out.status, out.price,
+      out.duration_minutes ?? null, out.validity_minutes ?? null,
+      out.download_mbps ?? null, out.upload_mbps ?? null, out.data_limit_mb ?? null,
+      out.device_limit ?? 1, out.session_limit ?? null,
+      out.schedule_start ?? null, out.schedule_end ?? null,
+      out.channel_voucher, out.channel_portal, out.channel_coin_vendo, out.channel_account,
+      out.display_order ?? 0
+    );
+    console.log(`📦 Plan created: "${out.name}" (₱${out.price})`);
+    const row = db.prepare('SELECT * FROM plans WHERE id = ?').get(result.lastInsertRowid);
+    return res.json({ success: true, plan: planRowToJson(row) });
+  } catch (err) {
+    console.error('Admin create plan error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Server error' });
+  }
+});
+
+router.patch('/plans/:id', adminAuth, (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM plans WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Plan not found' });
+
+    const { errors, out } = validatePlanInput(req.body, { partial: true });
+    if (errors.length) return res.status(400).json({ success: false, message: errors[0], errors });
+
+    const fields = Object.keys(out);
+    if (!fields.length) return res.json({ success: true, plan: planRowToJson(existing) });
+
+    const setClause = fields.map(f => `${f} = ?`).join(', ');
+    const values = fields.map(f => out[f] ?? null);
+    db.prepare(`UPDATE plans SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values, req.params.id);
+
+    console.log(`📦 Plan updated: "${existing.name}" (#${req.params.id})`);
+    const row = db.prepare('SELECT * FROM plans WHERE id = ?').get(req.params.id);
+    return res.json({ success: true, plan: planRowToJson(row) });
+  } catch (err) {
+    console.error('Admin update plan error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Server error' });
+  }
+});
+
+router.post('/plans/:id/duplicate', adminAuth, (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM plans WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Plan not found' });
+
+    let newName = `${existing.name} (Copy)`;
+    let suffix = 2;
+    while (db.prepare('SELECT id FROM plans WHERE name = ?').get(newName)) {
+      newName = `${existing.name} (Copy ${suffix})`;
+      suffix++;
+    }
+
+    const result = db.prepare(`
+      INSERT INTO plans (
+        name, description, type, status, price, duration_minutes, validity_minutes,
+        download_mbps, upload_mbps, data_limit_mb, device_limit, session_limit,
+        schedule_start, schedule_end, channel_voucher, channel_portal, channel_coin_vendo,
+        channel_account, display_order
+      ) VALUES (?, ?, ?, 'inactive', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      newName, existing.description, existing.type, existing.price,
+      existing.duration_minutes, existing.validity_minutes,
+      existing.download_mbps, existing.upload_mbps, existing.data_limit_mb,
+      existing.device_limit, existing.session_limit,
+      existing.schedule_start, existing.schedule_end,
+      existing.channel_voucher, existing.channel_portal, existing.channel_coin_vendo, existing.channel_account,
+      existing.display_order
+    );
+    console.log(`📦 Plan duplicated: "${existing.name}" -> "${newName}"`);
+    const row = db.prepare('SELECT * FROM plans WHERE id = ?').get(result.lastInsertRowid);
+    return res.json({ success: true, plan: planRowToJson(row) });
+  } catch (err) {
+    console.error('Admin duplicate plan error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Server error' });
+  }
+});
+
+router.post('/plans/:id/activate', adminAuth, (req, res) => {
+  try {
+    const result = db.prepare("UPDATE plans SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+    if (result.changes === 0) return res.status(404).json({ success: false, message: 'Plan not found' });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Admin activate plan error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/plans/:id/deactivate', adminAuth, (req, res) => {
+  try {
+    const result = db.prepare("UPDATE plans SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+    if (result.changes === 0) return res.status(404).json({ success: false, message: 'Plan not found' });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Admin deactivate plan error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// DELETE only allowed when no voucher group has ever referenced this plan -
+// deactivate is the correct action for a plan with history (section 25/17
+// of the spec: "prefer deactivation for plans that have already been used").
+router.delete('/plans/:id', adminAuth, (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM plans WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Plan not found' });
+    const groupCount = db.prepare('SELECT COUNT(*) as c FROM voucher_groups WHERE plan_id = ?').get(req.params.id).c;
+    if (groupCount > 0) {
+      return res.status(409).json({
+        success: false,
+        message: `This plan cannot be deleted because it is referenced by ${groupCount} voucher group(s). Deactivate it instead.`,
+      });
+    }
+    db.prepare('DELETE FROM plans WHERE id = ?').run(req.params.id);
+    console.log(`📦 Plan deleted: "${existing.name}" (#${req.params.id})`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Admin delete plan error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/plans/active/list — lightweight list for pickers (e.g.
+// the Create Voucher Group form's Plan selector) - active plans only.
+router.get('/plans-active/list', adminAuth, (req, res) => {
+  try {
+    const rows = db.prepare("SELECT id, name, price, duration_minutes, type FROM plans WHERE status = 'active' ORDER BY display_order ASC, name ASC").all();
+    return res.json({ success: true, plans: rows });
+  } catch (err) {
+    console.error('Admin list active plans error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

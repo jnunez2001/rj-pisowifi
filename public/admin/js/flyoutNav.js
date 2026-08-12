@@ -150,6 +150,7 @@ const FLYOUT_MENUS = {
         heading: 'Sales & Access',
         items: [
           { page: 'vouchers', label: 'Vouchers', icon: 'fa-ticket-alt' },
+          { page: 'plans', label: 'Plans', icon: 'fa-list-check' },
           { page: 'promos', label: 'Promos', icon: 'fa-gift' },
           { page: 'rates', label: 'Rates Manager', icon: 'fa-peso-sign' },
           { page: 'coin-slot-gpio', label: 'Main Kiosk Coin Slot', icon: 'fa-coins' },

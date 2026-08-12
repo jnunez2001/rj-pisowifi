@@ -114,6 +114,38 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- The single source of truth for an internet access product (price,
+  -- duration, speed, data limit). Vouchers reference a plan instead of
+  -- each voucher group carrying its own separate copy of the same
+  -- configuration. Client Portal / Coin Vendo / ZenPay integration is
+  -- real roadmap, not built yet - this table is deliberately shaped so
+  -- those can reference it later without a schema change, but nothing
+  -- here claims that wiring exists today.
+  CREATE TABLE IF NOT EXISTS plans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    type TEXT NOT NULL DEFAULT 'time', -- time | data | unlimited | custom
+    status TEXT NOT NULL DEFAULT 'active', -- active | inactive
+    price INTEGER NOT NULL,
+    duration_minutes REAL,
+    validity_minutes REAL,
+    download_mbps REAL,
+    upload_mbps REAL,
+    data_limit_mb INTEGER, -- NULL = unlimited
+    device_limit INTEGER DEFAULT 1,
+    session_limit INTEGER,
+    schedule_start TEXT, -- 'HH:MM', custom-type plans only
+    schedule_end TEXT,
+    channel_voucher INTEGER NOT NULL DEFAULT 1,
+    channel_portal INTEGER NOT NULL DEFAULT 0,
+    channel_coin_vendo INTEGER NOT NULL DEFAULT 0,
+    channel_account INTEGER NOT NULL DEFAULT 0,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS rates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     coin_value INTEGER NOT NULL,
@@ -777,6 +809,19 @@ try {
   // existing behavior), same "opt-in, nothing breaks" pattern as every
   // other additive column in this file.
   db.exec('ALTER TABLE promo_vouchers ADD COLUMN bandwidth_profile_id INTEGER REFERENCES bandwidth_profiles(id)');
+} catch (e) {
+  // already applied
+}
+
+try {
+  // Optional link from a voucher group to a Plan - NULL means the group
+  // still carries its own duration/price directly (existing behavior,
+  // predates the Plans module). When set, the group's duration/price
+  // columns are populated from the plan at creation time so every
+  // existing read site (redemption, printing, exports) keeps working
+  // unchanged; the link is what lets "Used Today" on the Plans page
+  // count real voucher redemptions instead of being a fabricated number.
+  db.exec('ALTER TABLE voucher_groups ADD COLUMN plan_id INTEGER REFERENCES plans(id)');
 } catch (e) {
   // already applied
 }

@@ -1,0 +1,221 @@
+<div class="zf3-header">
+  <div>
+    <div class="page-title">Plans</div>
+    <div class="page-subtitle">Create and manage internet access plans</div>
+  </div>
+  <div class="zf3-header-right">
+    <button class="btn btn-primary" onclick="openCreatePlan()">
+      <i class="fas fa-plus"></i> Create New Plan
+    </button>
+  </div>
+</div>
+
+<!-- SUMMARY CARDS -->
+<div class="zf3-stat-grid" style="grid-template-columns:repeat(4,1fr);">
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Total Plans</div>
+      <i class="fas fa-layer-group zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="plansTotalCount">0</div>
+    <div class="zf3-stat-trend">All plans created</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Active Plans</div>
+      <i class="fas fa-user-group zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="plansActiveCount">0</div>
+    <div class="zf3-stat-trend">Currently available</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Inactive Plans</div>
+      <i class="fas fa-circle-pause zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="plansInactiveCount">0</div>
+    <div class="zf3-stat-trend">Not available</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Total Used Today</div>
+      <i class="fas fa-tag zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="plansUsedTodayCount">0</div>
+    <div class="zf3-stat-trend">Across all plans</div>
+  </div>
+</div>
+
+<!-- TOOLBAR -->
+<div class="zf3-card" style="padding:14px 20px;margin-bottom:16px;display:flex;flex-direction:row;gap:10px;flex-wrap:wrap;align-items:center;">
+  <input type="text" id="plansSearch" placeholder="Search plans by name or description..." class="form-control" style="flex:1 1 0%;min-width:220px;width:auto;" oninput="renderPlansTable()">
+  <select id="plansStatusFilter" class="form-control" style="width:auto;min-width:130px;" onchange="renderPlansTable()">
+    <option value="">All Status</option>
+    <option value="active">Active</option>
+    <option value="inactive">Inactive</option>
+  </select>
+  <select id="plansTypeFilter" class="form-control" style="width:auto;min-width:130px;" onchange="renderPlansTable()">
+    <option value="">All Types</option>
+    <option value="time">Time</option>
+    <option value="data">Data</option>
+    <option value="unlimited">Unlimited</option>
+    <option value="custom">Custom</option>
+  </select>
+  <select id="plansSort" class="form-control" style="width:auto;min-width:150px;" onchange="renderPlansTable()">
+    <option value="order">Display Order</option>
+    <option value="name_asc">Name A-Z</option>
+    <option value="name_desc">Name Z-A</option>
+    <option value="price_asc">Price Low to High</option>
+    <option value="price_desc">Price High to Low</option>
+    <option value="used">Most Used</option>
+    <option value="created">Recently Created</option>
+  </select>
+</div>
+
+<!-- CATEGORY TABS -->
+<div class="zf3-tabs" id="plansTabs">
+  <div class="zf3-tab active" data-type="" onclick="setPlansTab('', this)"><i class="fas fa-layer-group"></i> All Plans</div>
+  <div class="zf3-tab" data-type="time" onclick="setPlansTab('time', this)"><i class="fas fa-clock"></i> Time Plans</div>
+  <div class="zf3-tab" data-type="data" onclick="setPlansTab('data', this)"><i class="fas fa-database"></i> Data Plans</div>
+  <div class="zf3-tab" data-type="unlimited" onclick="setPlansTab('unlimited', this)"><i class="fas fa-infinity"></i> Unlimited Plans</div>
+  <div class="zf3-tab" data-type="custom" onclick="setPlansTab('custom', this)"><i class="fas fa-sliders"></i> Custom Plans</div>
+</div>
+
+<!-- PLANS TABLE -->
+<div class="zf3-card" style="padding:0;">
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Plan Name</th>
+          <th>Type</th>
+          <th>Price</th>
+          <th>Duration / Validity</th>
+          <th>Speed Limit</th>
+          <th>Data Limit</th>
+          <th>Used Today</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="plansTable">
+        <tr><td colspan="9"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-top:1px solid var(--border-color);font-size:13px;color:var(--text-muted);">
+    <span id="plansSummary">Loading...</span>
+  </div>
+</div>
+
+<!-- CREATE / EDIT PLAN MODAL -->
+<div class="modal-overlay" id="planModal">
+  <div class="modal" style="max-width:560px;">
+    <div class="modal-header">
+      <div class="modal-title" id="planModalTitle">Create Plan</div>
+      <button class="modal-close" onclick="closeModal('planModal')"><i class="fas fa-times"></i></button>
+    </div>
+
+    <div class="card-title" style="font-size:12px;margin-bottom:8px;color:var(--text-muted);">BASIC INFORMATION</div>
+    <div class="form-group">
+      <label class="form-label">Plan Name</label>
+      <input type="text" id="planName" class="form-control" placeholder="e.g. 1 Hour, 500 MB, Night Promo">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description</label>
+      <input type="text" id="planDescription" class="form-control" placeholder="Short description shown under the name">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Plan Type</label>
+        <select id="planType" class="form-control" onchange="onPlanTypeChange()">
+          <option value="time">Time</option>
+          <option value="data">Data</option>
+          <option value="unlimited">Unlimited</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select id="planStatus" class="form-control">
+          <option value="active" selected>Active</option>
+          <option value="inactive">Inactive</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card-title" style="font-size:12px;margin:16px 0 8px;color:var(--text-muted);">PRICING</div>
+    <div class="form-group">
+      <label class="form-label">Selling Price (₱)</label>
+      <input type="number" id="planPrice" class="form-control" placeholder="e.g. 20" min="0">
+    </div>
+
+    <div class="card-title" style="font-size:12px;margin:16px 0 8px;color:var(--text-muted);">ACCESS CONFIGURATION</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Duration (minutes)</label>
+        <input type="number" id="planDuration" class="form-control" placeholder="e.g. 60" min="1">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Validity (minutes)</label>
+        <input type="number" id="planValidity" class="form-control" placeholder="Defaults to duration" min="1">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Download Speed (Mbps)</label>
+        <input type="number" id="planDownload" class="form-control" placeholder="e.g. 5" min="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Upload Speed (Mbps)</label>
+        <input type="number" id="planUpload" class="form-control" placeholder="e.g. 5" min="0">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Data Limit (MB)</label>
+        <input type="number" id="planDataLimit" class="form-control" placeholder="Leave blank for unlimited" min="0">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Device Limit</label>
+        <input type="number" id="planDeviceLimit" class="form-control" placeholder="1" min="1" value="1">
+      </div>
+    </div>
+    <div class="form-row" id="planScheduleRow" style="display:none;">
+      <div class="form-group">
+        <label class="form-label">Schedule Start</label>
+        <input type="time" id="planScheduleStart" class="form-control">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Schedule End</label>
+        <input type="time" id="planScheduleEnd" class="form-control">
+      </div>
+    </div>
+
+    <div class="card-title" style="font-size:12px;margin:16px 0 8px;color:var(--text-muted);">AVAILABILITY CHANNELS</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px;">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-primary);">
+        <input type="checkbox" id="planChannelVoucher" checked> Voucher
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-primary);">
+        <input type="checkbox" id="planChannelPortal"> Client Portal <span style="color:var(--text-muted);font-size:11px;">(not yet connected)</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-primary);">
+        <input type="checkbox" id="planChannelCoinVendo"> Coin Vendo <span style="color:var(--text-muted);font-size:11px;">(not yet connected)</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-primary);">
+        <input type="checkbox" id="planChannelAccount"> Account Users <span style="color:var(--text-muted);font-size:11px;">(not yet connected)</span>
+      </label>
+    </div>
+    <small style="color:var(--text-muted);display:block;margin-bottom:16px;">Channels record intent for where this plan can be used. Only Vouchers actually reference Plans today - Client Portal, Coin Vendo, and Account access are on the roadmap.</small>
+
+    <div id="planUsageWarning" class="alert alert-info" style="display:none;margin-bottom:16px;"></div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeModal('planModal')">Cancel</button>
+      <button class="btn btn-primary" id="savePlanBtn" onclick="savePlan()">
+        <i class="fas fa-save"></i> Save Plan
+      </button>
+    </div>
+  </div>
+</div>

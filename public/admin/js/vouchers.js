@@ -327,17 +327,59 @@ async function deletePromo(id, code) {
 
 // ===== VOUCHER GROUPS (batch creation + printing) =====
 
+let vgAvailablePlans = [];
+
+async function loadPlansForGroupPicker() {
+  const select = document.getElementById('groupPlanId');
+  if (!select) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/plans-active/list');
+    vgAvailablePlans = (data.success && data.plans) ? data.plans : [];
+    select.innerHTML = '<option value="">Custom (set price/duration manually)</option>' +
+      vgAvailablePlans.map(p => `<option value="${p.id}">${escapeHtml(p.name)} (₱${p.price})</option>`).join('');
+  } catch (e) {
+    vgAvailablePlans = [];
+  }
+}
+
+function onGroupPlanChange() {
+  const planId = parseInt(document.getElementById('groupPlanId').value, 10);
+  const priceInput = document.getElementById('groupPrice');
+  const durationInput = document.getElementById('groupDuration');
+  const durationUnit = document.getElementById('groupDurationUnit');
+  const plan = vgAvailablePlans.find(p => p.id === planId);
+  if (!plan) {
+    priceInput.readOnly = false;
+    durationInput.readOnly = false;
+    durationUnit.disabled = false;
+    return;
+  }
+  priceInput.value = plan.price;
+  priceInput.readOnly = true;
+  if (plan.duration_minutes) {
+    durationInput.value = plan.duration_minutes;
+    durationUnit.value = 'minutes';
+  }
+  durationInput.readOnly = true;
+  durationUnit.disabled = true;
+}
+
 function openCreateGroup() {
   document.getElementById('groupName').value = '';
+  document.getElementById('groupPlanId').value = '';
   document.getElementById('groupQuantity').value = '';
   document.getElementById('groupPrice').value = '';
+  document.getElementById('groupPrice').readOnly = false;
   document.getElementById('groupDuration').value = '';
+  document.getElementById('groupDuration').readOnly = false;
   document.getElementById('groupDurationUnit').value = 'days';
+  document.getElementById('groupDurationUnit').disabled = false;
   document.getElementById('groupCodeLength').value = 6;
   document.getElementById('groupCodeCharset').value = 'mixed';
   document.getElementById('groupCodeCase').value = 'upper';
   document.getElementById('groupCaption').value = '';
   document.getElementById('groupLogoFile').value = '';
+  loadPlansForGroupPicker();
   document.getElementById('groupModal').classList.add('show');
 }
 
@@ -444,6 +486,7 @@ async function createVoucherGroup() {
     }
 
     const durationMinutes = durationToMinutes(duration, durationUnit);
+    const planId = document.getElementById('groupPlanId').value || null;
     const data = await apiCall('POST', '/api/admin/vouchers/groups', {
       name,
       quantity,
@@ -453,7 +496,8 @@ async function createVoucherGroup() {
       code_charset: codeCharset,
       code_case: codeCase,
       print_caption: caption,
-      print_logo_url: logoUrl
+      print_logo_url: logoUrl,
+      plan_id: planId
     });
 
     if (data.success) {
