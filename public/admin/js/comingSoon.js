@@ -176,12 +176,6 @@ const COMING_SOON_PAGES = {
     description: 'Filterable viewer for the router\'s system log.',
     workstream: 'Workstream 10 (stretch)'
   },
-  'users': {
-    icon: 'fa-user-group',
-    title: 'Users',
-    description: '',
-    workstream: 'Nav rebuild (12c)'
-  },
   'sms-email-gateway': {
     icon: 'fa-paper-plane',
     title: 'SMS / Email Gateway',

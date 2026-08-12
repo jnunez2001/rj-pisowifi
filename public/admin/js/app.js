@@ -290,6 +290,7 @@ async function navigateTo(page) {
   if (typeof destroySessions === 'function') destroySessions();
   if (typeof destroyDashboard === 'function') destroyDashboard();
   if (typeof destroyAnalytics === 'function') destroyAnalytics();
+  if (typeof destroyUsersPage === 'function') destroyUsersPage();
   if (typeof destroyHotspotDashboard === 'function') destroyHotspotDashboard();
   if (typeof destroyDevices === 'function') destroyDevices();
 
@@ -340,6 +341,7 @@ async function navigateTo(page) {
     const scripts = {
       dashboard: () => typeof loadDashboard === 'function' && loadDashboard(),
       analytics: () => typeof loadAnalytics === 'function' && loadAnalytics(),
+      users: () => typeof loadUsersPage === 'function' && loadUsersPage(),
       'hotspot-dashboard': () => typeof loadHotspotDashboard === 'function' && loadHotspotDashboard(),
       'satellite-kiosks': () => typeof loadSatelliteKiosks === 'function' && loadSatelliteKiosks(),
       'coin-slot-gpio': () => typeof loadCoinSlotGpio === 'function' && loadCoinSlotGpio(),

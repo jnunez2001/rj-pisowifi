@@ -593,6 +593,128 @@ router.get('/sales', adminAuth, (req, res) => {
 
 // GET /api/admin/analytics/summary?days=7 — the Analytics page's single
 // aggregation endpoint (one round trip, matching the design guide's
+// ===== USERS: GUESTS =====
+// GET /api/admin/users/guests?days=N - real guest (anonymous hotspot
+// customer) sessions, live + recently ended. This app has no customer
+// account system at all (see /users/accounts below), so "Guests" here
+// covers the entire real customer base - matches the actual product,
+// not a subset of it.
+//
+// "Source" (Coin Vendo / Voucher / Free Access) comes from a real join
+// against `transactions` on voucher_code, the same linkage /sales
+// already relies on. No data-usage-in-bytes field is returned - this
+// app has no per-session byte counters, matching Live Sessions' own
+// scope note.
+router.get('/users/guests', adminAuth, (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 90);
+
+    const active = db.prepare(`
+      SELECT s.voucher_code, s.mac_address, s.ip_address, s.minutes_remaining,
+        s.is_paused, s.created_at, s.hard_expires_at, s.redeemed_code,
+        t.type as source_type, t.coin_value
+      FROM sessions s
+      LEFT JOIN transactions t ON t.voucher_code = s.voucher_code
+      ORDER BY s.created_at DESC
+    `).all();
+
+    const ended = db.prepare(`
+      SELECT sh.voucher_code, sh.mac_address, sh.started_at, sh.ended_at, sh.duration_seconds,
+        t.type as source_type, t.coin_value
+      FROM session_history sh
+      LEFT JOIN transactions t ON t.voucher_code = sh.voucher_code
+      WHERE date(sh.ended_at) >= date('now', '-' || ? || ' days')
+      ORDER BY sh.ended_at DESC LIMIT 100
+    `).all(days);
+
+    const kpiPeriod = db.prepare(`
+      SELECT COUNT(*) as sessions, SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as revenue
+      FROM transactions WHERE date(created_at) >= date('now', '-' || ? || ' days')
+    `).get(days);
+
+    return res.json({
+      success: true,
+      active: active.map((s) => ({
+        voucher_code: s.voucher_code, mac_address: s.mac_address, ip_address: s.ip_address,
+        minutes_remaining: s.minutes_remaining, is_paused: s.is_paused, created_at: s.created_at,
+        hard_expires_at: s.hard_expires_at, redeemed_code: s.redeemed_code,
+        source_type: s.source_type, coin_value: s.coin_value,
+      })),
+      recent: ended.map((s) => ({
+        voucher_code: s.voucher_code, mac_address: s.mac_address, started_at: s.started_at,
+        ended_at: s.ended_at, duration_seconds: s.duration_seconds,
+        source_type: s.source_type, coin_value: s.coin_value,
+      })),
+      kpi: { totalSessionsPeriod: kpiPeriod.sessions || 0, totalRevenuePeriod: kpiPeriod.revenue || 0, activeNow: active.filter((s) => s.is_paused !== 1).length },
+    });
+  } catch (err) {
+    console.error('Users guests error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ===== USERS: DEVICES =====
+// GET /api/admin/users/devices?days=N - real device list, aggregated
+// from every MAC address this box has ever actually seen across
+// transactions and session_history (the only two durable, permanent
+// records - `sessions` itself is deleted on expiry). No vendor/OS/device-
+// type field is returned - this app does no device fingerprinting, so
+// that would have to be invented. Friendly names come from the real
+// client_labels table (Network > Devices' existing "Name Your Devices"
+// feature) where an operator has set one.
+router.get('/users/devices', adminAuth, (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+
+    const macRows = db.prepare(`
+      SELECT mac_address,
+        MIN(created_at) as first_seen,
+        MAX(created_at) as last_seen,
+        COUNT(*) as transaction_count
+      FROM transactions
+      WHERE mac_address IS NOT NULL AND mac_address != '' AND date(created_at) >= date('now', '-' || ? || ' days')
+      GROUP BY mac_address
+    `).all(days);
+
+    const sessionCounts = db.prepare(`
+      SELECT mac_address, COUNT(*) as session_count, SUM(duration_seconds) as total_duration_seconds
+      FROM session_history
+      WHERE mac_address IS NOT NULL AND date(ended_at) >= date('now', '-' || ? || ' days')
+      GROUP BY mac_address
+    `).all(days);
+    const sessionCountByMac = new Map(sessionCounts.map((r) => [r.mac_address, r]));
+
+    const activeMacs = new Set(db.prepare('SELECT mac_address FROM sessions').all().map((r) => r.mac_address));
+    // Bug found live: client_labels normalizes mac_address to lowercase
+    // on write (see POST /network/client-labels), but transactions/
+    // session_history store whatever case the client sent - a label set
+    // through the existing "Name Your Devices" feature never matched up
+    // here because the lookup key case didn't match. Normalize both
+    // sides to lowercase for the join.
+    const labels = db.prepare('SELECT mac_address, label FROM client_labels').all();
+    const labelByMac = new Map(labels.map((r) => [r.mac_address.toLowerCase(), r.label]));
+    const trusted = new Set(db.prepare('SELECT mac_address FROM trusted_devices').all().map((r) => r.mac_address.toLowerCase()));
+
+    const devices = macRows.map((r) => ({
+      mac_address: r.mac_address,
+      label: labelByMac.get(r.mac_address.toLowerCase()) || null,
+      first_seen: r.first_seen,
+      last_seen: r.last_seen,
+      session_count: sessionCountByMac.get(r.mac_address)?.session_count || 0,
+      total_duration_seconds: sessionCountByMac.get(r.mac_address)?.total_duration_seconds || 0,
+      online: activeMacs.has(r.mac_address),
+      trusted: trusted.has(r.mac_address.toLowerCase()),
+    })).sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen));
+
+    return res.json({ success: true, devices });
+  } catch (err) {
+    console.error('Users devices error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/analytics/summary?days=7 — the Analytics page's single
+// aggregation endpoint (one round trip, matching the design guide's
 // "prefer backend aggregation" rule rather than N separate widget
 // calls). Compares the selected period against the immediately prior
 // period of the same length, real data only.
