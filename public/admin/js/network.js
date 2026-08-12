@@ -852,22 +852,25 @@ async function loadNetworkModeSettings() {
     document.getElementById('mikrotikSsl').checked = s.mikrotik_ssl === '1';
     document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
 
-    // Free tier is Standalone-only - MikroTik/OpenWRT router control is a
-    // Premium feature. Hide the entry point to newly select it (same "bury,
-    // don't break" pattern as OpenWRT being hidden for the beta) - an
-    // existing install already in mikrotik mode keeps working untouched,
-    // this only prevents a free-tier account from switching INTO it.
+    // Free tier is Router-Mode-only - Controller Mode (MikroTik/OpenWRT) is
+    // a Premium feature. Hide the entry point to newly select it (same
+    // "bury, don't break" pattern as OpenWRT being hidden for the beta) -
+    // an existing install already in mikrotik mode keeps working
+    // untouched, this only prevents a free-tier account from switching
+    // INTO it. Locks the vendor chip (where the mode is actually chosen)
+    // rather than the outer "Controller Mode" toggle button, since that
+    // button now only reveals the picker.
     const tier = s.account_tier || 'free';
-    const mikrotikCard = document.getElementById('modeMikrotikCard');
-    if (mikrotikCard) {
+    const mikrotikChip = document.getElementById('vendorMikrotikChip');
+    if (mikrotikChip) {
       if (tier !== 'premium' && mode !== 'mikrotik') {
-        mikrotikCard.disabled = true;
-        mikrotikCard.title = 'MikroTik router mode is a Premium feature';
-        mikrotikCard.innerHTML = 'MikroTik <i class="fas fa-lock" style="margin-left:4px;font-size:11px;"></i>';
+        mikrotikChip.disabled = true;
+        mikrotikChip.title = 'MikroTik controller mode is a Premium feature';
+        mikrotikChip.innerHTML = 'MikroTik <i class="fas fa-lock" style="margin-left:4px;font-size:11px;"></i>';
       } else {
-        mikrotikCard.disabled = false;
-        mikrotikCard.title = '';
-        mikrotikCard.innerHTML = 'MikroTik';
+        mikrotikChip.disabled = false;
+        mikrotikChip.title = '';
+        mikrotikChip.innerHTML = 'MikroTik';
       }
     }
     document.getElementById('openwrtHost').value = s.openwrt_host || '';
@@ -1193,26 +1196,41 @@ async function runRouterTerminalCommand() {
   output.scrollTop = output.scrollHeight;
 }
 
+// "Router Mode" (standalone) vs "Controller Mode" (mikrotik/openwrt, a
+// separate device the box controls rather than being) - see network.html's
+// rename comment. Controller Mode's own vendor picker (MikroTik/Ubiquiti/
+// TP-Link/OpenWRT chips) highlights separately, inside updateVendorChips().
 function updateNetworkModeCards(mode) {
-  const cards = {
-    standalone: document.getElementById('modeStandaloneCard'),
-    mikrotik: document.getElementById('modeMikrotikCard'),
-    // OpenWRT's button is currently commented out of network.html (buried
-    // for the closed beta, see that file's comment) - may be null, and
-    // that must not stop Standalone/MikroTik's own highlighting from
-    // working (bug: the old `if (!cards.standalone || !cards.mikrotik ||
-    // !cards.openwrt) return;` guard bailed out of this ENTIRE function
-    // the moment any one card was missing, silently breaking every mode's
-    // active-highlight styling, not just OpenWRT's).
-    openwrt: document.getElementById('modeOpenwrtCard'),
-  };
-  const colors = { standalone: 'var(--accent-green)', mikrotik: 'var(--accent-blue)', openwrt: 'var(--accent-orange, #ff9800)' };
-  Object.entries(cards).forEach(([key, btn]) => {
-    if (!btn) return;
-    const active = key === mode;
-    btn.style.background = active ? colors[key] : 'transparent';
-    btn.style.color = active ? '#fff' : 'var(--text-muted)';
-  });
+  const isController = mode === 'mikrotik' || mode === 'openwrt';
+  const standaloneBtn = document.getElementById('modeStandaloneCard');
+  const controllerBtn = document.getElementById('modeControllerCard');
+  if (standaloneBtn) {
+    standaloneBtn.style.background = mode === 'standalone' ? 'var(--accent-green)' : 'transparent';
+    standaloneBtn.style.color = mode === 'standalone' ? '#fff' : 'var(--text-muted)';
+  }
+  if (controllerBtn) {
+    controllerBtn.style.background = isController ? 'var(--accent-blue)' : 'transparent';
+    controllerBtn.style.color = isController ? '#fff' : 'var(--text-muted)';
+  }
+  const picker = document.getElementById('controllerVendorPicker');
+  if (picker) picker.style.display = isController ? 'flex' : 'none';
+  updateVendorChips(mode);
+}
+
+// Reveals the vendor picker without changing network_mode yet - an
+// operator switching INTO Controller Mode needs to see the vendor choices
+// before committing to one, rather than the first click silently defaulting
+// to MikroTik.
+function toggleControllerVendorPicker() {
+  const picker = document.getElementById('controllerVendorPicker');
+  if (!picker) return;
+  const currentlyShown = picker.style.display === 'flex';
+  picker.style.display = currentlyShown ? 'none' : 'flex';
+}
+
+function updateVendorChips(mode) {
+  const mikrotikChip = document.getElementById('vendorMikrotikChip');
+  if (mikrotikChip) mikrotikChip.classList.toggle('active', mode === 'mikrotik');
 }
 
 // Switch-style Network Mode selector (network.html) drives the same three

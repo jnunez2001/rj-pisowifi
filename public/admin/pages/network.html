@@ -86,6 +86,20 @@
   transition: background .15s, color .15s;
 }
 .zf-segmented button.active { background: var(--accent-green); color: #fff; }
+.zf-vendor-chip {
+  border: 1px solid var(--border-color);
+  background: transparent;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  color: var(--text-muted);
+  transition: background .15s, color .15s, border-color .15s;
+}
+.zf-vendor-chip:disabled { cursor: not-allowed; opacity: .5; }
+.zf-vendor-chip.active { background: var(--accent-blue); color: #fff; border-color: var(--accent-blue); }
 .zf-status-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; }
 .zf-status-dot { width: 8px; height: 8px; border-radius: 50%; }
 .zf-nav-row {
@@ -174,27 +188,37 @@
 <!-- NETWORK MODE -->
 <div class="zf-card">
   <div class="zf-card-title">Network Mode</div>
+  <!-- Renamed per operator naming decision 2026-08-12: what used to be
+       labeled "Standalone" is now "Router Mode" (this box IS the router -
+       nftables/tc directly on this Linux box), and what used to be a flat
+       "MikroTik" button is now "Controller Mode" (this box CONTROLS a
+       separate router/AP the operator already owns) with a vendor picker
+       inside it. Purely a display-label and UI-structure change - the
+       underlying network_mode setting values ('standalone'/'mikrotik'/
+       'openwrt') are untouched, so none of the backend mode-gating logic
+       (entitlementService.js's 'router_mode' capability, admin.js's mode
+       checks, setup-network.sh, mikrotikService.js) needed to change. -->
   <input type="radio" name="networkMode" id="modeStandalone" value="standalone" onchange="onNetworkModeChange()" style="display:none;">
   <input type="radio" name="networkMode" id="modeMikrotik" value="mikrotik" onchange="onNetworkModeChange()" style="display:none;">
   <input type="radio" name="networkMode" id="modeOpenwrt" value="openwrt" onchange="onNetworkModeChange()" style="display:none;">
   <div id="networkModeSwitch" class="zf-segmented">
-    <button type="button" id="modeStandaloneCard" onclick="setNetworkMode('standalone')">Standalone</button>
-    <button type="button" id="modeMikrotikCard" onclick="setNetworkMode('mikrotik')">MikroTik</button>
-    <!--
-      OpenWRT mode intentionally hidden from selection for the closed beta.
-      Unlike Standalone and MikroTik (both have a real-hardware bug-fix
-      history in their own driver files), the OpenWRT driver has never been
-      connected to real OpenWRT hardware or verified end-to-end - it's only
-      ever been code-reviewed. Per explicit instruction: bury untested
-      modes rather than ship them, keep the code in place for later once
-      it's actually tested, don't offer it as if it were ready.
-      Re-enable by uncommenting this button once OpenWRT mode has been
-      verified against real hardware. openwrtFields/onNetworkModeChange()
-      still handle it correctly if network_mode is ever set to 'openwrt'
-      directly (e.g. a pre-existing test install) - only the entry point
-      to newly select it from the UI is hidden.
-    <button type="button" id="modeOpenwrtCard" onclick="setNetworkMode('openwrt')">OpenWRT</button>
-    -->
+    <button type="button" id="modeStandaloneCard" onclick="setNetworkMode('standalone')">Router Mode</button>
+    <button type="button" id="modeControllerCard" onclick="toggleControllerVendorPicker()">Controller Mode</button>
+  </div>
+  <!-- Vendor picker for Controller Mode - only MikroTik actually has a
+       driver wired to the UI today. Ubiquiti/TP-Link are real roadmap
+       targets (the operator wants them), shown as visible-but-disabled
+       "Coming soon" chips rather than omitted, so the picker communicates
+       where this is headed without claiming support that doesn't exist
+       yet (CLAUDE.md's no-fabricated-features rule). OpenWRT keeps its
+       existing hidden-until-hardware-verified treatment (see the driver
+       file and openwrtFields below) - not surfaced here either, for the
+       same reason it was buried before this rename. -->
+  <div id="controllerVendorPicker" class="zf-row" style="display:none;flex-wrap:wrap;gap:8px;padding:10px 16px 14px;border-top:1px solid var(--border-color);">
+    <button type="button" class="zf-vendor-chip" id="vendorMikrotikChip" onclick="setNetworkMode('mikrotik')">MikroTik</button>
+    <button type="button" class="zf-vendor-chip" disabled title="Coming soon - no Ubiquiti driver yet">Ubiquiti</button>
+    <button type="button" class="zf-vendor-chip" disabled title="Coming soon - no TP-Link driver yet">TP-Link</button>
+    <button type="button" class="zf-vendor-chip" disabled title="Not yet verified against real OpenWRT hardware">OpenWRT</button>
   </div>
 </div>
 
