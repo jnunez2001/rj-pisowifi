@@ -591,6 +591,180 @@ router.get('/sales', adminAuth, (req, res) => {
   }
 });
 
+// GET /api/admin/analytics/summary?days=7 — the Analytics page's single
+// aggregation endpoint (one round trip, matching the design guide's
+// "prefer backend aggregation" rule rather than N separate widget
+// calls). Compares the selected period against the immediately prior
+// period of the same length, real data only.
+//
+// Deliberately does NOT include: data usage in GB (this app has no
+// per-session/per-client bandwidth-volume accounting, only live
+// throughput and coarse rate shaping - there is nothing to sum),
+// per-access-point traffic (no AP concept in Standalone/Router Mode),
+// or a historical WAN-uptime percentage / failover count (wanHealthService
+// only ever reports a live snapshot, nothing is sampled and stored over
+// time yet). Returning these as zero would look like real measured data
+// that happens to be zero, which is misleading - they're omitted from
+// the response entirely instead, and the frontend does not render those
+// widgets as a result.
+router.get('/analytics/summary', adminAuth, (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 90);
+
+    // Bug found live: revenue must NOT be filtered by mac_address - coin-
+    // slot transactions legitimately have no MAC recorded (matching
+    // /sales' own todaySales query, which never filters on it either).
+    // Only the distinct-user COUNT needs that filter; an earlier version
+    // of this query applied it to revenue too and silently undercounted
+    // real coin revenue whenever a box had any MAC-less transactions.
+    const period = db.prepare(`
+      SELECT
+        SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as revenue,
+        COUNT(DISTINCT CASE WHEN mac_address IS NOT NULL THEN mac_address END) as users,
+        COUNT(*) as transactions
+      FROM transactions
+      WHERE date(created_at) >= date('now', '-' || ? || ' days')
+    `).get(days);
+
+    const prevPeriod = db.prepare(`
+      SELECT
+        SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as revenue,
+        COUNT(DISTINCT CASE WHEN mac_address IS NOT NULL THEN mac_address END) as users,
+        COUNT(*) as transactions
+      FROM transactions
+      WHERE date(created_at) >= date('now', '-' || ? || ' days') AND date(created_at) < date('now', '-' || ? || ' days')
+    `).get(days * 2, days);
+
+    const sessionsPeriod = db.prepare(`
+      SELECT COUNT(*) as sessions, AVG(duration_seconds) as avg_duration
+      FROM session_history WHERE date(ended_at) >= date('now', '-' || ? || ' days')
+    `).get(days);
+    const sessionsPrev = db.prepare(`
+      SELECT COUNT(*) as sessions, AVG(duration_seconds) as avg_duration
+      FROM session_history WHERE date(ended_at) >= date('now', '-' || ? || ' days') AND date(ended_at) < date('now', '-' || ? || ' days')
+    `).get(days * 2, days);
+
+    const pctChange = (curr, prev) => {
+      if (!prev) return curr ? 100 : 0;
+      return Math.round(((curr - prev) / prev) * 1000) / 10;
+    };
+    const metric = (curr, prev) => ({ value: curr || 0, previousValue: prev || 0, changePercent: pctChange(curr || 0, prev || 0) });
+
+    const revenue = period.revenue || 0;
+    const users = period.users || 0;
+    const avgRevenuePerUser = users > 0 ? Math.round((revenue / users) * 100) / 100 : 0;
+    const prevAvgRevenuePerUser = (prevPeriod.users || 0) > 0 ? Math.round(((prevPeriod.revenue || 0) / prevPeriod.users) * 100) / 100 : 0;
+
+    // Daily revenue+sessions series for the primary chart.
+    const revenueSeries = db.prepare(`
+      SELECT date(created_at) as date,
+        SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as revenue,
+        COUNT(*) as sessions
+      FROM transactions
+      WHERE date(created_at) >= date('now', '-' || ? || ' days')
+      GROUP BY date(created_at) ORDER BY date ASC
+    `).all(days);
+
+    // Revenue breakdown by real transaction type.
+    const breakdownRows = db.prepare(`
+      SELECT type, SUM(coin_value) as amount
+      FROM transactions
+      WHERE date(created_at) >= date('now', '-' || ? || ' days') AND type != 'free'
+      GROUP BY type ORDER BY amount DESC
+    `).all(days);
+    const breakdownTotal = breakdownRows.reduce((sum, r) => sum + (r.amount || 0), 0);
+    const typeLabels = { coin: 'Coin Sales', voucher: 'Voucher Sales', promo: 'Promo Redemptions' };
+    const revenueBreakdown = breakdownRows.map((r) => ({
+      type: r.type,
+      label: typeLabels[r.type] || r.type,
+      amount: r.amount || 0,
+      percent: breakdownTotal > 0 ? Math.round(((r.amount || 0) / breakdownTotal) * 1000) / 10 : 0,
+    }));
+
+    // Sessions by hour-of-day (0-23), real session_history rows in period.
+    const hourRows = db.prepare(`
+      SELECT CAST(strftime('%H', started_at) as INTEGER) as hour, COUNT(*) as count
+      FROM session_history
+      WHERE started_at IS NOT NULL AND date(ended_at) >= date('now', '-' || ? || ' days')
+      GROUP BY hour
+    `).all(days);
+    const hourMap = new Map(hourRows.map((r) => [r.hour, r.count]));
+    const sessionsByHour = Array.from({ length: 24 }, (_, h) => ({ hour: h, count: hourMap.get(h) || 0 }));
+
+    // New vs returning + repeat users, same "first-ever-transaction-date"
+    // logic already proven in /sales, generalized to the selected period.
+    const firstSeenRows = db.prepare(`
+      SELECT mac_address, MIN(date(created_at)) as first_date
+      FROM transactions WHERE mac_address IS NOT NULL GROUP BY mac_address
+    `).all();
+    const firstSeenByMac = new Map(firstSeenRows.map((r) => [r.mac_address, r.first_date]));
+    const periodMacRows = db.prepare(`
+      SELECT mac_address, date(created_at) as tx_date, COUNT(*) as tx_count
+      FROM transactions
+      WHERE mac_address IS NOT NULL AND date(created_at) >= date('now', '-' || ? || ' days')
+      GROUP BY mac_address, tx_date
+    `).all(days);
+    const macTxCounts = new Map();
+    let newSessions = 0;
+    let returningSessions = 0;
+    periodMacRows.forEach((r) => {
+      const isNew = firstSeenByMac.get(r.mac_address) === r.tx_date;
+      if (isNew) newSessions += r.tx_count; else returningSessions += r.tx_count;
+      macTxCounts.set(r.mac_address, (macTxCounts.get(r.mac_address) || 0) + r.tx_count);
+    });
+    const repeatUsers = Array.from(macTxCounts.values()).filter((c) => c > 1).length;
+
+    // Top spenders (real per-client revenue ranking) for the selected
+    // period - same substitution as the Dashboard's Top Spenders widget,
+    // for the same reason (no per-client GB usage tracked).
+    const topSpenders = db.prepare(`
+      SELECT mac_address, SUM(coin_value) as total, COUNT(*) as transaction_count
+      FROM transactions
+      WHERE date(created_at) >= date('now', '-' || ? || ' days') AND mac_address IS NOT NULL AND mac_address != ''
+      GROUP BY mac_address ORDER BY total DESC LIMIT 5
+    `).all(days);
+    const topSpenderDurations = db.prepare(`
+      SELECT mac_address, AVG(duration_seconds) as avg_duration, COUNT(*) as session_count
+      FROM session_history
+      WHERE date(ended_at) >= date('now', '-' || ? || ' days') AND mac_address IS NOT NULL
+      GROUP BY mac_address
+    `).all(days);
+    const durationByMac = new Map(topSpenderDurations.map((r) => [r.mac_address, r]));
+    const topUsers = topSpenders.map((s) => ({
+      mac_address: s.mac_address,
+      total: s.total,
+      transaction_count: s.transaction_count,
+      session_count: durationByMac.get(s.mac_address)?.session_count || 0,
+      avg_duration_seconds: Math.round(durationByMac.get(s.mac_address)?.avg_duration || 0),
+    }));
+
+    return res.json({
+      success: true,
+      period: { days },
+      kpi: {
+        revenue: metric(revenue, prevPeriod.revenue || 0),
+        sessions: metric(sessionsPeriod.sessions || 0, sessionsPrev.sessions || 0),
+        users: metric(users, prevPeriod.users || 0),
+        avgSessionDurationSeconds: metric(Math.round(sessionsPeriod.avg_duration || 0), Math.round(sessionsPrev.avg_duration || 0)),
+        avgRevenuePerUser: metric(avgRevenuePerUser, prevAvgRevenuePerUser),
+      },
+      revenueSeries,
+      revenueBreakdown,
+      sessionsByHour,
+      sessionAnalytics: {
+        newSessions,
+        returningSessions,
+        avgSessionDurationSeconds: Math.round(sessionsPeriod.avg_duration || 0),
+        repeatUsers,
+      },
+      topUsers,
+    });
+  } catch (err) {
+    console.error('Analytics summary error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/dashboard/top-spenders-today — real per-client revenue
 // ranking for today (Dashboard's "Top Users" slot in the mockup asked for
 // data-usage-in-GB, which this app doesn't track per client; revenue is

@@ -218,6 +218,7 @@ function initSidebarCollapse() {
 // ===== NAVIGATION =====
 const pageTitles = {
   dashboard: 'Overview',
+  analytics: 'Analytics',
   users: 'Users',
   'sms-email-gateway': 'SMS / Email Gateway',
   'system-health': 'System Health',
@@ -288,6 +289,7 @@ async function navigateTo(page) {
   if (typeof destroyAbout === 'function') destroyAbout();
   if (typeof destroySessions === 'function') destroySessions();
   if (typeof destroyDashboard === 'function') destroyDashboard();
+  if (typeof destroyAnalytics === 'function') destroyAnalytics();
   if (typeof destroyHotspotDashboard === 'function') destroyHotspotDashboard();
   if (typeof destroyDevices === 'function') destroyDevices();
 
@@ -337,6 +339,7 @@ async function navigateTo(page) {
     // Run page script
     const scripts = {
       dashboard: () => typeof loadDashboard === 'function' && loadDashboard(),
+      analytics: () => typeof loadAnalytics === 'function' && loadAnalytics(),
       'hotspot-dashboard': () => typeof loadHotspotDashboard === 'function' && loadHotspotDashboard(),
       'satellite-kiosks': () => typeof loadSatelliteKiosks === 'function' && loadSatelliteKiosks(),
       'coin-slot-gpio': () => typeof loadCoinSlotGpio === 'function' && loadCoinSlotGpio(),

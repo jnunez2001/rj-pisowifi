@@ -1,0 +1,96 @@
+<div class="zf3-header">
+  <div>
+    <div class="page-title">Analytics</div>
+    <div class="page-subtitle">Understand your hotspot, network, and revenue performance</div>
+  </div>
+  <div class="zf3-header-right">
+    <select id="analyticsRangeSelect" class="zf3-view-pill" style="border:1px solid var(--border-color);background:var(--bg-card);color:var(--text-primary);font-family:inherit;cursor:pointer;" onchange="loadAnalytics()">
+      <option value="7">Last 7 Days</option>
+      <option value="30">Last 30 Days</option>
+      <option value="90">Last 90 Days</option>
+    </select>
+    <div class="zf3-icon-btn" onclick="loadAnalytics()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
+    <div class="zf3-icon-btn" onclick="exportAnalyticsCsv()" title="Export CSV"><i class="fas fa-download"></i></div>
+  </div>
+</div>
+
+<!-- KPI CARDS -->
+<div class="zf3-stat-grid" style="grid-template-columns:repeat(5,1fr);">
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Total Revenue</div>
+      <i class="fas fa-wallet zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="anRevenue">₱0</div>
+    <div class="zf3-stat-trend" id="anRevenueTrend">vs previous period</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Sessions</div>
+      <i class="fas fa-user-group zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="anSessions">0</div>
+    <div class="zf3-stat-trend" id="anSessionsTrend">vs previous period</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Users</div>
+      <i class="fas fa-user zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="anUsers">0</div>
+    <div class="zf3-stat-trend" id="anUsersTrend">vs previous period</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Avg. Session Duration</div>
+      <i class="fas fa-clock zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="anAvgDuration">0m</div>
+    <div class="zf3-stat-trend" id="anAvgDurationTrend">vs previous period</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Avg. Revenue / User</div>
+      <i class="fas fa-money-bill zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="anRevenuePerUser">₱0</div>
+    <div class="zf3-stat-trend" id="anRevenuePerUserTrend">vs previous period</div>
+  </div>
+</div>
+
+<!-- REVENUE/SESSION CHART + BREAKDOWN + SESSIONS BY HOUR -->
+<div class="zf3-row3">
+  <div class="zf3-card">
+    <div class="zf3-card-title" style="margin-bottom:14px;text-transform:none;font-size:14px;">Revenue &amp; Session Performance</div>
+    <canvas id="anRevenueSessionChart" height="110"></canvas>
+  </div>
+  <div class="zf3-card">
+    <div class="zf3-card-title" style="margin-bottom:14px;text-transform:none;font-size:14px;">Revenue Breakdown</div>
+    <canvas id="anBreakdownChart" height="140"></canvas>
+    <div id="anBreakdownLegend" style="margin-top:12px;"></div>
+  </div>
+  <div class="zf3-card">
+    <div class="zf3-card-title" style="margin-bottom:14px;text-transform:none;font-size:14px;">Sessions by Hour</div>
+    <canvas id="anHourChart" height="140"></canvas>
+  </div>
+</div>
+
+<!-- SESSION ANALYTICS + NETWORK SNAPSHOT + TOP USERS -->
+<div class="zf3-row3">
+  <div class="zf3-card">
+    <div class="zf3-card-title" style="margin-bottom:14px;text-transform:none;font-size:14px;">Session Analytics</div>
+    <div id="anSessionAnalytics"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+  </div>
+  <div class="zf3-card">
+    <div class="zf3-card-title" style="margin-bottom:4px;text-transform:none;font-size:14px;">Network Snapshot</div>
+    <div class="page-subtitle" style="font-size:11px;margin-bottom:14px;">Live status, not a period trend</div>
+    <div id="anNetworkSnapshot"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+  </div>
+  <div class="zf3-card">
+    <div class="zf3-card-head">
+      <div class="zf3-card-title" style="text-transform:none;font-size:14px;">Top Users</div>
+      <span style="font-size:11px;color:var(--text-muted);">By Revenue</span>
+    </div>
+    <div id="anTopUsers"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+  </div>
+</div>
