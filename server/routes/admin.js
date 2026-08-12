@@ -956,9 +956,14 @@ router.post('/settings', adminAuth, (req, res) => {
     // mikrotik/openwrt mode are untouched - this only blocks newly
     // switching INTO a router mode without Premium.
     if (updates.network_mode === 'mikrotik' || updates.network_mode === 'openwrt') {
-      const tier = db.prepare("SELECT value FROM settings WHERE key = 'account_tier'").get()?.value || 'free';
+      // Real entitlement check (server/services/entitlementService.js),
+      // not a raw account_tier settings read - see that file's own header
+      // for the gap this closed (account_tier used to be settable through
+      // this exact same generic loop, with nothing stopping an admin from
+      // just granting themselves Premium).
+      const { canUse } = require('../services/entitlementService');
       const currentMode = db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
-      if (tier !== 'premium' && currentMode !== updates.network_mode) {
+      if (!canUse('router_mode') && currentMode !== updates.network_mode) {
         return res.status(403).json({ success: false, message: 'Router mode (MikroTik/OpenWRT) is a Premium feature. Upgrade to unlock it.' });
       }
     }
