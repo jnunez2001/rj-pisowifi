@@ -4540,4 +4540,278 @@ router.post('/router/provision/apply', adminAuth, async (req, res) => {
   }
 });
 
+// ===== ROUTERS (fleet registry) =====
+// Real, separate MikroTik devices ZenFi connects to and monitors, distinct
+// from this box's own single mikrotik_host/user/pass settings (Network
+// page). Only 'mikrotik' has a working adapter (mikrotikApiClient.js) -
+// other manufacturers are accepted as a label but test-connection returns
+// an honest "not yet supported" instead of pretending to connect.
+const ROUTER_MANUFACTURERS = ['mikrotik', 'tplink', 'openwrt', 'ubiquiti'];
+const ROUTER_MODES = ['controller', 'standalone'];
+const ROUTER_STATUSES = ['online', 'offline', 'connecting', 'warning', 'configuration_required', 'unreachable'];
+
+function routerRowToJson(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    manufacturer: row.manufacturer,
+    model: row.model,
+    mode: row.mode,
+    site_id: row.site_id,
+    site_name: row.site_name || null,
+    host: row.host,
+    port: row.port,
+    ssl: !!row.ssl,
+    username: row.username,
+    has_password: !!row.password_encrypted,
+    status: row.status,
+    firmware_version: row.firmware_version,
+    uptime_seconds: row.uptime_seconds,
+    cpu_percent: row.cpu_percent,
+    memory_percent: row.memory_percent,
+    last_seen_at: row.last_seen_at,
+    last_error: row.last_error,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+router.get('/sites', adminAuth, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT id, name, is_default FROM sites ORDER BY is_default DESC, name ASC').all();
+    return res.json({ success: true, sites: rows });
+  } catch (err) {
+    console.error('Admin list sites error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.get('/routers', adminAuth, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT r.*, s.name as site_name
+      FROM routers r
+      LEFT JOIN sites s ON s.id = r.site_id
+      ORDER BY r.created_at DESC
+    `).all();
+    return res.json({ success: true, routers: rows.map(routerRowToJson) });
+  } catch (err) {
+    console.error('Admin list routers error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.get('/routers/:id', adminAuth, (req, res) => {
+  try {
+    const row = db.prepare(`
+      SELECT r.*, s.name as site_name FROM routers r LEFT JOIN sites s ON s.id = r.site_id WHERE r.id = ?
+    `).get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, message: 'Router not found' });
+    return res.json({ success: true, router: routerRowToJson(row) });
+  } catch (err) {
+    console.error('Admin get router error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+function validateRouterInput(body, { partial = false } = {}) {
+  const errors = [];
+  const out = {};
+
+  if (!partial || body.name !== undefined) {
+    const name = String(body.name || '').trim();
+    if (!name) errors.push('Router name is required.');
+    out.name = name;
+  }
+  if (body.manufacturer !== undefined || !partial) {
+    const m = ROUTER_MANUFACTURERS.includes(body.manufacturer) ? body.manufacturer : 'mikrotik';
+    out.manufacturer = m;
+  }
+  if (body.model !== undefined) out.model = String(body.model || '').trim().slice(0, 100) || null;
+  if (body.mode !== undefined || !partial) {
+    out.mode = ROUTER_MODES.includes(body.mode) ? body.mode : 'controller';
+  }
+  if (body.site_id !== undefined) {
+    const v = body.site_id === null || body.site_id === '' ? null : parseInt(body.site_id, 10);
+    out.site_id = Number.isFinite(v) ? v : null;
+  }
+  if (body.host !== undefined) out.host = String(body.host || '').trim().slice(0, 255) || null;
+  if (body.port !== undefined) {
+    const v = body.port === null || body.port === '' ? null : parseInt(body.port, 10);
+    if (v !== null && (!Number.isFinite(v) || v < 1 || v > 65535)) errors.push('Port must be between 1 and 65535.');
+    out.port = v;
+  }
+  if (body.ssl !== undefined) out.ssl = body.ssl ? 1 : 0;
+  if (body.username !== undefined) out.username = String(body.username || '').trim().slice(0, 100) || null;
+
+  return { errors, out };
+}
+
+router.post('/routers', adminAuth, (req, res) => {
+  try {
+    const { errors, out } = validateRouterInput(req.body);
+    if (errors.length) return res.status(400).json({ success: false, message: errors[0], errors });
+
+    const password = req.body.password ? encryptSecret(String(req.body.password)) : null;
+
+    const result = db.prepare(`
+      INSERT INTO routers (name, manufacturer, model, mode, site_id, host, port, ssl, username, password_encrypted, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'configuration_required')
+    `).run(
+      out.name, out.manufacturer, out.model || null, out.mode, out.site_id ?? null,
+      out.host || null, out.port ?? null, out.ssl ?? 0, out.username || null, password
+    );
+    console.log(`📡 Router registered: "${out.name}" (${out.manufacturer}, ${out.mode})`);
+    const row = db.prepare('SELECT r.*, s.name as site_name FROM routers r LEFT JOIN sites s ON s.id = r.site_id WHERE r.id = ?').get(result.lastInsertRowid);
+    return res.json({ success: true, router: routerRowToJson(row) });
+  } catch (err) {
+    console.error('Admin create router error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Server error' });
+  }
+});
+
+router.patch('/routers/:id', adminAuth, (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM routers WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Router not found' });
+
+    const { errors, out } = validateRouterInput(req.body, { partial: true });
+    if (errors.length) return res.status(400).json({ success: false, message: errors[0], errors });
+
+    if (req.body.password) out.password_encrypted = encryptSecret(String(req.body.password));
+
+    const fields = Object.keys(out);
+    if (!fields.length) return res.json({ success: true, router: routerRowToJson(existing) });
+
+    const setClause = fields.map(f => `${f} = ?`).join(', ');
+    const values = fields.map(f => out[f] ?? null);
+    db.prepare(`UPDATE routers SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values, req.params.id);
+
+    console.log(`📡 Router updated: "${existing.name}" (#${req.params.id})`);
+    const row = db.prepare('SELECT r.*, s.name as site_name FROM routers r LEFT JOIN sites s ON s.id = r.site_id WHERE r.id = ?').get(req.params.id);
+    return res.json({ success: true, router: routerRowToJson(row) });
+  } catch (err) {
+    console.error('Admin update router error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Server error' });
+  }
+});
+
+router.delete('/routers/:id', adminAuth, (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM routers WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Router not found' });
+    db.prepare('DELETE FROM routers WHERE id = ?').run(req.params.id);
+    console.log(`📡 Router removed: "${existing.name}" (#${req.params.id})`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Admin delete router error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/routers/:id/test-connection — the one place this module
+// actually talks to real hardware. Opens a real MikroTik API connection
+// with the router's own stored credentials, reads real /system/resource
+// data (RouterOS version, uptime, CPU, free memory), and persists it so
+// the dashboard/detail page show genuine numbers, not fabricated ones.
+router.post('/routers/:id/test-connection', adminAuth, async (req, res) => {
+  const existing = db.prepare('SELECT * FROM routers WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ success: false, message: 'Router not found' });
+
+  if (existing.manufacturer !== 'mikrotik') {
+    return res.status(400).json({
+      success: false,
+      message: `${existing.manufacturer} is not yet supported - only MikroTik has a working connection adapter today.`,
+    });
+  }
+  if (!existing.host || !existing.username || !existing.password_encrypted) {
+    db.prepare("UPDATE routers SET status = 'configuration_required', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
+    return res.status(400).json({ success: false, message: 'Host, username, and password are required before testing the connection.' });
+  }
+
+  try {
+    const { withMikrotik } = require('../services/mikrotikApiClient');
+    const config = {
+      ip: existing.host,
+      port: existing.port || undefined,
+      ssl: !!existing.ssl,
+      user: existing.username,
+      pass: decryptSecret(existing.password_encrypted),
+    };
+    const result = await withMikrotik(config, (client) => client.talk(['/system/resource/print']));
+    const resource = result.re && result.re[0] ? result.re[0] : {};
+    const uptimeSeconds = parseMikrotikUptime(resource.uptime);
+    const cpuPercent = resource['cpu-load'] !== undefined ? parseInt(resource['cpu-load'], 10) : null;
+    const totalMem = parseInt(resource['total-memory'], 10);
+    const freeMem = parseInt(resource['free-memory'], 10);
+    const memPercent = (Number.isFinite(totalMem) && Number.isFinite(freeMem) && totalMem > 0)
+      ? Math.round(((totalMem - freeMem) / totalMem) * 100)
+      : null;
+
+    db.prepare(`
+      UPDATE routers SET status = 'online', firmware_version = ?, uptime_seconds = ?, cpu_percent = ?, memory_percent = ?,
+        last_seen_at = CURRENT_TIMESTAMP, last_error = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(resource.version || null, uptimeSeconds, cpuPercent, memPercent, req.params.id);
+
+    const row = db.prepare('SELECT r.*, s.name as site_name FROM routers r LEFT JOIN sites s ON s.id = r.site_id WHERE r.id = ?').get(req.params.id);
+    return res.json({ success: true, router: routerRowToJson(row) });
+  } catch (err) {
+    db.prepare("UPDATE routers SET status = 'unreachable', last_error = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run((err.message || 'Connection failed').slice(0, 300), req.params.id);
+    console.error('Router test-connection error:', err.message);
+    return res.status(400).json({ success: false, message: `Unable to connect to router. ${err.message || 'Check the host, credentials, and network connection.'}` });
+  }
+});
+
+// MikroTik reports uptime as e.g. "4w2d3h4m5s" - parse into seconds.
+function parseMikrotikUptime(str) {
+  if (!str || typeof str !== 'string') return null;
+  const re = /(\d+)([wdhms])/g;
+  const unitSeconds = { w: 604800, d: 86400, h: 3600, m: 60, s: 1 };
+  let total = 0;
+  let match;
+  let matched = false;
+  while ((match = re.exec(str)) !== null) {
+    matched = true;
+    total += parseInt(match[1], 10) * (unitSeconds[match[2]] || 0);
+  }
+  return matched ? total : null;
+}
+
+// GET /api/admin/routers/:id/interfaces — real interface list + traffic
+// from the router itself, for the Router Detail > Interfaces tab.
+router.get('/routers/:id/interfaces', adminAuth, async (req, res) => {
+  const existing = db.prepare('SELECT * FROM routers WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ success: false, message: 'Router not found' });
+  if (existing.manufacturer !== 'mikrotik') {
+    return res.status(400).json({ success: false, message: `${existing.manufacturer} is not yet supported.` });
+  }
+  if (!existing.host || !existing.username || !existing.password_encrypted) {
+    return res.status(400).json({ success: false, message: 'This router is not fully configured yet.' });
+  }
+  try {
+    const { withMikrotik } = require('../services/mikrotikApiClient');
+    const config = {
+      ip: existing.host,
+      port: existing.port || undefined,
+      ssl: !!existing.ssl,
+      user: existing.username,
+      pass: decryptSecret(existing.password_encrypted),
+    };
+    const result = await withMikrotik(config, (client) => client.talk(['/interface/print']));
+    const interfaces = (result.re || []).map(i => ({
+      name: i.name,
+      type: i.type,
+      online: i.running === 'true',
+      disabled: i.disabled === 'true',
+      rx_bytes: i['rx-byte'] ? parseInt(i['rx-byte'], 10) : null,
+      tx_bytes: i['tx-byte'] ? parseInt(i['tx-byte'], 10) : null,
+    }));
+    return res.json({ success: true, interfaces });
+  } catch (err) {
+    console.error('Router interfaces error:', err.message);
+    return res.status(400).json({ success: false, message: `Unable to reach router. ${err.message || ''}` });
+  }
+});
+
 module.exports = router;

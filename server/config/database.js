@@ -146,6 +146,37 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Fleet registry for the Routers module - a real, separate MikroTik
+  -- device ZenFi connects to over the MikroTik API client
+  -- (mikrotikApiClient.js), distinct from this box's own single
+  -- mikrotik_host/mikrotik_user/mikrotik_pass settings (Network page,
+  -- Controller Mode) which remain untouched. A registered router here is
+  -- something ZenFi monitors/manages in addition to, not instead of,
+  -- whatever this box itself is doing. Password is encrypted at rest via
+  -- secretCrypto.js, same as mikrotik_pass.
+  CREATE TABLE IF NOT EXISTS routers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    manufacturer TEXT NOT NULL DEFAULT 'mikrotik', -- mikrotik | tplink | openwrt | ubiquiti (only mikrotik has a working adapter)
+    model TEXT,
+    mode TEXT NOT NULL DEFAULT 'controller', -- controller | standalone
+    site_id INTEGER REFERENCES sites(id),
+    host TEXT,
+    port INTEGER,
+    ssl INTEGER NOT NULL DEFAULT 0,
+    username TEXT,
+    password_encrypted TEXT,
+    status TEXT NOT NULL DEFAULT 'configuration_required', -- online | offline | connecting | warning | configuration_required | unreachable
+    firmware_version TEXT,
+    uptime_seconds INTEGER,
+    cpu_percent INTEGER,
+    memory_percent INTEGER,
+    last_seen_at DATETIME,
+    last_error TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS rates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     coin_value INTEGER NOT NULL,
