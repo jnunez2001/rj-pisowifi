@@ -1090,6 +1090,38 @@ router.post('/vouchers/groups', adminAuth, (req, res) => {
 });
 
 // GET /api/admin/vouchers/groups — list all groups with usage counts
+// GET /api/admin/vouchers/redemption-summary?days=30 - real voucher
+// redemption revenue over time, for the Vouchers Overview page. Sources
+// only transactions.type IN ('voucher','promo') - the real distinction
+// promo.js's redeem route already makes between a group-generated code
+// and a standalone one (see that route's own comment) - coin-slot
+// revenue is deliberately excluded, this card is voucher-specific.
+router.get('/vouchers/redemption-summary', adminAuth, (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
+    const series = db.prepare(`
+      SELECT date(created_at) as date, COUNT(*) as redeemed, SUM(coin_value) as revenue
+      FROM transactions
+      WHERE type IN ('voucher', 'promo') AND date(created_at) >= date('now', '-' || ? || ' days')
+      GROUP BY date(created_at) ORDER BY date ASC
+    `).all(days);
+    const totals = db.prepare(`
+      SELECT COUNT(*) as redeemed, SUM(coin_value) as revenue
+      FROM transactions
+      WHERE type IN ('voucher', 'promo') AND date(created_at) >= date('now', '-' || ? || ' days')
+    `).get(days);
+    return res.json({
+      success: true,
+      series,
+      totalRedeemed: totals.redeemed || 0,
+      totalRevenue: totals.revenue || 0,
+    });
+  } catch (err) {
+    console.error('Voucher redemption summary error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 router.get('/vouchers/groups', adminAuth, (req, res) => {
   try {
     // Bug: used_count lumped 'active' (redeemed, session currently running)

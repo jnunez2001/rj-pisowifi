@@ -1182,3 +1182,12 @@ table.zf3-table td:last-child, table.zf3-table th:last-child { text-align:right;
 .zf3-severity-critical { color: var(--accent-red); }
 .zf3-severity-warning { color: var(--accent-orange); }
 .zf3-severity-info { color: var(--text-muted); }
+
+/* Sub-navigation tabs (Users: Accounts/Guests/Devices, Vouchers:
+   Overview/All Vouchers/Groups/Templates) - promoted here from users.html
+   so every zf3-based page can reuse the same tab treatment. */
+.zf3-tabs { display:flex; gap:4px; margin-bottom:16px; border-bottom:1px solid var(--border-color); }
+.zf3-tab { padding:10px 16px; font-size:13px; font-weight:600; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; display:flex; align-items:center; gap:8px; }
+.zf3-tab.active { color:var(--brand-teal-dark); border-bottom-color:var(--brand-teal); }
+.zf3-tab-count { background:var(--bg-primary); border:1px solid var(--border-color); border-radius:10px; padding:1px 8px; font-size:11px; }
+.zf3-tab.active .zf3-tab-count { background:var(--brand-teal-light); color:var(--brand-teal-dark); border-color:transparent; }

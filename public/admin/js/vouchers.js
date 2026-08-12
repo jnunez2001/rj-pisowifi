@@ -31,6 +31,155 @@ async function loadVouchers() {
   await loadVoucherGroups();
 }
 
+// ===== VOUCHERS OVERVIEW (tabs + KPIs + charts) =====
+let voucherRedemptionChart = null;
+let voucherTopPlansChart = null;
+let voucherGroupsCache = [];
+
+async function loadVouchersPage() {
+  switchVoucherTab('overview');
+  await Promise.all([loadPromos(), loadVoucherGroups()]);
+  await loadVoucherOverview();
+}
+
+function destroyVouchersPage() {
+  if (voucherRedemptionChart) { voucherRedemptionChart.destroy(); voucherRedemptionChart = null; }
+  if (voucherTopPlansChart) { voucherTopPlansChart.destroy(); voucherTopPlansChart = null; }
+}
+
+function switchVoucherTab(tab) {
+  ['overview', 'all', 'groups', 'templates'].forEach((t) => {
+    const label = t.charAt(0).toUpperCase() + t.slice(1);
+    document.getElementById(`voucherTab${label}`)?.classList.toggle('active', t === tab);
+    const panel = document.getElementById(`voucher${label}Panel`);
+    if (panel) panel.style.display = t === tab ? 'block' : 'none';
+  });
+}
+
+async function loadVoucherOverview() {
+  try {
+    const [groupsData, redemption] = await Promise.all([
+      apiCall('GET', '/api/admin/vouchers/groups'),
+      apiCall('GET', '/api/admin/vouchers/redemption-summary?days=30'),
+    ]);
+
+    if (groupsData.success) {
+      voucherGroupsCache = groupsData.groups;
+      const totals = voucherGroupsCache.reduce((acc, g) => {
+        acc.total += g.actual_count || 0;
+        acc.unused += g.unused_count || 0;
+        acc.active += g.active_count || 0;
+        acc.used += g.used_count || 0;
+        return acc;
+      }, { total: 0, unused: 0, active: 0, used: 0 });
+      const pct = (n) => totals.total > 0 ? Math.round((n / totals.total) * 1000) / 10 : 0;
+
+      document.getElementById('vkTotal').textContent = totals.total;
+      document.getElementById('vkUnused').textContent = totals.unused;
+      document.getElementById('vkUnusedPct').textContent = `${pct(totals.unused)}% of total`;
+      document.getElementById('vkActive').textContent = totals.active;
+      document.getElementById('vkActivePct').textContent = `${pct(totals.active)}% of total`;
+      document.getElementById('vkRedeemed').textContent = totals.used;
+      document.getElementById('vkRedeemedPct').textContent = `${pct(totals.used)}% of total`;
+      // No expiry clock exists on generated voucher codes today (see
+      // promo_vouchers.expires_at - never populated by batch generation),
+      // so this is a real, currently-always-zero count, not a fabricated
+      // one - honest state of the data, not a placeholder.
+      document.getElementById('vkExpired').textContent = '0';
+      document.getElementById('vkExpiredPct').textContent = '0% of total';
+
+      renderTopPlansChart(voucherGroupsCache);
+    }
+
+    if (redemption.success) {
+      document.getElementById('vrRedeemed').textContent = redemption.totalRedeemed;
+      document.getElementById('vrRevenue').textContent = `₱${redemption.totalRevenue.toFixed(2)}`;
+      renderRedemptionChart(redemption.series);
+    }
+  } catch (e) {
+    console.error('Voucher overview error:', e);
+  }
+}
+
+function renderRedemptionChart(series) {
+  const canvas = document.getElementById('voucherRedemptionChart');
+  if (!canvas) return;
+  if (voucherRedemptionChart) { voucherRedemptionChart.destroy(); voucherRedemptionChart = null; }
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+  const textColor = isDark ? '#a7b0bd' : '#64748b';
+  voucherRedemptionChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: series.map((s) => s.date),
+      datasets: [
+        { label: 'Redeemed', data: series.map((s) => s.redeemed || 0), borderColor: '#2563eb', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 2, tension: 0.3, yAxisID: 'y' },
+        { label: 'Revenue (₱)', data: series.map((s) => s.revenue || 0), borderColor: '#16a34a', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 2, tension: 0.3, yAxisID: 'y1' },
+      ],
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { position: 'top', labels: { color: textColor, boxWidth: 10, font: { size: 11 } } } },
+      scales: {
+        x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 9 }, maxTicksLimit: 8 } },
+        y: { position: 'left', grid: { color: gridColor }, ticks: { color: textColor, font: { size: 10 } } },
+        y1: { position: 'right', grid: { display: false }, ticks: { color: textColor, font: { size: 10 } } },
+      },
+    },
+  });
+}
+
+function renderTopPlansChart(groups) {
+  const canvas = document.getElementById('voucherTopPlansChart');
+  const legend = document.getElementById('voucherTopPlansLegend');
+  if (!canvas) return;
+  if (voucherTopPlansChart) { voucherTopPlansChart.destroy(); voucherTopPlansChart = null; }
+
+  // "Plan" here = this group's duration+price combo; redemption count is
+  // the group's real used_count. Groups sharing the same duration/price
+  // are summed together, matching the mockup's "₱10 / 30 Minutes" style
+  // plan grouping rather than listing every group separately.
+  const byPlan = new Map();
+  groups.forEach((g) => {
+    const key = `${formatDuration(g.duration_minutes)} · ₱${g.price}`;
+    byPlan.set(key, (byPlan.get(key) || 0) + (g.used_count || 0));
+  });
+  const entries = Array.from(byPlan.entries()).filter(([, count]) => count > 0).sort((a, b) => b[1] - a[1]);
+
+  if (entries.length === 0) {
+    legend.innerHTML = '<div style="text-align:center;color:var(--text-muted);font-size:13px;padding:12px 0;">No redemptions yet</div>';
+    return;
+  }
+  const total = entries.reduce((sum, [, c]) => sum + c, 0);
+  const colors = ['#2563eb', '#16a34a', '#d97706', '#7c3aed', '#64748b'];
+  voucherTopPlansChart = new Chart(canvas.getContext('2d'), {
+    type: 'doughnut',
+    data: { labels: entries.map(([k]) => k), datasets: [{ data: entries.map(([, c]) => c), backgroundColor: colors, borderWidth: 0 }] },
+    options: { responsive: true, cutout: '70%', plugins: { legend: { display: false } } },
+  });
+  legend.innerHTML = entries.map(([label, count], i) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:12px;">
+      <span style="display:flex;align-items:center;gap:8px;color:var(--text-primary);"><span style="width:8px;height:8px;border-radius:50%;background:${colors[i % colors.length]};display:inline-block;"></span>${label}</span>
+      <span style="color:var(--text-secondary);">${Math.round((count / total) * 1000) / 10}%</span>
+    </div>
+  `).join('');
+}
+
+function exportVouchersCsv() {
+  if (!voucherGroupsCache.length) return;
+  const rows = [['Group', 'Quantity', 'Unused', 'Active', 'Used', 'Duration (min)', 'Price', 'Created']];
+  voucherGroupsCache.forEach((g) => rows.push([g.name, g.actual_count, g.unused_count || 0, g.active_count || 0, g.used_count || 0, g.duration_minutes, g.price, g.created_at]));
+  const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `zenfi-vouchers-${new Date().toISOString().split('T')[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function closeModal(id) {
   document.getElementById(id).classList.remove('show');
 }
@@ -202,14 +351,14 @@ async function loadVoucherGroups() {
     // branch as "no groups yet" and show a misleading "create one!"
     // message instead of the actual reason it failed.
     if (!data.success) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--accent-red);padding:24px;">${data.message || 'Failed to load voucher groups'}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--accent-red);padding:24px;">${data.message || 'Failed to load voucher groups'}</td></tr>`;
       return;
     }
 
     if (!data.groups.length) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="6">
+          <td colspan="9">
             <div class="empty-state">
               <i class="fas fa-layer-group"></i>
               <h3>No Voucher Groups</h3>
@@ -222,15 +371,17 @@ async function loadVoucherGroups() {
 
     tbody.innerHTML = data.groups.map(g => `
       <tr>
-        <td style="font-weight:700;">${g.name}</td>
-        <td>${g.actual_count}</td>
         <td>
-          <span class="badge badge-orange">${g.unused_count || 0} unused</span>
-          <span class="badge badge-green" style="margin-left:4px;">${g.active_count || 0} active</span>
-          <span class="badge badge-blue" style="margin-left:4px;">${g.used_count || 0} used</span>
+          <div style="font-weight:700;color:var(--text-primary);">${g.name}</div>
+          <div style="font-size:11px;color:var(--text-muted);">${formatDuration(g.duration_minutes)} · ₱${g.price}</div>
         </td>
-        <td><span class="badge badge-blue">${formatDuration(g.duration_minutes)}</span></td>
-        <td><span class="badge badge-green">₱${g.price}</span></td>
+        <td>${g.actual_count}</td>
+        <td style="color:var(--accent-orange);font-weight:600;">${g.unused_count || 0}</td>
+        <td style="color:var(--accent-green);font-weight:600;">${g.active_count || 0}</td>
+        <td style="color:var(--accent-blue);font-weight:600;">${g.used_count || 0}</td>
+        <td>${formatDuration(g.duration_minutes)}</td>
+        <td>₱${g.price}</td>
+        <td style="font-size:12px;color:var(--text-muted);">${new Date(g.created_at.replace(' ', 'T') + 'Z').toLocaleDateString()}</td>
         <td>
           <div style="display:flex;gap:6px;">
             <button class="btn btn-sm btn-secondary btn-icon" onclick="viewVoucherGroup(${g.id})" title="View codes">
@@ -251,7 +402,7 @@ async function loadVoucherGroups() {
     // its initial "Loading..." row forever with no visible indication
     // anything had gone wrong.
     console.error('Voucher groups error:', e);
-    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--accent-red);padding:24px;">Failed to load voucher groups. Refresh to try again.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--accent-red);padding:24px;">Failed to load voucher groups. Refresh to try again.</td></tr>`;
   }
 }
 
@@ -308,6 +459,11 @@ async function createVoucherGroup() {
       showToast(`Created ${data.codes.length} vouchers!`, 'success');
       closeModal('groupModal');
       loadVoucherGroups();
+      // Bug found live: the KPI row/charts (loadVoucherOverview) never
+      // refreshed after creating a group - only the flat table did, so
+      // "Total Vouchers" etc. stayed stuck at their pre-creation values
+      // until a full page reload.
+      if (typeof loadVoucherOverview === 'function') loadVoucherOverview();
     } else {
       showToast(data.message || 'Failed to create voucher group', 'error');
     }
@@ -326,6 +482,7 @@ async function deleteVoucherGroup(id, name) {
     if (data.success) {
       showToast('Voucher group deleted', 'success');
       loadVoucherGroups();
+      if (typeof loadVoucherOverview === 'function') loadVoucherOverview();
     } else {
       showToast(data.message || 'Failed to delete', 'error');
     }

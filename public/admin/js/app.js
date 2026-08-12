@@ -291,6 +291,7 @@ async function navigateTo(page) {
   if (typeof destroyDashboard === 'function') destroyDashboard();
   if (typeof destroyAnalytics === 'function') destroyAnalytics();
   if (typeof destroyUsersPage === 'function') destroyUsersPage();
+  if (typeof destroyVouchersPage === 'function') destroyVouchersPage();
   if (typeof destroyHotspotDashboard === 'function') destroyHotspotDashboard();
   if (typeof destroyDevices === 'function') destroyDevices();
 
@@ -348,7 +349,7 @@ async function navigateTo(page) {
       sessions: () => typeof loadSessions === 'function' && loadSessions(),
       sales: () => typeof loadSales === 'function' && loadSales(),
       rates: () => typeof loadRates === 'function' && loadRates(),
-      vouchers: () => typeof loadVouchers === 'function' && loadVouchers(),
+      vouchers: () => typeof loadVouchersPage === 'function' && loadVouchersPage(),
       promos: () => typeof loadPromosPage === 'function' && loadPromosPage(),
       settings: () => typeof loadSettings === 'function' && loadSettings(),
       network: () => typeof loadNetworkPage === 'function' && loadNetworkPage(),
