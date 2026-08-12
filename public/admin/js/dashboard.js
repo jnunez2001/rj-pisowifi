@@ -17,7 +17,60 @@ async function loadDashboard() {
   await loadActiveSessionsCount();
   await loadSystemVersion();
   await loadSystemStatus();
-  await loadDashboardMode();
+  await loadWanStatus();
+  // Bandwidth Usage chart is always visible now (matches the current
+  // dashboard layout) - the old "Comprehensive View" toggle that used to
+  // gate it is gone from the page; setDashboardMode(true) still does the
+  // real init/polling work, just unconditionally.
+  setDashboardMode(true);
+}
+
+// Internet/WAN status card - real data from wanHealthService.js (ping-
+// based score/latency/loss) and multiWanService.js (primary/backup lane
+// status, only meaningful once a second WAN lane is actually configured).
+async function loadWanStatus() {
+  const body = document.getElementById('wanStatusBody');
+  if (!body) return;
+  try {
+    const [healthRes, multiRes] = await Promise.all([
+      apiCall('GET', '/api/admin/network/wan-health'),
+      apiCall('GET', '/api/admin/network/multi-wan'),
+    ]);
+    const rows = [];
+    if (healthRes.success) {
+      const h = healthRes.health;
+      const scoreColor = h.score >= 80 ? 'var(--accent-green)' : h.score >= 40 ? 'var(--accent-orange)' : 'var(--accent-red)';
+      rows.push(`
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:13px;color:var(--text-muted);font-weight:600;"><i class="fas fa-signal" style="margin-right:6px;"></i>Health Score</span>
+          <span style="font-size:13px;font-weight:700;color:${scoreColor};">${h.score}/100</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:13px;color:var(--text-muted);font-weight:600;"><i class="fas fa-gauge" style="margin-right:6px;"></i>Latency</span>
+          <span style="font-size:13px;font-weight:700;color:var(--text-primary);">${h.avg_latency_ms != null ? h.avg_latency_ms + ' ms' : '--'}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:13px;color:var(--text-muted);font-weight:600;"><i class="fas fa-triangle-exclamation" style="margin-right:6px;"></i>Packet Loss</span>
+          <span style="font-size:13px;font-weight:700;color:var(--text-primary);">${h.packet_loss_pct != null ? h.packet_loss_pct + '%' : '--'}</span>
+        </div>
+      `);
+    } else {
+      rows.push('<div style="font-size:13px;color:var(--text-muted);">Health check unavailable</div>');
+    }
+    if (multiRes.success && multiRes.status && multiRes.status.backup) {
+      const s = multiRes.status;
+      rows.push(`
+        <hr style="border:none;border-top:1px solid var(--border-color);">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-size:13px;color:var(--text-muted);font-weight:600;"><i class="fas fa-route" style="margin-right:6px;"></i>Active Lane</span>
+          <span class="badge badge-blue">${s.currently_active || 'primary'}</span>
+        </div>
+      `);
+    }
+    body.innerHTML = rows.join('');
+  } catch (e) {
+    body.innerHTML = '<div style="font-size:13px;color:var(--text-muted);">Could not load WAN status</div>';
+  }
 }
 
 // Comprehensive vs clean dashboard (Dashboard's own toggle, top right) -
@@ -215,14 +268,13 @@ async function loadSalesStats() {
     document.getElementById('minutesSold').textContent =
       `${Math.round(data.today.minutes_sold || 0)} mins`;
 
-    // Weekly total
-    const weekTotal = data.week.reduce((sum, d) => sum + (d.total || 0), 0);
-    document.getElementById('weeklySales').textContent = `₱${weekTotal.toFixed(2)}`;
-
-    // Bug: this used to be weekTotal * 4, a rough guess, not real data.
-    // The server now computes an actual month-to-date total.
-    document.getElementById('monthlySales').textContent =
-      `₱${(data.month?.total_income || 0).toFixed(2)}`;
+    // Weekly/monthly totals no longer have their own stat cards (dashboard
+    // rebuild per the shared mockup - Today's Revenue/Active Sessions/
+    // Today's Transactions/Minutes Sold/Bandwidth Usage replaced the old
+    // Today/Weekly/Monthly Sales row) - still computed here since
+    // Revenue Analytics' chart range buttons below use the same
+    // currentChartRange state, just no longer written to weeklySales/
+    // monthlySales elements that don't exist in the page anymore.
 
     // Bug: the Daily/Weekly/Monthly buttons never changed what was charted
     // — every click re-rendered the same fixed 7-day view. data.chart is

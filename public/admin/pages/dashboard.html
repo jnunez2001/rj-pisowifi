@@ -1,14 +1,7 @@
 <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;">
   <div>
     <div class="page-title">Dashboard</div>
-    <div class="page-subtitle">Welcome back! Here's what's happening today.</div>
-  </div>
-  <div style="display:flex;align-items:center;gap:10px;">
-    <span style="font-size:13px;color:var(--text-muted);font-weight:600;">Comprehensive View</span>
-    <label class="toggle-switch">
-      <input type="checkbox" id="dashboardComprehensiveToggle" onchange="toggleDashboardMode()">
-      <span class="toggle-slider"></span>
-    </label>
+    <div class="page-subtitle">Overview of your network and hotspot performance</div>
   </div>
 </div>
 
@@ -16,70 +9,62 @@
 <div class="stat-grid">
   <div class="stat-card green">
     <div class="stat-icon"><i class="fas fa-coins"></i></div>
-    <div class="stat-label">Today's Sales</div>
+    <div class="stat-label">Today's Revenue</div>
     <div class="stat-value" id="todaySales">₱0</div>
     <div class="stat-desc">Daily Revenue</div>
   </div>
   <div class="stat-card blue">
-    <div class="stat-icon"><i class="fas fa-calendar-week"></i></div>
-    <div class="stat-label">Weekly Sales</div>
-    <div class="stat-value" id="weeklySales">₱0</div>
-    <div class="stat-desc">This Week</div>
-  </div>
-  <div class="stat-card orange">
-    <div class="stat-icon"><i class="fas fa-calendar-alt"></i></div>
-    <div class="stat-label">Monthly Sales</div>
-    <div class="stat-value" id="monthlySales">₱0</div>
-    <div class="stat-desc">This Month</div>
-  </div>
-  <div class="stat-card red">
     <div class="stat-icon"><i class="fas fa-users"></i></div>
     <div class="stat-label">Active Sessions</div>
     <div class="stat-value" id="activeSessions">0</div>
     <div class="stat-desc">Currently Connected</div>
   </div>
-</div>
-
-<!-- NETWORK TRAFFIC (Comprehensive View only) -->
-<div class="card" id="networkTrafficCard" style="display:none;margin-bottom:16px;">
-  <div class="card-header">
-    <div>
-      <div class="card-title">Network Traffic</div>
-      <div class="card-subtitle">Live bandwidth, updated every few seconds</div>
-    </div>
-    <div style="display:flex;gap:16px;font-size:13px;">
-      <span style="color:var(--accent-green);font-weight:700;"><i class="fas fa-arrow-down"></i> <span id="currentDownload">0</span> Mbps</span>
-      <span style="color:var(--accent-blue);font-weight:700;"><i class="fas fa-arrow-up"></i> <span id="currentUpload">0</span> Mbps</span>
-    </div>
+  <div class="stat-card orange">
+    <div class="stat-icon"><i class="fas fa-receipt"></i></div>
+    <div class="stat-label">Today's Transactions</div>
+    <div class="stat-value" id="todayTransactions">0</div>
+    <div class="stat-desc">Coin & Voucher</div>
   </div>
-  <canvas id="networkChart" height="70"></canvas>
+  <div class="stat-card red">
+    <div class="stat-icon"><i class="fas fa-hourglass-half"></i></div>
+    <div class="stat-label">Minutes Sold Today</div>
+    <div class="stat-value" id="minutesSold">0</div>
+    <div class="stat-desc">Total Minutes</div>
+  </div>
+  <div class="stat-card blue">
+    <div class="stat-icon"><i class="fas fa-gauge-high"></i></div>
+    <div class="stat-label">Bandwidth Usage</div>
+    <div class="stat-value"><span id="currentDownload">0</span>/<span id="currentUpload">0</span></div>
+    <div class="stat-desc">Mbps Down/Up</div>
+  </div>
 </div>
 
-<!-- CHARTS + STATUS ROW -->
-<div class="dashboard-row" style="display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:16px;">
+<!-- BANDWIDTH + WAN STATUS + HOTSPOT OVERVIEW -->
+<div class="dashboard-row" style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:16px;margin-bottom:16px;">
 
-  <!-- REVENUE CHART -->
   <div class="card">
     <div class="card-header">
       <div>
-        <div class="card-title">Revenue Analytics</div>
-        <div class="card-subtitle" id="chartRangeSubtitle">Last 7 days performance</div>
-      </div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-sm btn-secondary" onclick="setChartRange('daily')" id="btnDaily">Daily</button>
-        <button class="btn btn-sm btn-primary" onclick="setChartRange('weekly')" id="btnWeekly">Weekly</button>
-        <button class="btn btn-sm btn-secondary" onclick="setChartRange('monthly')" id="btnMonthly">Monthly</button>
+        <div class="card-title">Bandwidth Usage</div>
+        <div class="card-subtitle">Live, updated every few seconds</div>
       </div>
     </div>
-    <canvas id="revenueChart" height="120"></canvas>
+    <canvas id="networkChart" height="90"></canvas>
   </div>
 
-  <!-- SYSTEM STATUS -->
   <div class="card">
     <div class="card-header">
-      <div class="card-title">System Status</div>
+      <div class="card-title">Internet / WAN Status</div>
     </div>
+    <div id="wanStatusBody" style="display:flex;flex-direction:column;gap:14px;">
+      <div class="loading"><i class="fas fa-spinner fa-spin"></i></div>
+    </div>
+  </div>
 
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Hotspot Overview</div>
+    </div>
     <div style="display:flex;flex-direction:column;gap:14px;">
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
@@ -87,45 +72,19 @@
         </span>
         <span style="font-size:13px;font-weight:700;color:var(--text-primary);" id="uptime">--</span>
       </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
-          <i class="fas fa-server" style="margin-right:6px;"></i>Server Status
-        </span>
-        <span class="badge badge-green">
-          <span class="status-dot online"></span>Online
-        </span>
-      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;" title="" id="wifiApRow">
         <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
           <i class="fas fa-wifi" style="margin-right:6px;"></i>WiFi AP
         </span>
-        <span class="badge badge-orange" id="wifiApStatus">
-          Unknown
-        </span>
+        <span class="badge badge-orange" id="wifiApStatus">Unknown</span>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;" id="coinSlotRow">
         <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
           <i class="fas fa-microchip" style="margin-right:6px;"></i>Coin Slot
         </span>
-        <span class="badge badge-orange" id="coinSlotStatus">
-          Unknown
-        </span>
+        <span class="badge badge-orange" id="coinSlotStatus">Unknown</span>
       </div>
-
       <hr style="border:none;border-top:1px solid var(--border-color);">
-
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
-          <i class="fas fa-receipt" style="margin-right:6px;"></i>Today Transactions
-        </span>
-        <span style="font-size:13px;font-weight:700;color:var(--text-primary);" id="todayTransactions">0</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
-          <i class="fas fa-hourglass-half" style="margin-right:6px;"></i>Minutes Sold Today
-        </span>
-        <span style="font-size:13px;font-weight:700;color:var(--text-primary);" id="minutesSold">0</span>
-      </div>
       <div style="display:flex;justify-content:space-between;align-items:center;">
         <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
           <i class="fas fa-tag" style="margin-right:6px;"></i>System Version
@@ -136,37 +95,68 @@
   </div>
 </div>
 
-<!-- RECENT TRANSACTIONS -->
-<div class="card">
+<!-- REVENUE CHART -->
+<div class="card" style="margin-bottom:16px;">
   <div class="card-header">
     <div>
-      <div class="card-title">Recent Transactions</div>
-      <div class="card-subtitle">Latest coin insertions</div>
+      <div class="card-title">Revenue Analytics</div>
+      <div class="card-subtitle" id="chartRangeSubtitle">Last 7 days performance</div>
     </div>
-    <button class="btn btn-sm btn-secondary" onclick="navigateTo('sales')">
-      View All <i class="fas fa-arrow-right"></i>
-    </button>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-sm btn-secondary" onclick="setChartRange('daily')" id="btnDaily">Daily</button>
+      <button class="btn btn-sm btn-primary" onclick="setChartRange('weekly')" id="btnWeekly">Weekly</button>
+      <button class="btn btn-sm btn-secondary" onclick="setChartRange('monthly')" id="btnMonthly">Monthly</button>
+    </div>
   </div>
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>Session ID</th>
-          <th>Amount</th>
-          <th>Time Added</th>
-          <th>Type</th>
-          <th>Time</th>
-        </tr>
-      </thead>
-      <tbody id="recentTransactions">
-        <tr>
-          <td colspan="5">
-            <div class="loading">
-              <i class="fas fa-spinner fa-spin"></i> Loading...
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+  <canvas id="revenueChart" height="120"></canvas>
+</div>
+
+<!-- RECENT ACTIVITY + QUICK ACTIONS -->
+<div class="dashboard-row" style="display:grid;grid-template-columns:2fr 1fr;gap:16px;">
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Recent Activity</div>
+      <button class="btn btn-sm btn-secondary" onclick="navigateTo('sales')">
+        View All <i class="fas fa-arrow-right"></i>
+      </button>
+    </div>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Session ID</th>
+            <th>Amount</th>
+            <th>Time Added</th>
+            <th>Type</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody id="recentTransactions">
+          <tr><td colspan="5"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Quick Actions</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 16px 16px;">
+      <button class="btn btn-secondary" style="flex-direction:column;padding:16px 8px;gap:6px;" onclick="navigateTo('vouchers')">
+        <i class="fas fa-ticket"></i> Add Voucher
+      </button>
+      <button class="btn btn-secondary" style="flex-direction:column;padding:16px 8px;gap:6px;" onclick="navigateTo('sessions')">
+        <i class="fas fa-wifi"></i> View Sessions
+      </button>
+      <button class="btn btn-secondary" style="flex-direction:column;padding:16px 8px;gap:6px;" onclick="navigateTo('settings')">
+        <i class="fas fa-gear"></i> System Settings
+      </button>
+      <button class="btn btn-secondary" style="flex-direction:column;padding:16px 8px;gap:6px;" onclick="openPowerConfirm('reboot')">
+        <i class="fas fa-sync-alt"></i> Reboot Server
+      </button>
+    </div>
+  </div>
+
 </div>
