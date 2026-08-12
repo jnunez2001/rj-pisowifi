@@ -1112,3 +1112,73 @@ body {
   background: #ece4f2;
   color: var(--accent-purple);
 }
+
+/* ===== ZF3 COMPONENT LIBRARY =====
+   Reusable neutral SaaS components per the ZenFi Frontend Design Guide
+   (2026-08-12) - built for the Dashboard rebuild, promoted here so
+   System Health/Logs/Alerts and any future page share one definition
+   instead of copy-pasting a local <style> block per page. */
+.zf3-header { display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:20px; }
+.zf3-header-right { display:flex; align-items:center; gap:10px; }
+.zf3-date-pill { display:flex; align-items:center; gap:10px; padding:10px 16px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; font-size:13px; font-weight:600; color:var(--text-primary); }
+.zf3-icon-btn { width:40px; height:40px; display:flex; align-items:center; justify-content:center; background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; color:var(--text-muted); cursor:pointer; }
+.zf3-icon-btn:hover { color:var(--text-primary); }
+.zf3-view-pill { display:flex; align-items:center; gap:8px; padding:10px 16px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; font-size:13px; font-weight:600; color:var(--text-primary); }
+
+.zf3-stat-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:16px; margin-bottom:16px; }
+@media (max-width: 1100px) { .zf3-stat-grid { grid-template-columns:repeat(2,1fr); } }
+.zf3-stat-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:20px; box-shadow:var(--shadow-sm); }
+.zf3-stat-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; }
+.zf3-stat-label { font-size:11px; font-weight:600; letter-spacing:0.4px; text-transform:uppercase; color:var(--text-muted); }
+.zf3-stat-icon { color:var(--text-muted); font-size:18px; flex-shrink:0; line-height:1; }
+.zf3-stat-value { font-size:26px; font-weight:600; color:var(--text-primary); margin-bottom:6px; }
+.zf3-stat-trend { font-size:12px; font-weight:500; color:var(--text-secondary); }
+.zf3-stat-trend .up { color:var(--accent-green); }
+.zf3-stat-trend .down { color:var(--accent-red); }
+
+.zf3-row3 { display:grid; grid-template-columns:2fr 1fr 1fr; gap:16px; margin-bottom:16px; }
+@media (max-width: 1100px) { .zf3-row3 { grid-template-columns:1fr; } }
+.zf3-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:12px; padding:20px; box-shadow:var(--shadow-sm); }
+.zf3-card-title { font-size:12px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:var(--text-muted); }
+.zf3-card-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+
+.zf3-wan-lane { margin-bottom:16px; }
+.zf3-wan-lane:last-child { margin-bottom:0; }
+.zf3-wan-lane-head { display:flex; justify-content:space-between; align-items:center; font-size:13px; font-weight:700; color:var(--text-primary); margin-bottom:10px; }
+.zf3-wan-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px 16px; }
+.zf3-wan-item-label { font-size:11px; color:var(--text-muted); font-weight:600; margin-bottom:2px; }
+.zf3-wan-item-value { font-size:14px; color:var(--text-primary); font-weight:700; }
+
+.zf3-list-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; }
+.zf3-list-left { display:flex; align-items:center; gap:10px; color:var(--text-primary); font-weight:600; font-size:13px; min-width:0; }
+.zf3-rank { width:20px; height:20px; border-radius:50%; background:var(--bg-primary); color:var(--text-muted); font-size:11px; font-weight:700; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+.zf3-avatar { width:26px; height:26px; border-radius:50%; background:var(--bg-primary); border:1px solid var(--border-color); color:var(--text-muted); display:flex; align-items:center; justify-content:center; font-size:11px; flex-shrink:0; }
+.zf3-bar-track { flex:1; height:6px; background:var(--bg-primary); border-radius:3px; overflow:hidden; margin:0 10px; min-width:40px; }
+.zf3-bar-fill { height:100%; background:var(--accent-blue); border-radius:3px; }
+.zf3-list-value { font-size:13px; font-weight:700; color:var(--text-primary); flex-shrink:0; }
+
+table.zf3-table { width:100%; border-collapse:collapse; font-size:13px; }
+table.zf3-table th { text-align:left; font-size:10px; font-weight:700; letter-spacing:0.5px; text-transform:uppercase; color:var(--text-muted); padding-bottom:10px; }
+table.zf3-table td { padding:9px 0; border-top:1px solid var(--border-color); color:var(--text-primary); }
+table.zf3-table td:last-child, table.zf3-table th:last-child { text-align:right; }
+
+.zf3-devices-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--border-color); }
+.zf3-devices-stat-label { font-size:11px; color:var(--text-muted); font-weight:600; margin-bottom:4px; }
+.zf3-devices-stat-value { font-size:20px; font-weight:700; }
+
+.zf3-activity-row { display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-top:1px solid var(--border-color); }
+.zf3-activity-row:first-of-type { border-top:none; }
+.zf3-activity-dot { width:8px; height:8px; border-radius:50%; margin-top:5px; flex-shrink:0; }
+.zf3-activity-text { font-size:13px; color:var(--text-primary); font-weight:600; }
+.zf3-activity-meta { font-size:12px; color:var(--text-muted); margin-top:2px; }
+
+.zf3-actions-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.zf3-action-btn { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:18px 8px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:10px; color:var(--text-primary); font-size:12px; font-weight:600; cursor:pointer; }
+.zf3-action-btn:hover { border-color:var(--brand-teal); color:var(--brand-teal); }
+.zf3-action-btn i { font-size:16px; }
+
+/* Status pill for log/alert severity - reuses the same badge visual
+   language as everywhere else, just with a semantic-only palette. */
+.zf3-severity-critical { color: var(--accent-red); }
+.zf3-severity-warning { color: var(--accent-orange); }
+.zf3-severity-info { color: var(--text-muted); }

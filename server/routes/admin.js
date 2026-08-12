@@ -3141,6 +3141,114 @@ router.get('/diagnostics/last-boot', adminAuth, (req, res) => {
   }
 });
 
+// GET /api/admin/logs — unified real event log for the System > Logs
+// page. Merges watchdog_events (self-heal check history) and
+// network_config_versions (config-change audit trail, already built by
+// configSafety.js) into one time-ordered feed instead of two separate
+// tables nothing ever browsed together. financial events stay out of
+// this (transactions has its own Sales Report view already, and mixing
+// revenue records into an operational log invites confusion between the
+// two, not clarity).
+router.get('/logs', adminAuth, (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const watchdog = db.prepare(
+      'SELECT id, status, issues_json, checked_at FROM watchdog_events ORDER BY checked_at DESC LIMIT ?'
+    ).all(limit).map((r) => ({
+      source: 'watchdog',
+      time: r.checked_at,
+      level: r.status === 'ok' ? 'info' : 'warning',
+      message: r.status === 'ok' ? 'Self-heal check passed' : 'Self-heal check found issues',
+      // Bug found live: each issue is a structured {severity, code, message}
+      // object (see watchdogService.js's persistResult()), not a plain
+      // string - naively .join()-ing the array rendered "[object Object]".
+      detail: (() => { try { return JSON.parse(r.issues_json).map((i) => i.message || i).join(', '); } catch (e) { return ''; } })(),
+    }));
+    const configChanges = db.prepare(
+      'SELECT id, created_at, operator, reason, applied, rolled_back, verify_status FROM network_config_versions ORDER BY created_at DESC LIMIT ?'
+    ).all(limit).map((r) => ({
+      source: 'config',
+      time: r.created_at,
+      level: r.rolled_back ? 'warning' : 'info',
+      message: r.rolled_back
+        ? 'Network config change rolled back'
+        : r.applied ? 'Network config applied' : 'Network config change recorded',
+      detail: `${r.operator || 'admin'}${r.reason ? ' — ' + r.reason : ''}`,
+    }));
+    const merged = watchdog.concat(configChanges)
+      .sort((a, b) => new Date(b.time) - new Date(a.time))
+      .slice(0, limit);
+    return res.json({ success: true, logs: merged });
+  } catch (err) {
+    console.error('Logs error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/alerts — real, derived alerts, not a stored table of its
+// own. Sources: watchdog self-heal failures (recent, unresolved-looking
+// ones), WAN health score (wanHealthService.js, already built), and disk
+// space (systemDiagnosticsService.js's getDiskSpace(), already backs the
+// low-disk-space banner elsewhere in the admin UI). No alert here is
+// synthetic - each one traces to a real check that already runs.
+router.get('/alerts', adminAuth, async (req, res) => {
+  try {
+    const alerts = [];
+
+    const recentWatchdog = db.prepare(
+      "SELECT status, issues_json, checked_at FROM watchdog_events WHERE status != 'ok' ORDER BY checked_at DESC LIMIT 5"
+    ).all();
+    recentWatchdog.forEach((r) => {
+      let issues = [];
+      try { issues = JSON.parse(r.issues_json); } catch (e) {}
+      // Bug found live: issues are structured {severity, code, message}
+      // objects (watchdogService.js), not plain strings - naively
+      // .join()-ing rendered "[object Object]". Also now surfaces the
+      // real per-issue severity instead of hardcoding 'warning' for
+      // every watchdog alert, even critical ones.
+      const hasCritical = issues.some((i) => i.severity === 'critical');
+      alerts.push({
+        severity: hasCritical ? 'critical' : 'warning',
+        title: 'Self-heal check found an issue',
+        detail: issues.map((i) => i.message || i).join(', ') || 'See Logs for details.',
+        time: r.checked_at,
+      });
+    });
+
+    try {
+      const { checkWanHealth } = require('../services/wanHealthService');
+      const health = await checkWanHealth();
+      if (health.score < 80) {
+        alerts.push({
+          severity: health.score < 40 ? 'critical' : 'warning',
+          title: 'WAN health degraded',
+          detail: (health.reasons || []).join(', ') || `Health score ${health.score}/100`,
+          time: health.measured_at,
+        });
+      }
+    } catch (e) {}
+
+    try {
+      const { getDiskSpace } = require('../services/systemDiagnosticsService');
+      const disk = getDiskSpace();
+      if (disk && disk.checked && disk.usePercent != null && disk.usePercent >= 90) {
+        alerts.push({
+          severity: disk.usePercent >= 97 ? 'critical' : 'warning',
+          title: 'Disk space running low',
+          detail: `${disk.usePercent}% used, ${disk.availMb} MB free`,
+          time: new Date().toISOString(),
+        });
+      }
+    } catch (e) {}
+
+    alerts.sort((a, b) => new Date(b.time) - new Date(a.time));
+    return res.json({ success: true, alerts });
+  } catch (err) {
+    console.error('Alerts error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // ===== STANDALONE PORTS AND ROLES + PROVISIONING
 // (STANDALONE_ARCHITECTURE_PLAN.md - VLAN-based multi-lane engine) =====
 // Reuses router_ports the same way router/MikroTik mode does, but scoped

@@ -352,6 +352,9 @@ async function navigateTo(page) {
       devices: () => typeof loadDevices === 'function' && loadDevices(),
       update: () => typeof loadUpdate === 'function' && loadUpdate(),
       about: () => typeof loadAbout === 'function' && loadAbout(),
+      'system-health': () => typeof loadSystemHealth === 'function' && loadSystemHealth(),
+      logs: () => typeof loadLogsPage === 'function' && loadLogsPage(),
+      alerts: () => typeof loadAlertsPage === 'function' && loadAlertsPage(),
     };
 
     if (scripts[page]) scripts[page]();

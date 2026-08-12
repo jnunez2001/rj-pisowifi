@@ -188,24 +188,6 @@ const COMING_SOON_PAGES = {
     description: '',
     workstream: 'Nav rebuild (12c)'
   },
-  'system-health': {
-    icon: 'fa-heart-pulse',
-    title: 'System Health',
-    description: '',
-    workstream: 'Nav rebuild (12c)'
-  },
-  'logs': {
-    icon: 'fa-scroll',
-    title: 'Logs',
-    description: '',
-    workstream: 'Nav rebuild (12c)'
-  },
-  'alerts': {
-    icon: 'fa-bell',
-    title: 'Alerts',
-    description: '',
-    workstream: 'Nav rebuild (12c)'
-  },
   'isp-subscribers': {
     icon: 'fa-users-gear',
     title: 'Subscribers',

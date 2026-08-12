@@ -1,0 +1,24 @@
+<div class="zf3-header">
+  <div>
+    <div class="page-title">System Health</div>
+    <div class="page-subtitle">Preflight checks, disk space, and hardware metrics for this box</div>
+  </div>
+  <div class="zf3-header-right">
+    <div class="zf3-icon-btn" onclick="loadSystemHealth()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
+  </div>
+</div>
+
+<div class="zf3-row3" style="grid-template-columns:1fr 1fr 1fr;">
+  <div class="zf3-card">
+    <div class="zf3-card-title" style="margin-bottom:14px;">Preflight Checks</div>
+    <div id="shChecks"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+  </div>
+  <div class="zf3-card">
+    <div class="zf3-card-title" style="margin-bottom:14px;">Disk Space</div>
+    <div id="shDisk"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+  </div>
+  <div class="zf3-card">
+    <div class="zf3-card-title" style="margin-bottom:14px;">Hardware</div>
+    <div id="shHardware"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+  </div>
+</div>
