@@ -232,6 +232,15 @@ async function toggleDashboardMode() {
   } catch (e) {}
 }
 
+function updateNetworkChartEmptyState() {
+  const empty = document.getElementById('networkChartEmpty');
+  const canvas = document.getElementById('networkChart');
+  if (!empty || !canvas || !networkChart) return;
+  const hasData = networkChart.data.datasets.some(ds => ds.data.some(v => v > 0));
+  empty.style.display = hasData ? 'none' : 'flex';
+  canvas.style.visibility = hasData ? 'visible' : 'hidden';
+}
+
 function initNetworkChart() {
   const canvas = document.getElementById('networkChart');
   if (!canvas || networkChart) return;
@@ -276,6 +285,7 @@ function initNetworkChart() {
       }
     }
   });
+  updateNetworkChartEmptyState();
 }
 
 const NETWORK_CHART_MAX_POINTS = 20;
@@ -298,6 +308,7 @@ async function pollNetworkStats() {
       networkChart.data.datasets[1].data.shift();
     }
     networkChart.update('none');
+    updateNetworkChartEmptyState();
   } catch (e) {}
 }
 

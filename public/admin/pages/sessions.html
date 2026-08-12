@@ -61,15 +61,15 @@
 </div>
 
 <!-- TOOLBAR -->
-<div class="zf3-card" style="padding:14px 20px;margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-  <input type="text" id="lsSearch" placeholder="Search by MAC, IP, or session ID..." class="form-control" style="flex:1;min-width:220px;" oninput="renderSessionsTable()">
-  <select id="lsStatusFilter" class="form-control" style="width:auto;" onchange="renderSessionsTable()">
+<div class="zf3-card" style="padding:14px 20px;margin-bottom:16px;display:flex;flex-direction:row;gap:10px;flex-wrap:wrap;align-items:center;">
+  <input type="text" id="lsSearch" placeholder="Search by MAC, IP, or session ID..." class="form-control" style="flex:1 1 0%;min-width:220px;width:auto;" oninput="renderSessionsTable()">
+  <select id="lsStatusFilter" class="form-control" style="width:auto;min-width:140px;" onchange="renderSessionsTable()">
     <option value="">All Status</option>
     <option value="active">Active</option>
     <option value="expiring">Expiring Soon</option>
     <option value="paused">Paused</option>
   </select>
-  <select id="lsTypeFilter" class="form-control" style="width:auto;" onchange="renderSessionsTable()">
+  <select id="lsTypeFilter" class="form-control" style="width:auto;min-width:130px;" onchange="renderSessionsTable()">
     <option value="">All Types</option>
     <option value="voucher">Voucher</option>
     <option value="coin">Coin</option>

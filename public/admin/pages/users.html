@@ -52,8 +52,8 @@
     </div>
   </div>
 
-  <div class="zf3-card" style="padding:14px 20px;margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-    <input type="text" id="guestsSearch" placeholder="Search by session ID, MAC, or IP..." class="form-control" style="flex:1;min-width:220px;" oninput="renderGuestsTable()">
+  <div class="zf3-card" style="padding:14px 20px;margin-bottom:16px;display:flex;flex-direction:row;gap:10px;flex-wrap:wrap;align-items:center;">
+    <input type="text" id="guestsSearch" placeholder="Search by session ID, MAC, or IP..." class="form-control" style="flex:1 1 0%;min-width:220px;width:auto;" oninput="renderGuestsTable()">
     <select id="guestsStatusFilter" class="form-control" style="width:auto;" onchange="renderGuestsTable()">
       <option value="">All Status</option>
       <option value="active">Active</option>
@@ -91,8 +91,8 @@
 
 <!-- DEVICES TAB -->
 <div id="usersDevicesPanel" style="display:none;">
-  <div class="zf3-card" style="padding:14px 20px;margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-    <input type="text" id="devicesSearch" placeholder="Search by MAC address or name..." class="form-control" style="flex:1;min-width:220px;" oninput="renderDevicesTable()">
+  <div class="zf3-card" style="padding:14px 20px;margin-bottom:16px;display:flex;flex-direction:row;gap:10px;flex-wrap:wrap;align-items:center;">
+    <input type="text" id="devicesSearch" placeholder="Search by MAC address or name..." class="form-control" style="flex:1 1 0%;min-width:220px;width:auto;" oninput="renderDevicesTable()">
     <select id="devicesStatusFilter" class="form-control" style="width:auto;" onchange="renderDevicesTable()">
       <option value="">All Status</option>
       <option value="online">Online</option>

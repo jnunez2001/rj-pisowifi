@@ -64,7 +64,13 @@
     <div class="zf3-card-head">
       <div class="zf3-card-title" style="text-transform:none;font-size:14px;">Bandwidth Usage</div>
     </div>
-    <canvas id="networkChart" height="90"></canvas>
+    <div style="position:relative;">
+      <canvas id="networkChart" height="90"></canvas>
+      <div id="networkChartEmpty" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-align:center;">
+        <div style="font-size:13px;font-weight:600;color:var(--text-secondary);">No traffic yet</div>
+        <div style="font-size:12px;color:var(--text-muted);">Bandwidth will appear here once a client connects.</div>
+      </div>
+    </div>
   </div>
 
   <div class="zf3-card">
