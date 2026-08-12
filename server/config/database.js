@@ -342,6 +342,41 @@ db.exec(`
     burst_mbps INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  -- Telemetry Tier 1 (server/services/telemetryService.js) - local-first
+  -- outbox. Every event is written here FIRST, synced later, same
+  -- "box must never depend on cloud connectivity" principle as
+  -- licenseService.js - a box with no internet (or telemetry left off)
+  -- just accumulates rows here forever with zero functional impact.
+  -- Nothing is ever collected or sent unless the 'telemetry_enabled'
+  -- setting is explicitly '1' (default '0' - opt-in, off until a real
+  -- Privacy Policy exists to disclose what this table holds).
+  CREATE TABLE IF NOT EXISTS telemetry_outbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    synced INTEGER DEFAULT 0,
+    synced_at DATETIME,
+    attempts INTEGER DEFAULT 0
+  );
+
+  -- Crash/error reports, same outbox+opt-in pattern as telemetry_outbox
+  -- above but kept in its own table since these are diagnosed and pruned
+  -- differently (e.g. an operator may want to see recent errors in-app
+  -- even with sync off, vs. usage telemetry which has no local-viewing
+  -- use case).
+  CREATE TABLE IF NOT EXISTS error_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    error_type TEXT NOT NULL,
+    message TEXT NOT NULL,
+    stack TEXT,
+    context_json TEXT DEFAULT '{}',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    synced INTEGER DEFAULT 0,
+    synced_at DATETIME,
+    attempts INTEGER DEFAULT 0
+  );
 `);
 
 // router_ports' shape changed from "one row per port" to "one row per lane
@@ -679,6 +714,10 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('admin_2fa_enabled', '0');
   upsertIfMissing('admin_2fa_secret', '');
   upsertIfMissing('venue_type', 'piso_wifi');
+  // Telemetry (server/services/telemetryService.js) - off by default,
+  // mechanism-only until a real Privacy Policy is published and a UI
+  // toggle is exposed (see that file's header for the full reasoning).
+  upsertIfMissing('telemetry_enabled', '0');
 }
 
 // Tracks whether the 2-minutes-remaining push notification has already

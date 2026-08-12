@@ -447,6 +447,16 @@ const server = app.listen(PORT, () => {
     console.warn('[DataRetention] Failed to start (non-fatal):', e.message);
   }
 
+  // Telemetry Tier 1 (outbox + crash reporting) - off by default
+  // (telemetry_enabled setting), mechanism-only until a real Privacy
+  // Policy exists. Scheduling this unconditionally is safe: both its
+  // cron jobs no-op instantly while disabled.
+  try {
+    require('./services/telemetryService').start();
+  } catch (e) {
+    console.warn('[Telemetry] Failed to start (non-fatal):', e.message);
+  }
+
   // Preflight dependency check — verifies nft/tc/gpio tools and basic
   // network readiness exist before the app is trusted to vend. Deliberately
   // non-blocking (matches this app's "boot always succeeds, subsystems

@@ -2196,6 +2196,35 @@ router.post('/storage/retention-cleanup-now', adminAuth, (req, res) => {
   }
 });
 
+// GET /api/admin/telemetry/status — no UI toggle exists yet (backend
+// mechanism only, see telemetryService.js header); this just surfaces
+// whether it's enabled and how many rows are queued, for diagnostics.
+router.get('/telemetry/status', adminAuth, (req, res) => {
+  try {
+    const telemetryService = require('../services/telemetryService');
+    return res.json({ success: true, status: telemetryService.getOutboxStatus() });
+  } catch (err) {
+    console.error('Telemetry status read error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/telemetry/toggle — { enabled: boolean }. Kept API-only
+// (no admin UI wired to it yet) until a real Privacy Policy exists to
+// disclose what's collected, per telemetryService.js's header.
+router.post('/telemetry/toggle', adminAuth, (req, res) => {
+  try {
+    const enabled = req.body && req.body.enabled ? '1' : '0';
+    db.prepare(
+      "INSERT INTO settings (key, value) VALUES ('telemetry_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).run(enabled);
+    return res.json({ success: true, telemetry_enabled: enabled === '1' });
+  } catch (err) {
+    console.error('Telemetry toggle error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/network
 router.get('/network', adminAuth, (req, res) => {
   try {
