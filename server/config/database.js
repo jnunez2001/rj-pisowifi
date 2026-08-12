@@ -779,6 +779,117 @@ try {
   console.error('⚠️ VAPID key generation failed:', e.message);
 }
 
+// ===== MULTI-TENANT DATA MODEL (Organization -> Site) =====
+// Foundation layer for ZenFi_Navigation_and_System_Specification.md's nav
+// shell (site switcher) and Controller Mode's device adoption flow - see
+// this project's multi-tenant decision notes. Schema/data-model only, no
+// auth enforcement or nav/UI wiring here (that's later, separate work).
+//
+// Every existing install is single-tenant today (one box, one operator).
+// This does NOT change that in practice: a default Organization + Site
+// is created once below and every existing tenant-owned table's rows are
+// backfilled to point at it, so nothing currently working changes
+// behavior. New code can start scoping queries by site_id going forward;
+// old code that ignores site_id still works exactly as before since
+// there's only ever been the one site until an operator (or a future
+// central dashboard) creates more.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS organizations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS sites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    organization_id INTEGER NOT NULL REFERENCES organizations(id),
+    name TEXT NOT NULL,
+    venue_type TEXT DEFAULT 'piso_wifi',
+    address TEXT DEFAULT '',
+    timezone TEXT DEFAULT '',
+    is_default INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- RBAC foundation only - this app still authenticates via the single
+  -- admin_password setting (+ optional TOTP), nothing reads or enforces
+  -- this table yet. Exists so a future multi-user/site-scoped permissions
+  -- page has a real table to build against instead of starting from
+  -- nothing, per the sequencing note in the multi-tenant decision (data
+  -- model + auth scoping before the pages that depend on it).
+  CREATE TABLE IF NOT EXISTS site_memberships (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    site_id INTEGER NOT NULL REFERENCES sites(id),
+    username TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'owner',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(site_id, username)
+  );
+`);
+
+// Tenant-owned tables that gain a site_id scope. Deliberately excludes
+// `settings` (a genuine global singleton key-value store today, not
+// per-site data - splitting it into per-site settings is a larger,
+// separate refactor) and the two new telemetry tables (device-level, not
+// site-level, by design - see telemetryService.js).
+const SITE_SCOPED_TABLES = [
+  'sessions', 'transactions', 'promo_vouchers', 'voucher_groups', 'rates',
+  'session_history', 'free_claims', 'vlans', 'vendos', 'trusted_devices',
+  'watchdog_events', 'satellite_kiosks', 'tc_class_allocations',
+  'router_ports', 'static_leases', 'port_forwards', 'client_labels',
+  'network_config_versions', 'bandwidth_profiles',
+];
+
+try {
+  const orgCountRow = db.prepare('SELECT COUNT(*) as c FROM organizations').get();
+  if (orgCountRow.c === 0) {
+    // First boot on this schema version - create the default org/site
+    // this existing single-box install has implicitly always been, and
+    // backfill every tenant-owned table's existing rows to it. Runs
+    // exactly once: guarded by "no organizations exist yet", not by a
+    // version flag, so it's safe even if this code runs again.
+    const venueTypeRow = db.prepare("SELECT value FROM settings WHERE key = 'venue_type'").get();
+    const venueType = venueTypeRow ? venueTypeRow.value : 'piso_wifi';
+
+    const orgId = db.prepare("INSERT INTO organizations (name) VALUES ('Default Organization')").run().lastInsertRowid;
+    const siteId = db.prepare(
+      "INSERT INTO sites (organization_id, name, venue_type, is_default) VALUES (?, 'Main Site', ?, 1)"
+    ).run(orgId, venueType).lastInsertRowid;
+
+    for (const table of SITE_SCOPED_TABLES) {
+      try {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN site_id INTEGER REFERENCES sites(id)`);
+      } catch (e) {
+        // column already exists (re-run safety) - fall through to backfill
+      }
+      db.prepare(`UPDATE ${table} SET site_id = ? WHERE site_id IS NULL`).run(siteId);
+    }
+
+    const adminRow = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get();
+    if (adminRow) {
+      db.prepare("INSERT OR IGNORE INTO site_memberships (site_id, username, role) VALUES (?, 'admin', 'owner')").run(siteId);
+    }
+
+    console.log(`🏢 Multi-tenant data model initialized: Default Organization / Main Site (site_id=${siteId})`);
+  } else {
+    // Not first boot - still make sure any table added to
+    // SITE_SCOPED_TABLES after an install's first boot gets its column
+    // (existing rows backfilled to that install's default site).
+    const defaultSite = db.prepare('SELECT id FROM sites WHERE is_default = 1 ORDER BY id LIMIT 1').get();
+    for (const table of SITE_SCOPED_TABLES) {
+      const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+      if (!cols.includes('site_id')) {
+        db.exec(`ALTER TABLE ${table} ADD COLUMN site_id INTEGER REFERENCES sites(id)`);
+        if (defaultSite) {
+          db.prepare(`UPDATE ${table} SET site_id = ? WHERE site_id IS NULL`).run(defaultSite.id);
+        }
+      }
+    }
+  }
+} catch (e) {
+  console.error('⚠️ Multi-tenant data model migration failed:', e.message);
+}
+
 console.log('✅ Database initialized successfully');
 
 module.exports = db;
