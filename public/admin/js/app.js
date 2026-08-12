@@ -218,6 +218,11 @@ function initSidebarCollapse() {
 // ===== NAVIGATION =====
 const pageTitles = {
   dashboard: 'Overview',
+  users: 'Users',
+  'sms-email-gateway': 'SMS / Email Gateway',
+  'system-health': 'System Health',
+  logs: 'Logs',
+  alerts: 'Alerts',
   sales: 'Sales Report',
   sessions: 'Active Sessions',
   vouchers: 'Vouchers',

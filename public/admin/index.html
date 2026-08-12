@@ -147,103 +147,121 @@
       </div>
     </div>
 
-    <!-- Short icon-rail nav (Workstream 13 Foundation). Large groups that
-         used to be dozens of individual rows (MikroTik Control Center's 13
-         tabs, ISP Tools' 7, Network's settings) are now single flyout
-         triggers — see flyoutNav.js for the panel contents, and
-         docs/design/omada-reference.md for why this replaces the old
-         accordion. -->
+    <!-- Nav rebuild (12b, per the shared dashboard mockup + operator
+         naming decisions) — always-expanded grouped list (MAIN/NETWORK/
+         HOTSPOT/SYSTEM), replacing the old icon-rail + flyout-panel system.
+         Every item routes through the same navigateTo(page) every other
+         part of this app already uses - real pages where they exist,
+         registered COMING_SOON_PAGES entries (comingSoon.js) where the
+         mockup names something not built yet, never fabricated content.
+         ISP/Rental/Wallet/AI Assistant stay omitted here entirely (not
+         released - see CLAUDE.md), same as they were hidden before this
+         rebuild, not a regression. -->
     <nav class="sidebar-nav" id="sidebarNav">
 
-      <div class="nav-item active" onclick="navigateTo('dashboard')" title="Overview">
-        <span class="nav-icon"><i class="fas fa-chart-pie"></i></span>
-        <span class="nav-label">Overview</span>
-      </div>
-      <div class="nav-item" onclick="navigateTo('sales')" title="Sales Report">
-        <span class="nav-icon"><i class="fas fa-coins"></i></span>
-        <span class="nav-label">Sales Report</span>
-      </div>
-      <div class="nav-item" onclick="navigateTo('sessions')" title="Active Sessions">
-        <span class="nav-icon"><i class="fas fa-users"></i></span>
-        <span class="nav-label">Active Sessions</span>
-        <span id="sessionCount" class="nav-badge">0</span>
-      </div>
-      <div class="nav-item" onclick="navigateTo('devices')" title="Devices">
-        <span class="nav-icon"><i class="fas fa-microchip"></i></span>
-        <span class="nav-label">Devices</span>
-      </div>
-
-      <div class="nav-divider"></div>
-
-      <!-- One flyout per business line — each is fully self-contained
-           (its own dashboard plus all of its own settings), so an operator
-           never has to leave one line's flyout to find a setting that
-           belongs to it. -->
-      <div class="nav-item nav-flyout-trigger" data-flyout="hotspot" onclick="toggleFlyout('hotspot', this)" title="Hotspot">
-        <span class="nav-icon"><i class="fas fa-bolt"></i></span>
-        <span class="nav-label">Hotspot</span>
-        <i class="fas fa-chevron-right nav-flyout-chevron"></i>
-      </div>
-      <!--
-        ISP and Device Rental hidden for the closed beta - only Hotspot is
-        being beta tested, and neither of these lines has any real backend
-        yet (pure Coming Soon placeholders throughout, not even the
-        code-reviewed-but-unverified state OpenWRT mode was in). Same
-        "bury what isn't ready, don't ship it as if it were" instruction as
-        network.js's OpenWRT mode-switch hiding. Markup/flyout content left
-        intact (not commented out, unlike the OpenWRT button) since this is
-        exactly the kind of per-line hiding Workstream 11's App Store/module
-        gating will eventually do properly - re-enable by removing
-        style="display:none" once each line actually has something real
-        behind it, or wire it to real module-install state at that point.
-      -->
-      <div class="nav-item nav-flyout-trigger" data-flyout="isp" onclick="toggleFlyout('isp', this)" title="ISP" style="display:none;">
-        <span class="nav-icon"><i class="fas fa-globe"></i></span>
-        <span class="nav-label">ISP</span>
-        <i class="fas fa-chevron-right nav-flyout-chevron"></i>
-      </div>
-      <div class="nav-item nav-flyout-trigger" data-flyout="rental" onclick="toggleFlyout('rental', this)" title="Device Rental" style="display:none;">
-        <span class="nav-icon"><i class="fas fa-mobile-screen"></i></span>
-        <span class="nav-label">Device Rental</span>
-        <i class="fas fa-chevron-right nav-flyout-chevron"></i>
+      <div class="nav-section" data-nav-section="main">
+        <div class="nav-section-title nav-section-title-static"><span>Main</span></div>
+        <div class="nav-section-items">
+          <div class="nav-item active" onclick="navigateTo('dashboard')">
+            <span class="nav-icon"><i class="fas fa-house"></i></span>
+            Dashboard
+          </div>
+          <div class="nav-item" onclick="navigateTo('sales')">
+            <span class="nav-icon"><i class="fas fa-chart-line"></i></span>
+            Analytics
+          </div>
+          <div class="nav-item" onclick="navigateTo('sessions')">
+            <span class="nav-icon"><i class="fas fa-wifi"></i></span>
+            Live Sessions
+            <span id="sessionCount" class="nav-badge">0</span>
+          </div>
+          <div class="nav-item" onclick="navigateTo('users')">
+            <span class="nav-icon"><i class="fas fa-user-group"></i></span>
+            Users
+          </div>
+          <div class="nav-item" onclick="navigateTo('vouchers')">
+            <span class="nav-icon"><i class="fas fa-ticket"></i></span>
+            Vouchers
+          </div>
+          <div class="nav-item" onclick="navigateTo('rates')">
+            <span class="nav-icon"><i class="fas fa-list-check"></i></span>
+            Plans
+          </div>
+        </div>
       </div>
 
-      <div class="nav-divider"></div>
+      <div class="nav-section" data-nav-section="network">
+        <div class="nav-section-title nav-section-title-static"><span>Network</span></div>
+        <div class="nav-section-items">
+          <div class="nav-item" onclick="navigateTo('network')">
+            <span class="nav-icon"><i class="fas fa-server"></i></span>
+            Routers
+          </div>
+          <div class="nav-item" onclick="navigateTo('mikrotik-wireless')">
+            <span class="nav-icon"><i class="fas fa-broadcast-tower"></i></span>
+            Access Points
+          </div>
+          <div class="nav-item" onclick="navigateTo('devices')">
+            <span class="nav-icon"><i class="fas fa-diagram-project"></i></span>
+            Network Devices
+          </div>
+          <div class="nav-item" onclick="navigateTo('mikrotik-queues')">
+            <span class="nav-icon"><i class="fas fa-gauge-high"></i></span>
+            Bandwidth
+          </div>
+          <div class="nav-item" onclick="navigateTo('network')">
+            <span class="nav-icon"><i class="fas fa-globe"></i></span>
+            WAN / ISP
+          </div>
+        </div>
+      </div>
 
-      <!-- Shared infrastructure — the physical connection and platform
-           wallet, used regardless of which business line(s) are active. -->
-      <div class="nav-item nav-flyout-trigger" data-flyout="network" onclick="toggleFlyout('network', this)" title="Network">
-        <span class="nav-icon"><i class="fas fa-network-wired"></i></span>
-        <span class="nav-label">Network</span>
-        <i class="fas fa-chevron-right nav-flyout-chevron"></i>
-      </div>
-      <div class="nav-item nav-flyout-trigger" id="routerFlyoutTrigger" data-flyout="router" onclick="toggleFlyout('router', this)" title="Router (MikroTik)" style="display:none;">
-        <span class="nav-icon"><i class="fas fa-server"></i></span>
-        <span class="nav-label">Router</span>
-        <i class="fas fa-chevron-right nav-flyout-chevron"></i>
-      </div>
-      <!--
-        Wallet and AI Assistant hidden for the closed beta - both are
-        entirely Coming Soon placeholders (Workstream 5 and 7, neither
-        started), same reasoning as ISP/Rental above. Re-enable once either
-        actually has a real feature behind it.
-      -->
-      <div class="nav-item nav-flyout-trigger" data-flyout="wallet" onclick="toggleFlyout('wallet', this)" title="Wallet" style="display:none;">
-        <span class="nav-icon"><i class="fas fa-wallet"></i></span>
-        <span class="nav-label">Wallet</span>
-        <i class="fas fa-chevron-right nav-flyout-chevron"></i>
+      <div class="nav-section" data-nav-section="hotspot">
+        <div class="nav-section-title nav-section-title-static"><span>Hotspot</span></div>
+        <div class="nav-section-items">
+          <div class="nav-item" onclick="navigateTo('hotspot-dashboard')">
+            <span class="nav-icon"><i class="fas fa-bolt"></i></span>
+            Hotspot Settings
+          </div>
+          <div class="nav-item" onclick="navigateTo('branding')">
+            <span class="nav-icon"><i class="fas fa-door-open"></i></span>
+            Captive Portal
+          </div>
+          <div class="nav-item" onclick="navigateTo('security')">
+            <span class="nav-icon"><i class="fas fa-shield-halved"></i></span>
+            Authentication
+          </div>
+          <div class="nav-item" onclick="navigateTo('sms-email-gateway')">
+            <span class="nav-icon"><i class="fas fa-envelope"></i></span>
+            SMS / Email Gateway
+          </div>
+        </div>
       </div>
 
-      <div class="nav-divider"></div>
-
-      <div class="nav-item" onclick="navigateTo('ai-assistant')" title="AI Assistant" style="display:none;">
-        <span class="nav-icon"><i class="fas fa-robot"></i></span>
-        <span class="nav-label">AI Assistant</span>
-      </div>
-      <div class="nav-item nav-flyout-trigger" data-flyout="system" onclick="toggleFlyout('system', this)" title="System">
-        <span class="nav-icon"><i class="fas fa-toolbox"></i></span>
-        <span class="nav-label">System</span>
-        <i class="fas fa-chevron-right nav-flyout-chevron"></i>
+      <div class="nav-section" data-nav-section="system">
+        <div class="nav-section-title nav-section-title-static"><span>System</span></div>
+        <div class="nav-section-items">
+          <div class="nav-item" onclick="navigateTo('system-health')">
+            <span class="nav-icon"><i class="fas fa-heart-pulse"></i></span>
+            System Health
+          </div>
+          <div class="nav-item" onclick="navigateTo('logs')">
+            <span class="nav-icon"><i class="fas fa-scroll"></i></span>
+            Logs
+          </div>
+          <div class="nav-item" onclick="navigateTo('alerts')">
+            <span class="nav-icon"><i class="fas fa-bell"></i></span>
+            Alerts
+          </div>
+          <div class="nav-item" onclick="navigateTo('update')">
+            <span class="nav-icon"><i class="fas fa-arrows-rotate"></i></span>
+            Updates
+          </div>
+          <div class="nav-item" onclick="navigateTo('settings')">
+            <span class="nav-icon"><i class="fas fa-gear"></i></span>
+            Settings
+          </div>
+        </div>
       </div>
 
       <div class="nav-divider"></div>
@@ -258,213 +276,6 @@
       </div>
 
     </nav>
-
-    <!-- OLD SECTIONS BELOW: superseded by the flyout triggers above, kept
-         temporarily as the source data flyoutNav.js reads from (data-nav-
-         section blocks are hidden via CSS, not deleted, so no content is
-         lost while later Workstream 13 phases migrate each one into a
-         proper flyout column definition). -->
-    <div id="legacyNavSections" style="display:none;">
-
-      <div class="nav-section" data-nav-section="configuration">
-        <div class="nav-section-title">
-          <span>Configuration</span>
-        </div>
-        <div class="nav-section-items">
-          <div class="nav-item" onclick="navigateTo('rates')">
-            <span class="nav-icon"><i class="fas fa-peso-sign"></i></span>
-            Rates Manager
-          </div>
-          <div class="nav-item" onclick="navigateTo('settings')">
-            <span class="nav-icon"><i class="fas fa-cog"></i></span>
-            Settings
-          </div>
-          <div class="nav-item" onclick="navigateTo('coin-slot-gpio')">
-            <span class="nav-icon"><i class="fas fa-coins"></i></span>
-            Main Kiosk Coin Slot
-          </div>
-          <div class="nav-item" onclick="navigateTo('security')">
-            <span class="nav-icon"><i class="fas fa-shield-alt"></i></span>
-            Security
-          </div>
-          <div class="nav-item" onclick="navigateTo('branding')">
-            <span class="nav-icon"><i class="fas fa-palette"></i></span>
-            Branding
-          </div>
-        </div>
-      </div>
-
-      <div class="nav-section" data-nav-section="wallet">
-        <div class="nav-section-title">
-          <span>Wallet</span>
-        </div>
-        <div class="nav-section-items">
-          <div class="nav-item" onclick="navigateTo('wallet')">
-            <span class="nav-icon"><i class="fas fa-wallet"></i></span>
-            Wallet
-          </div>
-          <div class="nav-item" onclick="navigateTo('wallet-withdrawals')">
-            <span class="nav-icon"><i class="fas fa-money-bill-transfer"></i></span>
-            Withdrawals
-          </div>
-        </div>
-      </div>
-
-      <!-- ================================================================
-           WIFI RENTAL — only what a rental-only operator needs. Kept
-           separate from ISP Tools below so neither business type has to
-           wade through the other's settings to find their own (per the
-           "ease of navigation" / no-clutter product principle in
-           docs/tabs/INDEX.md). Once Workstream 11's App Store lands, this
-           whole group only appears if the Tablet/Phone Rental module is
-           installed — for now it's a visible-but-Coming-Soon section,
-           collapsed by default since it's not built yet.
-           ================================================================ -->
-      <div class="nav-section" data-nav-section="rental">
-        <div class="nav-section-title">
-          <span><i class="fas fa-mobile-screen" style="margin-right:6px;"></i>WiFi Rental</span>
-        </div>
-        <div class="nav-section-items">
-          <div class="nav-item" onclick="navigateTo('rental')">
-            <span class="nav-icon"><i class="fas fa-mobile-screen"></i></span>
-            Tablet/Phone Rental
-          </div>
-        </div>
-      </div>
-
-      <!-- ================================================================
-           ISP TOOLS — everything specific to running a mini/medium ISP
-           (PPPoE subscriber billing, walled garden, MikroTik-specific
-           router control, alternate router backends). Same reasoning as
-           the WiFi Rental group above: a pure-rental or pure-vendo
-           operator should never have to scroll past this to find Vouchers.
-           Collapsed by default (long list, not built yet).
-           ================================================================ -->
-      <div class="nav-section" data-nav-section="isp">
-        <div class="nav-section-title">
-          <span><i class="fas fa-globe" style="margin-right:6px;"></i>ISP Tools</span>
-        </div>
-        <div class="nav-section-items">
-          <div class="nav-item" onclick="navigateTo('isp-subscribers')">
-            <span class="nav-icon"><i class="fas fa-users-gear"></i></span>
-            Subscribers
-          </div>
-          <div class="nav-item" onclick="navigateTo('isp-plans')">
-            <span class="nav-icon"><i class="fas fa-gauge"></i></span>
-            Plans
-          </div>
-          <div class="nav-item" onclick="navigateTo('isp-billing')">
-            <span class="nav-icon"><i class="fas fa-file-invoice-dollar"></i></span>
-            Billing
-          </div>
-          <div class="nav-item" onclick="navigateTo('isp-sms')">
-            <span class="nav-icon"><i class="fas fa-comment-sms"></i></span>
-            SMS Notifications
-          </div>
-          <div class="nav-item" onclick="navigateTo('isp-walled-garden')">
-            <span class="nav-icon"><i class="fas fa-tree"></i></span>
-            Walled Garden
-          </div>
-          <div class="nav-item" onclick="navigateTo('isp-import')">
-            <span class="nav-icon"><i class="fas fa-file-csv"></i></span>
-            Import
-          </div>
-          <div class="nav-item" onclick="navigateTo('network-pppoe')">
-            <span class="nav-icon"><i class="fas fa-plug"></i></span>
-            PPPoE WAN
-          </div>
-          <div class="nav-item" onclick="navigateTo('network-pfsense')">
-            <span class="nav-icon"><i class="fas fa-shield-halved"></i></span>
-            pfSense
-          </div>
-        </div>
-      </div>
-
-      <!-- Collapsed by default — 13 items, only relevant when
-           network_mode = mikrotik. Longest section in the sidebar, the
-           main reason this whole accordion exists. -->
-      <div class="nav-section" data-nav-section="mikrotik">
-        <div class="nav-section-title">
-          <span>MikroTik Control Center</span>
-        </div>
-        <div class="nav-section-items">
-          <div class="nav-item" onclick="navigateTo('network-mikrotik-script')">
-            <span class="nav-icon"><i class="fas fa-terminal"></i></span>
-            Setup Script
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-interfaces')">
-            <span class="nav-icon"><i class="fas fa-ethernet"></i></span>
-            Interfaces
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-wan')">
-            <span class="nav-icon"><i class="fas fa-globe"></i></span>
-            WAN
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-wireless')">
-            <span class="nav-icon"><i class="fas fa-wifi"></i></span>
-            Wireless / AP
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-dhcp')">
-            <span class="nav-icon"><i class="fas fa-list-ol"></i></span>
-            DHCP Server & Leases
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-vlans')">
-            <span class="nav-icon"><i class="fas fa-diagram-project"></i></span>
-            VLANs & Lanes
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-queues')">
-            <span class="nav-icon"><i class="fas fa-gauge-high"></i></span>
-            Bandwidth / Queues
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-hotspot')">
-            <span class="nav-icon"><i class="fas fa-door-open"></i></span>
-            Hotspot / Captive Portal
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-firewall')">
-            <span class="nav-icon"><i class="fas fa-fire"></i></span>
-            Firewall & NAT
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-backup')">
-            <span class="nav-icon"><i class="fas fa-box-archive"></i></span>
-            Backup & Restore
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-users')">
-            <span class="nav-icon"><i class="fas fa-user-shield"></i></span>
-            Users & API Access
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-wireguard')">
-            <span class="nav-icon"><i class="fas fa-lock"></i></span>
-            VPN / WireGuard
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-routes')">
-            <span class="nav-icon"><i class="fas fa-route"></i></span>
-            Static Routes
-          </div>
-          <div class="nav-item" onclick="navigateTo('mikrotik-logs')">
-            <span class="nav-icon"><i class="fas fa-scroll"></i></span>
-            Logs
-          </div>
-        </div>
-      </div>
-
-      <div class="nav-section" data-nav-section="system">
-        <div class="nav-section-title">
-          <span>System</span>
-        </div>
-        <div class="nav-section-items">
-          <div class="nav-item" onclick="navigateTo('update')">
-            <span class="nav-icon"><i class="fas fa-sync-alt"></i></span>
-            System Update
-          </div>
-          <div class="nav-item" onclick="navigateTo('about')">
-            <span class="nav-icon"><i class="fas fa-info-circle"></i></span>
-            About
-          </div>
-        </div>
-      </div>
-
-    </div>
-    <!-- /legacyNavSections -->
 
     <div class="sidebar-footer">
       <div class="admin-avatar">A</div>
