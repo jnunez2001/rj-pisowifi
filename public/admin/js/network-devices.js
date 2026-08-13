@@ -1,6 +1,8 @@
 // ===== NETWORK DEVICES PAGE =====
 let devAll = [];
 let devGroups = [];
+let devCurrentPage = 1;
+const DEV_PAGE_SIZE = 25;
 
 async function loadNetworkDevicesPage() {
   const tbody = document.getElementById('devTable');
@@ -97,10 +99,20 @@ function renderDevicesTable() {
         </div>
       </td></tr>`;
     summary.textContent = `Showing 0 of ${devAll.length} devices`;
+    document.getElementById('devPageInfo').textContent = 'Page 1 of 1';
+    document.getElementById('devPrevPage').disabled = true;
+    document.getElementById('devNextPage').disabled = true;
     return;
   }
 
-  tbody.innerHTML = rows.map((d) => `
+  const totalPages = Math.max(1, Math.ceil(rows.length / DEV_PAGE_SIZE));
+  if (devCurrentPage > totalPages) devCurrentPage = totalPages;
+  const pageRows = rows.slice((devCurrentPage - 1) * DEV_PAGE_SIZE, devCurrentPage * DEV_PAGE_SIZE);
+  document.getElementById('devPageInfo').textContent = `Page ${devCurrentPage} of ${totalPages}`;
+  document.getElementById('devPrevPage').disabled = devCurrentPage <= 1;
+  document.getElementById('devNextPage').disabled = devCurrentPage >= totalPages;
+
+  tbody.innerHTML = pageRows.map((d) => `
     <tr style="cursor:pointer;" onclick="openDevDetail('${d.mac}')">
       <td>
         <div style="font-weight:700;color:var(--text-primary);">${escapeHtml(d.name)}</div>
@@ -114,7 +126,12 @@ function renderDevicesTable() {
       <td>${devTrafficCell(d.traffic_bytes)}</td>
     </tr>
   `).join('');
-  summary.textContent = `Showing ${rows.length} of ${devAll.length} devices`;
+  summary.textContent = `Showing ${pageRows.length} of ${rows.length} devices${rows.length !== devAll.length ? ` (${devAll.length} total)` : ''}`;
+}
+
+function changeDevPage(delta) {
+  devCurrentPage += delta;
+  renderDevicesTable();
 }
 
 // ===== DEVICE DETAIL =====
