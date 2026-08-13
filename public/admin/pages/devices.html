@@ -1,165 +1,69 @@
-<div class="page-title">Devices</div>
-<div class="page-subtitle">Manage connected vendo devices.</div>
-
-<!-- CONNECTED DEVICES -->
-<div class="card">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-microchip" style="margin-right:8px;color:var(--accent-green);"></i>Connected Devices
-    </div>
-    <button class="btn btn-sm btn-secondary" onclick="loadDevices()">
-      <i class="fas fa-sync-alt"></i> Refresh
-    </button>
+<div class="zf3-header">
+  <div>
+    <div class="page-title">Network Devices</div>
+    <div class="page-subtitle">Overview of all devices connected to your network</div>
   </div>
+  <div class="zf3-header-right">
+    <div class="zf3-icon-btn" onclick="loadNetworkDevicesPage()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
+  </div>
+</div>
 
+<div class="zf3-stat-grid" style="grid-template-columns:repeat(3,1fr);">
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Total Devices</div>
+      <i class="fas fa-diagram-project zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="devTotalCount">0</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Online</div>
+      <img src="/assets/zenfi/routers/icons/online.svg" alt="" width="18" height="18">
+    </div>
+    <div class="zf3-stat-value" id="devOnlineCount">0</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Offline</div>
+      <i class="fas fa-circle-xmark zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="devOfflineCount">0</div>
+  </div>
+</div>
+
+<div class="zf3-card" style="padding:14px 20px;margin-bottom:16px;display:flex;flex-direction:row;gap:10px;flex-wrap:wrap;align-items:center;">
+  <input type="text" id="devSearch" placeholder="Search by name, IP, or MAC..." class="form-control" style="flex:1 1 0%;min-width:220px;width:auto;" oninput="renderDevicesTable()">
+  <select id="devTypeFilter" class="form-control" style="width:auto;min-width:130px;" onchange="renderDevicesTable()">
+    <option value="">All Types</option>
+  </select>
+  <select id="devStatusFilter" class="form-control" style="width:auto;min-width:130px;" onchange="renderDevicesTable()">
+    <option value="">All Status</option>
+    <option value="online">Online</option>
+    <option value="offline">Offline</option>
+  </select>
+</div>
+
+<div class="zf3-card" style="padding:0;">
   <div class="table-wrapper">
     <table>
       <thead>
         <tr>
-          <th>Name</th>
-          <th>MAC Address</th>
-          <th>IP Address</th>
-          <th>Firmware</th>
+          <th>Device</th>
+          <th>Type</th>
           <th>Status</th>
-          <th>Last Seen</th>
-          <th style="text-align:right;">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="devicesTable">
-        <tr>
-          <td colspan="7">
-            <div class="loading">
-              <i class="fas fa-spinner fa-spin"></i> Loading...
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-  </div>
-</div>
-
-<!-- VENDO FIRMWARE -->
-<div class="card" style="margin-top:20px;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-microchip" style="margin-right:8px;color:var(--accent-purple);"></i>Sub Vendo Flasher
-    </div>
-  </div>
-  <div class="alert alert-info">
-    <i class="fas fa-info-circle"></i>
-    Keep every vendo device up to date, automatically, over WiFi.
-  </div>
-  <div class="sysinfo-table" style="margin-bottom:16px;">
-    <div class="sysinfo-row">
-      <span class="sysinfo-label">Currently Pushed Version</span>
-      <span class="sysinfo-value" id="firmwareCurrentVersion">--</span>
-    </div>
-    <div class="sysinfo-row">
-      <span class="sysinfo-label">Uploaded</span>
-      <span class="sysinfo-value" id="firmwareUploadedAt">--</span>
-    </div>
-  </div>
-  <div class="form-row">
-    <div class="form-group">
-      <label class="form-label">Version</label>
-      <input type="text" id="firmwareVersion" class="form-control" placeholder="e.g. v1.0.1">
-      <small style="color:var(--text-muted);font-size:12px;">
-        Must match FIRMWARE_VERSION in esp32/firmware/rj_pisowifi/config.h for this exact build
-      </small>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Firmware File (.bin)</label>
-      <input type="file" id="firmwareFile" class="form-control" accept=".bin">
-    </div>
-  </div>
-  <button class="btn btn-primary" onclick="uploadFirmware()">
-    <i class="fas fa-upload"></i> Push Firmware Update
-  </button>
-</div>
-
-<!-- TRUSTED DEVICES -->
-<div class="card" style="margin-top:20px;">
-  <div class="card-header">
-    <div class="card-title">
-      <i class="fas fa-shield-alt" style="margin-right:8px;color:var(--accent-blue);"></i>Trusted Devices
-    </div>
-    <span style="font-size:12px;color:var(--text-muted);">Always online, never gated behind payment</span>
-    <button class="btn btn-sm btn-primary" style="margin-left:auto;" onclick="addTrustedDevice()">
-      <i class="fas fa-plus"></i> Add Trusted Device
-    </button>
-  </div>
-  <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
-    <i class="fas fa-info-circle"></i>
-    Use this for hardware that needs internet access at all times, like a coin-slot device sharing WiFi with paying
-    customers. A trusted device skips the payment screen completely and this stays in effect even after a reboot.
-  </div>
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>Label</th>
+          <th>IP Address</th>
           <th>MAC Address</th>
-          <th style="text-align:right;">Actions</th>
+          <th>VLAN</th>
+          <th>Traffic</th>
         </tr>
       </thead>
-      <tbody id="trustedDevicesTable">
-        <tr><td colspan="3" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
+      <tbody id="devTable">
+        <tr><td colspan="7"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
       </tbody>
     </table>
   </div>
-</div>
-
-<!-- DEVICE STATS -->
-<div class="grid-2" style="margin-top:20px;">
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">
-        <i class="fas fa-info-circle" style="margin-right:8px;color:var(--accent-blue);"></i>Device Summary
-      </div>
-    </div>
-    <div class="sysinfo-table">
-      <div class="sysinfo-row">
-        <span class="sysinfo-label">Total Devices</span>
-        <span class="sysinfo-value" id="totalDevices">--</span>
-      </div>
-      <div class="sysinfo-row">
-        <span class="sysinfo-label">Online</span>
-        <span class="sysinfo-value" style="color:var(--accent-green);" id="onlineDevices">--</span>
-      </div>
-      <div class="sysinfo-row">
-        <span class="sysinfo-label">Offline</span>
-        <span class="sysinfo-value" style="color:var(--accent-red);" id="offlineDevices">--</span>
-      </div>
-    </div>
-  </div>
-
-  <div class="card">
-    <div class="card-header">
-      <div class="card-title">
-        <i class="fas fa-question-circle" style="margin-right:8px;color:var(--accent-yellow);"></i>How to Add a Device
-      </div>
-    </div>
-    <div style="font-size:13px;color:var(--text-muted);line-height:1.8;">
-      <p style="margin-bottom:8px;">
-        <i class="fas fa-circle" style="font-size:6px;margin-right:8px;color:var(--accent-green);"></i>
-        Power on the ESP32 vendo device.
-      </p>
-      <p style="margin-bottom:8px;">
-        <i class="fas fa-circle" style="font-size:6px;margin-right:8px;color:var(--accent-green);"></i>
-        Connect to <strong>RJ-Vendo-Setup</strong> WiFi.
-      </p>
-      <p style="margin-bottom:8px;">
-        <i class="fas fa-circle" style="font-size:6px;margin-right:8px;color:var(--accent-green);"></i>
-        Open <strong>192.168.4.1</strong> in browser.
-      </p>
-      <p style="margin-bottom:8px;">
-        <i class="fas fa-circle" style="font-size:6px;margin-right:8px;color:var(--accent-green);"></i>
-        Enter WiFi credentials and server IP.
-      </p>
-      <p>
-        <i class="fas fa-circle" style="font-size:6px;margin-right:8px;color:var(--accent-green);"></i>
-        Device will appear here automatically.
-      </p>
-    </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-top:1px solid var(--border-color);font-size:13px;color:var(--text-muted);">
+    <span id="devSummary">Loading...</span>
   </div>
 </div>

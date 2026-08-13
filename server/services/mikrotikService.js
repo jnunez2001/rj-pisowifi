@@ -1066,6 +1066,29 @@ async function setDnsServers(servers) {
 // device that actually knows" approach getMacFromIp already uses. VLAN
 // evidence comes from matching the ARP entry's interface name against
 // listVlans() (real RouterOS interface -> vlan_id mapping, not a guess).
+// Real per-client traffic for the Network Devices page - reads this
+// client's own simple queue (the same rj-<mac> parent queue
+// setClientBandwidth() already creates for shaping), rather than inventing
+// a number. RouterOS reports "bytes" as "upload/download" on the parent
+// queue. Returns null (not zero) for a client with no active queue - e.g.
+// no session right now - so the UI can honestly show "not available"
+// instead of a fake 0.
+async function getClientTraffic(mac) {
+  const config = getMikrotikConfig();
+  if (!config.ip) return null;
+  try {
+    return await withMikrotik(config, async (client) => {
+      const res = await client.talk(['/queue/simple/print', `?name=${queueNameFor(mac)}`]);
+      const q = res.re[0];
+      if (!q || !q.bytes) return null;
+      const [up, down] = String(q.bytes).split('/').map((n) => parseInt(n, 10) || 0);
+      return { uploadBytes: up, downloadBytes: down, totalBytes: up + down };
+    });
+  } catch (err) {
+    return null;
+  }
+}
+
 async function scanForDevices() {
   const config = getMikrotikConfig();
   if (!config.ip) return [];
@@ -1155,4 +1178,5 @@ module.exports = {
   getDnsServers,
   setDnsServers,
   scanForDevices,
+  getClientTraffic,
 };

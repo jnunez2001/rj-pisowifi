@@ -1,0 +1,136 @@
+// ===== NETWORK DEVICES (unified inventory) =====
+// Per the Vendo Protocol spec, section 25: "Vendo devices must appear in
+// the shared Network Devices inventory. There must be one device identity,
+// not separate records for Network Devices and Vendo." This is that shared
+// inventory - it merges real passive network discovery (ARP/DHCP, or the
+// MikroTik's own tables in Controller Mode - see networkDiscoveryService.js)
+// with adopted Vendo devices (satellite_kiosks) and active sessions, keyed
+// by MAC so a Vendo appears once, not as two disconnected records.
+//
+// Traffic is real where it can be, honestly absent where it can't: a
+// standalone client only has tc HTB counters while it has an active shaped
+// session; a MikroTik client only has queue counters the same way. A device
+// that's merely present on the network with no active paid session (a
+// printer, an idle laptop, an unpaired candidate) has no traffic source at
+// all - shown as unavailable, never a fabricated 0.
+
+const { execFile } = require('child_process');
+const db = require('../config/database');
+const { vendorFromMac } = require('./networkDiscoveryService');
+const { peekClassId } = require('./drivers/classIdAllocator');
+
+function getNetworkMode() {
+  return db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
+}
+
+function getLanInterface() {
+  return db.prepare("SELECT value FROM settings WHERE key = 'lan_interface'").get()?.value || process.env.LAN_IF || 'enp0s8';
+}
+
+// Real tc HTB byte counter for a standalone client's own shaping class -
+// only exists while that client has an active shaped session.
+function getTcTraffic(classId) {
+  return new Promise((resolve) => {
+    if (!classId) return resolve(null);
+    execFile('tc', ['-s', 'class', 'show', 'dev', getLanInterface(), 'classid', `1:${classId}`], (err, stdout) => {
+      if (err || !stdout) return resolve(null);
+      const m = String(stdout).match(/Sent (\d+) bytes/);
+      resolve(m ? { totalBytes: parseInt(m[1], 10) } : null);
+    });
+  });
+}
+
+// Best-effort device "type" from real signals only - never a guessed
+// category the data can't actually support. vendorClass comes from the
+// MikroTik's own DHCP vendor-class-identifier (see mikrotikService.js's
+// scanForDevices) when available.
+function inferDeviceType({ isVendo, isAccessPoint, vendorClass }) {
+  if (isVendo) return 'Vendo';
+  if (isAccessPoint) return 'Access Point';
+  const vc = (vendorClass || '').toLowerCase();
+  if (vc.includes('android') || vc.includes('iphone') || vc.includes('ios')) return 'Mobile';
+  if (vc.includes('msft') || vc.includes('windows') || vc.includes('dhcpcd') || vc.includes('udhcp')) return 'Computer';
+  return 'Unknown';
+}
+
+async function listDevices() {
+  const { scanNetwork } = require('./networkDiscoveryService');
+  const mode = getNetworkMode();
+
+  const [discovered, kiosks, accessPoints, activeSessions] = await Promise.all([
+    scanNetwork().catch(() => []),
+    Promise.resolve(db.prepare("SELECT id, name, mac_address, status FROM satellite_kiosks WHERE status = 'adopted'").all()),
+    Promise.resolve(db.prepare('SELECT mac_address FROM access_points').all()),
+    Promise.resolve(db.prepare("SELECT mac_address, hard_expires_at FROM sessions WHERE hard_expires_at > datetime('now') AND is_paused = 0").all()),
+  ]);
+
+  const kioskByMac = new Map(kiosks.map((k) => [String(k.mac_address || '').toLowerCase(), k]));
+  const apMacs = new Set(accessPoints.map((a) => String(a.mac_address || '').toLowerCase()));
+  const sessionMacs = new Set(activeSessions.map((s) => String(s.mac_address || '').toLowerCase()));
+
+  const byMac = new Map();
+  for (const d of discovered) {
+    const mac = String(d.mac || '').toLowerCase();
+    if (!mac) continue;
+    byMac.set(mac, {
+      mac,
+      ip: d.ip,
+      hostname: d.hostname,
+      vendor: d.vendor,
+      vendor_class: d.vendor_class,
+      vlan_id: d.vlan_id,
+    });
+  }
+  // A Vendo might be adopted but not currently answering ARP/DHCP (e.g.
+  // powered off) - still list it, just as offline with no live IP/VLAN.
+  for (const k of kiosks) {
+    const mac = String(k.mac_address || '').toLowerCase();
+    if (!mac) continue;
+    if (!byMac.has(mac)) byMac.set(mac, { mac });
+  }
+
+  const devices = [];
+  for (const entry of byMac.values()) {
+    const kiosk = kioskByMac.get(entry.mac);
+    const isVendo = !!kiosk;
+    const isAccessPoint = apMacs.has(entry.mac);
+    const hasActiveSession = sessionMacs.has(entry.mac);
+    const online = !!entry.ip; // seen in the live discovery pass this call
+
+    let traffic = null;
+    if (hasActiveSession) {
+      if (mode === 'mikrotik') {
+        try {
+          const mikrotikService = require('./mikrotikService');
+          traffic = await mikrotikService.getClientTraffic(entry.mac);
+        } catch (e) { traffic = null; }
+      } else {
+        traffic = await getTcTraffic(peekClassId(entry.mac));
+      }
+    }
+
+    devices.push({
+      mac: entry.mac,
+      name: isVendo ? kiosk.name : (entry.hostname || entry.mac),
+      type: inferDeviceType({ isVendo, isAccessPoint, vendorClass: entry.vendor_class }),
+      status: online ? 'online' : 'offline',
+      ip: entry.ip || null,
+      vlan_id: entry.vlan_id || null,
+      vendor: entry.vendor || null,
+      traffic_bytes: traffic ? traffic.totalBytes : null,
+      vendo_id: isVendo ? kiosk.id : null,
+    });
+  }
+
+  return devices;
+}
+
+function summarize(devices) {
+  return {
+    total: devices.length,
+    online: devices.filter((d) => d.status === 'online').length,
+    offline: devices.filter((d) => d.status === 'offline').length,
+  };
+}
+
+module.exports = { listDevices, summarize };

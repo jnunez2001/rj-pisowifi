@@ -357,6 +357,19 @@ router.post('/vendo-candidates/:id/adopt', adminAuth, (req, res) => {
   }
 });
 
+// ===== NETWORK DEVICES (unified inventory, see networkDevicesService.js) =====
+// GET /api/admin/network-devices
+router.get('/network-devices', adminAuth, async (req, res) => {
+  try {
+    const networkDevicesService = require('../services/networkDevicesService');
+    const devices = await networkDevicesService.listDevices();
+    res.json({ success: true, devices, summary: networkDevicesService.summarize(devices) });
+  } catch (err) {
+    console.error('Network devices list error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // DELETE /api/admin/session/:code
 router.delete('/session/:code', adminAuth, async (req, res) => {
   try {
