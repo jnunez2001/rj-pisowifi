@@ -4888,6 +4888,9 @@ function apRowToJson(row) {
     discovered_via: row.discovered_via,
     last_seen_at: row.last_seen_at,
     last_latency_ms: row.last_latency_ms,
+    adapter_type: row.adapter_type || null,
+    adapter_last_error: row.adapter_last_error || null,
+    adapter_last_polled_at: row.adapter_last_polled_at || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -5059,6 +5062,72 @@ router.post('/access-points/:id/ping', adminAuth, (req, res) => {
     const row = db.prepare('SELECT a.*, s.name as site_name FROM access_points a LEFT JOIN sites s ON s.id = a.site_id WHERE a.id = ?').get(req.params.id);
     return res.json({ success: true, accessPoint: apRowToJson(row) });
   });
+});
+
+// POST /api/admin/access-points/:id/identify — unauthenticated vendor
+// fingerprint (AP_INTEGRATION_ARCHITECTURE.md section 6: identify() never
+// takes credentials). Used to suggest an adapter before asking for a
+// password, not to prove the password works.
+router.post('/access-points/:id/identify', adminAuth, async (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM access_points WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Access point not found' });
+    if (!existing.ip_address) return res.status(400).json({ success: false, message: 'This AP has no IP address.' });
+    const { identifyDevice } = require('../services/apAdapters/apIntegrationService');
+    const result = await identifyDevice(existing.ip_address);
+    return res.json({ success: true, identified: result });
+  } catch (err) {
+    console.error('AP identify error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Identify failed' });
+  }
+});
+
+// POST /api/admin/access-points/:id/adopt — connects a real adapter,
+// verifies the credentials by authenticating once, stores them encrypted
+// (never plaintext, never echoed back), and moves management_state to
+// 'monitored'. Body: { adapter_type, password }.
+router.post('/access-points/:id/adopt', adminAuth, async (req, res) => {
+  try {
+    const { adapter_type, password } = req.body || {};
+    if (!adapter_type) return res.status(400).json({ success: false, message: 'adapter_type is required.' });
+    if (!password) return res.status(400).json({ success: false, message: 'Password is required.' });
+    const { adoptDevice } = require('../services/apAdapters/apIntegrationService');
+    const result = await adoptDevice(req.params.id, adapter_type, { password });
+    console.log(`📶 Access point #${req.params.id} adopted via ${adapter_type} adapter`);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    const status = err.name === 'AuthenticationFailed' ? 401 : 500;
+    console.error('AP adopt error:', err);
+    res.status(status).json({ success: false, message: err.message || 'Adopt failed' });
+  }
+});
+
+// POST /api/admin/access-points/:id/unadopt — reverts to unmanaged and
+// discards the stored credentials.
+router.post('/access-points/:id/unadopt', adminAuth, (req, res) => {
+  try {
+    const { unadoptDevice } = require('../services/apAdapters/apIntegrationService');
+    unadoptDevice(req.params.id);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('AP unadopt error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Unadopt failed' });
+  }
+});
+
+// GET /api/admin/access-points/:id/live — real adapter poll (device info,
+// status, wireless, clients). Separate from the plain ICMP /ping route:
+// this only works once an AP has been adopted, and returns much richer
+// data than a ping can.
+router.get('/access-points/:id/live', adminAuth, async (req, res) => {
+  try {
+    const { pollDevice } = require('../services/apAdapters/apIntegrationService');
+    const data = await pollDevice(req.params.id);
+    return res.json({ success: true, live: data });
+  } catch (err) {
+    console.error('AP live poll error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Poll failed' });
+  }
 });
 
 // GET /api/admin/entitlements — lets the frontend render locked-feature

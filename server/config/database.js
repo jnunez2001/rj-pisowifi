@@ -984,6 +984,23 @@ for (const stmt of [
   try { db.exec(stmt); } catch (e) { /* already applied */ }
 }
 
+// Access Points: adapter adoption columns (AP_INTEGRATION_ARCHITECTURE.md).
+// adapter_type identifies which server/services/apAdapters/*.js module owns
+// this device once adopted; credentials_encrypted is the login password
+// stored via server/utils/secretCrypto.js (never plaintext, never returned
+// to the frontend). management_state gains 'monitored' alongside the
+// existing unmanaged/pending values now that a real adapter can read live
+// data - 'managed' (write access) is intentionally not introduced yet,
+// since no adapter has validated write endpoints against real hardware.
+for (const stmt of [
+  "ALTER TABLE access_points ADD COLUMN adapter_type TEXT",
+  "ALTER TABLE access_points ADD COLUMN credentials_encrypted TEXT",
+  "ALTER TABLE access_points ADD COLUMN adapter_last_error TEXT",
+  "ALTER TABLE access_points ADD COLUMN adapter_last_polled_at DATETIME",
+]) {
+  try { db.exec(stmt); } catch (e) { /* already applied */ }
+}
+
 // VAPID keypair for Web Push (server/services/pushNotificationService.js) -
 // generated once and persisted in settings, not regenerated on every boot,
 // since every customer's existing push subscription is cryptographically
