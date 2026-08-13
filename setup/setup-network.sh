@@ -989,7 +989,7 @@ ISSUELOGO
     printf '\033[0m'
     echo ""
     echo "Zentry Systems - ZenFi Hotspot Server $ISSUE_VERSION"
-    echo "$(hostnamectl --static 2>/dev/null || hostname)"
+    echo "Copyright (c) $(date +%Y) Zentry Systems. All rights reserved."
     echo "-----------------------------------------------"
     FOUND_IP=0
     ISSUE_PRIMARY_IP=""
@@ -1002,16 +1002,34 @@ ISSUELOGO
         fi
     done
     [ "$FOUND_IP" = "0" ] && echo "  (no IP assigned yet)"
-    echo ""
+    echo "-----------------------------------------------"
+    ISSUE_DEVICE_ID=$(grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' /var/lib/rj-pisowifi/.device-identity 2>/dev/null | sed 's/.*:[[:space:]]*"//;s/"$//')
+    [ -n "$ISSUE_DEVICE_ID" ] && echo "  Device ID: $ISSUE_DEVICE_ID"
     if [ -n "$ISSUE_PRIMARY_IP" ]; then
-        echo "Admin panel: http://$ISSUE_PRIMARY_IP:3000/admin (from this box only, or via SSH tunnel)"
+        echo "  Admin panel: http://$ISSUE_PRIMARY_IP:3000/admin"
+        echo "  Portal: http://$ISSUE_PRIMARY_IP:3000/portal"
     else
-        echo "Admin panel: (unavailable - no IP assigned yet)"
+        echo "  Admin panel: (unavailable - no IP assigned yet)"
     fi
     echo "-----------------------------------------------"
     echo ""
 } > /etc/issue
 echo "Console IP banner updated (/etc/issue)" >> $LOG
+
+# The "<hostname> login:" prompt agetty prints after /etc/issue comes from
+# the real system hostname (still "rjcyberzone" - the actual Linux
+# username, used all over this codebase's file paths, is separate and
+# unaffected either way) - overriding agetty's own --host text branding
+# the visible prompt as "zentry login:" without renaming the box itself,
+# safer than a real hostname change with unknown blast radius elsewhere.
+mkdir -p /etc/systemd/system/getty@tty1.service.d
+cat > /etc/systemd/system/getty@tty1.service.d/override.conf << 'GETTYEOF'
+[Service]
+ExecStart=
+ExecStart=-/sbin/agetty --host zentry --noclear %I $TERM
+GETTYEOF
+systemctl daemon-reload >> $LOG 2>&1
+echo "Login prompt branded (zentry login)" >> $LOG
 
 # ── BRANDED POST-LOGIN CONSOLE (MOTD) ──────────────────────────
 # Ubuntu's stock update-motd.d scripts (update-available nag, ESM/Pro ads,
