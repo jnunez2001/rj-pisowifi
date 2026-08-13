@@ -168,6 +168,23 @@ if [ -z "$LAN_IF" ]; then
         fi
     done
 fi
+# Bug #78 follow-up, found live: the exclude-WAN_IF loop above assumes WAN
+# and LAN are always separate physical NICs, true for standalone mode
+# (ISP modem cable vs. customer-network cable) but not for Controller Mode
+# on a single-NIC box - there, this server's one connection to the MikroTik
+# serves both roles at once, there's no separate "WAN uplink" cable at all.
+# On a box like that, the loop above excludes the only candidate interface
+# there is, LAN_IF stays empty, and the script aborted with "No LAN
+# interface found" before ever reaching the address bring-up code further
+# down - confirmed live, this was the actual root cause of a static IP
+# never taking effect on every single boot, not the address-assignment
+# logic itself. Only mikrotik mode falls back this way - standalone mode
+# genuinely needs WAN and LAN to be different interfaces, so this must
+# never apply there.
+if [ -z "$LAN_IF" ] && [ "$NETWORK_MODE" = "mikrotik" ] && [ -n "$WAN_IF" ]; then
+    LAN_IF="$WAN_IF"
+    echo "Single-NIC Controller Mode: using $WAN_IF as both WAN and LAN" >> $LOG
+fi
 # 'nodogsplash' was this project's old internal name for standalone mode
 # (the real Nodogsplash software was replaced by this script's own
 # nftables/tc setup long ago; only the label lingered). The database was
