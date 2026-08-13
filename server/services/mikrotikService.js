@@ -1081,7 +1081,18 @@ async function scanForDevices() {
     for (const lease of leaseRes.re) {
       const mac = (lease['mac-address'] || '').toLowerCase();
       if (!mac) continue;
-      leaseByMac.set(mac, { hostname: lease['host-name'] || null });
+      // RouterOS's WebFig "Active Host Name" column comes from
+      // active-host-name, not host-name (host-name is the static field,
+      // which stays blank on ordinary dynamic leases) - checking both
+      // covers static-bound leases too.
+      leaseByMac.set(mac, {
+        hostname: lease['active-host-name'] || lease['host-name'] || null,
+        // DHCP vendor class (option 60) - RouterOS's "Active Class ID"
+        // column. Often more identifying than hostname for spotting an AP
+        // specifically, e.g. "Omada Wireless EAP225-Outdoor" versus a
+        // generic phone hostname.
+        vendor_class: lease['active-class-id'] || lease['class-id'] || null,
+      });
     }
 
     const byMac = new Map();
@@ -1094,6 +1105,7 @@ async function scanForDevices() {
         ip,
         mac,
         hostname: leaseByMac.get(mac)?.hostname || null,
+        vendor_class: leaseByMac.get(mac)?.vendor_class || null,
         vlan_id: vlanId,
         vlan_evidence: vlanId ? `Reported by MikroTik as connected via VLAN ${vlanId} interface (${entry.interface})` : null,
         discovered_via: leaseByMac.has(mac) ? 'mikrotik_arp+dhcp' : 'mikrotik_arp',

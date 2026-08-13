@@ -232,6 +232,7 @@ function renderApCandidates() {
           ${c.vlan_id ? ` &middot; VLAN ${c.vlan_id} detected` : ''}
           &middot; via ${escapeHtml(c.discovered_via)}
         </div>
+        ${c.vendor_class ? `<div style="font-size:11px;color:var(--text-muted);">DHCP class: ${escapeHtml(c.vendor_class)}</div>` : ''}
       </div>
       <button class="btn btn-sm btn-primary" onclick="addCandidateAsAp(${i})"><i class="fas fa-plus"></i> Add as AP</button>
     </div>

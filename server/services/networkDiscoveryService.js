@@ -160,6 +160,7 @@ async function scanNetworkViaMikrotik() {
     mac: entry.mac,
     hostname: entry.hostname,
     vendor: vendorFromMac(entry.mac),
+    vendor_class: entry.vendor_class,
     vlan_id: entry.vlan_id,
     vlan_evidence: entry.vlan_evidence,
     discovered_via: entry.discovered_via,
