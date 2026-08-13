@@ -117,7 +117,7 @@ function renderApTable() {
           <i class="fas fa-wifi"></i>
           <h3>No Access Points Found</h3>
           <p>ZenFi scanned the network but did not identify any candidate devices.</p>
-          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px;">
             <button class="btn btn-primary" onclick="scanForAps()"><i class="fas fa-satellite-dish"></i> Scan Again</button>
             <button class="btn btn-secondary" onclick="openAddAp()"><i class="fas fa-plus"></i> Add AP Manually</button>
           </div>
@@ -128,7 +128,7 @@ function renderApTable() {
           <i class="fas fa-wifi"></i>
           <h3>No Access Points Discovered Yet</h3>
           <p>ZenFi hasn't scanned this network for access points yet.</p>
-          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px;">
             <button class="btn btn-primary" onclick="scanForAps()"><i class="fas fa-satellite-dish"></i> Scan Network</button>
             <button class="btn btn-secondary" onclick="openAddAp()"><i class="fas fa-plus"></i> Add AP Manually</button>
           </div>
