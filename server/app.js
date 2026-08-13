@@ -65,10 +65,27 @@ app.use(helmet({
       baseUri: ["'self'"],
       formAction: ["'self'"],
       frameAncestors: ["'self'"],
-      upgradeInsecureRequests: [],
+      // Helmet bakes upgrade-insecure-requests into its own CSP defaults
+      // and merges it back in even when this key is simply omitted here -
+      // it must be explicitly nulled to actually suppress it.
+      upgradeInsecureRequests: null,
     },
   },
 }));
+
+// upgrade-insecure-requests belongs only on the admin panel, which is
+// reached exclusively over HTTPS via nginx's WAN front door (setup/nginx.conf).
+// Setting it globally broke the portal: portal.html loads over plain HTTP for
+// LAN captive-portal clients (no TLS listener on this port), so the directive
+// was forcing every CSS/JS/media request on that page to upgrade to
+// https://<box-ip>:3000/..., which nothing answers - the page itself would
+// load (fetched before any CSP applied) but every asset silently failed,
+// exactly the "raw unstyled HTML, buttons don't work" symptom reported live.
+app.use(['/admin', '/api/admin'], (req, res, next) => {
+  const csp = res.getHeader('Content-Security-Policy');
+  if (csp) res.setHeader('Content-Security-Policy', `${csp}; upgrade-insecure-requests`);
+  next();
+});
 
 // cors() with no options reflects and allows ANY origin. Nothing in this
 // app actually needs cross-origin browser access - the admin/portal HTML
