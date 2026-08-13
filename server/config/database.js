@@ -608,6 +608,12 @@ try {
 try {
   db.exec("ALTER TABLE vendos ADD COLUMN status TEXT DEFAULT 'adopted'");
 } catch (e) { /* already applied */ }
+// Vendo Protocol spec section 17: "Support Main / Sub-vendo / Standalone.
+// Do not hard-code only one main Vendo." Purely organizational - doesn't
+// change how any Vendo is discovered, adopted, or credited.
+try {
+  db.exec("ALTER TABLE vendos ADD COLUMN role TEXT DEFAULT 'standalone'");
+} catch (e) { /* already applied */ }
 
 // Same story as above: free_claims.ip_address was added to the CREATE TABLE
 // statement after this install's table already existed, so it was never

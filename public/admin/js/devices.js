@@ -77,7 +77,7 @@ async function loadDevices() {
     if (!data.success || !data.vendos.length) {
       tbody.innerHTML = `
         <tr>
-          <td colspan="7" style="text-align:center;color:var(--text-muted);padding:32px;">
+          <td colspan="8" style="text-align:center;color:var(--text-muted);padding:32px;">
             <i class="fas fa-microchip" style="font-size:32px;margin-bottom:12px;display:block;opacity:0.3;"></i>
             No devices registered yet.<br>
             <span style="font-size:12px;">Follow the steps on the right to add a device.</span>
@@ -121,6 +121,13 @@ async function loadDevices() {
             <div style="font-weight:700;">${v.name}</div>
             ${isCandidate ? '<span class="badge badge-orange" style="margin-top:4px;">New - needs approval</span>' : ''}
           </td>
+          <td>
+            <select class="form-control" style="width:auto;font-size:12px;padding:4px 8px;" onchange="changeVendoRole(${v.id}, this.value)" ${isCandidate ? 'disabled' : ''}>
+              <option value="main" ${v.role === 'main' ? 'selected' : ''}>Main</option>
+              <option value="sub" ${v.role === 'sub' ? 'selected' : ''}>Sub-vendo</option>
+              <option value="standalone" ${(!v.role || v.role === 'standalone') ? 'selected' : ''}>Standalone</option>
+            </select>
+          </td>
           <td style="font-family:monospace;font-size:12px;color:var(--text-muted);">
             ${v.mac_address}
           </td>
@@ -152,6 +159,20 @@ async function loadDevices() {
 
   } catch(e) {
     console.error('Devices error:', e);
+  }
+}
+
+async function changeVendoRole(id, role) {
+  try {
+    const data = await apiCall('PUT', `/api/admin/vendos/${id}/role`, { role });
+    if (!data.success) {
+      showToast(data.message || 'Failed to update role', 'error');
+      loadDevices();
+      return;
+    }
+    showToast('Role updated');
+  } catch (e) {
+    showToast('Failed to update role', 'error');
   }
 }
 

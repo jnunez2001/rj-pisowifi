@@ -2631,6 +2631,26 @@ router.post('/vendos/:id/adopt', adminAuth, (req, res) => {
   }
 });
 
+// PUT /api/admin/vendos/:id/role — { role: 'main' | 'sub' | 'standalone' }
+// Purely organizational (spec section 17) - doesn't hard-code a single
+// "main" Vendo, an operator can mark multiple as Main across sites.
+router.put('/vendos/:id/role', adminAuth, (req, res) => {
+  try {
+    const role = String(req.body.role || '').trim();
+    if (!['main', 'sub', 'standalone'].includes(role)) {
+      return res.status(400).json({ success: false, message: 'Invalid role' });
+    }
+    const result = db.prepare('UPDATE vendos SET role = ? WHERE id = ?').run(role, req.params.id);
+    if (result.changes === 0) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Vendo role update error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // ===== TRUSTED DEVICES =====
 // Devices that should always have internet access, never gated behind
 // payment (see database.js's trusted_devices table comment for why this
