@@ -25,6 +25,7 @@ async function loadNetworkDevicesPage() {
     populateDevTypeFilter();
     populateDevGroupFilter();
     renderDevicesTable();
+    renderDevCharts();
   } catch (e) {
     console.error('Network devices load error:', e);
     tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--accent-red);padding:24px;">Failed to load devices. Refresh to try again.</td></tr>`;
@@ -396,4 +397,55 @@ function destroyNetworkDevices() {
     clearInterval(devRefreshInterval);
     devRefreshInterval = null;
   }
+  if (devTypeChart) { devTypeChart.destroy(); devTypeChart = null; }
+  if (devVlanChart) { devVlanChart.destroy(); devVlanChart = null; }
+}
+
+// ===== CHARTS (real counts only - see analytics.js's renderBreakdownChart
+// for the same donut+legend pattern this matches) =====
+let devTypeChart = null;
+let devVlanChart = null;
+const DEV_CHART_COLORS = ['#2563eb', '#16a34a', '#d97706', '#7c3aed', '#64748b', '#db2777'];
+
+function renderDonutChart(canvasId, legendId, chartVar, entries) {
+  const canvas = document.getElementById(canvasId);
+  const legend = document.getElementById(legendId);
+  if (!canvas) return null;
+  if (chartVar) chartVar.destroy();
+  if (!entries.length) {
+    legend.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No devices yet</div>';
+    return null;
+  }
+  const chart = new Chart(canvas.getContext('2d'), {
+    type: 'doughnut',
+    data: {
+      labels: entries.map((e) => e.label),
+      datasets: [{ data: entries.map((e) => e.count), backgroundColor: DEV_CHART_COLORS, borderWidth: 0 }],
+    },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false } } },
+  });
+  legend.innerHTML = entries.map((e, i) => `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:12px;">
+      <span style="display:flex;align-items:center;gap:8px;color:var(--text-primary);"><span style="width:8px;height:8px;border-radius:50%;background:${DEV_CHART_COLORS[i % DEV_CHART_COLORS.length]};display:inline-block;"></span>${escapeHtml(e.label)}</span>
+      <span style="color:var(--text-secondary);">${e.count}</span>
+    </div>
+  `).join('');
+  return chart;
+}
+
+function renderDevCharts() {
+  const typeCounts = {};
+  for (const d of devAll) typeCounts[d.type] = (typeCounts[d.type] || 0) + 1;
+  const typeEntries = Object.entries(typeCounts).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+  devTypeChart = renderDonutChart('devTypeChart', 'devTypeLegend', devTypeChart, typeEntries);
+
+  const vlanCounts = {};
+  let noVlanCount = 0;
+  for (const d of devAll) {
+    if (d.vlan_id) vlanCounts[`VLAN ${d.vlan_id}`] = (vlanCounts[`VLAN ${d.vlan_id}`] || 0) + 1;
+    else noVlanCount++;
+  }
+  const vlanEntries = Object.entries(vlanCounts).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+  if (noVlanCount) vlanEntries.push({ label: 'No VLAN detected', count: noVlanCount });
+  devVlanChart = renderDonutChart('devVlanChart', 'devVlanLegend', devVlanChart, vlanEntries);
 }
