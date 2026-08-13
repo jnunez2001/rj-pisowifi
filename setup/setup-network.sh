@@ -90,6 +90,24 @@ fi
 # here since there's only one customer network and one ISP link.
 LAN_VLAN_ROW=$(sqlite3 -separator '|' "$DB" "SELECT base_interface, vlan_id FROM vlans WHERE mode='lan' ORDER BY id DESC LIMIT 1;" 2>/dev/null)
 WAN_VLAN_ROW=$(sqlite3 -separator '|' "$DB" "SELECT base_interface, vlan_id, protocol, static_ip, static_gateway, static_netmask FROM vlans WHERE mode='wan' ORDER BY id DESC LIMIT 1;" 2>/dev/null)
+
+# The "Server IP Configuration" panel (admin panel > WAN/ISP) saves here -
+# real bug found live: this script used to always run dhclient on the LAN
+# VLAN interface in Controller Mode regardless of this setting, and that
+# dhclient process keeps running/renewing in the background afterward. Even
+# though hostNetworkService.js's reapplyStaticNetworkOnBoot() (Node side)
+# also tries to reassert a static IP via netplan right after the app starts,
+# it was racing this script's own already-running dhclient - which isn't an
+# "OS default" disable_os_network_management() covers, it's this script's
+# own explicit action - so a brownout reboot could silently drift back to
+# whatever DHCP handed it. Reading the same setting here and skipping
+# dhclient entirely when static is configured makes this script the single
+# authoritative source for that interface, instead of two systems fighting
+# over it.
+LAN_STATIC_TYPE=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='network_type';" 2>/dev/null)
+LAN_STATIC_IP=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='static_ip';" 2>/dev/null)
+LAN_STATIC_GATEWAY=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='static_gateway';" 2>/dev/null)
+LAN_STATIC_SUBNET=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='static_subnet';" 2>/dev/null)
 if [ -n "$LAN_VLAN_ROW" ]; then
     LAN_VLAN_BASE=$(echo "$LAN_VLAN_ROW" | cut -d'|' -f1)
     LAN_VLAN_ID=$(echo "$LAN_VLAN_ROW" | cut -d'|' -f2)
@@ -269,8 +287,15 @@ if [ "$NETWORK_MODE" = "mikrotik" ] && [ "$LAN_VIF" != "$LAN_IF" ]; then
     # needs on the tagged interface is an address, the same way WAN_VIF gets
     # one above when the ISP requires a tagged uplink.
     pkill -f "dhclient.*$LAN_VIF" 2>/dev/null || true
-    dhclient -nw $LAN_VIF >> $LOG 2>&1 || true
-    echo "LAN VLAN ($LAN_VIF): requesting DHCP from router" >> $LOG
+    if [ "$LAN_STATIC_TYPE" = "static" ] && [ -n "$LAN_STATIC_IP" ] && [ -n "$LAN_STATIC_GATEWAY" ]; then
+        ip addr flush dev $LAN_VIF 2>/dev/null
+        ip addr add ${LAN_STATIC_IP}/${LAN_STATIC_SUBNET:-24} dev $LAN_VIF
+        ip route replace default via $LAN_STATIC_GATEWAY dev $LAN_VIF
+        echo "LAN VLAN ($LAN_VIF): static $LAN_STATIC_IP/${LAN_STATIC_SUBNET:-24} via $LAN_STATIC_GATEWAY" >> $LOG
+    else
+        dhclient -nw $LAN_VIF >> $LOG 2>&1 || true
+        echo "LAN VLAN ($LAN_VIF): requesting DHCP from router" >> $LOG
+    fi
 fi
 
 # ── ADMIN/PORTAL-HTTPS FIREWALL GUARD (always applied, both modes) ──

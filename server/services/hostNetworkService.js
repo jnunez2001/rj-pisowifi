@@ -1,11 +1,29 @@
 const fs = require('fs');
 const { execFile, execSync } = require('child_process');
 
-// Reads the interface currently holding the default route instead of a
-// hardcoded name - a VirtualBox adapter swap (or any NIC rename) used to
-// silently break static-IP apply because it kept targeting "enp0s3" even
-// after the box was actually running on a different interface.
+// Real bug found live: this used to detect the interface purely from
+// "whatever currently holds the default route" - fine once the box is
+// already up and running, but reapplyStaticNetworkOnBoot() calls this right
+// at server startup, immediately after setup-network.sh disabled DHCP on
+// this exact interface and (in the untagged case) left it addressless on
+// purpose, expecting this function to give it its static address. At that
+// moment there's no default route yet, so detection silently fell back to a
+// hardcoded "enp0s3" - wrong on any box actually using enp0s8 (this whole
+// project's dev/test VM has flip-flopped between the two across boots) -
+// writing the static IP to the wrong interface and leaving the real one on
+// whatever DHCP/cloud-init default it had. setup-network.sh already knows
+// the real LAN interface name (the same 'lan_interface' setting it reads
+// itself) - reuse that as the primary source of truth, and only fall back
+// to route-detection (still useful standalone, e.g. before any interface
+// has ever been configured) when it's unset.
 function getPrimaryInterface() {
+  try {
+    const db = require('../config/database');
+    const saved = db.prepare("SELECT value FROM settings WHERE key = 'lan_interface'").get()?.value;
+    if (saved) return saved;
+  } catch (err) {
+    console.error('Could not read saved LAN interface:', err.message);
+  }
   try {
     const out = execSync('ip route show default', { encoding: 'utf8' });
     const match = out.match(/dev (\S+)/);
