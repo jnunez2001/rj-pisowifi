@@ -4133,10 +4133,35 @@ router.post('/network/standalone/ports', adminAuth, (req, res) => {
     // lane count beyond what's already saved, matching the same
     // "allow staying put, block switching in" shape as the router_mode
     // gate right above this file's /settings handler.
+    //
+    // Second bug caught in a later review pass: router_ports is one
+    // shared table for BOTH standalone and MikroTik/Controller-mode lanes
+    // (no mode column), and this endpoint's own stale-row cleanup further
+    // down is deliberately scoped to only this box's real local
+    // interfaces so it never touches MikroTik lane rows. That means a
+    // leftover MikroTik 'wan' row (e.g. from before a mode switch) was
+    // silently counting toward currentWanCount here, letting it either
+    // over-block a legitimate single-WAN save or, worse, undercount-block
+    // and let a genuine new second Standalone WAN lane slip through once
+    // enough foreign rows had accumulated.
+    //
+    // Scoped the "currently saved" count to port names present in THIS
+    // submitted request rather than re-detecting local interfaces via
+    // /sys/class/net - saveLanePorts() on the frontend always resubmits
+    // every lane this mode currently manages (see the comment above), so
+    // the request's own port_name set already IS "this mode's lane
+    // universe", with no dependency on sysfs/platform quirks (caught this
+    // dev machine has no /sys/class/net at all, which made an earlier
+    // version of this fix force currentWanCount to 0 and wrongly re-block
+    // a same-lanes resave - exactly the regression the original fix
+    // commit existed to prevent).
     const { canUse } = require('../services/entitlementService');
     const requestedWanCount = lanes.filter((l) => l.role === 'wan').length;
     if (requestedWanCount > 1 && !canUse('multi_wan')) {
-      const currentWanCount = db.prepare("SELECT COUNT(*) as c FROM router_ports WHERE role = 'wan'").get().c;
+      const submittedNames = [...new Set(lanes.map((l) => l.port_name).filter(Boolean))];
+      const currentWanCount = submittedNames.length
+        ? db.prepare(`SELECT COUNT(*) as c FROM router_ports WHERE role = 'wan' AND port_name IN (${submittedNames.map(() => '?').join(',')})`).get(...submittedNames).c
+        : 0;
       if (requestedWanCount > currentWanCount) {
         return res.status(403).json({ success: false, message: 'Multi-WAN failover (a second WAN lane) is a Pro feature. Upgrade to add a backup connection.' });
       }
@@ -4373,6 +4398,30 @@ router.post('/router/ports', adminAuth, (req, res) => {
     if (!Array.isArray(lanes)) {
       return res.status(400).json({ success: false, message: 'lanes array required' });
     }
+
+    // Same multi-WAN entitlement gate as POST /network/standalone/ports
+    // (that endpoint's own comment explains why) - this MikroTik/
+    // Controller-mode twin was missing it entirely, a real tier bypass:
+    // a Free/Grow install in router (MikroTik) mode could submit two
+    // 'wan'-role lanes here and get real multi-WAN failover for free,
+    // since the standalone endpoint's check never runs for this path.
+    // Scoped to this request's own submitted port names (not a
+    // /sys/class/net lookup - see the standalone endpoint's comment for
+    // why that was unreliable), matching the symmetric fix there.
+    {
+      const { canUse } = require('../services/entitlementService');
+      const requestedWanCount = lanes.filter((l) => l.role === 'wan').length;
+      if (requestedWanCount > 1 && !canUse('multi_wan')) {
+        const submittedNames = [...new Set(lanes.map((l) => l.port_name).filter(Boolean))];
+        const currentWanCount = submittedNames.length
+          ? db.prepare(`SELECT COUNT(*) as c FROM router_ports WHERE role = 'wan' AND port_name IN (${submittedNames.map(() => '?').join(',')})`).get(...submittedNames).c
+          : 0;
+        if (requestedWanCount > currentWanCount) {
+          return res.status(403).json({ success: false, message: 'Multi-WAN failover (a second WAN lane) is a Pro feature. Upgrade to add a backup connection.' });
+        }
+      }
+    }
+
     const validRoles = ['wan', 'gated', 'open', 'unused'];
     const keyOf = (l) => `${l.port_name}::${parseInt(l.vlan_id, 10) || 0}`;
     const byKey = new Map(lanes.map((l) => [keyOf(l), l]));
