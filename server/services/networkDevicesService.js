@@ -73,6 +73,12 @@ async function listDevices() {
   const labels = db.prepare('SELECT mac_address, label FROM client_labels').all();
   const labelByMac = new Map(labels.map((l) => [String(l.mac_address || '').toLowerCase(), l.label]));
 
+  const groupRows = db.prepare(`
+    SELECT m.mac_address, g.id as group_id, g.name as group_name
+    FROM device_group_members m JOIN device_groups g ON g.id = m.group_id
+  `).all();
+  const groupByMac = new Map(groupRows.map((g) => [String(g.mac_address || '').toLowerCase(), g]));
+
   const vendoByMac = new Map(vendos.map((v) => [String(v.mac_address || '').toLowerCase(), v]));
   const apMacs = new Set(accessPoints.map((a) => String(a.mac_address || '').toLowerCase()));
   const sessionMacs = new Set(activeSessions.map((s) => String(s.mac_address || '').toLowerCase()));
@@ -128,6 +134,8 @@ async function listDevices() {
       vendor: entry.vendor || null,
       traffic_bytes: traffic ? traffic.totalBytes : null,
       vendo_id: isVendo ? vendo.id : null,
+      group_id: groupByMac.get(entry.mac)?.group_id || null,
+      group_name: groupByMac.get(entry.mac)?.group_name || null,
     });
   }
 
@@ -142,4 +150,32 @@ function summarize(devices) {
   };
 }
 
-module.exports = { listDevices, summarize };
+function listGroups() {
+  return db.prepare('SELECT * FROM device_groups ORDER BY name').all();
+}
+
+function createGroup(name) {
+  const trimmed = String(name || '').trim();
+  if (!trimmed) throw new Error('Group name is required');
+  const result = db.prepare('INSERT INTO device_groups (name) VALUES (?)').run(trimmed);
+  return { id: result.lastInsertRowid, name: trimmed };
+}
+
+function deleteGroup(id) {
+  const result = db.prepare('DELETE FROM device_groups WHERE id = ?').run(id);
+  if (result.changes === 0) throw new Error('Group not found');
+}
+
+function assignDeviceGroup(mac, groupId) {
+  const normalizedMac = String(mac || '').toLowerCase().trim();
+  if (groupId) {
+    db.prepare(`
+      INSERT INTO device_group_members (mac_address, group_id) VALUES (?, ?)
+      ON CONFLICT(mac_address) DO UPDATE SET group_id = excluded.group_id
+    `).run(normalizedMac, groupId);
+  } else {
+    db.prepare('DELETE FROM device_group_members WHERE mac_address = ?').run(normalizedMac);
+  }
+}
+
+module.exports = { listDevices, summarize, listGroups, createGroup, deleteGroup, assignDeviceGroup };

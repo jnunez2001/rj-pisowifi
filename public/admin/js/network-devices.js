@@ -1,20 +1,26 @@
 // ===== NETWORK DEVICES PAGE =====
 let devAll = [];
+let devGroups = [];
 
 async function loadNetworkDevicesPage() {
   const tbody = document.getElementById('devTable');
   if (!tbody) return;
   try {
-    const data = await apiCall('GET', '/api/admin/network-devices');
-    if (!data.success) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--accent-red);padding:24px;">${data.message || 'Failed to load devices'}</td></tr>`;
+    const [devicesData, groupsData] = await Promise.all([
+      apiCall('GET', '/api/admin/network-devices'),
+      apiCall('GET', '/api/admin/network-devices/groups'),
+    ]);
+    if (!devicesData.success) {
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--accent-red);padding:24px;">${devicesData.message || 'Failed to load devices'}</td></tr>`;
       return;
     }
-    devAll = data.devices;
-    document.getElementById('devTotalCount').textContent = data.summary.total;
-    document.getElementById('devOnlineCount').textContent = data.summary.online;
-    document.getElementById('devOfflineCount').textContent = data.summary.offline;
+    devAll = devicesData.devices;
+    devGroups = groupsData.success ? groupsData.groups : [];
+    document.getElementById('devTotalCount').textContent = devicesData.summary.total;
+    document.getElementById('devOnlineCount').textContent = devicesData.summary.online;
+    document.getElementById('devOfflineCount').textContent = devicesData.summary.offline;
     populateDevTypeFilter();
+    populateDevGroupFilter();
     renderDevicesTable();
   } catch (e) {
     console.error('Network devices load error:', e);
@@ -27,6 +33,13 @@ function populateDevTypeFilter() {
   const current = select.value;
   const types = [...new Set(devAll.map((d) => d.type))].sort();
   select.innerHTML = '<option value="">All Types</option>' + types.map((t) => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('');
+  select.value = current;
+}
+
+function populateDevGroupFilter() {
+  const select = document.getElementById('devGroupFilter');
+  const current = select.value;
+  select.innerHTML = '<option value="">All Groups</option>' + devGroups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
   select.value = current;
 }
 
@@ -52,10 +65,12 @@ function renderDevicesTable() {
   const search = (document.getElementById('devSearch')?.value || '').toLowerCase().trim();
   const typeFilter = document.getElementById('devTypeFilter')?.value || '';
   const statusFilter = document.getElementById('devStatusFilter')?.value || '';
+  const groupFilter = document.getElementById('devGroupFilter')?.value || '';
 
   const rows = devAll.filter((d) => {
     if (typeFilter && d.type !== typeFilter) return false;
     if (statusFilter && d.status !== statusFilter) return false;
+    if (groupFilter && String(d.group_id || '') !== groupFilter) return false;
     if (search && !((d.name || '').toLowerCase().includes(search) || (d.ip || '').toLowerCase().includes(search) || (d.mac || '').toLowerCase().includes(search))) return false;
     return true;
   });
@@ -89,7 +104,7 @@ function renderDevicesTable() {
     <tr style="cursor:pointer;" onclick="openDevDetail('${d.mac}')">
       <td>
         <div style="font-weight:700;color:var(--text-primary);">${escapeHtml(d.name)}</div>
-        <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(d.vendor || '')}</div>
+        <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(d.vendor || '')}${d.group_name ? ` &middot; ${escapeHtml(d.group_name)}` : ''}</div>
       </td>
       <td>${escapeHtml(d.type)}</td>
       <td>${devStatusBadge(d.status)}</td>
@@ -129,6 +144,10 @@ function openDevDetail(mac) {
   document.getElementById('devdStatus').textContent = d.status === 'online' ? 'Online' : 'Offline';
   document.getElementById('devdVendor').textContent = d.vendor || 'Unknown';
   document.getElementById('devdMac').textContent = d.mac;
+
+  const groupSelect = document.getElementById('devdGroupSelect');
+  groupSelect.innerHTML = '<option value="">No group</option>' + devGroups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
+  groupSelect.value = d.group_id || '';
 
   document.getElementById('devdIp').textContent = d.ip || 'Unavailable';
   document.getElementById('devdVlan').textContent = d.vlan_id ? `VLAN ${d.vlan_id}` : 'Not verified';
@@ -201,4 +220,82 @@ function exportDevicesCsv() {
   a.download = `zenfi-network-devices-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+// ===== DEVICE GROUPS =====
+function openManageGroups() {
+  document.getElementById('newGroupName').value = '';
+  renderGroupsList();
+  openModal('manageGroupsModal');
+}
+
+function renderGroupsList() {
+  const list = document.getElementById('groupsList');
+  if (!devGroups.length) {
+    list.innerHTML = `<p style="color:var(--text-muted);font-size:13px;">No groups yet. Add one above.</p>`;
+    return;
+  }
+  list.innerHTML = devGroups.map((g) => {
+    const count = devAll.filter((d) => d.group_id === g.id).length;
+    return `
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border-color);">
+        <div>
+          <div style="font-weight:600;">${escapeHtml(g.name)}</div>
+          <div style="font-size:12px;color:var(--text-muted);">${count} device${count === 1 ? '' : 's'}</div>
+        </div>
+        <button class="btn btn-sm btn-danger" onclick="deleteDeviceGroup(${g.id}, '${escapeHtml(g.name)}')"><i class="fas fa-trash"></i></button>
+      </div>
+    `;
+  }).join('');
+}
+
+async function submitCreateGroup() {
+  const name = document.getElementById('newGroupName').value.trim();
+  if (!name) {
+    showToast('Enter a group name', 'error');
+    return;
+  }
+  try {
+    const data = await apiCall('POST', '/api/admin/network-devices/groups', { name });
+    if (!data.success) {
+      showToast(data.message || 'Failed to create group', 'error');
+      return;
+    }
+    document.getElementById('newGroupName').value = '';
+    await loadNetworkDevicesPage();
+    renderGroupsList();
+  } catch (e) {
+    showToast('Failed to create group', 'error');
+  }
+}
+
+async function deleteDeviceGroup(id, name) {
+  if (!confirm(`Delete the "${name}" group? Devices in it will just become ungrouped.`)) return;
+  try {
+    const data = await apiCall('DELETE', `/api/admin/network-devices/groups/${id}`);
+    if (!data.success) {
+      showToast(data.message || 'Failed to delete group', 'error');
+      return;
+    }
+    await loadNetworkDevicesPage();
+    renderGroupsList();
+  } catch (e) {
+    showToast('Failed to delete group', 'error');
+  }
+}
+
+async function changeDeviceGroup() {
+  if (!devDetailMac) return;
+  const groupId = document.getElementById('devdGroupSelect').value || null;
+  try {
+    const data = await apiCall('POST', `/api/admin/network-devices/${devDetailMac}/group`, { group_id: groupId });
+    if (!data.success) {
+      showToast(data.message || 'Failed to update group', 'error');
+      return;
+    }
+    showToast('Group updated');
+    loadNetworkDevicesPage();
+  } catch (e) {
+    showToast('Failed to update group', 'error');
+  }
 }

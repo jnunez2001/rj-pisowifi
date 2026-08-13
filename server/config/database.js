@@ -396,6 +396,21 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Network Devices: admin-defined groups (Gaming/Kids/IoT/Guest/etc.),
+  -- for future firewall/QoS/schedule integration per the spec. One group
+  -- per device (mac_address is the primary key) - simplest model matching
+  -- how an admin actually thinks about grouping ("this device is in
+  -- Gaming"), not a many-to-many tagging system.
+  CREATE TABLE IF NOT EXISTS device_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE TABLE IF NOT EXISTS device_group_members (
+    mac_address TEXT PRIMARY KEY,
+    group_id INTEGER NOT NULL REFERENCES device_groups(id) ON DELETE CASCADE
+  );
+
   -- Friendly names for MACs, independent of static_leases (a client can be
   -- named without reserving an IP for it) - shown wherever a MAC address
   -- would otherwise be the only identifier (Sessions, Network diagnostics).

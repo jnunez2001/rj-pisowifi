@@ -343,6 +343,47 @@ router.get('/network-devices', adminAuth, async (req, res) => {
   }
 });
 
+// ===== NETWORK DEVICES: GROUPS =====
+router.get('/network-devices/groups', adminAuth, (req, res) => {
+  try {
+    const networkDevicesService = require('../services/networkDevicesService');
+    res.json({ success: true, groups: networkDevicesService.listGroups() });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/network-devices/groups', adminAuth, (req, res) => {
+  try {
+    const networkDevicesService = require('../services/networkDevicesService');
+    const group = networkDevicesService.createGroup(req.body.name);
+    res.json({ success: true, group });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+router.delete('/network-devices/groups/:id', adminAuth, (req, res) => {
+  try {
+    const networkDevicesService = require('../services/networkDevicesService');
+    networkDevicesService.deleteGroup(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// POST /api/admin/network-devices/:mac/group — { group_id } (null/absent clears it)
+router.post('/network-devices/:mac/group', adminAuth, (req, res) => {
+  try {
+    const networkDevicesService = require('../services/networkDevicesService');
+    networkDevicesService.assignDeviceGroup(req.params.mac, req.body.group_id || null);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
 // DELETE /api/admin/session/:code
 router.delete('/session/:code', adminAuth, async (req, res) => {
   try {
