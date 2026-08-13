@@ -108,6 +108,11 @@ LAN_STATIC_TYPE=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='network_t
 LAN_STATIC_IP=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='static_ip';" 2>/dev/null)
 LAN_STATIC_GATEWAY=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='static_gateway';" 2>/dev/null)
 LAN_STATIC_SUBNET=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='static_subnet';" 2>/dev/null)
+# Logged unconditionally (not just on failure) so a static-IP problem is
+# diagnosable straight from this log file alone - every earlier round of
+# troubleshooting this exact bug needed a live SSH session to check these
+# same four values by hand.
+echo "Static IP settings read: network_type='$LAN_STATIC_TYPE' static_ip='$LAN_STATIC_IP' static_gateway='$LAN_STATIC_GATEWAY' static_subnet='$LAN_STATIC_SUBNET'" >> $LOG
 if [ -n "$LAN_VLAN_ROW" ]; then
     LAN_VLAN_BASE=$(echo "$LAN_VLAN_ROW" | cut -d'|' -f1)
     LAN_VLAN_ID=$(echo "$LAN_VLAN_ROW" | cut -d'|' -f2)
@@ -287,11 +292,17 @@ if [ "$NETWORK_MODE" = "mikrotik" ] && [ "$LAN_VIF" != "$LAN_IF" ]; then
     # needs on the tagged interface is an address, the same way WAN_VIF gets
     # one above when the ISP requires a tagged uplink.
     pkill -f "dhclient.*$LAN_VIF" 2>/dev/null || true
+    ip link set $LAN_VIF up
     if [ "$LAN_STATIC_TYPE" = "static" ] && [ -n "$LAN_STATIC_IP" ] && [ -n "$LAN_STATIC_GATEWAY" ]; then
         ip addr flush dev $LAN_VIF 2>/dev/null
         ip addr add ${LAN_STATIC_IP}/${LAN_STATIC_SUBNET:-24} dev $LAN_VIF
         ip route replace default via $LAN_STATIC_GATEWAY dev $LAN_VIF
         echo "LAN VLAN ($LAN_VIF): static $LAN_STATIC_IP/${LAN_STATIC_SUBNET:-24} via $LAN_STATIC_GATEWAY" >> $LOG
+        if ip -4 -o addr show dev $LAN_VIF | grep -q "$LAN_STATIC_IP"; then
+            echo "LAN VLAN ($LAN_VIF): verified $LAN_STATIC_IP is active" >> $LOG
+        else
+            echo "LAN VLAN ($LAN_VIF): WARNING - static IP did not take effect, interface has no matching address" >> $LOG
+        fi
     else
         dhclient -nw $LAN_VIF >> $LOG 2>&1 || true
         echo "LAN VLAN ($LAN_VIF): requesting DHCP from router" >> $LOG
@@ -313,11 +324,26 @@ fi
 # that dependency and the timing gap it created.
 if [ "$NETWORK_MODE" = "mikrotik" ] && [ "$LAN_VIF" = "$LAN_IF" ]; then
     pkill -f "dhclient.*$LAN_IF" 2>/dev/null || true
+    # Real bug found live: nothing before this point explicitly brings the
+    # untagged interface up (the tagged branch above does, via its VLAN
+    # sub-interface creation step) - disable_os_network_management() only
+    # tells netplan/NetworkManager to leave it alone, it doesn't bring the
+    # link up itself. An address added to a down link doesn't actually take
+    # effect, and the default route replace can fail outright.
+    ip link set $LAN_IF up
     if [ "$LAN_STATIC_TYPE" = "static" ] && [ -n "$LAN_STATIC_IP" ] && [ -n "$LAN_STATIC_GATEWAY" ]; then
         ip addr flush dev $LAN_IF 2>/dev/null
         ip addr add ${LAN_STATIC_IP}/${LAN_STATIC_SUBNET:-24} dev $LAN_IF
         ip route replace default via $LAN_STATIC_GATEWAY dev $LAN_IF
         echo "LAN ($LAN_IF): static $LAN_STATIC_IP/${LAN_STATIC_SUBNET:-24} via $LAN_STATIC_GATEWAY" >> $LOG
+        # Verify rather than assume - confirms the address actually took
+        # effect instead of silently failing (e.g. ip addr add erroring
+        # because the link never came up) with no visible trace in the log.
+        if ip -4 -o addr show dev $LAN_IF | grep -q "$LAN_STATIC_IP"; then
+            echo "LAN ($LAN_IF): verified $LAN_STATIC_IP is active" >> $LOG
+        else
+            echo "LAN ($LAN_IF): WARNING - static IP did not take effect, interface has no matching address" >> $LOG
+        fi
     else
         dhclient -nw $LAN_IF >> $LOG 2>&1 || true
         echo "LAN ($LAN_IF): requesting DHCP from router" >> $LOG
@@ -953,8 +979,11 @@ fi
 cat > /etc/update-motd.d/00-zenfi << 'MOTDEOF'
 #!/bin/bash
 IDENTITY_FILE="/var/lib/rj-pisowifi/.device-identity"
+APP_DIR="/home/rjcyberzone/rj-pisowifi"
 DEVICE_ID=$(grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' "$IDENTITY_FILE" 2>/dev/null | sed 's/.*:[[:space:]]*"//;s/"$//')
 [ -z "$DEVICE_ID" ] && DEVICE_ID="(not yet generated)"
+VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$APP_DIR/package.json" 2>/dev/null | sed 's/.*:[[:space:]]*"//;s/"$//')
+[ -z "$VERSION" ] && VERSION="unknown"
 echo ""
 printf '\033[36m'
 cat << 'LOGO'
@@ -965,20 +994,26 @@ cat << 'LOGO'
 LOGO
 printf '\033[0m'
 echo ""
-echo "  Zentry Systems - ZenFi Hotspot Server"
+echo "  Zentry Systems - ZenFi Hotspot Server $VERSION"
 echo "  Device ID: $DEVICE_ID"
 echo "  -----------------------------------------------"
 FOUND=0
+PRIMARY_IP=""
 for ifc in $(ls /sys/class/net/ | grep -vE '^(lo|docker|veth|br-)'); do
     IP=$(ip -4 -o addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
     if [ -n "$IP" ]; then
         echo "    $ifc: $IP"
+        [ -z "$PRIMARY_IP" ] && PRIMARY_IP="$IP"
         FOUND=1
     fi
 done
 [ "$FOUND" = "0" ] && echo "    (no IP assigned yet)"
 echo "  -----------------------------------------------"
-echo "  Admin panel: http://<ip-above>:3000/admin"
+if [ -n "$PRIMARY_IP" ]; then
+    echo "  Admin panel: http://$PRIMARY_IP:3000/admin"
+else
+    echo "  Admin panel: (unavailable - no IP assigned yet)"
+fi
 echo ""
 MOTDEOF
 chmod +x /etc/update-motd.d/00-zenfi
