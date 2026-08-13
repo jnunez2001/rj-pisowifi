@@ -866,7 +866,15 @@ select.form-control { cursor: pointer; }
   color: var(--text-muted);
 }
 
-.empty-state i { font-size: 48px; margin-bottom: 16px; display: block; }
+/* Bug: this used to match every <i> anywhere inside .empty-state,
+   including icons nested inside a call-to-action <button> (e.g. "+ Add
+   Router") - a button's icon inherited the decorative 48px/block-display
+   sizing meant only for the big top icon, ballooning that one button to
+   several times the size of every other button on the page. Scoped to
+   only the icon that's a direct child of .empty-state itself (the real
+   decorative one); a button's own icon is nested one level deeper and is
+   unaffected, same as everywhere else in the app. */
+.empty-state > i { font-size: 48px; margin-bottom: 16px; display: block; }
 .empty-state h3 { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary); }
 .empty-state p { font-size: 14px; }
 
