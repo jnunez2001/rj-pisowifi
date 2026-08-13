@@ -10,6 +10,7 @@
 const { exec } = require('child_process');
 const os = require('os');
 const fs = require('fs');
+const db = require('../config/database');
 
 // A compact table of real, IEEE-assigned OUI (first 3 MAC octets) ->
 // vendor name, focused on network-infrastructure vendors an admin is
@@ -140,7 +141,36 @@ function detectVlanEvidence(ip) {
 // box's own interface addresses. Never classifies a candidate as
 // definitely an AP - "possible AP" scoring is left to the caller/UI,
 // which should present these as identify-and-approve candidates only.
+function getNetworkMode() {
+  return db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
+}
+
+// Controller Mode (network_mode = 'mikrotik'): this box has no interface
+// presence on the VLANs the external MikroTik owns, so its own local ARP
+// table can only ever see whatever single VLAN its management connection
+// sits on. The router itself already knows every device on every VLAN it
+// routes, so ask it directly instead (mikrotikService.scanForDevices(),
+// real /ip/arp/print + /ip/dhcp-server/lease/print) rather than trying to
+// discover across VLANs this box structurally cannot see.
+async function scanNetworkViaMikrotik() {
+  const mikrotikService = require('./mikrotikService');
+  const entries = await mikrotikService.scanForDevices();
+  return entries.map((entry) => ({
+    ip: entry.ip,
+    mac: entry.mac,
+    hostname: entry.hostname,
+    vendor: vendorFromMac(entry.mac),
+    vlan_id: entry.vlan_id,
+    vlan_evidence: entry.vlan_evidence,
+    discovered_via: entry.discovered_via,
+  }));
+}
+
 async function scanNetwork() {
+  if (getNetworkMode() === 'mikrotik') {
+    return scanNetworkViaMikrotik();
+  }
+
   const [arpEntries, leases] = await Promise.all([getArpTable(), Promise.resolve(getDhcpLeases())]);
   const ownAddresses = new Set();
   for (const addrs of Object.values(os.networkInterfaces())) {

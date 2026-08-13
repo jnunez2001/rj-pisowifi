@@ -1055,6 +1055,54 @@ async function setDnsServers(servers) {
   });
 }
 
+// Real cross-VLAN device discovery for Access Points, used when
+// network_mode = 'mikrotik' (Controller Mode). This box's own local ARP
+// table (networkDiscoveryService.js) only sees devices on whatever single
+// VLAN its management connection happens to sit on - it has no interface
+// presence on the other VLANs the MikroTik owns. The router itself,
+// however, already knows every device on every VLAN it routes, so this
+// asks it directly via /ip/arp/print (live L2 table) and
+// /ip/dhcp-server/lease/print (hostnames), same read-only "ask the
+// device that actually knows" approach getMacFromIp already uses. VLAN
+// evidence comes from matching the ARP entry's interface name against
+// listVlans() (real RouterOS interface -> vlan_id mapping, not a guess).
+async function scanForDevices() {
+  const config = getMikrotikConfig();
+  if (!config.ip) return [];
+  return withMikrotik(config, async (client) => {
+    const [arpRes, leaseRes, vlanRes] = await Promise.all([
+      client.talk(['/ip/arp/print']),
+      client.talk(['/ip/dhcp-server/lease/print']),
+      client.talk(['/interface/vlan/print']),
+    ]);
+
+    const vlanByInterface = new Map(vlanRes.re.map((v) => [v.name, parseInt(v['vlan-id'], 10)]));
+    const leaseByMac = new Map();
+    for (const lease of leaseRes.re) {
+      const mac = (lease['mac-address'] || '').toLowerCase();
+      if (!mac) continue;
+      leaseByMac.set(mac, { hostname: lease['host-name'] || null });
+    }
+
+    const byMac = new Map();
+    for (const entry of arpRes.re) {
+      const mac = (entry['mac-address'] || '').toLowerCase();
+      const ip = entry.address;
+      if (!mac || !ip || entry.invalid === 'true') continue;
+      const vlanId = vlanByInterface.get(entry.interface) || null;
+      byMac.set(mac, {
+        ip,
+        mac,
+        hostname: leaseByMac.get(mac)?.hostname || null,
+        vlan_id: vlanId,
+        vlan_evidence: vlanId ? `Reported by MikroTik as connected via VLAN ${vlanId} interface (${entry.interface})` : null,
+        discovered_via: leaseByMac.has(mac) ? 'mikrotik_arp+dhcp' : 'mikrotik_arp',
+      });
+    }
+    return Array.from(byMac.values());
+  });
+}
+
 module.exports = {
   allowClient,
   blockClient,
@@ -1089,4 +1137,5 @@ module.exports = {
   MikrotikPortForwardConflictError,
   getDnsServers,
   setDnsServers,
+  scanForDevices,
 };
