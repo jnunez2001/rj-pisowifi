@@ -189,6 +189,7 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-secondary" id="apdPingBtn" onclick="pingApFromDetail()"><i class="fas fa-satellite-dish"></i> Ping Now</button>
+        <button class="btn btn-secondary" id="apdConnectBtn" onclick="openConnectAp(apDetailId)"><i class="fas fa-plug"></i> Connect</button>
         <button class="btn btn-secondary" onclick="editApFromDetail()"><i class="fas fa-pen"></i> Edit</button>
         <button class="btn btn-danger" onclick="removeApFromDetail()"><i class="fas fa-trash"></i> Remove</button>
       </div>
@@ -200,13 +201,46 @@
         <div id="apdVlanBlock" style="font-size:13px;"></div>
       </div>
       <div class="zf3-card">
-        <div class="zf3-card-title" style="margin-bottom:8px;">Clients, SSID &amp; Radio</div>
-        <div class="empty-state" style="padding:24px;">
-          <i class="fas fa-plug-circle-xmark"></i>
-          <h3>No vendor integration connected</h3>
-          <p>Client list, SSID/VLAN configuration, and radio settings require a working vendor adapter (e.g. TP-Link Omada, MikroTik wireless API) that isn't built yet. This AP is monitored by network reachability only.</p>
+        <div class="zf3-card-title" style="margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;">
+          <span>Clients, SSID &amp; Radio</span>
+          <div class="zf3-icon-btn" onclick="loadApLiveData()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
+        </div>
+        <div id="apdLiveBlock">
+          <div class="empty-state" style="padding:24px;">
+            <i class="fas fa-plug-circle-xmark"></i>
+            <h3>No vendor integration connected</h3>
+            <p>Connect a supported adapter (currently: TP-Link Archer AX12) from the Overview tab to read live client list, SSID/radio status, and health from this AP. Until then it's monitored by network reachability only.</p>
+          </div>
         </div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- CONNECT AP MODAL -->
+<div class="modal-overlay" id="apConnectModal">
+  <div class="modal" style="max-width:440px;">
+    <div class="modal-header">
+      <div class="modal-title">Connect <span id="apConnectName"></span></div>
+      <button class="modal-close" onclick="closeModal('apConnectModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">
+      ZenFi will log in to this device with its own admin password to read live status. The password is sent once and stored encrypted, never shown again.
+    </div>
+    <div class="form-group">
+      <label class="form-label">Adapter</label>
+      <select id="apConnectAdapter" class="form-control"></select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Device Admin Password</label>
+      <input type="password" id="apConnectPassword" class="form-control" placeholder="Same password you use to log into the device's own web UI">
+    </div>
+    <div id="apConnectResult"></div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:10px;">
+      <button class="btn btn-secondary" onclick="closeModal('apConnectModal')">Cancel</button>
+      <button class="btn btn-primary" id="apConnectSubmitBtn" onclick="submitConnectAp()">
+        <i class="fas fa-plug"></i> Connect
+      </button>
     </div>
   </div>
 </div>

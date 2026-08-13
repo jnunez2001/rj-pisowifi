@@ -5096,7 +5096,11 @@ router.post('/access-points/:id/adopt', adminAuth, async (req, res) => {
     console.log(`📶 Access point #${req.params.id} adopted via ${adapter_type} adapter`);
     return res.json({ success: true, ...result });
   } catch (err) {
-    const status = err.name === 'AuthenticationFailed' ? 401 : 500;
+    // 401 is reserved sitewide for "your ZenFi admin session expired" (see
+    // apiCall()'s handleAuthFailure() in app.js, which force-logs-out on
+    // any 401) - a wrong password for the *AP device itself* is a
+    // different failure and must not trigger that, so it's 400 here.
+    const status = err.name === 'AuthenticationFailed' ? 400 : 500;
     console.error('AP adopt error:', err);
     res.status(status).json({ success: false, message: err.message || 'Adopt failed' });
   }

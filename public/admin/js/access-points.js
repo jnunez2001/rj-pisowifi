@@ -82,9 +82,17 @@ function apStatusBadge(status) {
 }
 
 function apManagementBadge(state) {
+  if (state === 'monitored') return `<span class="badge badge-green">Connected</span>`;
   if (state === 'pending') return `<span class="badge badge-orange">Pending</span>`;
   return `<span class="badge badge-blue">Unmanaged</span>`;
 }
+
+// Adapters registered in server/services/apAdapters/apIntegrationService.js.
+// Kept as a small static list here (rather than fetched) since adding a new
+// adapter is a code change on both sides anyway.
+const AP_ADAPTER_OPTIONS = [
+  { value: 'tplink-ax12', label: 'TP-Link Archer AX12' },
+];
 
 function apVlanCell(a) {
   if (!a.vlan_id) return '-';
@@ -388,6 +396,10 @@ function setApDetailTab(tab, el) {
   el.classList.add('active');
   document.getElementById('apDetailOverview').style.display = tab === 'overview' ? 'block' : 'none';
   document.getElementById('apDetailNetwork').style.display = tab === 'network' ? 'block' : 'none';
+  if (tab === 'network') {
+    const a = apAll.find(x => x.id === apDetailId);
+    if (a && a.management_state === 'monitored') loadApLiveData();
+  }
 }
 
 function openApDetail(id) {
@@ -414,6 +426,19 @@ function renderApDetail(a) {
   document.getElementById('apdLatency').textContent = (a.last_latency_ms !== null && a.last_latency_ms !== undefined) ? `${a.last_latency_ms} ms` : '-';
   document.getElementById('apdManagement').innerHTML = apManagementBadge(a.management_state);
   document.getElementById('apdNotes').textContent = a.notes || '';
+
+  const connectBtn = document.getElementById('apdConnectBtn');
+  if (connectBtn) {
+    connectBtn.innerHTML = a.management_state === 'monitored'
+      ? '<i class="fas fa-plug-circle-xmark"></i> Disconnect'
+      : '<i class="fas fa-plug"></i> Connect';
+    connectBtn.onclick = a.management_state === 'monitored'
+      ? disconnectApAdapter
+      : () => openConnectAp(a.id);
+  }
+  if (a.adapter_last_error && a.management_state === 'monitored') {
+    document.getElementById('apdNotes').innerHTML += `<div style="color:var(--accent-red);margin-top:6px;"><i class="fas fa-triangle-exclamation"></i> Last connection attempt failed: ${escapeHtml(a.adapter_last_error)}</div>`;
+  }
 
   const vlanBlock = document.getElementById('apdVlanBlock');
   if (a.vlan_id) {
@@ -459,4 +484,126 @@ function editApFromDetail() {
 function removeApFromDetail() {
   closeModal('apDetailModal');
   deleteAp(apDetailId);
+}
+
+// ===== ADAPTER CONNECT / LIVE DATA =====
+// Phase 1 read-only adapters (see server/services/apAdapters/) - identify()
+// is unauthenticated and just suggests which adapter to try; the actual
+// password is only ever sent once, to /adopt, and never stored client-side
+// or echoed back by the server.
+function openConnectAp(id) {
+  const a = apAll.find(x => x.id === id);
+  if (!a) return;
+  apDetailId = id;
+  document.getElementById('apConnectName').textContent = a.name;
+  const select = document.getElementById('apConnectAdapter');
+  select.innerHTML = AP_ADAPTER_OPTIONS.map(o => `<option value="${o.value}">${o.label}</option>`).join('');
+  document.getElementById('apConnectPassword').value = '';
+  document.getElementById('apConnectResult').innerHTML = '';
+  document.getElementById('apConnectModal').classList.add('show');
+  identifyApForConnect(id);
+}
+
+async function identifyApForConnect(id) {
+  const result = document.getElementById('apConnectResult');
+  try {
+    const data = await apiCall('POST', `/api/admin/access-points/${id}/identify`);
+    if (data.success && data.identified) {
+      result.innerHTML = `<div style="color:var(--accent-green);font-size:12px;margin-top:4px;"><i class="fas fa-circle-check"></i> Identified as ${escapeHtml(data.identified.vendor)} (${escapeHtml(data.identified.confidence)} confidence)</div>`;
+      const select = document.getElementById('apConnectAdapter');
+      if ([...select.options].some(o => o.value === data.identified.adapterType)) select.value = data.identified.adapterType;
+    }
+  } catch (e) {
+    // identify is best-effort - silently leave the manual adapter picker as-is
+  }
+}
+
+async function submitConnectAp() {
+  const adapterType = document.getElementById('apConnectAdapter').value;
+  const password = document.getElementById('apConnectPassword').value;
+  const result = document.getElementById('apConnectResult');
+  if (!password) { showToast('Enter the device password.', 'error'); return; }
+
+  const btn = document.getElementById('apConnectSubmitBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Connecting...';
+  try {
+    const data = await apiCall('POST', `/api/admin/access-points/${apDetailId}/adopt`, { adapter_type: adapterType, password });
+    if (data.success) {
+      showToast('Connected! ZenFi can now read live status from this AP.', 'success');
+      closeModal('apConnectModal');
+      await loadApList();
+      const a = apAll.find(x => x.id === apDetailId);
+      if (a) { renderApDetail(a); document.getElementById('apDetailModal').classList.add('show'); }
+    } else {
+      result.innerHTML = `<div style="color:var(--accent-red);font-size:12px;margin-top:4px;">${escapeHtml(data.message || 'Connection failed.')}</div>`;
+    }
+  } catch (e) {
+    result.innerHTML = `<div style="color:var(--accent-red);font-size:12px;margin-top:4px;">Connection failed.</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-plug"></i> Connect';
+  }
+}
+
+async function disconnectApAdapter() {
+  if (!confirm('Disconnect this AP\'s live integration? Its stored password will be discarded and it goes back to reachability-only monitoring.')) return;
+  try {
+    const data = await apiCall('POST', `/api/admin/access-points/${apDetailId}/unadopt`);
+    if (data.success) {
+      showToast('Disconnected.', 'success');
+      await loadApList();
+      const a = apAll.find(x => x.id === apDetailId);
+      if (a) renderApDetail(a);
+    } else {
+      showToast(data.message || 'Unable to disconnect.', 'error');
+    }
+  } catch (e) {
+    showToast('Unable to disconnect.', 'error');
+  }
+}
+
+async function loadApLiveData() {
+  const block = document.getElementById('apdLiveBlock');
+  if (!block) return;
+  block.innerHTML = `<div class="loading"><i class="fas fa-spinner fa-spin"></i> Reading live data...</div>`;
+  try {
+    const data = await apiCall('GET', `/api/admin/access-points/${apDetailId}/live`);
+    if (!data.success) {
+      block.innerHTML = `<div class="empty-state" style="padding:24px;"><i class="fas fa-triangle-exclamation"></i><h3>Could not read live data</h3><p>${escapeHtml(data.message || 'The device did not respond.')}</p></div>`;
+      return;
+    }
+    const live = data.live;
+    const bands = [live.wireless?.band2g, live.wireless?.band5g].filter(Boolean);
+    const bandHtml = bands.map(b => `
+      <div class="zf3-wan-item"><div class="zf3-wan-item-label">${escapeHtml(b.ssid || 'SSID')} ${b.channelWidth ? '(' + escapeHtml(b.channelWidth) + ')' : ''}</div>
+      <div class="zf3-wan-item-value">${b.enabled ? 'Enabled' : 'Disabled'}${b.channel ? ', ch. ' + escapeHtml(String(b.channel)) : ''}</div></div>
+    `).join('');
+    const clientRows = (live.clients || []).map(c => `
+      <tr>
+        <td style="font-weight:600;">${escapeHtml(c.hostname || c.mac)}</td>
+        <td style="font-family:monospace;font-size:12px;">${escapeHtml(c.mac)}</td>
+        <td>${escapeHtml(c.connectionType)}${c.band ? ' / ' + escapeHtml(c.band) : ''}</td>
+        <td>${c.signalDbm != null ? c.signalDbm + ' dBm' : '-'}</td>
+        <td>${c.rxRateMbps != null ? c.rxRateMbps.toFixed(1) + ' Mbps' : '-'}</td>
+      </tr>
+    `).join('');
+    block.innerHTML = `
+      <div class="zf3-wan-grid" style="margin-bottom:16px;">
+        <div><div class="zf3-wan-item-label">CPU</div><div class="zf3-wan-item-value">${live.health?.cpuPercent != null ? live.health.cpuPercent + '%' : '-'}</div></div>
+        <div><div class="zf3-wan-item-label">Memory</div><div class="zf3-wan-item-value">${live.health?.memPercent != null ? live.health.memPercent + '%' : '-'}</div></div>
+        <div><div class="zf3-wan-item-label">Operation Mode</div><div class="zf3-wan-item-value">${escapeHtml(live.operationMode || 'unknown')}</div></div>
+        <div><div class="zf3-wan-item-label">Firmware</div><div class="zf3-wan-item-value">${escapeHtml(live.deviceInfo?.firmware || '-')}</div></div>
+        ${bandHtml}
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead><tr><th>Client</th><th>MAC</th><th>Connection</th><th>Signal</th><th>RX Rate</th></tr></thead>
+          <tbody>${clientRows || '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);">No clients connected right now.</td></tr>'}</tbody>
+        </table>
+      </div>
+    `;
+  } catch (e) {
+    block.innerHTML = `<div class="empty-state" style="padding:24px;"><i class="fas fa-triangle-exclamation"></i><h3>Could not read live data</h3><p>The device did not respond.</p></div>`;
+  }
 }
