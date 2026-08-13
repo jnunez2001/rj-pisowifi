@@ -330,33 +330,6 @@ router.delete('/satellite-kiosks/:id', adminAuth, (req, res) => {
   }
 });
 
-// ===== VENDO DISCOVERY / ADOPTION =====
-// A Vendo candidate is a satellite_kiosks row with status='candidate' -
-// same underlying pairing/revenue-attribution machinery, just discovered
-// automatically instead of manually created. See satelliteKioskService.js.
-
-// GET /api/admin/vendo-candidates
-router.get('/vendo-candidates', adminAuth, (req, res) => {
-  try {
-    res.json({ success: true, candidates: kioskService.listCandidates() });
-  } catch (err) {
-    console.error('List vendo candidates error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
-
-// POST /api/admin/vendo-candidates/:id/adopt — { name } -> returns the
-// unmasked device_key exactly once, same "shown once" discipline as
-// creating a satellite kiosk manually.
-router.post('/vendo-candidates/:id/adopt', adminAuth, (req, res) => {
-  try {
-    const vendo = kioskService.adoptCandidate(req.params.id, req.body.name);
-    res.json({ success: true, vendo });
-  } catch (err) {
-    res.status(400).json({ success: false, message: err.message });
-  }
-});
-
 // ===== NETWORK DEVICES (unified inventory, see networkDevicesService.js) =====
 // GET /api/admin/network-devices
 router.get('/network-devices', adminAuth, async (req, res) => {
@@ -2421,15 +2394,28 @@ router.post('/vendo/register', (req, res) => {
     // upsert below, which only matches same-case duplicates.
     const mac = String(req.body.mac).trim().toLowerCase();
 
-    db.prepare(`
-      INSERT INTO vendos (mac_address, name, ip_address, firmware, last_seen)
-      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(mac_address) DO UPDATE SET
-        name = excluded.name,
-        ip_address = excluded.ip_address,
-        firmware = excluded.firmware,
-        last_seen = CURRENT_TIMESTAMP
-    `).run(mac, name, ip || '', version || '');
+    // Vendo Protocol spec: "Never automatically adopt a device merely
+    // because it advertises itself." A MAC this box has never seen before
+    // registers as an unapproved candidate; re-registration (the 60s
+    // heartbeat) never touches status either way, so an admin's adopt/
+    // ignore decision sticks regardless of how often the device checks in.
+    // Registration itself still always succeeds either way - real deployed
+    // hardware expects a normal response, and nothing here gates any real
+    // capability behind adoption (this table has never been used for
+    // financial attribution), so this is a visibility/approval gate, not
+    // an access-control one.
+    const existing = db.prepare('SELECT id FROM vendos WHERE mac_address = ?').get(mac);
+    if (existing) {
+      db.prepare(`
+        UPDATE vendos SET name = ?, ip_address = ?, firmware = ?, last_seen = CURRENT_TIMESTAMP
+        WHERE mac_address = ?
+      `).run(name, ip || '', version || '', mac);
+    } else {
+      db.prepare(`
+        INSERT INTO vendos (mac_address, name, ip_address, firmware, last_seen, status)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, 'candidate')
+      `).run(mac, name, ip || '', version || '');
+    }
 
     // No auth on this route (see note above) means anyone on the LAN could
     // otherwise POST a fake ip here and hijack vendo_ip — the address
@@ -2546,6 +2532,21 @@ router.delete('/vendos/:id', adminAuth, (req, res) => {
     return res.json({ success: true, message: 'Device removed' });
   } catch (err) {
     console.error('Vendo delete error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/vendos/:id/adopt — approves a candidate device (a MAC
+// this box has never seen before, per POST /vendo/register above).
+router.post('/vendos/:id/adopt', adminAuth, (req, res) => {
+  try {
+    const result = db.prepare("UPDATE vendos SET status = 'adopted' WHERE id = ?").run(req.params.id);
+    if (result.changes === 0) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    return res.json({ success: true, message: 'Device adopted' });
+  } catch (err) {
+    console.error('Vendo adopt error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

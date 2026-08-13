@@ -106,6 +106,8 @@ async function loadDevices() {
              <i class="fas fa-circle" style="font-size:7px;margin-right:4px;"></i>Offline
            </span>`;
 
+      const isCandidate = v.status === 'candidate';
+
       const ipLink = v.ip_address
         ? `<a href="http://${v.ip_address}" target="_blank"
               style="color:var(--accent-blue);text-decoration:none;font-family:monospace;font-size:13px;">
@@ -114,9 +116,10 @@ async function loadDevices() {
         : '--';
 
       return `
-        <tr>
+        <tr${isCandidate ? ' style="background:var(--accent-yellow-light,#fff8e1);"' : ''}>
           <td>
             <div style="font-weight:700;">${v.name}</div>
+            ${isCandidate ? '<span class="badge badge-orange" style="margin-top:4px;">New - needs approval</span>' : ''}
           </td>
           <td style="font-family:monospace;font-size:12px;color:var(--text-muted);">
             ${v.mac_address}
@@ -130,6 +133,11 @@ async function loadDevices() {
             ${timeAgo(v.last_seen)}
           </td>
           <td style="text-align:right;">
+            ${isCandidate ? `
+              <button class="btn btn-sm btn-primary" onclick="adoptVendoDevice(${v.id}, '${escapeHtml(v.name)}')">
+                <i class="fas fa-check"></i> Adopt
+              </button>
+            ` : ''}
             <button class="btn btn-sm btn-danger" onclick="removeVendo(${v.id}, '${escapeHtml(v.name)}')">
               <i class="fas fa-trash"></i>
             </button>
@@ -144,6 +152,20 @@ async function loadDevices() {
 
   } catch(e) {
     console.error('Devices error:', e);
+  }
+}
+
+async function adoptVendoDevice(id, name) {
+  try {
+    const data = await apiCall('POST', `/api/admin/vendos/${id}/adopt`);
+    if (data.success) {
+      showToast(`${name} adopted`, 'success');
+      loadDevices();
+    } else {
+      showToast(data.message || 'Failed to adopt device', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
   }
 }
 

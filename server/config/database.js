@@ -553,6 +553,19 @@ try {
   db.exec("ALTER TABLE satellite_kiosks ADD COLUMN discovered_via TEXT");
 } catch (e) { /* already applied */ }
 
+// Vendo adoption gate on the REAL, already-working vendos table (real ESP32
+// firmware already self-registers here via POST /api/vendo/register on
+// boot + every 60s heartbeat - the satellite_kiosks columns/functions added
+// above were a parallel, disconnected system built without checking for
+// this one first; reconciled here per explicit user direction rather than
+// keeping two device registries). Existing rows default to 'adopted' so
+// every already-registered real device already in the field stays exactly
+// as trusted as it was before this migration - only a MAC this box has
+// never seen before starts as an unapproved 'candidate'.
+try {
+  db.exec("ALTER TABLE vendos ADD COLUMN status TEXT DEFAULT 'adopted'");
+} catch (e) { /* already applied */ }
+
 // Same story as above: free_claims.ip_address was added to the CREATE TABLE
 // statement after this install's table already existed, so it was never
 // actually created on disk here - every free-minutes claim crashed with

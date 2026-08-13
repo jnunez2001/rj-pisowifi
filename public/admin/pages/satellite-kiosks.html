@@ -1,31 +1,6 @@
 <div class="page-title">Satellite Kiosks</div>
 <div class="page-subtitle">Secondary coin-accepting stations that relay credits back to this box wirelessly.</div>
 
-<!-- DISCOVERED VENDO DEVICES - hidden entirely when there are none, so
-     customers who don't use auto-discovering Vendo hardware never see it -->
-<div class="card" id="vendoCandidatesCard" style="display:none;">
-  <div class="card-header">
-    <div>
-      <div class="card-title">Discovered Vendo Devices</div>
-      <div class="card-subtitle">Found automatically on your network. Review and adopt the ones that are actually yours.</div>
-    </div>
-  </div>
-  <div class="table-wrapper">
-    <table>
-      <thead>
-        <tr>
-          <th>Device</th>
-          <th>MAC Address</th>
-          <th>Firmware</th>
-          <th>Last Seen</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="vendoCandidateList"></tbody>
-    </table>
-  </div>
-</div>
-
 <div class="card">
   <div class="card-header">
     <div>
@@ -94,26 +69,6 @@
     </div>
     <div style="display:flex;justify-content:flex-end;">
       <button class="btn btn-primary" onclick="closeModal('kioskKeyModal')">Done</button>
-    </div>
-  </div>
-</div>
-
-<!-- ADOPT VENDO MODAL -->
-<div class="modal-overlay" id="adoptVendoModal">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title">Adopt Vendo Device</div>
-      <button class="modal-close" onclick="closeModal('adoptVendoModal')" aria-label="Close"><i class="fas fa-times"></i></button>
-    </div>
-    <div class="form-group">
-      <label class="form-label">Name</label>
-      <input type="text" id="adoptVendoName" class="form-control" placeholder="e.g. Main Vendo, Outdoor Vendo" autocomplete="off">
-    </div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;">
-      <button class="btn btn-secondary" onclick="closeModal('adoptVendoModal')">Cancel</button>
-      <button class="btn btn-primary" onclick="submitAdoptVendo()">
-        <i class="fas fa-check"></i> Adopt
-      </button>
     </div>
   </div>
 </div>

@@ -8,10 +8,8 @@ function openModal(id) {
 }
 
 let renameKioskId = null;
-let adoptVendoId = null;
 
 async function loadSatelliteKiosks() {
-  await loadVendoCandidates();
   try {
     const data = await apiCall('GET', '/api/admin/satellite-kiosks');
     if (!data.success) return;
@@ -97,71 +95,6 @@ function copyKioskKey() {
   }).catch(() => {
     document.execCommand('copy');
   });
-}
-
-// ===== VENDO DISCOVERY / ADOPTION =====
-
-async function loadVendoCandidates() {
-  const card = document.getElementById('vendoCandidatesCard');
-  const list = document.getElementById('vendoCandidateList');
-  try {
-    const data = await apiCall('GET', '/api/admin/vendo-candidates');
-    if (!data.success || !data.candidates.length) {
-      card.style.display = 'none';
-      return;
-    }
-    card.style.display = 'block';
-    list.innerHTML = data.candidates.map(c => `
-      <tr>
-        <td style="font-weight:600;">${escapeHtml(c.name)}</td>
-        <td style="font-family:monospace;font-size:12px;">${escapeHtml(c.mac_address || '-')}</td>
-        <td>${escapeHtml(c.firmware_version || '-')}</td>
-        <td style="color:var(--text-muted);font-size:13px;">
-          ${c.last_seen ? new Date(c.last_seen + 'Z').toLocaleString() : 'Never'}
-        </td>
-        <td style="text-align:right;">
-          <button class="btn btn-sm btn-primary" onclick="openAdoptVendo(${c.id})">
-            <i class="fas fa-check"></i> Adopt
-          </button>
-        </td>
-      </tr>
-    `).join('');
-  } catch (e) {
-    console.error('Vendo candidates load error:', e);
-    card.style.display = 'none';
-  }
-}
-
-function openAdoptVendo(id) {
-  adoptVendoId = id;
-  document.getElementById('adoptVendoName').value = '';
-  openModal('adoptVendoModal');
-}
-
-async function submitAdoptVendo() {
-  const name = document.getElementById('adoptVendoName').value.trim();
-  if (!name || !adoptVendoId) {
-    showToast('Enter a name for this device', 'error');
-    return;
-  }
-  try {
-    const data = await apiCall('POST', `/api/admin/vendo-candidates/${adoptVendoId}/adopt`, { name });
-    if (!data.success) {
-      showToast(data.message || 'Failed to adopt device', 'error');
-      return;
-    }
-    closeModal('adoptVendoModal');
-
-    // Same "shown once" key modal the manual Add Satellite Kiosk flow
-    // already uses - the underlying credential is the same kind of thing.
-    document.getElementById('kioskKeyName').textContent = data.vendo.name;
-    document.getElementById('kioskKeyValue').value = data.vendo.device_key;
-    openModal('kioskKeyModal');
-
-    loadSatelliteKiosks();
-  } catch (e) {
-    showToast('Failed to adopt device', 'error');
-  }
 }
 
 function openRenameKiosk(id, name) {

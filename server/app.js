@@ -14,7 +14,6 @@ const { execSync } = require('child_process');
 require('./config/database');
 
 const coinRoute = require('./routes/coin');
-const vendoRoute = require('./routes/vendo');
 const sessionRoute = require('./routes/session');
 const promoRoute = require('./routes/promo');
 const adminRoute = require('./routes/admin');
@@ -373,7 +372,6 @@ app.get('/redirect', (req, res) => {
 
 // ── API Routes ────────────────────────────────────────────────
 app.use('/api/coin', coinRoute);
-app.use('/api/vendo', vendoRoute);
 app.use('/api/session', sessionRoute);
 app.use('/api/promo', promoRoute);
 app.use('/api/admin', adminRoute);

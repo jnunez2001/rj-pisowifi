@@ -13,6 +13,13 @@
 // a JSON payload containing only non-sensitive information, matching the
 // spec's "Discovery must NOT establish trust by itself" - no keys, no
 // credentials, nothing an eavesdropper could use to impersonate this box.
+//
+// After discovery, a Vendo registers itself with the address+port it just
+// learned by calling the existing POST /api/vendo/register (admin.js) -
+// real ESP32 firmware already calls that endpoint on boot and every 60s
+// heartbeat, it just currently needs the address hand-configured first.
+// This service exists to remove that manual step, not to introduce a
+// second registration mechanism alongside it.
 
 const dgram = require('dgram');
 const DISCOVERY_PORT = 6970;

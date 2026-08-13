@@ -4,8 +4,10 @@
 // not separate records for Network Devices and Vendo." This is that shared
 // inventory - it merges real passive network discovery (ARP/DHCP, or the
 // MikroTik's own tables in Controller Mode - see networkDiscoveryService.js)
-// with adopted Vendo devices (satellite_kiosks) and active sessions, keyed
-// by MAC so a Vendo appears once, not as two disconnected records.
+// with adopted Vendo devices (the real vendos table real ESP32 firmware
+// self-registers into - see POST /api/vendo/register in admin.js) and
+// active sessions, keyed by MAC so a Vendo appears once, not as two
+// disconnected records.
 //
 // Traffic is real where it can be, honestly absent where it can't: a
 // standalone client only has tc HTB counters while it has an active shaped
@@ -57,9 +59,9 @@ async function listDevices() {
   const { scanNetwork } = require('./networkDiscoveryService');
   const mode = getNetworkMode();
 
-  const [discovered, kiosks, accessPoints, activeSessions] = await Promise.all([
+  const [discovered, vendos, accessPoints, activeSessions] = await Promise.all([
     scanNetwork().catch(() => []),
-    Promise.resolve(db.prepare("SELECT id, name, mac_address, status FROM satellite_kiosks WHERE status = 'adopted'").all()),
+    Promise.resolve(db.prepare("SELECT id, name, mac_address, status FROM vendos WHERE status = 'adopted'").all()),
     Promise.resolve(db.prepare('SELECT mac_address FROM access_points').all()),
     Promise.resolve(db.prepare("SELECT mac_address, hard_expires_at FROM sessions WHERE hard_expires_at > datetime('now') AND is_paused = 0").all()),
   ]);
@@ -67,11 +69,11 @@ async function listDevices() {
   // Reuses the existing "Name Your Devices" client_labels table (Network >
   // Devices) as the rename mechanism here too, instead of a second,
   // duplicate naming table - an admin-set label wins over anything
-  // auto-detected (hostname, kiosk name).
+  // auto-detected (hostname, Vendo's own registered name).
   const labels = db.prepare('SELECT mac_address, label FROM client_labels').all();
   const labelByMac = new Map(labels.map((l) => [String(l.mac_address || '').toLowerCase(), l.label]));
 
-  const kioskByMac = new Map(kiosks.map((k) => [String(k.mac_address || '').toLowerCase(), k]));
+  const vendoByMac = new Map(vendos.map((v) => [String(v.mac_address || '').toLowerCase(), v]));
   const apMacs = new Set(accessPoints.map((a) => String(a.mac_address || '').toLowerCase()));
   const sessionMacs = new Set(activeSessions.map((s) => String(s.mac_address || '').toLowerCase()));
 
@@ -90,16 +92,16 @@ async function listDevices() {
   }
   // A Vendo might be adopted but not currently answering ARP/DHCP (e.g.
   // powered off) - still list it, just as offline with no live IP/VLAN.
-  for (const k of kiosks) {
-    const mac = String(k.mac_address || '').toLowerCase();
+  for (const v of vendos) {
+    const mac = String(v.mac_address || '').toLowerCase();
     if (!mac) continue;
     if (!byMac.has(mac)) byMac.set(mac, { mac });
   }
 
   const devices = [];
   for (const entry of byMac.values()) {
-    const kiosk = kioskByMac.get(entry.mac);
-    const isVendo = !!kiosk;
+    const vendo = vendoByMac.get(entry.mac);
+    const isVendo = !!vendo;
     const isAccessPoint = apMacs.has(entry.mac);
     const hasActiveSession = sessionMacs.has(entry.mac);
     const online = !!entry.ip; // seen in the live discovery pass this call
@@ -118,14 +120,14 @@ async function listDevices() {
 
     devices.push({
       mac: entry.mac,
-      name: labelByMac.get(entry.mac) || (isVendo ? kiosk.name : (entry.hostname || entry.mac)),
+      name: labelByMac.get(entry.mac) || (isVendo ? vendo.name : (entry.hostname || entry.mac)),
       type: inferDeviceType({ isVendo, isAccessPoint, vendorClass: entry.vendor_class }),
       status: online ? 'online' : 'offline',
       ip: entry.ip || null,
       vlan_id: entry.vlan_id || null,
       vendor: entry.vendor || null,
       traffic_bytes: traffic ? traffic.totalBytes : null,
-      vendo_id: isVendo ? kiosk.id : null,
+      vendo_id: isVendo ? vendo.id : null,
     });
   }
 
