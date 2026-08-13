@@ -298,6 +298,32 @@ if [ "$NETWORK_MODE" = "mikrotik" ] && [ "$LAN_VIF" != "$LAN_IF" ]; then
     fi
 fi
 
+# Same as the tagged case above, but for the plain/untagged "main port" -
+# no LAN VLAN configured at all, so LAN_VIF == LAN_IF. Real bug found live:
+# this case had NO address bring-up of its own here - disable_os_network_
+# management() above turns off DHCP/OS management on this interface, then
+# nothing in this script gave it anything else, leaving it entirely to
+# hostNetworkService.js's reapplyStaticNetworkOnBoot() (Node side, runs
+# later, in a separate service) to notice and fix. That worked in principle
+# but not reliably: right after this script disables DHCP and gives the
+# interface nothing, there's no default route yet, so that function's own
+# interface-detection could target the wrong interface - confirmed live,
+# left enp0s8 addressless entirely after a reboot. Bringing this up directly
+# here, the same authoritative way the tagged case already does, removes
+# that dependency and the timing gap it created.
+if [ "$NETWORK_MODE" = "mikrotik" ] && [ "$LAN_VIF" = "$LAN_IF" ]; then
+    pkill -f "dhclient.*$LAN_IF" 2>/dev/null || true
+    if [ "$LAN_STATIC_TYPE" = "static" ] && [ -n "$LAN_STATIC_IP" ] && [ -n "$LAN_STATIC_GATEWAY" ]; then
+        ip addr flush dev $LAN_IF 2>/dev/null
+        ip addr add ${LAN_STATIC_IP}/${LAN_STATIC_SUBNET:-24} dev $LAN_IF
+        ip route replace default via $LAN_STATIC_GATEWAY dev $LAN_IF
+        echo "LAN ($LAN_IF): static $LAN_STATIC_IP/${LAN_STATIC_SUBNET:-24} via $LAN_STATIC_GATEWAY" >> $LOG
+    else
+        dhclient -nw $LAN_IF >> $LOG 2>&1 || true
+        echo "LAN ($LAN_IF): requesting DHCP from router" >> $LOG
+    fi
+fi
+
 # ── ADMIN/PORTAL-HTTPS FIREWALL GUARD (always applied, both modes) ──
 # Real security gap found live: nginx (setup/nginx.conf) listens on port
 # 443 on EVERY interface, and nothing in this project's firewall ever
