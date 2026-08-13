@@ -237,7 +237,7 @@ const pageTitles = {
   network: 'Network',
   security: 'Security',
   branding: 'Branding',
-  devices: 'Devices',
+  devices: 'Vendo Devices',
   update: 'System Update',
   about: 'About',
   'coin-slot-gpio': 'Main Kiosk Coin Slot',
