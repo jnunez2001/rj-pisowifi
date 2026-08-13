@@ -14,6 +14,7 @@ const { execSync } = require('child_process');
 require('./config/database');
 
 const coinRoute = require('./routes/coin');
+const vendoRoute = require('./routes/vendo');
 const sessionRoute = require('./routes/session');
 const promoRoute = require('./routes/promo');
 const adminRoute = require('./routes/admin');
@@ -372,6 +373,7 @@ app.get('/redirect', (req, res) => {
 
 // ── API Routes ────────────────────────────────────────────────
 app.use('/api/coin', coinRoute);
+app.use('/api/vendo', vendoRoute);
 app.use('/api/session', sessionRoute);
 app.use('/api/promo', promoRoute);
 app.use('/api/admin', adminRoute);
@@ -434,6 +436,14 @@ const server = app.listen(PORT, () => {
     require('./services/coinslotGpio').startListener();
   } catch (e) {
     console.warn('[CoinslotGPIO] Listener failed to start (non-fatal):', e.message);
+  }
+
+  // Vendo zero-config discovery - same "never blocks boot" degrade-
+  // gracefully pattern as everything else here.
+  try {
+    require('./services/vendoDiscoveryService').startVendoDiscovery();
+  } catch (e) {
+    console.warn('[VendoDiscovery] Failed to start (non-fatal):', e.message);
   }
 
   // Self-heal watchdog — periodic health check + narrow auto-repair for the

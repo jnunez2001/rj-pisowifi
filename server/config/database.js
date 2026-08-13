@@ -530,6 +530,29 @@ try {
   // already applied
 }
 
+// Vendo Devices: satellite_kiosks extended in place rather than a separate
+// table - a Vendo IS a satellite kiosk (same device_key pairing, same
+// transactions.kiosk_id revenue attribution), just discovered automatically
+// instead of manually created by an admin typing a name. Every existing
+// kiosk defaults to status='adopted' (it was already manually paired, so
+// it's not a pending candidate) - this migration never changes behavior for
+// installs that don't use auto-discovery.
+try {
+  db.exec("ALTER TABLE satellite_kiosks ADD COLUMN mac_address TEXT");
+} catch (e) { /* already applied */ }
+try {
+  db.exec("ALTER TABLE satellite_kiosks ADD COLUMN firmware_version TEXT");
+} catch (e) { /* already applied */ }
+try {
+  db.exec("ALTER TABLE satellite_kiosks ADD COLUMN hardware TEXT");
+} catch (e) { /* already applied */ }
+try {
+  db.exec("ALTER TABLE satellite_kiosks ADD COLUMN status TEXT DEFAULT 'adopted'");
+} catch (e) { /* already applied */ }
+try {
+  db.exec("ALTER TABLE satellite_kiosks ADD COLUMN discovered_via TEXT");
+} catch (e) { /* already applied */ }
+
 // Same story as above: free_claims.ip_address was added to the CREATE TABLE
 // statement after this install's table already existed, so it was never
 // actually created on disk here - every free-minutes claim crashed with

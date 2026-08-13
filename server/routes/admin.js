@@ -330,6 +330,33 @@ router.delete('/satellite-kiosks/:id', adminAuth, (req, res) => {
   }
 });
 
+// ===== VENDO DISCOVERY / ADOPTION =====
+// A Vendo candidate is a satellite_kiosks row with status='candidate' -
+// same underlying pairing/revenue-attribution machinery, just discovered
+// automatically instead of manually created. See satelliteKioskService.js.
+
+// GET /api/admin/vendo-candidates
+router.get('/vendo-candidates', adminAuth, (req, res) => {
+  try {
+    res.json({ success: true, candidates: kioskService.listCandidates() });
+  } catch (err) {
+    console.error('List vendo candidates error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/vendo-candidates/:id/adopt — { name } -> returns the
+// unmasked device_key exactly once, same "shown once" discipline as
+// creating a satellite kiosk manually.
+router.post('/vendo-candidates/:id/adopt', adminAuth, (req, res) => {
+  try {
+    const vendo = kioskService.adoptCandidate(req.params.id, req.body.name);
+    res.json({ success: true, vendo });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
 // DELETE /api/admin/session/:code
 router.delete('/session/:code', adminAuth, async (req, res) => {
   try {
