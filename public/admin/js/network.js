@@ -95,12 +95,29 @@ async function loadCurrentIp() {
   }
 }
 
+// Tracked so the DHCP warning below can react to Network Mode changes,
+// which load/save on a separate card further down the page.
+let currentNetworkMode = 'standalone';
+
 function onNetworkTypeChange() {
   const type = document.getElementById('networkType').value;
   const staticFields = document.getElementById('staticIpFields');
   if (staticFields) {
     staticFields.style.display = type === 'static' ? 'block' : 'none';
   }
+  updateDhcpControllerWarning();
+}
+
+// Controller Mode boxes rely on their own LAN address staying reachable -
+// the MikroTik is both gateway and DHCP server, so if it briefly drops
+// during a brownout, dhclient's lease expires and it deconfigures the
+// interface entirely (no reboot needed). Static, outside the router's
+// DHCP pool, avoids that.
+function updateDhcpControllerWarning() {
+  const warning = document.getElementById('dhcpControllerWarning');
+  if (!warning) return;
+  const type = document.getElementById('networkType').value;
+  warning.style.display = (type === 'dhcp' && currentNetworkMode === 'mikrotik') ? 'block' : 'none';
 }
 
 async function saveNetworkConfig() {
@@ -845,6 +862,8 @@ async function loadNetworkModeSettings() {
     if (!data.success) return;
     const s = data.settings;
     const mode = s.network_mode || 'standalone';
+    currentNetworkMode = mode;
+    updateDhcpControllerWarning();
     document.getElementById('modeStandalone').checked = mode === 'standalone';
     document.getElementById('modeMikrotik').checked = mode === 'mikrotik';
     document.getElementById('modeOpenwrt').checked = mode === 'openwrt';
@@ -1065,6 +1084,8 @@ async function loadLocalInterfaces(savedMac) {
 
 function onNetworkModeChange() {
   const mode = document.querySelector('input[name="networkMode"]:checked').value;
+  currentNetworkMode = mode;
+  updateDhcpControllerWarning();
   document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
   document.getElementById('openwrtFields').style.display = mode === 'openwrt' ? 'block' : 'none';
   updateNetworkModeCards(mode);

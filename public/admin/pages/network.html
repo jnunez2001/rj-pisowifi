@@ -180,6 +180,9 @@
       <input type="text" id="staticDns" placeholder="8.8.8.8">
     </div>
   </div>
+  <div id="dhcpControllerWarning" class="zf-footnote" style="display:none;background:var(--card-orange-bg,rgba(255,152,0,.1));color:var(--accent-orange);border-radius:8px;margin:0 16px 14px;padding:10px 12px;">
+    <i class="fas fa-triangle-exclamation"></i> Controller Mode boxes should use a Static IP outside your router's DHCP pool. On DHCP, this box can lose its own address and become unreachable if the router briefly goes offline, even without a reboot.
+  </div>
   <button class="zf-btn-row" onclick="saveNetworkConfig()" id="saveNetworkBtn">Apply Network Settings</button>
   <div class="zf-footnote">Switch back to DHCP before changing routers or ISPs, otherwise the server may become unreachable.</div>
   <div id="networkStatus" style="display:none;margin:0 16px 14px;padding:12px;border-radius:8px;font-size:13px;"></div>
