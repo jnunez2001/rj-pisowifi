@@ -473,6 +473,27 @@
     </div>
     <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
+  <div class="zf-nav-row" onclick="openMtCapabilitiesModal()">
+    <div class="zf-nav-left">
+      <div class="zf-nav-title">Detected Capabilities</div>
+      <div class="zf-nav-sub" id="mtCapabilitiesNavSub">What this specific router actually supports</div>
+    </div>
+    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+  </div>
+</div>
+
+<!-- MT CAPABILITIES MODAL -->
+<div class="modal-overlay" id="mtCapabilitiesModal">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-header">
+      <div class="modal-title">Detected Capabilities</div>
+      <button class="modal-close" onclick="closeModal('mtCapabilitiesModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="zf-row-hint" style="padding:0 0 10px;">Read directly from this router right now &mdash; never assumed from its RouterOS version. A different router may show different results.</div>
+    <div id="mtCapabilitiesBody">
+      <div class="loading"><i class="fas fa-spinner fa-spin"></i> Checking router...</div>
+    </div>
+  </div>
 </div>
 
 <!-- MT VLAN MODAL -->

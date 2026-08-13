@@ -3394,6 +3394,26 @@ router.delete('/network/vlans/:id', adminAuth, (req, res) => {
   }
 });
 
+// GET /api/admin/network/mikrotik/capabilities — real, read-only discovery
+// of what THIS specific router actually supports (packages, queue types
+// incl. CAKE, and menu-path probes for WireGuard/IPsec/BGP/OSPF/RADIUS/
+// Hotspot/L2TP/OVPN) rather than assuming from RouterOS version or board
+// name. See mikrotikCapabilityModel.js.
+router.get('/network/mikrotik/capabilities', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const { detectMikrotikCapabilities } = require('../services/mikrotikCapabilityModel');
+    const capabilities = await detectMikrotikCapabilities();
+    return res.json({ success: true, ...capabilities });
+  } catch (err) {
+    console.error('MikroTik capability detection error:', err);
+    res.status(500).json({ success: false, message: 'Failed to reach router: ' + err.message });
+  }
+});
+
 // ===== MIKROTIK VLAN MANAGER (network power parity with Standalone) =====
 // Same conceptual shape as the Standalone /network/vlans endpoints just
 // above, but executes over the RouterOS API instead of local `ip link`,

@@ -429,6 +429,69 @@ async function deleteMtForward(id) {
   }
 }
 
+// ===== DETECTED CAPABILITIES =====
+// Real read-only discovery (server/services/mikrotikCapabilityModel.js) -
+// never assumed from RouterOS version, matching the handoff doc's own
+// "a router with a custom CAKE queue type shows CAKE, one without doesn't"
+// rule.
+
+const MT_CAPABILITY_LABELS = {
+  cake: 'CAKE Queue Type',
+  wireguard: 'WireGuard VPN',
+  ipsec: 'IPsec VPN',
+  bgp: 'BGP Routing',
+  ospf: 'OSPF Routing',
+  radius: 'RADIUS',
+  hotspot: 'Hotspot',
+  l2tp: 'L2TP Server',
+  ovpn: 'OpenVPN Server',
+};
+
+function openMtCapabilitiesModal() {
+  document.getElementById('mtCapabilitiesModal').classList.add('show');
+  loadMtCapabilities();
+}
+
+async function loadMtCapabilities() {
+  const body = document.getElementById('mtCapabilitiesBody');
+  body.innerHTML = `<div class="loading"><i class="fas fa-spinner fa-spin"></i> Checking router...</div>`;
+  try {
+    const data = await apiCall('GET', '/api/admin/network/mikrotik/capabilities');
+    if (!data.success) throw new Error(data.message);
+
+    const capRows = Object.entries(MT_CAPABILITY_LABELS).map(([key, label]) => {
+      const supported = !!data.capabilities[key];
+      return `
+        <div class="zf-row" style="padding:8px 0;">
+          <div class="zf-row-label">${escapeHtml(label)}</div>
+          <span class="badge ${supported ? 'badge-green' : 'badge-red'}">
+            <i class="fas ${supported ? 'fa-check' : 'fa-xmark'}"></i> ${supported ? 'Supported' : 'Not Available'}
+          </span>
+        </div>
+      `;
+    }).join('');
+
+    const queueTypesHtml = data.queueTypes.length
+      ? data.queueTypes.map(q => `<span class="badge badge-blue" style="margin:2px;">${escapeHtml(q.name)}${q.kind ? ' (' + escapeHtml(q.kind) + ')' : ''}</span>`).join('')
+      : '<span style="color:var(--text-muted);">None found</span>';
+
+    body.innerHTML = `
+      <div class="zf-wan-grid" style="margin-bottom:16px;">
+        <div><div class="zf-wan-item-label">Model</div><div class="zf-wan-item-value">${escapeHtml(data.model)}</div></div>
+        <div><div class="zf-wan-item-label">RouterOS Version</div><div class="zf-wan-item-value">${escapeHtml(data.routerosVersion)}</div></div>
+        <div><div class="zf-wan-item-label">Architecture</div><div class="zf-wan-item-value">${escapeHtml(data.architecture)}</div></div>
+        <div><div class="zf-wan-item-label">Installed Packages</div><div class="zf-wan-item-value">${data.packages.length}</div></div>
+      </div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px;">Queue Types</div>
+      <div style="margin-bottom:16px;">${queueTypesHtml}</div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px;">Feature Support</div>
+      ${capRows}
+    `;
+  } catch (e) {
+    body.innerHTML = `<div style="color:var(--accent-red);">${escapeHtml(e.message || 'Failed to reach router.')}</div>`;
+  }
+}
+
 // ===== DNS SERVERS (both modes) =====
 
 async function loadDnsServers() {
