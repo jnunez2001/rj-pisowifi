@@ -1,5 +1,9 @@
 #!/bin/bash
 LOG="/var/log/rj-network-setup.log"
+# Derived, not hardcoded - this script always lives at $APP_DIR/setup/
+# setup-network.sh, so its own location is a reliable way to find package.json
+# for the console banner's version number, regardless of install path.
+APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # Bug (found on real hardware, root cause of a whole night of "network mode
 # keeps reverting to standalone" confusion): this used to be hardcoded to
 # the app's old in-repo database path. The database was moved outside the
@@ -963,21 +967,46 @@ echo "nftables restore service installed" >> $LOG
 # which mode branch actually ran above, and still shows something useful
 # on a single-NIC box or an unusual wiring setup those two variables
 # don't fully capture.
+ISSUE_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$APP_DIR/package.json" 2>/dev/null | sed 's/.*:[[:space:]]*"//;s/"$//')
+[ -z "$ISSUE_VERSION" ] && ISSUE_VERSION="unknown"
 {
     echo ""
-    echo "ZenFi - $(hostnamectl --static 2>/dev/null || hostname)"
+    # Same branding as the post-login MOTD (/etc/update-motd.d/00-zenfi),
+    # but shown here in /etc/issue too - agetty prints this the instant boot
+    # finishes, before anyone has typed a username, matching how a real
+    # network appliance (e.g. RouterOS) shows its own branding immediately
+    # rather than only after a successful login. Login itself still
+    # requires the real password either way - this only moves where the
+    # branding appears, not the security boundary.
+    printf '\033[36m'
+    cat << 'ISSUELOGO'
+   _____           ______ _
+  |__  /___ _ _ _  / ____(_)
+   / // _ \ ' \ ' \| |___ _
+  /___\___/_||_||_|\_____(_)
+ISSUELOGO
+    printf '\033[0m'
+    echo ""
+    echo "Zentry Systems - ZenFi Hotspot Server $ISSUE_VERSION"
+    echo "$(hostnamectl --static 2>/dev/null || hostname)"
     echo "-----------------------------------------------"
     FOUND_IP=0
+    ISSUE_PRIMARY_IP=""
     for ifc in $(ls /sys/class/net/ | grep -vE '^(lo|docker|veth|br-)'); do
         IP=$(ip -4 -o addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
         if [ -n "$IP" ]; then
             echo "  $ifc: $IP"
+            [ -z "$ISSUE_PRIMARY_IP" ] && ISSUE_PRIMARY_IP="$IP"
             FOUND_IP=1
         fi
     done
     [ "$FOUND_IP" = "0" ] && echo "  (no IP assigned yet)"
     echo ""
-    echo "Admin panel: http://<ip-above>:3000/admin (from this box only, or via SSH tunnel)"
+    if [ -n "$ISSUE_PRIMARY_IP" ]; then
+        echo "Admin panel: http://$ISSUE_PRIMARY_IP:3000/admin (from this box only, or via SSH tunnel)"
+    else
+        echo "Admin panel: (unavailable - no IP assigned yet)"
+    fi
     echo "-----------------------------------------------"
     echo ""
 } > /etc/issue
