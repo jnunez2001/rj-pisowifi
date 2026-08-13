@@ -3546,6 +3546,8 @@ router.delete('/network/mikrotik/dhcp/:id', adminAuth, async (req, res) => {
 const mikrotikRoleSchema = z.object({
   interfaceName: z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid interface name'),
   role: z.enum(['wan', 'lan', 'guest', 'unused']),
+  confirmed: z.boolean().optional(),
+  reason: z.string().trim().max(200).optional(),
 });
 
 // GET /api/admin/network/mikrotik/roles
@@ -3563,7 +3565,12 @@ router.get('/network/mikrotik/roles', adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/network/mikrotik/roles
+// POST /api/admin/network/mikrotik/roles — goes through configSafety.js's
+// applyMikrotikRoleChangeTransaction (risk check -> require confirmation on
+// a management-path-risky change -> apply -> verify connectivity ->
+// automatic rollback to the interface's previous role on failure). This is
+// the one MikroTik write that can strand the router's own uplink, the same
+// class of risk Standalone's provision/apply route already guards against.
 router.post('/network/mikrotik/roles', adminAuth, validateBody(mikrotikRoleSchema), async (req, res) => {
   try {
     const mikrotikService = require('../services/mikrotikService');
@@ -3571,9 +3578,26 @@ router.post('/network/mikrotik/roles', adminAuth, validateBody(mikrotikRoleSchem
       return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
     }
     const { interfaceName, role } = req.body;
-    const result = await mikrotikService.setInterfaceRole(interfaceName, role);
-    console.log(`🔌 MikroTik interface role set: ${result.interface} → ${result.role}`);
-    return res.json({ success: true, result });
+    const { confirmed, reason } = req.body || {};
+    const { applyMikrotikRoleChangeTransaction } = require('../services/configSafety');
+    const result = await applyMikrotikRoleChangeTransaction({
+      interfaceName, role, operator: 'admin', reason: reason || '', riskConfirmed: !!confirmed,
+    });
+
+    if (result.requiresConfirmation) {
+      return res.status(409).json({
+        success: false,
+        requiresConfirmation: true,
+        reasons: result.reasons,
+        message: 'This change affects the router\'s own internet uplink. Review and confirm to proceed.',
+      });
+    }
+    if (!result.success) {
+      console.error('MikroTik role assign error:', result.message);
+      return res.status(500).json({ success: false, message: result.message, rolledBack: result.rolledBack });
+    }
+    console.log(`🔌 MikroTik interface role set: ${result.result.interface} → ${result.result.role} (verified reachable)`);
+    return res.json({ success: true, result: result.result });
   } catch (err) {
     console.error('MikroTik role assign error:', err);
     res.status(500).json({ success: false, message: 'Failed to set role: ' + err.message });
@@ -3752,24 +3776,37 @@ router.get('/network/dns', adminAuth, async (req, res) => {
 
 // POST /api/admin/network/dns
 router.post('/network/dns', adminAuth, validateBody(dnsSchema), async (req, res) => {
+  const { dns1, dns2 } = req.body;
   try {
-    const { dns1, dns2 } = req.body;
     db.prepare("INSERT INTO settings (key, value) VALUES ('dns_upstream_1', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(dns1);
     db.prepare("INSERT INTO settings (key, value) VALUES ('dns_upstream_2', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(dns2 || '');
-
-    const mikrotikService = require('../services/mikrotikService');
-    if (mikrotikService.isMikrotikModeEnabled()) {
-      const servers = [dns1, dns2].filter(Boolean);
-      await mikrotikService.setDnsServers(servers);
-      console.log(`🌐 DNS servers updated (MikroTik live + saved): ${servers.join(', ')}`);
-    } else {
-      console.log(`🌐 DNS servers saved (applies on next Standalone network apply): ${[dns1, dns2].filter(Boolean).join(', ')}`);
-    }
-    return res.json({ success: true, message: 'DNS settings saved' });
   } catch (err) {
     console.error('DNS settings save error:', err);
-    res.status(500).json({ success: false, message: 'Failed to save DNS settings: ' + err.message });
+    return res.status(500).json({ success: false, message: 'Failed to save DNS settings: ' + err.message });
   }
+
+  // The DB save above is the source of truth and already succeeded by this
+  // point - real bug found live: this used to let a MikroTik push failure
+  // (e.g. router unreachable) fail the WHOLE request, telling the admin
+  // "Failed to save" even though their setting was in fact saved and will
+  // still apply (Standalone reads dns_upstream_1/2 directly; MikroTik will
+  // pick it up on its next successful push). Now the DB save's own success
+  // is what the response reports, with the live-push failure surfaced as a
+  // warning rather than a false failure.
+  const mikrotikService = require('../services/mikrotikService');
+  if (mikrotikService.isMikrotikModeEnabled()) {
+    const servers = [dns1, dns2].filter(Boolean);
+    try {
+      await mikrotikService.setDnsServers(servers);
+      console.log(`🌐 DNS servers updated (MikroTik live + saved): ${servers.join(', ')}`);
+      return res.json({ success: true, message: 'DNS settings saved' });
+    } catch (err) {
+      console.error('DNS settings saved, but MikroTik live push failed:', err.message);
+      return res.json({ success: true, message: 'Saved, but could not push to the router right now: ' + err.message, routerPushFailed: true });
+    }
+  }
+  console.log(`🌐 DNS servers saved (applies on next Standalone network apply): ${[dns1, dns2].filter(Boolean).join(', ')}`);
+  return res.json({ success: true, message: 'DNS settings saved' });
 });
 
 // ===== NAMED BANDWIDTH PROFILES (network power) =====

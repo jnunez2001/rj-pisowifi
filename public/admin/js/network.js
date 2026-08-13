@@ -811,10 +811,11 @@ async function loadNetworkPage() {
   await loadInterfaces();
   await loadVlans();
   await loadClientLabels();
+  await loadDnsServers();
 }
 
 function showRouterModeCards(show) {
-  ['routerSetupCard', 'portalAddressCard', 'routerStatusCard', 'routerTerminalCard'].forEach(id => {
+  ['routerSetupCard', 'portalAddressCard', 'routerStatusCard', 'routerTerminalCard', 'routerPowerCard'].forEach(id => {
     document.getElementById(id).style.display = show ? 'block' : 'none';
   });
   if (show) {
@@ -822,6 +823,7 @@ function showRouterModeCards(show) {
     loadPortalHostname();
     loadRouterPorts();
     loadRouterStatus();
+    loadMikrotikNetworkPowerSummaries();
   }
 }
 

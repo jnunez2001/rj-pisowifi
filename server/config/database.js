@@ -1001,6 +1001,15 @@ for (const stmt of [
   try { db.exec(stmt); } catch (e) { /* already applied */ }
 }
 
+// network_config_versions originally only ever recorded Standalone mode
+// applies (see the table's own comment above) - 'scope' distinguishes
+// those from the MikroTik role-change transactions configSafety.js's
+// applyMikrotikRoleChangeTransaction() also logs here now, since both
+// share the same audit trail rather than needing a second table.
+try {
+  db.exec("ALTER TABLE network_config_versions ADD COLUMN scope TEXT NOT NULL DEFAULT 'standalone'");
+} catch (e) { /* already applied */ }
+
 // VAPID keypair for Web Push (server/services/pushNotificationService.js) -
 // generated once and persisted in settings, not regenerated on every boot,
 // since every customer's existing push subscription is cryptographically

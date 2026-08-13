@@ -18,11 +18,16 @@
 // failed verification restores to, not "state one line ago in this
 // request."
 //
-// Scope for this v1: wraps Standalone mode's setup-network.sh re-apply
-// (router_ports/vlans/static_leases/port_forwards). MikroTik mode has no
-// config-writing surface yet (only per-client allow/block/bandwidth) - it
-// gets wrapped by this same engine once group 4's VLAN/DHCP/firewall work
-// lands on top of it.
+// Scope: wraps Standalone mode's setup-network.sh re-apply
+// (router_ports/vlans/static_leases/port_forwards), AND MikroTik mode's
+// interface-role assignment (applyMikrotikRoleChangeTransaction below) -
+// the one MikroTik write that can strand the box's own uplink the same
+// way removing Standalone's only WAN role can. MikroTik's other writes
+// (VLAN/DHCP/firewall-zone/port-forward create-or-delete) are additive or
+// self-verifying at the RouterOS-API-call level already (see
+// mikrotikService.js's own re-fetch-and-confirm checks) and don't carry
+// that same "can cut off the admin's own path to this box" risk class, so
+// they aren't wrapped here.
 
 const db = require('../config/database');
 const path = require('path');
@@ -135,11 +140,11 @@ function runSetupScript() {
   });
 }
 
-function logVersion({ operator, reason, snapshot, riskReasons, applied, rolledBack, verifyResult }) {
+function logVersion({ operator, reason, snapshot, riskReasons, applied, rolledBack, verifyResult, scope = 'standalone' }) {
   db.prepare(`
     INSERT INTO network_config_versions
-    (operator, reason, snapshot_json, risk_reasons_json, applied, rolled_back, verify_status, verify_detail)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    (operator, reason, snapshot_json, risk_reasons_json, applied, rolled_back, verify_status, verify_detail, scope)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     operator || 'admin',
     reason || '',
@@ -148,7 +153,8 @@ function logVersion({ operator, reason, snapshot, riskReasons, applied, rolledBa
     applied ? 1 : 0,
     rolledBack ? 1 : 0,
     verifyResult ? verifyResult.status : null,
-    verifyResult ? verifyResult.detail : null
+    verifyResult ? verifyResult.detail : null,
+    scope
   );
 }
 
@@ -200,6 +206,70 @@ async function applyNetworkChangeTransaction({ operator, reason, riskConfirmed =
   return { success: true, verifyResult };
 }
 
+// Same "removing the only WAN role" risk as detectManagementPathRisk above,
+// applied to a MikroTik interface-list role change instead of a Standalone
+// lane. baselineRoles/candidateRoles are the shape listInterfaceRoles()
+// returns ({name, role, ...}[]).
+function detectMikrotikRoleRisk(candidateRoles, baselineRoles) {
+  const reasons = [];
+  const baselineWanCount = (baselineRoles || []).filter((r) => r.role === 'wan').length;
+  const candidateWanCount = (candidateRoles || []).filter((r) => r.role === 'wan').length;
+  if (baselineWanCount > 0 && candidateWanCount === 0) {
+    reasons.push('This removes the router\'s only WAN role - it would lose its own internet uplink.');
+  }
+  return { risky: reasons.length > 0, reasons };
+}
+
+// Entry point for POST /network/mikrotik/roles. Unlike Standalone's
+// two-step "save to DB, then apply" flow, a MikroTik role change is live
+// the moment mikrotikService.setInterfaceRole() returns - so "snapshot" is
+// the CURRENT live role list (fetched right before applying, not
+// last-known-good from a DB table), and "rollback" means putting that
+// specific interface back to its pre-change role via the same live API
+// call, not restoring an entire table.
+async function applyMikrotikRoleChangeTransaction({ interfaceName, role, operator, reason, riskConfirmed = false }) {
+  const mikrotikService = require('./mikrotikService');
+  const baseline = await mikrotikService.listInterfaceRoles();
+  const previous = baseline.find((r) => r.name === interfaceName);
+  const previousRole = previous ? previous.role : 'unused';
+  const candidate = baseline.map((r) => (r.name === interfaceName ? { ...r, role } : r));
+
+  const riskCheck = detectMikrotikRoleRisk(candidate, baseline);
+  if (riskCheck.risky && !riskConfirmed) {
+    return { success: false, requiresConfirmation: true, reasons: riskCheck.reasons };
+  }
+
+  let applyResult;
+  try {
+    applyResult = await mikrotikService.setInterfaceRole(interfaceName, role);
+  } catch (err) {
+    logVersion({ operator, reason, snapshot: { interfaceName, previousRole, requestedRole: role }, riskReasons: riskCheck.reasons, applied: false, rolledBack: false, verifyResult: { status: 'apply_failed', detail: err.message }, scope: 'mikrotik' });
+    return { success: false, rolledBack: false, message: 'Apply failed: ' + err.message };
+  }
+
+  const verifyResult = await verifyConnectivity();
+  if (verifyResult.status === 'failed') {
+    let rolledBack = false;
+    try {
+      await mikrotikService.setInterfaceRole(interfaceName, previousRole);
+      rolledBack = true;
+    } catch (err) {
+      console.error('MikroTik role rollback failed:', err.message);
+    }
+    logVersion({ operator, reason, snapshot: { interfaceName, previousRole, requestedRole: role }, riskReasons: riskCheck.reasons, applied: true, rolledBack, verifyResult, scope: 'mikrotik' });
+    return {
+      success: false,
+      rolledBack,
+      message: rolledBack
+        ? 'Connectivity check failed after applying - rolled back to the previous role.'
+        : 'Connectivity check failed after applying, AND rollback also failed. The router may be unreachable - manual review needed.',
+    };
+  }
+
+  logVersion({ operator, reason, snapshot: { interfaceName, previousRole, requestedRole: role }, riskReasons: riskCheck.reasons, applied: true, rolledBack: false, verifyResult, scope: 'mikrotik' });
+  return { success: true, result: applyResult, verifyResult };
+}
+
 module.exports = {
   snapshotNetworkTables,
   restoreNetworkTables,
@@ -208,4 +278,6 @@ module.exports = {
   verifyConnectivity,
   runSetupScript,
   applyNetworkChangeTransaction,
+  detectMikrotikRoleRisk,
+  applyMikrotikRoleChangeTransaction,
 };
