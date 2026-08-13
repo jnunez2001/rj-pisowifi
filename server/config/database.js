@@ -177,6 +177,27 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Access Points v1: manual registry + real reachability monitoring only
+  -- (no discovery scan, no vendor adapters/SSID/radio config yet - see the
+  -- Access Points module scoping decision). Status/last_seen/last_latency
+  -- are only ever written by a real ICMP ping (POST /access-points/:id/ping),
+  -- never fabricated - an AP the admin hasn't pinged yet stays 'unknown'.
+  CREATE TABLE IF NOT EXISTS access_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    ip_address TEXT,
+    mac_address TEXT,
+    vendor TEXT,
+    model TEXT,
+    site_id INTEGER REFERENCES sites(id),
+    notes TEXT,
+    status TEXT NOT NULL DEFAULT 'unknown', -- online | offline | unknown
+    last_seen_at DATETIME,
+    last_latency_ms REAL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS rates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     coin_value INTEGER NOT NULL,

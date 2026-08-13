@@ -4667,6 +4667,160 @@ router.get('/routers/self', adminAuth, async (req, res) => {
   }
 });
 
+// ===== ACCESS POINTS (v1: manual registry + real reachability monitoring) =====
+// Deliberately scoped down (per explicit product decision): no discovery
+// scan, no vendor adapters, no SSID/radio/VLAN management. An admin adds
+// an AP by hand (name/IP/MAC/vendor/model/site) and ZenFi can genuinely
+// ping it to know if it's reachable - status/last_seen/last_latency are
+// never written except by that real check, so an AP nobody has pinged
+// yet honestly stays 'unknown' rather than defaulting to a fake "online".
+
+const AP_TARGET_REGEX = /^[a-zA-Z0-9.:-]{1,253}$/;
+
+function apRowToJson(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    ip_address: row.ip_address,
+    mac_address: row.mac_address,
+    vendor: row.vendor,
+    model: row.model,
+    site_id: row.site_id,
+    site_name: row.site_name || null,
+    notes: row.notes,
+    status: row.status,
+    last_seen_at: row.last_seen_at,
+    last_latency_ms: row.last_latency_ms,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+router.get('/access-points', adminAuth, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT a.*, s.name as site_name FROM access_points a
+      LEFT JOIN sites s ON s.id = a.site_id
+      ORDER BY a.created_at DESC
+    `).all();
+    return res.json({ success: true, accessPoints: rows.map(apRowToJson) });
+  } catch (err) {
+    console.error('Admin list access points error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.get('/access-points/:id', adminAuth, (req, res) => {
+  try {
+    const row = db.prepare(`
+      SELECT a.*, s.name as site_name FROM access_points a LEFT JOIN sites s ON s.id = a.site_id WHERE a.id = ?
+    `).get(req.params.id);
+    if (!row) return res.status(404).json({ success: false, message: 'Access point not found' });
+    return res.json({ success: true, accessPoint: apRowToJson(row) });
+  } catch (err) {
+    console.error('Admin get access point error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+function validateApInput(body, { partial = false } = {}) {
+  const errors = [];
+  const out = {};
+  if (!partial || body.name !== undefined) {
+    const name = String(body.name || '').trim();
+    if (!name) errors.push('AP name is required.');
+    out.name = name;
+  }
+  if (body.ip_address !== undefined) {
+    const ip = String(body.ip_address || '').trim();
+    if (ip && !AP_TARGET_REGEX.test(ip)) errors.push('IP address / hostname looks invalid.');
+    out.ip_address = ip || null;
+  }
+  if (body.mac_address !== undefined) out.mac_address = String(body.mac_address || '').trim().toLowerCase() || null;
+  if (body.vendor !== undefined) out.vendor = String(body.vendor || '').trim().slice(0, 100) || null;
+  if (body.model !== undefined) out.model = String(body.model || '').trim().slice(0, 100) || null;
+  if (body.site_id !== undefined) {
+    const v = body.site_id === null || body.site_id === '' ? null : parseInt(body.site_id, 10);
+    out.site_id = Number.isFinite(v) ? v : null;
+  }
+  if (body.notes !== undefined) out.notes = String(body.notes || '').trim().slice(0, 500) || null;
+  return { errors, out };
+}
+
+router.post('/access-points', adminAuth, (req, res) => {
+  try {
+    const { errors, out } = validateApInput(req.body);
+    if (errors.length) return res.status(400).json({ success: false, message: errors[0], errors });
+    const result = db.prepare(`
+      INSERT INTO access_points (name, ip_address, mac_address, vendor, model, site_id, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(out.name, out.ip_address || null, out.mac_address || null, out.vendor || null, out.model || null, out.site_id ?? null, out.notes || null);
+    console.log(`📶 Access point added: "${out.name}"`);
+    const row = db.prepare('SELECT a.*, s.name as site_name FROM access_points a LEFT JOIN sites s ON s.id = a.site_id WHERE a.id = ?').get(result.lastInsertRowid);
+    return res.json({ success: true, accessPoint: apRowToJson(row) });
+  } catch (err) {
+    console.error('Admin create access point error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Server error' });
+  }
+});
+
+router.patch('/access-points/:id', adminAuth, (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM access_points WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Access point not found' });
+    const { errors, out } = validateApInput(req.body, { partial: true });
+    if (errors.length) return res.status(400).json({ success: false, message: errors[0], errors });
+    const fields = Object.keys(out);
+    if (!fields.length) return res.json({ success: true, accessPoint: apRowToJson(existing) });
+    const setClause = fields.map(f => `${f} = ?`).join(', ');
+    const values = fields.map(f => out[f] ?? null);
+    db.prepare(`UPDATE access_points SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values, req.params.id);
+    console.log(`📶 Access point updated: "${existing.name}" (#${req.params.id})`);
+    const row = db.prepare('SELECT a.*, s.name as site_name FROM access_points a LEFT JOIN sites s ON s.id = a.site_id WHERE a.id = ?').get(req.params.id);
+    return res.json({ success: true, accessPoint: apRowToJson(row) });
+  } catch (err) {
+    console.error('Admin update access point error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Server error' });
+  }
+});
+
+router.delete('/access-points/:id', adminAuth, (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM access_points WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Access point not found' });
+    db.prepare('DELETE FROM access_points WHERE id = ?').run(req.params.id);
+    console.log(`📶 Access point removed: "${existing.name}" (#${req.params.id})`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Admin delete access point error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/access-points/:id/ping — the one place this module
+// actually touches the network. A real ICMP ping (same execFile pattern
+// as /network/diagnostics/ping), parses real round-trip latency, and
+// persists real status/last_seen_at - never simulated.
+router.post('/access-points/:id/ping', adminAuth, (req, res) => {
+  const existing = db.prepare('SELECT * FROM access_points WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ success: false, message: 'Access point not found' });
+  if (!existing.ip_address || !AP_TARGET_REGEX.test(existing.ip_address)) {
+    return res.status(400).json({ success: false, message: 'This AP has no valid IP address/hostname to ping.' });
+  }
+  execFile('ping', ['-c', '2', '-W', '2', existing.ip_address], { timeout: 8000 }, (err, stdout) => {
+    const match = (stdout || '').match(/time[=<]([\d.]+)/);
+    const reachable = !err && !!match;
+    const latency = match ? parseFloat(match[1]) : null;
+    const status = reachable ? 'online' : 'offline';
+    db.prepare(`
+      UPDATE access_points SET status = ?, last_seen_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE last_seen_at END,
+        last_latency_ms = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(status, reachable ? 1 : 0, latency, req.params.id);
+    const row = db.prepare('SELECT a.*, s.name as site_name FROM access_points a LEFT JOIN sites s ON s.id = a.site_id WHERE a.id = ?').get(req.params.id);
+    return res.json({ success: true, accessPoint: apRowToJson(row) });
+  });
+});
+
 // GET /api/admin/entitlements — lets the frontend render locked-feature
 // UI ("PRO FEATURE, upgrade to unlock") without duplicating tier logic.
 // The list of capability names here must stay in sync with
