@@ -384,6 +384,16 @@ router.post('/network-devices/:mac/group', adminAuth, (req, res) => {
   }
 });
 
+// GET /api/admin/network-devices/:mac/history
+router.get('/network-devices/:mac/history', adminAuth, (req, res) => {
+  try {
+    const networkDevicesService = require('../services/networkDevicesService');
+    res.json({ success: true, history: networkDevicesService.getDeviceHistory(req.params.mac) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // DELETE /api/admin/session/:code
 router.delete('/session/:code', adminAuth, async (req, res) => {
   try {
@@ -2569,6 +2579,7 @@ router.delete('/vendos/:id', adminAuth, (req, res) => {
       return res.status(404).json({ success: false, message: 'Device not found' });
     }
     db.prepare('DELETE FROM vendos WHERE id = ?').run(req.params.id);
+    require('../services/networkDevicesService').logDeviceEvent(vendo.mac_address, 'vendo_removed', `"${vendo.name}" removed from ZenFi`);
     console.log(`🗑️  Vendo removed: ${vendo.mac_address} (${vendo.name})`);
     return res.json({ success: true, message: 'Device removed' });
   } catch (err) {
@@ -2581,9 +2592,13 @@ router.delete('/vendos/:id', adminAuth, (req, res) => {
 // this box has never seen before, per POST /vendo/register above).
 router.post('/vendos/:id/adopt', adminAuth, (req, res) => {
   try {
+    const vendo = db.prepare('SELECT mac_address, name FROM vendos WHERE id = ?').get(req.params.id);
     const result = db.prepare("UPDATE vendos SET status = 'adopted' WHERE id = ?").run(req.params.id);
     if (result.changes === 0) {
       return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    if (vendo) {
+      require('../services/networkDevicesService').logDeviceEvent(vendo.mac_address, 'vendo_adopted', `"${vendo.name}" adopted`);
     }
     return res.json({ success: true, message: 'Device adopted' });
   } catch (err) {
@@ -3861,12 +3876,14 @@ router.post('/network/client-labels', adminAuth, (req, res) => {
     }
     if (!lbl) {
       db.prepare('DELETE FROM client_labels WHERE mac_address = ?').run(mac);
+      require('../services/networkDevicesService').logDeviceEvent(mac, 'renamed', 'Custom name cleared');
       return res.json({ success: true, message: 'Label cleared' });
     }
     db.prepare(`
       INSERT INTO client_labels (mac_address, label, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(mac_address) DO UPDATE SET label = excluded.label, updated_at = CURRENT_TIMESTAMP
     `).run(mac, lbl);
+    require('../services/networkDevicesService').logDeviceEvent(mac, 'renamed', `Renamed to "${lbl}"`);
     res.json({ success: true, message: 'Label saved' });
   } catch (err) {
     console.error('Client label save error:', err);

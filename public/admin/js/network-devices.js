@@ -126,6 +126,30 @@ function setDevDetailTab(tab, el) {
   document.getElementById('devDetailOverview').style.display = tab === 'overview' ? 'block' : 'none';
   document.getElementById('devDetailNetwork').style.display = tab === 'network' ? 'block' : 'none';
   document.getElementById('devDetailTraffic').style.display = tab === 'traffic' ? 'block' : 'none';
+  document.getElementById('devDetailHistory').style.display = tab === 'history' ? 'block' : 'none';
+  if (tab === 'history') loadDeviceHistory();
+}
+
+async function loadDeviceHistory() {
+  const block = document.getElementById('devdHistoryBlock');
+  if (!devDetailMac) return;
+  block.innerHTML = `<div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>`;
+  try {
+    const data = await apiCall('GET', `/api/admin/network-devices/${devDetailMac}/history`);
+    if (!data.success || !data.history.length) {
+      block.innerHTML = `<p style="color:var(--text-muted);">No recorded events for this device yet.</p>`;
+      return;
+    }
+    block.innerHTML = data.history.map((h) => `
+      <div style="padding:8px 0;border-bottom:1px solid var(--border-color);">
+        <div style="font-weight:600;">${escapeHtml(h.event_type.replace(/_/g, ' '))}</div>
+        <div style="color:var(--text-muted);">${escapeHtml(h.details || '')}</div>
+        <div style="color:var(--text-muted);font-size:11px;">${new Date(h.created_at + 'Z').toLocaleString()}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    block.innerHTML = `<p style="color:var(--accent-red);">Failed to load history.</p>`;
+  }
 }
 
 function openDevDetail(mac) {

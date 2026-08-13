@@ -173,9 +173,27 @@ function assignDeviceGroup(mac, groupId) {
       INSERT INTO device_group_members (mac_address, group_id) VALUES (?, ?)
       ON CONFLICT(mac_address) DO UPDATE SET group_id = excluded.group_id
     `).run(normalizedMac, groupId);
+    const group = db.prepare('SELECT name FROM device_groups WHERE id = ?').get(groupId);
+    db.prepare('INSERT INTO device_events (mac_address, event_type, details) VALUES (?, ?, ?)')
+      .run(normalizedMac, 'group_changed', `Added to group "${group ? group.name : groupId}"`);
   } else {
     db.prepare('DELETE FROM device_group_members WHERE mac_address = ?').run(normalizedMac);
+    db.prepare('INSERT INTO device_events (mac_address, event_type, details) VALUES (?, ?, ?)')
+      .run(normalizedMac, 'group_changed', 'Removed from group');
   }
 }
 
-module.exports = { listDevices, summarize, listGroups, createGroup, deleteGroup, assignDeviceGroup };
+// Shared logging helper - used by this file's own group-assignment
+// endpoint and by admin.js's Vendo adopt/remove/rename routes, so there's
+// one history table instead of a separate one per feature.
+function logDeviceEvent(mac, eventType, details) {
+  db.prepare('INSERT INTO device_events (mac_address, event_type, details) VALUES (?, ?, ?)')
+    .run(String(mac || '').toLowerCase().trim(), eventType, details || null);
+}
+
+function getDeviceHistory(mac) {
+  return db.prepare('SELECT event_type, details, created_at FROM device_events WHERE mac_address = ? ORDER BY created_at DESC LIMIT 100')
+    .all(String(mac || '').toLowerCase().trim());
+}
+
+module.exports = { listDevices, summarize, listGroups, createGroup, deleteGroup, assignDeviceGroup, logDeviceEvent, getDeviceHistory };

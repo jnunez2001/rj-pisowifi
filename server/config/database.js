@@ -411,6 +411,21 @@ db.exec(`
     group_id INTEGER NOT NULL REFERENCES device_groups(id) ON DELETE CASCADE
   );
 
+  -- Network Devices + Vendo history/audit log, one shared table rather than
+  -- a separate one per feature (the reconciliation earlier this session
+  -- was exactly this mistake happening once already - two disconnected
+  -- registries for the same concept). Admin-initiated events only for now
+  -- (adopted/renamed/group changed/removed) - automatic IP/hostname/
+  -- online-offline change tracking would need a continuous background
+  -- poller comparing snapshots over time, a bigger addition not built yet.
+  CREATE TABLE IF NOT EXISTS device_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac_address TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    details TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Friendly names for MACs, independent of static_leases (a client can be
   -- named without reserving an IP for it) - shown wherever a MAC address
   -- would otherwise be the only identifier (Sessions, Network diagnostics).

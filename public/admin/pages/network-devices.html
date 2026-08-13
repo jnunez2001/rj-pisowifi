@@ -92,6 +92,7 @@
       <div class="zf3-tab active" data-tab="overview" onclick="setDevDetailTab('overview', this)"><i class="fas fa-circle-info"></i> Overview</div>
       <div class="zf3-tab" data-tab="network" onclick="setDevDetailTab('network', this)"><i class="fas fa-diagram-project"></i> Network</div>
       <div class="zf3-tab" data-tab="traffic" onclick="setDevDetailTab('traffic', this)"><i class="fas fa-gauge-high"></i> Traffic</div>
+      <div class="zf3-tab" data-tab="history" onclick="setDevDetailTab('history', this)"><i class="fas fa-clock-rotate-left"></i> History</div>
     </div>
 
     <div id="devDetailOverview">
@@ -126,6 +127,12 @@
     <div id="devDetailTraffic" style="display:none;">
       <div class="zf3-card">
         <div id="devdTrafficBlock" style="font-size:13px;"></div>
+      </div>
+    </div>
+
+    <div id="devDetailHistory" style="display:none;">
+      <div class="zf3-card">
+        <div id="devdHistoryBlock" style="font-size:13px;"></div>
       </div>
     </div>
   </div>
