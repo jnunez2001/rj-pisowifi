@@ -4123,10 +4123,23 @@ router.post('/network/standalone/ports', adminAuth, (req, res) => {
     // there rather than adding a separate endpoint, so an unentitled
     // install saving its port layout is blocked from ever getting a
     // second WAN lane in the first place, not just from viewing status.
+    //
+    // Bug caught before commit: this only compared against the request,
+    // not the currently-saved state, so an install that already has 2 WAN
+    // lanes (e.g. downgraded from Pro) would be hard-blocked from saving
+    // ANY port change at all - saveLanePorts() on the frontend always
+    // resubmits the full lane list, so even renaming an unrelated gated
+    // lane would 403. Only block when the request would INCREASE the WAN
+    // lane count beyond what's already saved, matching the same
+    // "allow staying put, block switching in" shape as the router_mode
+    // gate right above this file's /settings handler.
     const { canUse } = require('../services/entitlementService');
     const requestedWanCount = lanes.filter((l) => l.role === 'wan').length;
     if (requestedWanCount > 1 && !canUse('multi_wan')) {
-      return res.status(403).json({ success: false, message: 'Multi-WAN failover (a second WAN lane) is a Pro feature. Upgrade to add a backup connection.' });
+      const currentWanCount = db.prepare("SELECT COUNT(*) as c FROM router_ports WHERE role = 'wan'").get().c;
+      if (requestedWanCount > currentWanCount) {
+        return res.status(403).json({ success: false, message: 'Multi-WAN failover (a second WAN lane) is a Pro feature. Upgrade to add a backup connection.' });
+      }
     }
 
     const localNames = getLocalPhysicalInterfaces();
