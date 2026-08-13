@@ -4576,6 +4576,64 @@ function routerRowToJson(row) {
   };
 }
 
+// GET /api/admin/routers/self — represents THIS box's own real gateway,
+// not a row in the `routers` fleet table. When network_mode is
+// 'standalone', this box's existing, already-functional network engine
+// (nftables/tc via hostNetworkService.js, DHCP/DNS/NAT/firewall/hotspot -
+// all real, pre-existing capability, not new) is genuinely acting as the
+// router - so "ZenFi Router" in the Routers module must surface real data
+// from that engine (WAN health, live bandwidth, CPU/uptime) instead of
+// being a disconnected label with a fake row and a doomed MikroTik-API
+// test-connection, which is what it was before this fix. When
+// network_mode is 'mikrotik'/'openwrt', this box is itself in Controller
+// Mode (see Network page) and isn't acting as a router, so this reports
+// inactive rather than pretending.
+router.get('/routers/self', adminAuth, async (req, res) => {
+  try {
+    const mode = db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
+    const active = mode === 'standalone';
+
+    if (!active) {
+      return res.json({ success: true, active: false, mode });
+    }
+
+    const cpus = os.cpus();
+    // Bug: getCpuUsagePercents returns one percentage PER CORE (an array),
+    // not a single number - Math.round() on an array is NaN, which
+    // JSON.stringify() silently turns into `null`. Average across cores
+    // for one overall figure, same as any other "CPU Usage" readout in
+    // this app.
+    const perCoreUsage = await getCpuUsagePercents(cpus);
+    const cpuPercent = perCoreUsage.length
+      ? Math.round(perCoreUsage.reduce((sum, p) => sum + p, 0) / perCoreUsage.length)
+      : null;
+    const totalMem = os.totalmem();
+    const freeMem = getAvailableMem();
+    const memPercent = totalMem > 0 ? Math.round(((totalMem - freeMem) / totalMem) * 100) : null;
+
+    let wan = null;
+    try {
+      const { checkWanHealth } = require('../services/wanHealthService');
+      wan = await checkWanHealth();
+    } catch (e) {
+      wan = null;
+    }
+
+    return res.json({
+      success: true,
+      active: true,
+      mode,
+      uptime_seconds: Math.floor(os.uptime()),
+      cpu_percent: cpuPercent,
+      memory_percent: memPercent,
+      wan,
+    });
+  } catch (err) {
+    console.error('Router self-status error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 router.get('/sites', adminAuth, (req, res) => {
   try {
     const rows = db.prepare('SELECT id, name, is_default FROM sites ORDER BY is_default DESC, name ASC').all();

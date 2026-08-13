@@ -871,6 +871,7 @@ select.form-control { cursor: pointer; }
 .empty-state p { font-size: 14px; }
 
 .dropdown-item:hover { background: var(--bg-primary); }
+.zf-deploy-card:hover { border-color: var(--accent-blue); }
 
 /* ===== SCROLLBAR ===== */
 ::-webkit-scrollbar { width: 6px; height: 6px; }

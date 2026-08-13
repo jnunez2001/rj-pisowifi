@@ -59,8 +59,8 @@
   </select>
   <select id="routersModeFilter" class="form-control" style="width:auto;min-width:130px;" onchange="renderRoutersTable()">
     <option value="">All Modes</option>
+    <option value="router">ZenFi Router</option>
     <option value="controller">Controller</option>
-    <option value="standalone">Standalone</option>
   </select>
 </div>
 
@@ -98,18 +98,44 @@
       <button class="modal-close" onclick="closeModal('routerModal')"><i class="fas fa-times"></i></button>
     </div>
 
-    <div class="card-title" style="font-size:12px;margin-bottom:8px;color:var(--text-muted);">DEPLOYMENT MODE</div>
-    <div class="form-row" style="margin-bottom:16px;">
-      <label class="zf-vendor-chip-radio" style="display:flex;flex-direction:column;gap:6px;padding:12px;border:1.5px solid var(--border-color);border-radius:10px;cursor:pointer;">
-        <span style="font-weight:700;font-size:13px;"><input type="radio" name="routerMode" value="controller" id="routerModeController" checked> Controller Mode</span>
-        <span style="font-size:11px;color:var(--text-muted);">Manage an existing MikroTik router.</span>
-      </label>
-      <label class="zf-vendor-chip-radio" style="display:flex;flex-direction:column;gap:6px;padding:12px;border:1.5px solid var(--border-color);border-radius:10px;cursor:pointer;">
-        <span style="font-weight:700;font-size:13px;"><input type="radio" name="routerMode" value="standalone" id="routerModeStandalone"> Standalone Mode</span>
-        <span style="font-size:11px;color:var(--text-muted);">Registered for inventory/monitoring only.</span>
-      </label>
+    <!-- DEPLOYMENT PICKER (new router only) - how the mockup's "How do you
+         want to run your network?" screen maps onto this modal. ZenFi
+         Router is the recommended, real path: it flips this box's
+         existing, already-functional standalone gateway engine into
+         Router Mode (nftables/tc, DHCP/DNS/NAT/firewall/hotspot - all real,
+         see Network page) - it does not create a fleet row or attempt any
+         MikroTik connection. Controller Mode is the compatibility path for
+         an external router the operator already owns, and is the only
+         path that uses the form below. -->
+    <div id="routerDeploymentPicker">
+      <div class="card-title" style="font-size:12px;margin-bottom:8px;color:var(--text-muted);">HOW DO YOU WANT TO RUN YOUR NETWORK?</div>
+      <div class="form-row" style="margin-bottom:8px;">
+        <div class="zf-deploy-card zf-deploy-recommended" onclick="useZenfiAsRouter()" style="cursor:pointer;padding:16px;border:2px solid var(--accent-blue);border-radius:12px;position:relative;">
+          <span class="badge badge-blue" style="position:absolute;top:-10px;left:14px;">RECOMMENDED</span>
+          <div style="font-weight:700;font-size:14px;margin-top:6px;">ZenFi Router</div>
+          <div style="font-size:12px;color:var(--text-muted);margin:6px 0 10px;">Start with ZenFi alone. No separate router required.</div>
+          <ul style="margin:0 0 12px;padding-left:18px;font-size:12px;color:var(--text-secondary);line-height:1.7;">
+            <li>WAN, DHCP, DNS, NAT, Firewall</li>
+            <li>Routing, QoS / bandwidth control</li>
+            <li>Hotspot, Captive Portal, Authentication</li>
+          </ul>
+          <button type="button" class="btn btn-primary" style="width:100%;" onclick="event.stopPropagation();useZenfiAsRouter();"><i class="fas fa-bolt"></i> Use ZenFi as Router</button>
+        </div>
+        <div class="zf-deploy-card" onclick="showControllerConnectForm()" style="cursor:pointer;padding:16px;border:1.5px solid var(--border-color);border-radius:12px;">
+          <div style="font-weight:700;font-size:14px;margin-top:6px;">Existing Router</div>
+          <div style="font-size:12px;color:var(--text-muted);margin:6px 0 10px;">Already have a router? Keep it and let ZenFi manage it.</div>
+          <ul style="margin:0 0 12px;padding-left:18px;font-size:12px;color:var(--text-secondary);line-height:1.7;">
+            <li>MikroTik support</li>
+            <li>Centralized monitoring</li>
+            <li>ZenFi management</li>
+          </ul>
+          <button type="button" class="btn btn-secondary" style="width:100%;" onclick="event.stopPropagation();showControllerConnectForm();"><i class="fas fa-router"></i> Connect Existing Router</button>
+        </div>
+      </div>
     </div>
 
+    <div id="routerConnectForm" style="display:none;">
+    <input type="hidden" id="routerModeController" value="controller">
     <div class="card-title" style="font-size:12px;margin-bottom:8px;color:var(--text-muted);">ROUTER INFO</div>
     <div class="form-row">
       <div class="form-group">
@@ -172,6 +198,48 @@
       <button class="btn btn-primary" id="saveRouterBtn" onclick="saveRouter()">
         <i class="fas fa-save"></i> Save Router
       </button>
+    </div>
+    </div>
+  </div>
+</div>
+
+<!-- ZENFI ROUTER (THIS BOX) DETAIL MODAL -->
+<div class="modal-overlay" id="selfRouterModal">
+  <div class="modal" style="max-width:600px;">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">ZenFi Router</div>
+        <div style="font-size:12px;color:var(--text-muted);">This box's own gateway</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('selfRouterModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="zf3-row3" style="grid-template-columns:1fr 1fr 1fr;">
+      <div class="zf3-card">
+        <div class="zf3-card-title">Uptime</div>
+        <div class="zf3-stat-value" id="srUptime" style="font-size:20px;margin-top:8px;">-</div>
+      </div>
+      <div class="zf3-card">
+        <div class="zf3-card-title">CPU Usage</div>
+        <div class="zf3-stat-value" id="srCpu" style="font-size:20px;margin-top:8px;">-</div>
+      </div>
+      <div class="zf3-card">
+        <div class="zf3-card-title">Memory Usage</div>
+        <div class="zf3-stat-value" id="srMem" style="font-size:20px;margin-top:8px;">-</div>
+      </div>
+    </div>
+    <div class="zf3-card">
+      <div class="zf3-card-title" style="margin-bottom:12px;">WAN Status</div>
+      <div class="zf3-wan-grid" id="srWanGrid">
+        <div><div class="zf3-wan-item-label">Status</div><div class="zf3-wan-item-value" id="srWanStatus">-</div></div>
+      </div>
+    </div>
+    <div class="alert alert-info" style="margin-bottom:16px;">
+      <i class="fas fa-info-circle"></i> Full WAN/LAN/DHCP/DNS/Firewall/Bandwidth/Hotspot configuration for this box lives on its existing dedicated pages, not duplicated here.
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-secondary" onclick="closeModal('selfRouterModal');navigateTo('network');"><i class="fas fa-network-wired"></i> Network Settings</button>
+      <button class="btn btn-secondary" onclick="closeModal('selfRouterModal');navigateTo('security');"><i class="fas fa-shield-halved"></i> Bandwidth / QoS</button>
+      <button class="btn btn-secondary" onclick="closeModal('selfRouterModal');navigateTo('hotspot-settings');"><i class="fas fa-wifi"></i> Hotspot Settings</button>
     </div>
   </div>
 </div>

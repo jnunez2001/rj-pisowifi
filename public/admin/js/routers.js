@@ -3,10 +3,21 @@ let rtAllRouters = [];
 let rtAllSites = [];
 let rtEditingId = null;
 let rtDetailId = null;
+let rtSelfRouter = null; // this box's own real gateway, from /api/admin/routers/self
 
 async function loadRoutersPage() {
   await loadSitesForRouters();
+  await loadSelfRouter();
   await loadRoutersList();
+}
+
+async function loadSelfRouter() {
+  try {
+    const data = await apiCall('GET', '/api/admin/routers/self');
+    rtSelfRouter = (data.success && data.active) ? data : null;
+  } catch (e) {
+    rtSelfRouter = null;
+  }
 }
 
 async function loadSitesForRouters() {
@@ -37,8 +48,9 @@ async function loadRoutersList() {
 }
 
 function renderRoutersSummary() {
-  const total = rtAllRouters.length;
-  const online = rtAllRouters.filter(r => r.status === 'online').length;
+  const selfCount = rtSelfRouter ? 1 : 0;
+  const total = rtAllRouters.length + selfCount;
+  const online = rtAllRouters.filter(r => r.status === 'online').length + selfCount;
   const offline = total - online;
   document.getElementById('routersTotalCount').textContent = total;
   document.getElementById('routersOnlineCount').textContent = online;
@@ -70,6 +82,24 @@ function formatUptimeSeconds(sec) {
   return `${m}m`;
 }
 
+function selfRouterRowHtml() {
+  if (!rtSelfRouter) return '';
+  return `
+    <tr style="cursor:pointer;" onclick="openSelfRouterDetail()">
+      <td>
+        <div style="font-weight:700;color:var(--text-primary);"><i class="fas fa-star" style="color:var(--accent-blue);font-size:11px;margin-right:4px;"></i> ZenFi Router</div>
+        <div style="font-size:11px;color:var(--text-muted);">This box's own gateway</div>
+      </td>
+      <td>${routerStatusBadge('online')}</td>
+      <td><span class="badge badge-blue">Router</span></td>
+      <td>-</td>
+      <td style="font-family:monospace;font-size:12px;">localhost</td>
+      <td>${formatUptimeSeconds(rtSelfRouter.uptime_seconds)}</td>
+      <td>${rtSelfRouter.cpu_percent ?? '-'}% / ${rtSelfRouter.memory_percent ?? '-'}%</td>
+      <td><button class="btn btn-sm btn-secondary btn-icon" onclick="event.stopPropagation();openSelfRouterDetail();" title="View"><i class="fas fa-eye"></i></button></td>
+    </tr>`;
+}
+
 function renderRoutersTable() {
   const tbody = document.getElementById('routersTable');
   const summary = document.getElementById('routersSummary');
@@ -79,20 +109,29 @@ function renderRoutersTable() {
   const statusFilter = document.getElementById('routersStatusFilter')?.value || '';
   const modeFilter = document.getElementById('routersModeFilter')?.value || '';
 
+  const showSelf = rtSelfRouter
+    && (!modeFilter || modeFilter === 'router')
+    && (!statusFilter || statusFilter === 'online')
+    && (!search || 'zenfi router'.includes(search));
+
   let rows = rtAllRouters.filter(r => {
+    if (modeFilter === 'router') return false;
     if (statusFilter && r.status !== statusFilter) return false;
     if (modeFilter && r.mode !== modeFilter) return false;
     if (search && !(r.name.toLowerCase().includes(search) || (r.model || '').toLowerCase().includes(search) || (r.host || '').toLowerCase().includes(search))) return false;
     return true;
   });
 
-  if (!rtAllRouters.length) {
+  const totalCount = rtAllRouters.length + (rtSelfRouter ? 1 : 0);
+  const shownCount = rows.length + (showSelf ? 1 : 0);
+
+  if (!totalCount) {
     tbody.innerHTML = `
       <tr><td colspan="8">
         <div class="empty-state">
           <i class="fas fa-router"></i>
           <h3>No Routers Yet</h3>
-          <p>Connect an existing MikroTik router to start monitoring and managing it.</p>
+          <p>Use ZenFi as your router, or connect an existing MikroTik router.</p>
           <button class="btn btn-primary" onclick="openAddRouter()"><i class="fas fa-plus"></i> Add Router</button>
         </div>
       </td></tr>`;
@@ -100,7 +139,7 @@ function renderRoutersTable() {
     return;
   }
 
-  if (!rows.length) {
+  if (!shownCount) {
     tbody.innerHTML = `
       <tr><td colspan="8">
         <div class="empty-state">
@@ -109,18 +148,18 @@ function renderRoutersTable() {
           <button class="btn btn-secondary" onclick="clearRoutersFilters()">Clear Filters</button>
         </div>
       </td></tr>`;
-    summary.textContent = `Showing 0 of ${rtAllRouters.length} routers`;
+    summary.textContent = `Showing 0 of ${totalCount} routers`;
     return;
   }
 
-  tbody.innerHTML = rows.map(r => `
+  tbody.innerHTML = (showSelf ? selfRouterRowHtml() : '') + rows.map(r => `
     <tr style="cursor:pointer;" onclick="openRouterDetail(${r.id})">
       <td>
         <div style="font-weight:700;color:var(--text-primary);">${escapeHtml(r.name)}</div>
         <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(r.manufacturer)}${r.model ? ' · ' + escapeHtml(r.model) : ''}</div>
       </td>
       <td>${routerStatusBadge(r.status)}</td>
-      <td><span class="badge badge-blue">${r.mode === 'controller' ? 'Controller' : 'Standalone'}</span></td>
+      <td><span class="badge badge-blue">Controller</span></td>
       <td>${escapeHtml(r.site_name || '-')}</td>
       <td style="font-family:monospace;font-size:12px;">${escapeHtml(r.host || '-')}</td>
       <td>${formatUptimeSeconds(r.uptime_seconds)}</td>
@@ -135,7 +174,7 @@ function renderRoutersTable() {
     </tr>
   `).join('');
 
-  summary.textContent = `Showing ${rows.length} of ${rtAllRouters.length} routers`;
+  summary.textContent = `Showing ${shownCount} of ${totalCount} routers`;
 }
 
 function clearRoutersFilters() {
@@ -153,7 +192,6 @@ function populateRouterSiteSelect() {
 function resetRouterForm() {
   rtEditingId = null;
   document.getElementById('routerModalTitle').textContent = 'Add Router';
-  document.getElementById('routerModeController').checked = true;
   document.getElementById('routerManufacturer').value = 'mikrotik';
   document.getElementById('routerModel').value = '';
   document.getElementById('routerName').value = '';
@@ -167,9 +205,49 @@ function resetRouterForm() {
   document.getElementById('routerTestResult').style.display = 'none';
 }
 
+// New router: show the "how do you want to run your network?" picker
+// first (ZenFi Router vs Existing Router), matching the product's actual
+// recommended path. Editing an existing fleet entry always means an
+// external Controller-mode device, so it skips straight to the connect
+// form.
 function openAddRouter() {
   resetRouterForm();
+  document.getElementById('routerModalTitle').textContent = 'Add Router';
+  document.getElementById('routerDeploymentPicker').style.display = 'block';
+  document.getElementById('routerConnectForm').style.display = 'none';
   document.getElementById('routerModal').classList.add('show');
+}
+
+function showControllerConnectForm() {
+  document.getElementById('routerModalTitle').textContent = 'Connect Existing Router';
+  document.getElementById('routerDeploymentPicker').style.display = 'none';
+  document.getElementById('routerConnectForm').style.display = 'block';
+}
+
+// Real action, not a label: flips this box's own network_mode setting to
+// 'standalone' - the same setting the existing Network page's Router Mode
+// switch uses - so ZenFi genuinely becomes the gateway (WAN/DHCP/DNS/NAT/
+// firewall/hotspot, all real, pre-existing engine). Does not create a
+// fleet row; the ZenFi Router entry in the table comes from
+// /api/admin/routers/self reading this same setting back.
+async function useZenfiAsRouter() {
+  if (rtSelfRouter) {
+    showToast('ZenFi is already running as your router.', 'info');
+    closeModal('routerModal');
+    return;
+  }
+  try {
+    const data = await apiCall('POST', '/api/admin/settings', { network_mode: 'standalone' });
+    if (data.success) {
+      showToast('ZenFi is now your router.', 'success');
+      closeModal('routerModal');
+      loadRoutersPage();
+    } else {
+      showToast(data.message || 'Unable to switch to Router Mode.', 'error');
+    }
+  } catch (e) {
+    showToast('Unable to switch to Router Mode.', 'error');
+  }
 }
 
 function openEditRouter(id) {
@@ -178,8 +256,8 @@ function openEditRouter(id) {
   resetRouterForm();
   rtEditingId = id;
   document.getElementById('routerModalTitle').textContent = 'Edit Router';
-  document.getElementById('routerModeController').checked = r.mode === 'controller';
-  document.getElementById('routerModeStandalone').checked = r.mode === 'standalone';
+  document.getElementById('routerDeploymentPicker').style.display = 'none';
+  document.getElementById('routerConnectForm').style.display = 'block';
   document.getElementById('routerManufacturer').value = r.manufacturer;
   document.getElementById('routerModel').value = r.model || '';
   document.getElementById('routerName').value = r.name;
@@ -194,12 +272,11 @@ function openEditRouter(id) {
 }
 
 function currentRouterFormPayload() {
-  const mode = document.querySelector('input[name="routerMode"]:checked').value;
   return {
     name: document.getElementById('routerName').value.trim(),
     manufacturer: document.getElementById('routerManufacturer').value,
     model: document.getElementById('routerModel').value.trim(),
-    mode,
+    mode: 'controller',
     site_id: document.getElementById('routerSiteId').value || null,
     host: document.getElementById('routerHost').value.trim(),
     port: document.getElementById('routerPort').value || null,
@@ -297,6 +374,27 @@ function setRouterDetailTab(tab, el) {
   document.getElementById('routerDetailInterfaces').style.display = tab === 'interfaces' ? 'block' : 'none';
   document.getElementById('routerDetailMore').style.display = tab === 'more' ? 'block' : 'none';
   if (tab === 'interfaces') loadRouterInterfaces(rtDetailId);
+}
+
+function openSelfRouterDetail() {
+  if (!rtSelfRouter) return;
+  document.getElementById('srUptime').textContent = formatUptimeSeconds(rtSelfRouter.uptime_seconds);
+  document.getElementById('srCpu').textContent = (rtSelfRouter.cpu_percent ?? '-') + '%';
+  document.getElementById('srMem').textContent = (rtSelfRouter.memory_percent ?? '-') + '%';
+
+  const wan = rtSelfRouter.wan;
+  const grid = document.getElementById('srWanGrid');
+  if (wan && wan.ping_status) {
+    grid.innerHTML = `
+      <div><div class="zf3-wan-item-label">Status</div><div class="zf3-wan-item-value">${escapeHtml(wan.ping_status)}</div></div>
+      <div><div class="zf3-wan-item-label">Latency</div><div class="zf3-wan-item-value">${wan.avg_latency_ms !== null && wan.avg_latency_ms !== undefined ? wan.avg_latency_ms + ' ms' : '-'}</div></div>
+      <div><div class="zf3-wan-item-label">Packet Loss</div><div class="zf3-wan-item-value">${wan.packet_loss_pct !== null && wan.packet_loss_pct !== undefined ? wan.packet_loss_pct + '%' : '-'}</div></div>
+    `;
+  } else {
+    grid.innerHTML = '<div><div class="zf3-wan-item-label">Status</div><div class="zf3-wan-item-value">Not available</div></div>';
+  }
+
+  document.getElementById('selfRouterModal').classList.add('show');
 }
 
 function openRouterDetail(id) {
