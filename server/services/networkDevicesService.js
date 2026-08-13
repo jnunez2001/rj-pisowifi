@@ -64,6 +64,13 @@ async function listDevices() {
     Promise.resolve(db.prepare("SELECT mac_address, hard_expires_at FROM sessions WHERE hard_expires_at > datetime('now') AND is_paused = 0").all()),
   ]);
 
+  // Reuses the existing "Name Your Devices" client_labels table (Network >
+  // Devices) as the rename mechanism here too, instead of a second,
+  // duplicate naming table - an admin-set label wins over anything
+  // auto-detected (hostname, kiosk name).
+  const labels = db.prepare('SELECT mac_address, label FROM client_labels').all();
+  const labelByMac = new Map(labels.map((l) => [String(l.mac_address || '').toLowerCase(), l.label]));
+
   const kioskByMac = new Map(kiosks.map((k) => [String(k.mac_address || '').toLowerCase(), k]));
   const apMacs = new Set(accessPoints.map((a) => String(a.mac_address || '').toLowerCase()));
   const sessionMacs = new Set(activeSessions.map((s) => String(s.mac_address || '').toLowerCase()));
@@ -111,7 +118,7 @@ async function listDevices() {
 
     devices.push({
       mac: entry.mac,
-      name: isVendo ? kiosk.name : (entry.hostname || entry.mac),
+      name: labelByMac.get(entry.mac) || (isVendo ? kiosk.name : (entry.hostname || entry.mac)),
       type: inferDeviceType({ isVendo, isAccessPoint, vendorClass: entry.vendor_class }),
       status: online ? 'online' : 'offline',
       ip: entry.ip || null,

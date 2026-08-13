@@ -86,7 +86,7 @@ function renderDevicesTable() {
   }
 
   tbody.innerHTML = rows.map((d) => `
-    <tr>
+    <tr style="cursor:pointer;" onclick="openDevDetail('${d.mac}')">
       <td>
         <div style="font-weight:700;color:var(--text-primary);">${escapeHtml(d.name)}</div>
         <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(d.vendor || '')}</div>
@@ -100,4 +100,105 @@ function renderDevicesTable() {
     </tr>
   `).join('');
   summary.textContent = `Showing ${rows.length} of ${devAll.length} devices`;
+}
+
+// ===== DEVICE DETAIL =====
+let devDetailMac = null;
+
+function setDevDetailTab(tab, el) {
+  document.querySelectorAll('#devDetailTabs .zf3-tab').forEach((t) => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('devDetailOverview').style.display = tab === 'overview' ? 'block' : 'none';
+  document.getElementById('devDetailNetwork').style.display = tab === 'network' ? 'block' : 'none';
+  document.getElementById('devDetailTraffic').style.display = tab === 'traffic' ? 'block' : 'none';
+}
+
+function openDevDetail(mac) {
+  const d = devAll.find((x) => x.mac === mac);
+  if (!d) return;
+  devDetailMac = mac;
+
+  document.getElementById('devDetailName').textContent = d.name;
+  document.getElementById('devDetailSub').textContent = d.mac;
+
+  document.querySelectorAll('#devDetailTabs .zf3-tab').forEach((t) => t.classList.remove('active'));
+  document.querySelector('#devDetailTabs .zf3-tab').classList.add('active');
+  setDevDetailTab('overview', document.querySelector('#devDetailTabs .zf3-tab'));
+
+  document.getElementById('devdType').textContent = d.type;
+  document.getElementById('devdStatus').textContent = d.status === 'online' ? 'Online' : 'Offline';
+  document.getElementById('devdVendor').textContent = d.vendor || 'Unknown';
+  document.getElementById('devdMac').textContent = d.mac;
+
+  document.getElementById('devdIp').textContent = d.ip || 'Unavailable';
+  document.getElementById('devdVlan').textContent = d.vlan_id ? `VLAN ${d.vlan_id}` : 'Not verified';
+
+  const trafficBlock = document.getElementById('devdTrafficBlock');
+  if (d.traffic_bytes !== null && d.traffic_bytes !== undefined) {
+    trafficBlock.innerHTML = `
+      <div class="zf3-wan-item-label">Total (this session)</div>
+      <div class="zf3-wan-item-value">${devTrafficCell(d.traffic_bytes)}</div>
+      <p style="color:var(--text-muted);font-size:12px;margin-top:8px;">Cumulative total since this device's current session started. Not a historical/per-period breakdown.</p>
+    `;
+  } else {
+    trafficBlock.innerHTML = `
+      <div class="empty-state" style="padding:16px;">
+        <i class="fas fa-gauge-high"></i>
+        <h3>Traffic not available</h3>
+        <p>This device has no active shaped session right now, so there's no live traffic counter for it.</p>
+      </div>
+    `;
+  }
+
+  document.getElementById('devDetailModal').classList.add('show');
+}
+
+function openRenameDevice() {
+  if (!devDetailMac) return;
+  const d = devAll.find((x) => x.mac === devDetailMac);
+  document.getElementById('renameDeviceName').value = d ? d.name : '';
+  openModal('renameDeviceModal');
+}
+
+async function submitRenameDevice() {
+  const name = document.getElementById('renameDeviceName').value.trim();
+  if (!devDetailMac) return;
+  try {
+    // Reuses the existing Network > Devices "Name Your Devices" endpoint -
+    // same client_labels table, so a rename here and a rename there stay
+    // consistent instead of two separate naming systems.
+    const data = await apiCall('POST', '/api/admin/network/client-labels', { mac_address: devDetailMac, label: name });
+    if (!data.success) {
+      showToast(data.message || 'Failed to rename device', 'error');
+      return;
+    }
+    closeModal('renameDeviceModal');
+    closeModal('devDetailModal');
+    showToast('Device renamed');
+    loadNetworkDevicesPage();
+  } catch (e) {
+    showToast('Failed to rename device', 'error');
+  }
+}
+
+// ===== EXPORT =====
+function exportDevicesCsv() {
+  if (!devAll.length) {
+    showToast('No devices to export', 'error');
+    return;
+  }
+  const header = ['Device', 'Type', 'Status', 'IP', 'MAC', 'VLAN', 'Vendor', 'Traffic (bytes)'];
+  const rows = devAll.map((d) => [
+    d.name, d.type, d.status, d.ip || '', d.mac, d.vlan_id || '', d.vendor || '', d.traffic_bytes ?? '',
+  ]);
+  const csv = [header, ...rows]
+    .map((row) => row.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `zenfi-network-devices-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }
