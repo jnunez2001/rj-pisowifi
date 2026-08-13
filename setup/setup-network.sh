@@ -940,4 +940,48 @@ echo "nftables restore service installed" >> $LOG
 } > /etc/issue
 echo "Console IP banner updated (/etc/issue)" >> $LOG
 
+# ── BRANDED POST-LOGIN CONSOLE (MOTD) ──────────────────────────
+# Ubuntu's stock update-motd.d scripts (update-available nag, ESM/Pro ads,
+# landscape sysinfo) clutter what should feel like a real network
+# appliance's own console, the way a MikroTik's login never shows anything
+# but its own branding. Disabling the stock scripts once and replacing them
+# with just this box's own banner (recomputed fresh on every login, not
+# baked in at setup time, so it's never stale) matches that.
+if [ -d /etc/update-motd.d ]; then
+    chmod -x /etc/update-motd.d/* 2>/dev/null || true
+fi
+cat > /etc/update-motd.d/00-zenfi << 'MOTDEOF'
+#!/bin/bash
+IDENTITY_FILE="/var/lib/rj-pisowifi/.device-identity"
+DEVICE_ID=$(grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' "$IDENTITY_FILE" 2>/dev/null | sed 's/.*:[[:space:]]*"//;s/"$//')
+[ -z "$DEVICE_ID" ] && DEVICE_ID="(not yet generated)"
+echo ""
+printf '\033[36m'
+cat << 'LOGO'
+   _____           ______ _
+  |__  /___ _ _ _  / ____(_)
+   / // _ \ ' \ ' \| |___ _
+  /___\___/_||_||_|\_____(_)
+LOGO
+printf '\033[0m'
+echo ""
+echo "  Zentry Systems - ZenFi Hotspot Server"
+echo "  Device ID: $DEVICE_ID"
+echo "  -----------------------------------------------"
+FOUND=0
+for ifc in $(ls /sys/class/net/ | grep -vE '^(lo|docker|veth|br-)'); do
+    IP=$(ip -4 -o addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
+    if [ -n "$IP" ]; then
+        echo "    $ifc: $IP"
+        FOUND=1
+    fi
+done
+[ "$FOUND" = "0" ] && echo "    (no IP assigned yet)"
+echo "  -----------------------------------------------"
+echo "  Admin panel: http://<ip-above>:3000/admin"
+echo ""
+MOTDEOF
+chmod +x /etc/update-motd.d/00-zenfi
+echo "Console MOTD updated (/etc/update-motd.d/00-zenfi)" >> $LOG
+
 echo "=== Setup complete ===" >> $LOG

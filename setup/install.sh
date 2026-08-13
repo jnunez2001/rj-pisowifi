@@ -111,6 +111,25 @@ echo "DNS configured" | tee -a $LOG
 # ─── 6. SYSTEM CONFIG ────────────────────────────────────────
 echo "[5/8] System configuration..." | tee -a $LOG
 
+# Quiet boot — a real network appliance (MikroTik, any consumer router)
+# never shows raw Linux service-startup spam ("[ OK ] Started Docker
+# Application Container Engine", cloud-init module timing, etc.) on its own
+# console. That noise undermines the "stable, professional appliance" feel
+# this box's own branded banner (see setup-network.sh's /etc/issue and
+# /etc/update-motd.d/00-zenfi) is otherwise going for. Suppressing kernel
+# and systemd status output leaves just this box's own branding and the
+# login prompt, matching that. Safe to skip if grub isn't present (some
+# cloud/VM images boot without it).
+if [ -f /etc/default/grub ]; then
+    cp /etc/default/grub /etc/default/grub.rj-pisowifi.bak 2>/dev/null || true
+    if ! grep -q "systemd.show_status=0" /etc/default/grub; then
+        sed -i 's/^GRUB_CMDLINE_LINUX_DEFAULT="\(.*\)"/GRUB_CMDLINE_LINUX_DEFAULT="\1 quiet loglevel=3 systemd.show_status=0"/' /etc/default/grub
+        sed -i 's/^GRUB_CMDLINE_LINUX="\(.*\)"/GRUB_CMDLINE_LINUX="\1"/' /etc/default/grub
+        update-grub >> $LOG 2>&1 || grub2-mkconfig -o /boot/grub2/grub.cfg >> $LOG 2>&1 || true
+        echo "Quiet boot configured (takes effect next reboot)" >> $LOG
+    fi
+fi
+
 # IP forwarding permanent
 grep -q "net.ipv4.ip_forward=1" /etc/sysctl.conf || \
   echo "net.ipv4.ip_forward=1" >> /etc/sysctl.conf
