@@ -1085,13 +1085,18 @@ async function scanForDevices() {
       // active-host-name, not host-name (host-name is the static field,
       // which stays blank on ordinary dynamic leases) - checking both
       // covers static-bound leases too.
+      // A MAC can have more than one lease record (e.g. a static binding
+      // alongside a dynamic one) - merge rather than overwrite, so a
+      // blank field on whichever record RouterOS returns second doesn't
+      // wipe out a hostname/class-id a different record already had.
+      const existing = leaseByMac.get(mac) || {};
       leaseByMac.set(mac, {
-        hostname: lease['active-host-name'] || lease['host-name'] || null,
+        hostname: existing.hostname || lease['active-host-name'] || lease['host-name'] || null,
         // DHCP vendor class (option 60) - RouterOS's "Active Class ID"
         // column. Often more identifying than hostname for spotting an AP
         // specifically, e.g. "Omada Wireless EAP225-Outdoor" versus a
         // generic phone hostname.
-        vendor_class: lease['active-class-id'] || lease['class-id'] || null,
+        vendor_class: existing.vendor_class || lease['active-class-id'] || lease['class-id'] || null,
       });
     }
 

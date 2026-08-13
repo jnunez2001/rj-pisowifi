@@ -154,7 +154,16 @@ function getNetworkMode() {
 // discover across VLANs this box structurally cannot see.
 async function scanNetworkViaMikrotik() {
   const mikrotikService = require('./mikrotikService');
-  const entries = await mikrotikService.scanForDevices();
+  let entries;
+  try {
+    entries = await mikrotikService.scanForDevices();
+  } catch (e) {
+    // Every other source in this file (getDhcpLeases, execArpA) degrades to
+    // an empty result on failure rather than throwing - a transient
+    // MikroTik connectivity blip shouldn't turn a scan into a hard error.
+    console.error('MikroTik scanForDevices error:', e.message);
+    return [];
+  }
   return entries.map((entry) => ({
     ip: entry.ip,
     mac: entry.mac,
