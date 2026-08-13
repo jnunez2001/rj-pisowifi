@@ -418,6 +418,19 @@ db.exec(`
   -- (adopted/renamed/group changed/removed) - automatic IP/hostname/
   -- online-offline change tracking would need a continuous background
   -- poller comparing snapshots over time, a bigger addition not built yet.
+  -- Network Devices: which MACs an admin has explicitly blocked. Real
+  -- enforcement (networkService.blockClient(), the same mode-aware nftables/
+  -- RouterOS mechanism session management already uses) - this table is
+  -- just persistence so the UI can show blocked state and the block
+  -- survives this box's own process restart. It does NOT survive a full
+  -- network reconfiguration (setup-network.sh rebuilding firewall state
+  -- from scratch at boot) - reapplying blocks at boot isn't wired up yet,
+  -- a real, documented limitation rather than something silently broken.
+  CREATE TABLE IF NOT EXISTS device_blocks (
+    mac_address TEXT PRIMARY KEY,
+    blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS device_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     mac_address TEXT NOT NULL,

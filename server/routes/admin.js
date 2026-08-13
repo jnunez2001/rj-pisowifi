@@ -394,6 +394,30 @@ router.get('/network-devices/:mac/history', adminAuth, (req, res) => {
   }
 });
 
+// POST /api/admin/network-devices/:mac/block
+router.post('/network-devices/:mac/block', adminAuth, async (req, res) => {
+  try {
+    const networkDevicesService = require('../services/networkDevicesService');
+    await networkDevicesService.blockDevice(req.params.mac);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Device block error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/network-devices/:mac/unblock
+router.post('/network-devices/:mac/unblock', adminAuth, async (req, res) => {
+  try {
+    const networkDevicesService = require('../services/networkDevicesService');
+    await networkDevicesService.unblockDevice(req.params.mac);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Device unblock error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // DELETE /api/admin/session/:code
 router.delete('/session/:code', adminAuth, async (req, res) => {
   try {

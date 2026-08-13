@@ -111,6 +111,7 @@
         <div class="zf3-wan-grid">
           <div><div class="zf3-wan-item-label">Type</div><div class="zf3-wan-item-value" id="devdType">-</div></div>
           <div><div class="zf3-wan-item-label">Status</div><div class="zf3-wan-item-value" id="devdStatus">-</div></div>
+          <div><div class="zf3-wan-item-label">Access</div><div class="zf3-wan-item-value" id="devdAccess">-</div></div>
           <div><div class="zf3-wan-item-label">Vendor</div><div class="zf3-wan-item-value" id="devdVendor">-</div></div>
           <div><div class="zf3-wan-item-label">MAC Address</div><div class="zf3-wan-item-value" id="devdMac">-</div></div>
         </div>
@@ -123,6 +124,7 @@
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button class="btn btn-secondary" onclick="openRenameDevice()"><i class="fas fa-pen"></i> Rename</button>
+        <button class="btn btn-danger" id="devdBlockBtn" onclick="toggleDeviceBlock()"><i class="fas fa-ban"></i> Block</button>
       </div>
     </div>
 

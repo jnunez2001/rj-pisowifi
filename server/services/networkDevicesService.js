@@ -82,6 +82,7 @@ async function listDevices() {
   const vendoByMac = new Map(vendos.map((v) => [String(v.mac_address || '').toLowerCase(), v]));
   const apMacs = new Set(accessPoints.map((a) => String(a.mac_address || '').toLowerCase()));
   const sessionMacs = new Set(activeSessions.map((s) => String(s.mac_address || '').toLowerCase()));
+  const blockedMacs = new Set(db.prepare('SELECT mac_address FROM device_blocks').all().map((b) => b.mac_address));
 
   const byMac = new Map();
   for (const d of discovered) {
@@ -136,6 +137,7 @@ async function listDevices() {
       vendo_id: isVendo ? vendo.id : null,
       group_id: groupByMac.get(entry.mac)?.group_id || null,
       group_name: groupByMac.get(entry.mac)?.group_name || null,
+      is_blocked: blockedMacs.has(entry.mac),
     });
   }
 
@@ -196,4 +198,24 @@ function getDeviceHistory(mac) {
     .all(String(mac || '').toLowerCase().trim());
 }
 
-module.exports = { listDevices, summarize, listGroups, createGroup, deleteGroup, assignDeviceGroup, logDeviceEvent, getDeviceHistory };
+// Real enforcement via networkService.blockClient/allowClient (the same
+// mode-aware mechanism session management already uses) - device_blocks is
+// just persistence/audit visibility on top, not a separate access-control
+// system of its own.
+async function blockDevice(mac) {
+  const normalizedMac = String(mac || '').toLowerCase().trim();
+  const networkService = require('./networkService');
+  await networkService.blockClient(normalizedMac);
+  db.prepare('INSERT OR REPLACE INTO device_blocks (mac_address, blocked_at) VALUES (?, CURRENT_TIMESTAMP)').run(normalizedMac);
+  logDeviceEvent(normalizedMac, 'blocked', 'Network access blocked');
+}
+
+async function unblockDevice(mac) {
+  const normalizedMac = String(mac || '').toLowerCase().trim();
+  const networkService = require('./networkService');
+  await networkService.allowClient(normalizedMac);
+  db.prepare('DELETE FROM device_blocks WHERE mac_address = ?').run(normalizedMac);
+  logDeviceEvent(normalizedMac, 'unblocked', 'Network access restored');
+}
+
+module.exports = { listDevices, summarize, listGroups, createGroup, deleteGroup, assignDeviceGroup, logDeviceEvent, getDeviceHistory, blockDevice, unblockDevice };

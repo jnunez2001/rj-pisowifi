@@ -187,6 +187,13 @@ function openDevDetail(mac) {
   document.getElementById('devdVendor').textContent = d.vendor || 'Unknown';
   document.getElementById('devdMac').textContent = d.mac;
 
+  const accessEl = document.getElementById('devdAccess');
+  accessEl.textContent = d.is_blocked ? 'Blocked' : 'Allowed';
+  accessEl.style.color = d.is_blocked ? 'var(--accent-red)' : 'var(--accent-green)';
+  const blockBtn = document.getElementById('devdBlockBtn');
+  blockBtn.innerHTML = d.is_blocked ? '<i class="fas fa-check"></i> Unblock' : '<i class="fas fa-ban"></i> Block';
+  blockBtn.className = d.is_blocked ? 'btn btn-secondary' : 'btn btn-danger';
+
   const groupSelect = document.getElementById('devdGroupSelect');
   groupSelect.innerHTML = '<option value="">No group</option>' + devGroups.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join('');
   groupSelect.value = d.group_id || '';
@@ -212,6 +219,26 @@ function openDevDetail(mac) {
   }
 
   document.getElementById('devDetailModal').classList.add('show');
+}
+
+async function toggleDeviceBlock() {
+  if (!devDetailMac) return;
+  const d = devAll.find((x) => x.mac === devDetailMac);
+  if (!d) return;
+  const action = d.is_blocked ? 'unblock' : 'block';
+  if (action === 'block' && !confirm(`Block "${d.name}" from the network? This takes effect immediately.`)) return;
+  try {
+    const data = await apiCall('POST', `/api/admin/network-devices/${devDetailMac}/${action}`);
+    if (!data.success) {
+      showToast(data.message || `Failed to ${action} device`, 'error');
+      return;
+    }
+    showToast(action === 'block' ? 'Device blocked' : 'Device unblocked');
+    await loadNetworkDevicesPage();
+    openDevDetail(devDetailMac);
+  } catch (e) {
+    showToast(`Failed to ${action} device`, 'error');
+  }
 }
 
 function openRenameDevice() {
