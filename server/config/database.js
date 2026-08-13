@@ -177,11 +177,15 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
-  -- Access Points v1: manual registry + real reachability monitoring only
-  -- (no discovery scan, no vendor adapters/SSID/radio config yet - see the
-  -- Access Points module scoping decision). Status/last_seen/last_latency
-  -- are only ever written by a real ICMP ping (POST /access-points/:id/ping),
-  -- never fabricated - an AP the admin hasn't pinged yet stays 'unknown'.
+  -- Access Points: discovery-first registry + real reachability
+  -- monitoring. Status/last_seen/last_latency are only ever written by a
+  -- real ICMP ping (POST /access-points/:id/ping); vlan_id/vlan_evidence
+  -- only by real subnet-match detection (networkDiscoveryService.js) -
+  -- never fabricated. management_state is honestly 'unmanaged' for every
+  -- row today - no vendor adapter (TP-Link Omada/MikroTik wireless API/
+  -- etc.) exists yet to actually read or change AP configuration, so
+  -- this column exists for the real states that ARE meaningful now
+  -- (unmanaged vs pending-approval) without pretending 'managed' works.
   CREATE TABLE IF NOT EXISTS access_points (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -189,9 +193,14 @@ db.exec(`
     mac_address TEXT,
     vendor TEXT,
     model TEXT,
+    hostname TEXT,
     site_id INTEGER REFERENCES sites(id),
     notes TEXT,
     status TEXT NOT NULL DEFAULT 'unknown', -- online | offline | unknown
+    management_state TEXT NOT NULL DEFAULT 'unmanaged', -- unmanaged | pending
+    vlan_id INTEGER,
+    vlan_evidence TEXT,
+    discovered_via TEXT, -- arp | dhcp | arp+dhcp | manual
     last_seen_at DATETIME,
     last_latency_ms REAL,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -876,6 +885,18 @@ try {
   db.exec('ALTER TABLE voucher_groups ADD COLUMN plan_id INTEGER REFERENCES plans(id)');
 } catch (e) {
   // already applied
+}
+
+// Access Points: discovery-first columns added after the initial v1
+// (manual-registry-only) release - see access_points table comment.
+for (const stmt of [
+  "ALTER TABLE access_points ADD COLUMN hostname TEXT",
+  "ALTER TABLE access_points ADD COLUMN management_state TEXT NOT NULL DEFAULT 'unmanaged'",
+  "ALTER TABLE access_points ADD COLUMN vlan_id INTEGER",
+  "ALTER TABLE access_points ADD COLUMN vlan_evidence TEXT",
+  "ALTER TABLE access_points ADD COLUMN discovered_via TEXT",
+]) {
+  try { db.exec(stmt); } catch (e) { /* already applied */ }
 }
 
 // VAPID keypair for Web Push (server/services/pushNotificationService.js) -

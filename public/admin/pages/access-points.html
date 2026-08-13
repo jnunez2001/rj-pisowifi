@@ -1,18 +1,29 @@
 <div class="zf3-header">
   <div>
     <div class="page-title">Access Points</div>
-    <div class="page-subtitle">Register and monitor the access points on your network</div>
+    <div class="page-subtitle">Discover, monitor and manage access points on your network</div>
   </div>
   <div class="zf3-header-right">
     <div class="zf3-icon-btn" onclick="loadAccessPointsPage()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
-    <button class="btn btn-primary" onclick="openAddAp()">
+    <button class="btn btn-secondary" onclick="openAddAp()">
       <i class="fas fa-plus"></i> Add AP
+    </button>
+    <button class="btn btn-primary" id="scanApBtn" onclick="scanForAps()">
+      <i class="fas fa-satellite-dish"></i> Scan Network
     </button>
   </div>
 </div>
 
-<div class="alert alert-info" style="margin-bottom:16px;">
-  <i class="fas fa-info-circle"></i> This is a manual registry with real reachability checks (ping). It doesn't yet discover APs automatically or manage SSID/radio/VLAN settings on them.
+<!-- DISCOVERED CANDIDATES (shown after a scan finds unregistered devices) -->
+<div class="zf3-card" id="apCandidatesCard" style="display:none;margin-bottom:16px;">
+  <div class="zf3-card-head">
+    <div class="zf3-card-title" style="text-transform:none;font-size:14px;">Discovered on Last Scan</div>
+    <div class="zf3-icon-btn" onclick="dismissApCandidates()" title="Dismiss"><i class="fas fa-times"></i></div>
+  </div>
+  <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+    ZenFi found these devices via ARP/DHCP (passive, no active probing). It cannot tell which are actually access points versus other devices &mdash; review and add the ones that are.
+  </div>
+  <div id="apCandidatesList"></div>
 </div>
 
 <!-- SUMMARY CARDS -->
@@ -35,19 +46,19 @@
   </div>
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
-      <div class="zf3-stat-label">Offline</div>
-      <img src="/assets/zenfi/routers/icons/offline.svg" alt="" width="18" height="18">
+      <div class="zf3-stat-label">Clients</div>
+      <i class="fas fa-users zf3-stat-icon"></i>
     </div>
-    <div class="zf3-stat-value" id="apOfflineCount">0</div>
-    <div class="zf3-stat-trend">Unreachable on last ping</div>
+    <div class="zf3-stat-value" id="apClientsValue">&mdash;</div>
+    <div class="zf3-stat-trend">Not available without a vendor integration</div>
   </div>
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
-      <div class="zf3-stat-label">Not Checked Yet</div>
-      <i class="fas fa-circle-question zf3-stat-icon"></i>
+      <div class="zf3-stat-label">Total Throughput</div>
+      <i class="fas fa-gauge-high zf3-stat-icon"></i>
     </div>
-    <div class="zf3-stat-value" id="apUnknownCount">0</div>
-    <div class="zf3-stat-trend">Never pinged</div>
+    <div class="zf3-stat-value" id="apThroughputValue">&mdash;</div>
+    <div class="zf3-stat-trend">Not available without a vendor integration</div>
   </div>
 </div>
 
@@ -59,6 +70,12 @@
     <option value="online">Online</option>
     <option value="offline">Offline</option>
     <option value="unknown">Not Checked Yet</option>
+  </select>
+  <select id="apVendorFilter" class="form-control" style="width:auto;min-width:130px;" onchange="renderApTable()">
+    <option value="">All Vendors</option>
+  </select>
+  <select id="apSiteFilter" class="form-control" style="width:auto;min-width:130px;" onchange="renderApTable()">
+    <option value="">All Sites</option>
   </select>
 </div>
 
@@ -72,13 +89,15 @@
           <th>Status</th>
           <th>IP Address</th>
           <th>MAC Address</th>
+          <th>VLAN</th>
           <th>Site</th>
+          <th>Management</th>
           <th>Last Seen</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody id="apTable">
-        <tr><td colspan="7"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+        <tr><td colspan="9"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
       </tbody>
     </table>
   </div>
@@ -139,7 +158,7 @@
 
 <!-- AP DETAIL MODAL -->
 <div class="modal-overlay" id="apDetailModal">
-  <div class="modal" style="max-width:560px;">
+  <div class="modal" style="max-width:600px;">
     <div class="modal-header">
       <div>
         <div class="modal-title" id="apDetailName">Access Point</div>
@@ -147,25 +166,47 @@
       </div>
       <button class="modal-close" onclick="closeModal('apDetailModal')"><i class="fas fa-times"></i></button>
     </div>
-    <div class="zf3-card">
-      <div class="zf3-card-title" style="margin-bottom:12px;">Overview</div>
-      <div class="zf3-wan-grid">
-        <div><div class="zf3-wan-item-label">IP Address</div><div class="zf3-wan-item-value" id="apdIp">-</div></div>
-        <div><div class="zf3-wan-item-label">MAC Address</div><div class="zf3-wan-item-value" id="apdMac">-</div></div>
-        <div><div class="zf3-wan-item-label">Vendor / Model</div><div class="zf3-wan-item-value" id="apdVendor">-</div></div>
-        <div><div class="zf3-wan-item-label">Site</div><div class="zf3-wan-item-value" id="apdSite">-</div></div>
-        <div><div class="zf3-wan-item-label">Last Seen</div><div class="zf3-wan-item-value" id="apdLastSeen">-</div></div>
-        <div><div class="zf3-wan-item-label">Ping Latency</div><div class="zf3-wan-item-value" id="apdLatency">-</div></div>
+
+    <div class="zf3-tabs" id="apDetailTabs">
+      <div class="zf3-tab active" data-tab="overview" onclick="setApDetailTab('overview', this)"><i class="fas fa-circle-info"></i> Overview</div>
+      <div class="zf3-tab" data-tab="network" onclick="setApDetailTab('network', this)"><i class="fas fa-diagram-project"></i> Network</div>
+    </div>
+
+    <div id="apDetailOverview">
+      <div class="zf3-card">
+        <div class="zf3-card-title" style="margin-bottom:12px;">Overview</div>
+        <div class="zf3-wan-grid">
+          <div><div class="zf3-wan-item-label">IP Address</div><div class="zf3-wan-item-value" id="apdIp">-</div></div>
+          <div><div class="zf3-wan-item-label">MAC Address</div><div class="zf3-wan-item-value" id="apdMac">-</div></div>
+          <div><div class="zf3-wan-item-label">Vendor / Model</div><div class="zf3-wan-item-value" id="apdVendor">-</div></div>
+          <div><div class="zf3-wan-item-label">Hostname</div><div class="zf3-wan-item-value" id="apdHostname">-</div></div>
+          <div><div class="zf3-wan-item-label">Site</div><div class="zf3-wan-item-value" id="apdSite">-</div></div>
+          <div><div class="zf3-wan-item-label">Last Seen</div><div class="zf3-wan-item-value" id="apdLastSeen">-</div></div>
+          <div><div class="zf3-wan-item-label">Ping Latency</div><div class="zf3-wan-item-value" id="apdLatency">-</div></div>
+          <div><div class="zf3-wan-item-label">Management</div><div class="zf3-wan-item-value" id="apdManagement">-</div></div>
+        </div>
+        <div id="apdNotes" style="margin-top:12px;font-size:13px;color:var(--text-secondary);"></div>
       </div>
-      <div id="apdNotes" style="margin-top:12px;font-size:13px;color:var(--text-secondary);"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="btn btn-secondary" id="apdPingBtn" onclick="pingApFromDetail()"><i class="fas fa-satellite-dish"></i> Ping Now</button>
+        <button class="btn btn-secondary" onclick="editApFromDetail()"><i class="fas fa-pen"></i> Edit</button>
+        <button class="btn btn-danger" onclick="removeApFromDetail()"><i class="fas fa-trash"></i> Remove</button>
+      </div>
     </div>
-    <div class="alert alert-info" style="margin-bottom:16px;">
-      <i class="fas fa-info-circle"></i> Client list, throughput, radio/SSID, and VLAN detection aren't available yet - this AP is monitored by reachability only.
-    </div>
-    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-      <button class="btn btn-secondary" id="apdPingBtn" onclick="pingApFromDetail()"><i class="fas fa-satellite-dish"></i> Ping Now</button>
-      <button class="btn btn-secondary" onclick="editApFromDetail()"><i class="fas fa-pen"></i> Edit</button>
-      <button class="btn btn-danger" onclick="removeApFromDetail()"><i class="fas fa-trash"></i> Remove</button>
+
+    <div id="apDetailNetwork" style="display:none;">
+      <div class="zf3-card">
+        <div class="zf3-card-title" style="margin-bottom:12px;">VLAN Evidence</div>
+        <div id="apdVlanBlock" style="font-size:13px;"></div>
+      </div>
+      <div class="zf3-card">
+        <div class="zf3-card-title" style="margin-bottom:8px;">Clients, SSID &amp; Radio</div>
+        <div class="empty-state" style="padding:24px;">
+          <i class="fas fa-plug-circle-xmark"></i>
+          <h3>No vendor integration connected</h3>
+          <p>Client list, SSID/VLAN configuration, and radio settings require a working vendor adapter (e.g. TP-Link Omada, MikroTik wireless API) that isn't built yet. This AP is monitored by network reachability only.</p>
+        </div>
+      </div>
     </div>
   </div>
 </div>

@@ -4685,10 +4685,15 @@ function apRowToJson(row) {
     mac_address: row.mac_address,
     vendor: row.vendor,
     model: row.model,
+    hostname: row.hostname,
     site_id: row.site_id,
     site_name: row.site_name || null,
     notes: row.notes,
     status: row.status,
+    management_state: row.management_state || 'unmanaged',
+    vlan_id: row.vlan_id,
+    vlan_evidence: row.vlan_evidence,
+    discovered_via: row.discovered_via,
     last_seen_at: row.last_seen_at,
     last_latency_ms: row.last_latency_ms,
     created_at: row.created_at,
@@ -4744,6 +4749,18 @@ function validateApInput(body, { partial = false } = {}) {
     out.site_id = Number.isFinite(v) ? v : null;
   }
   if (body.notes !== undefined) out.notes = String(body.notes || '').trim().slice(0, 500) || null;
+  // Discovery-sourced fields - only ever set from a real scan candidate
+  // (see POST /access-points/scan), never free-typed by the manual-add
+  // form, so they stay honest evidence rather than becoming a guess field.
+  if (body.hostname !== undefined) out.hostname = String(body.hostname || '').trim().slice(0, 200) || null;
+  if (body.vlan_id !== undefined) {
+    const v = body.vlan_id === null || body.vlan_id === '' ? null : parseInt(body.vlan_id, 10);
+    out.vlan_id = Number.isFinite(v) ? v : null;
+  }
+  if (body.vlan_evidence !== undefined) out.vlan_evidence = String(body.vlan_evidence || '').trim().slice(0, 300) || null;
+  if (body.discovered_via !== undefined) {
+    out.discovered_via = ['arp', 'dhcp', 'arp+dhcp', 'manual'].includes(body.discovered_via) ? body.discovered_via : 'manual';
+  }
   return { errors, out };
 }
 
@@ -4752,9 +4769,12 @@ router.post('/access-points', adminAuth, (req, res) => {
     const { errors, out } = validateApInput(req.body);
     if (errors.length) return res.status(400).json({ success: false, message: errors[0], errors });
     const result = db.prepare(`
-      INSERT INTO access_points (name, ip_address, mac_address, vendor, model, site_id, notes)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(out.name, out.ip_address || null, out.mac_address || null, out.vendor || null, out.model || null, out.site_id ?? null, out.notes || null);
+      INSERT INTO access_points (name, ip_address, mac_address, vendor, model, site_id, notes, hostname, vlan_id, vlan_evidence, discovered_via)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      out.name, out.ip_address || null, out.mac_address || null, out.vendor || null, out.model || null, out.site_id ?? null, out.notes || null,
+      out.hostname || null, out.vlan_id ?? null, out.vlan_evidence || null, out.discovered_via || 'manual'
+    );
     console.log(`📶 Access point added: "${out.name}"`);
     const row = db.prepare('SELECT a.*, s.name as site_name FROM access_points a LEFT JOIN sites s ON s.id = a.site_id WHERE a.id = ?').get(result.lastInsertRowid);
     return res.json({ success: true, accessPoint: apRowToJson(row) });
@@ -4795,6 +4815,34 @@ router.delete('/access-points/:id', adminAuth, (req, res) => {
     console.error('Admin delete access point error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
+});
+
+// POST /api/admin/access-points/scan — real passive network discovery
+// (ARP table + DHCP leases, no active probing - see
+// networkDiscoveryService.js). Returns candidates only; nothing is
+// inserted into access_points until the administrator explicitly adds
+// one, matching the "discover -> identify -> administrator approves"
+// flow. Already-registered MACs are excluded so a repeat scan doesn't
+// re-surface APs already in the table.
+router.post('/access-points/scan', adminAuth, async (req, res) => {
+  try {
+    const { scanNetwork } = require('../services/networkDiscoveryService');
+    const candidates = await scanNetwork();
+    const known = new Set(
+      db.prepare("SELECT mac_address FROM access_points WHERE mac_address IS NOT NULL").all().map(r => r.mac_address)
+    );
+    const fresh = candidates.filter(c => !known.has(c.mac));
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('ap_last_scanned_at', ?)").run(new Date().toISOString());
+    return res.json({ success: true, candidates: fresh });
+  } catch (err) {
+    console.error('Access point scan error:', err);
+    res.status(500).json({ success: false, message: 'Scan failed: ' + (err.message || 'server error') });
+  }
+});
+
+router.get('/access-points/scan/status', adminAuth, (req, res) => {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'ap_last_scanned_at'").get();
+  return res.json({ success: true, last_scanned_at: row ? row.value : null });
 });
 
 // POST /api/admin/access-points/:id/ping — the one place this module

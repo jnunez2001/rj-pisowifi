@@ -1,11 +1,18 @@
-// ===== ACCESS POINTS PAGE (v1: manual registry + real reachability) =====
+// ===== ACCESS POINTS PAGE =====
+// Discovery-first: real passive scan (ARP/DHCP) surfaces candidates for
+// approval, real ICMP ping drives reachability status. No vendor adapter
+// exists yet, so management/config features are honestly absent rather
+// than faked - see the empty states in the Network detail tab.
 let apAll = [];
 let apAllSites = [];
 let apEditingId = null;
 let apDetailId = null;
+let apCandidates = [];
+let apLastScannedAt = null;
 
 async function loadAccessPointsPage() {
   await loadSitesForAp();
+  await loadScanStatus();
   await loadApList();
 }
 
@@ -18,39 +25,70 @@ async function loadSitesForAp() {
   }
 }
 
+async function loadScanStatus() {
+  try {
+    const data = await apiCall('GET', '/api/admin/access-points/scan/status');
+    apLastScannedAt = (data.success && data.last_scanned_at) ? data.last_scanned_at : null;
+  } catch (e) {
+    apLastScannedAt = null;
+  }
+}
+
 async function loadApList() {
   const tbody = document.getElementById('apTable');
   if (!tbody) return;
   try {
     const data = await apiCall('GET', '/api/admin/access-points');
     if (!data.success) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--accent-red);padding:24px;">${data.message || 'Failed to load access points'}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--accent-red);padding:24px;">${data.message || 'Failed to load access points'}</td></tr>`;
       return;
     }
     apAll = data.accessPoints;
     renderApSummary();
+    populateApFilterOptions();
     renderApTable();
   } catch (e) {
     console.error('Access points load error:', e);
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--accent-red);padding:24px;">Failed to load access points. Refresh to try again.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--accent-red);padding:24px;">Failed to load access points. Refresh to try again.</td></tr>`;
   }
 }
 
 function renderApSummary() {
   const total = apAll.length;
   const online = apAll.filter(a => a.status === 'online').length;
-  const offline = apAll.filter(a => a.status === 'offline').length;
-  const unknown = total - online - offline;
   document.getElementById('apTotalCount').textContent = total;
   document.getElementById('apOnlineCount').textContent = online;
-  document.getElementById('apOfflineCount').textContent = offline;
-  document.getElementById('apUnknownCount').textContent = unknown;
+  // Clients/Throughput stay honestly unavailable - no vendor adapter
+  // exists to report real per-AP client counts or throughput.
+}
+
+function populateApFilterOptions() {
+  const vendorSelect = document.getElementById('apVendorFilter');
+  const currentVendor = vendorSelect.value;
+  const vendors = [...new Set(apAll.map(a => a.vendor).filter(Boolean))].sort();
+  vendorSelect.innerHTML = '<option value="">All Vendors</option>' + vendors.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+  vendorSelect.value = currentVendor;
+
+  const siteSelect = document.getElementById('apSiteFilter');
+  const currentSite = siteSelect.value;
+  siteSelect.innerHTML = '<option value="">All Sites</option>' + apAllSites.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
+  siteSelect.value = currentSite;
 }
 
 function apStatusBadge(status) {
   if (status === 'online') return `<span class="badge badge-green"><span class="status-dot online"></span> Online</span>`;
   if (status === 'offline') return `<span class="badge badge-red">Offline</span>`;
   return `<span class="badge badge-blue">Not Checked Yet</span>`;
+}
+
+function apManagementBadge(state) {
+  if (state === 'pending') return `<span class="badge badge-orange">Pending</span>`;
+  return `<span class="badge badge-blue">Unmanaged</span>`;
+}
+
+function apVlanCell(a) {
+  if (!a.vlan_id) return '-';
+  return `<span title="${escapeHtml(a.vlan_evidence || '')}">VLAN ${a.vlan_id}</span>`;
 }
 
 function renderApTable() {
@@ -60,21 +98,40 @@ function renderApTable() {
 
   const search = (document.getElementById('apSearch')?.value || '').toLowerCase().trim();
   const statusFilter = document.getElementById('apStatusFilter')?.value || '';
+  const vendorFilter = document.getElementById('apVendorFilter')?.value || '';
+  const siteFilter = document.getElementById('apSiteFilter')?.value || '';
 
   let rows = apAll.filter(a => {
     if (statusFilter && a.status !== statusFilter) return false;
+    if (vendorFilter && a.vendor !== vendorFilter) return false;
+    if (siteFilter && String(a.site_id) !== siteFilter) return false;
     if (search && !(a.name.toLowerCase().includes(search) || (a.ip_address || '').toLowerCase().includes(search) || (a.mac_address || '').toLowerCase().includes(search))) return false;
     return true;
   });
 
   if (!apAll.length) {
-    tbody.innerHTML = `
-      <tr><td colspan="7">
+    const alreadyScanned = !!apLastScannedAt;
+    tbody.innerHTML = alreadyScanned ? `
+      <tr><td colspan="9">
         <div class="empty-state">
           <i class="fas fa-wifi"></i>
           <h3>No Access Points Found</h3>
-          <p>ZenFi has not been told about any access points yet.</p>
-          <button class="btn btn-primary" onclick="openAddAp()"><i class="fas fa-plus"></i> Add AP Manually</button>
+          <p>ZenFi scanned the network but did not identify any candidate devices.</p>
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="scanForAps()"><i class="fas fa-satellite-dish"></i> Scan Again</button>
+            <button class="btn btn-secondary" onclick="openAddAp()"><i class="fas fa-plus"></i> Add AP Manually</button>
+          </div>
+        </div>
+      </td></tr>` : `
+      <tr><td colspan="9">
+        <div class="empty-state">
+          <i class="fas fa-wifi"></i>
+          <h3>No Access Points Discovered Yet</h3>
+          <p>ZenFi hasn't scanned this network for access points yet.</p>
+          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;">
+            <button class="btn btn-primary" onclick="scanForAps()"><i class="fas fa-satellite-dish"></i> Scan Network</button>
+            <button class="btn btn-secondary" onclick="openAddAp()"><i class="fas fa-plus"></i> Add AP Manually</button>
+          </div>
         </div>
       </td></tr>`;
     summary.textContent = 'Showing 0 of 0 access points';
@@ -83,7 +140,7 @@ function renderApTable() {
 
   if (!rows.length) {
     tbody.innerHTML = `
-      <tr><td colspan="7">
+      <tr><td colspan="9">
         <div class="empty-state">
           <i class="fas fa-filter-circle-xmark"></i>
           <h3>No access points match your filters.</h3>
@@ -103,7 +160,9 @@ function renderApTable() {
       <td>${apStatusBadge(a.status)}</td>
       <td style="font-family:monospace;font-size:12px;">${escapeHtml(a.ip_address || '-')}</td>
       <td style="font-family:monospace;font-size:12px;">${escapeHtml(a.mac_address || '-')}</td>
+      <td>${apVlanCell(a)}</td>
       <td>${escapeHtml(a.site_name || '-')}</td>
+      <td>${apManagementBadge(a.management_state)}</td>
       <td style="font-size:12px;">${a.last_seen_at ? new Date(a.last_seen_at.replace(' ', 'T') + 'Z').toLocaleString() : 'Never'}</td>
       <td onclick="event.stopPropagation();">
         <div style="display:flex;gap:6px;">
@@ -122,9 +181,96 @@ function renderApTable() {
 function clearApFilters() {
   document.getElementById('apSearch').value = '';
   document.getElementById('apStatusFilter').value = '';
+  document.getElementById('apVendorFilter').value = '';
+  document.getElementById('apSiteFilter').value = '';
   renderApTable();
 }
 
+// ===== SCAN / DISCOVERY =====
+async function scanForAps() {
+  const btn = document.getElementById('scanApBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
+  try {
+    const data = await apiCall('POST', '/api/admin/access-points/scan');
+    if (data.success) {
+      apCandidates = data.candidates;
+      apLastScannedAt = new Date().toISOString();
+      renderApCandidates();
+      if (apCandidates.length) {
+        showToast(`Found ${apCandidates.length} device(s) not yet registered.`, 'success');
+      } else {
+        showToast('Scan complete. No new devices found.', 'info');
+      }
+      renderApTable();
+    } else {
+      showToast(data.message || 'Scan failed.', 'error');
+    }
+  } catch (e) {
+    showToast('Scan failed.', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-satellite-dish"></i> Scan Network';
+  }
+}
+
+function renderApCandidates() {
+  const card = document.getElementById('apCandidatesCard');
+  const list = document.getElementById('apCandidatesList');
+  if (!apCandidates.length) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = 'block';
+  list.innerHTML = apCandidates.map((c, i) => `
+    <div class="zf3-list-row" style="border-top:1px solid var(--border-color);padding:10px 0;">
+      <div class="zf3-list-left" style="flex-direction:column;align-items:flex-start;gap:2px;">
+        <div style="font-weight:700;">${escapeHtml(c.hostname || c.ip)}</div>
+        <div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escapeHtml(c.ip)} &middot; ${escapeHtml(c.mac)}</div>
+        <div style="font-size:11px;color:var(--text-muted);">
+          ${c.vendor ? `Vendor: ${escapeHtml(c.vendor)}` : 'Vendor: Unknown'}
+          ${c.vlan_id ? ` &middot; VLAN ${c.vlan_id} detected` : ''}
+          &middot; via ${escapeHtml(c.discovered_via)}
+        </div>
+      </div>
+      <button class="btn btn-sm btn-primary" onclick="addCandidateAsAp(${i})"><i class="fas fa-plus"></i> Add as AP</button>
+    </div>
+  `).join('');
+}
+
+function dismissApCandidates() {
+  apCandidates = [];
+  document.getElementById('apCandidatesCard').style.display = 'none';
+}
+
+async function addCandidateAsAp(index) {
+  const c = apCandidates[index];
+  if (!c) return;
+  try {
+    const data = await apiCall('POST', '/api/admin/access-points', {
+      name: c.hostname || c.vendor || c.ip,
+      ip_address: c.ip,
+      mac_address: c.mac,
+      vendor: c.vendor || '',
+      hostname: c.hostname || '',
+      vlan_id: c.vlan_id,
+      vlan_evidence: c.vlan_evidence,
+      discovered_via: c.discovered_via,
+    });
+    if (data.success) {
+      showToast(`Added "${data.accessPoint.name}".`, 'success');
+      apCandidates.splice(index, 1);
+      renderApCandidates();
+      loadApList();
+    } else {
+      showToast(data.message || 'Unable to add this device.', 'error');
+    }
+  } catch (e) {
+    showToast('Unable to add this device.', 'error');
+  }
+}
+
+// ===== MANUAL ADD / EDIT =====
 function populateApSiteSelect() {
   const select = document.getElementById('apSiteId');
   select.innerHTML = '<option value="">No site</option>' + apAllSites.map(s => `<option value="${s.id}">${escapeHtml(s.name)}</option>`).join('');
@@ -236,11 +382,22 @@ async function deleteAp(id) {
 }
 
 // ===== DETAIL =====
+function setApDetailTab(tab, el) {
+  document.querySelectorAll('#apDetailTabs .zf3-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('apDetailOverview').style.display = tab === 'overview' ? 'block' : 'none';
+  document.getElementById('apDetailNetwork').style.display = tab === 'network' ? 'block' : 'none';
+}
+
 function openApDetail(id) {
   const a = apAll.find(x => x.id === id);
   if (!a) return;
   apDetailId = id;
   renderApDetail(a);
+  document.querySelectorAll('#apDetailTabs .zf3-tab').forEach(t => t.classList.remove('active'));
+  document.querySelector('#apDetailTabs .zf3-tab').classList.add('active');
+  document.getElementById('apDetailOverview').style.display = 'block';
+  document.getElementById('apDetailNetwork').style.display = 'none';
   document.getElementById('apDetailModal').classList.add('show');
 }
 
@@ -250,10 +407,23 @@ function renderApDetail(a) {
   document.getElementById('apdIp').textContent = a.ip_address || '-';
   document.getElementById('apdMac').textContent = a.mac_address || '-';
   document.getElementById('apdVendor').textContent = `${a.vendor || '-'}${a.model ? ' ' + a.model : ''}`;
+  document.getElementById('apdHostname').textContent = a.hostname || '-';
   document.getElementById('apdSite').textContent = a.site_name || '-';
   document.getElementById('apdLastSeen').textContent = a.last_seen_at ? new Date(a.last_seen_at.replace(' ', 'T') + 'Z').toLocaleString() : 'Never';
   document.getElementById('apdLatency').textContent = (a.last_latency_ms !== null && a.last_latency_ms !== undefined) ? `${a.last_latency_ms} ms` : '-';
+  document.getElementById('apdManagement').innerHTML = apManagementBadge(a.management_state);
   document.getElementById('apdNotes').textContent = a.notes || '';
+
+  const vlanBlock = document.getElementById('apdVlanBlock');
+  if (a.vlan_id) {
+    vlanBlock.innerHTML = `
+      <div style="font-weight:700;margin-bottom:4px;">VLAN ${a.vlan_id}</div>
+      <div style="color:var(--text-muted);">${escapeHtml(a.vlan_evidence || 'Detected from network evidence.')}</div>
+      <div style="color:var(--text-muted);margin-top:8px;font-size:12px;">This is evidence from this box's own network, not a read of the switch's full VLAN configuration.</div>
+    `;
+  } else {
+    vlanBlock.innerHTML = `<span style="color:var(--text-muted);">No VLAN evidence detected for this device.</span>`;
+  }
 }
 
 async function pingApFromDetail() {
