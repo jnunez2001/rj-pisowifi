@@ -145,6 +145,20 @@ function getNetworkMode() {
   return db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
 }
 
+// Real bug found live: the box's own ARP table contains protocol
+// addresses too (ff:ff:ff:ff:ff:ff broadcast, 01:00:5e:xx:xx:xx IPv4
+// multicast, 33:33:xx:xx:xx:xx IPv6 multicast) alongside real devices -
+// these aren't clients, showing them in the inventory as "Unknown Online
+// devices" is wrong. The IEEE-standard test for this: the low bit of the
+// first octet marks a frame as multicast/broadcast (unicast addresses
+// always have it clear) - one check catches all of the above without an
+// address-range allowlist that could miss a case.
+function isRealUnicastMac(mac) {
+  if (!mac) return false;
+  const firstOctet = parseInt(mac.split(':')[0], 16);
+  return Number.isFinite(firstOctet) && (firstOctet & 0x01) === 0;
+}
+
 // Controller Mode (network_mode = 'mikrotik'): this box has no interface
 // presence on the VLANs the external MikroTik owns, so its own local ARP
 // table can only ever see whatever single VLAN its management connection
@@ -164,16 +178,18 @@ async function scanNetworkViaMikrotik() {
     console.error('MikroTik scanForDevices error:', e.message);
     return [];
   }
-  return entries.map((entry) => ({
-    ip: entry.ip,
-    mac: entry.mac,
-    hostname: entry.hostname,
-    vendor: vendorFromMac(entry.mac),
-    vendor_class: entry.vendor_class,
-    vlan_id: entry.vlan_id,
-    vlan_evidence: entry.vlan_evidence,
-    discovered_via: entry.discovered_via,
-  }));
+  return entries
+    .filter((entry) => isRealUnicastMac(entry.mac))
+    .map((entry) => ({
+      ip: entry.ip,
+      mac: entry.mac,
+      hostname: entry.hostname,
+      vendor: vendorFromMac(entry.mac),
+      vendor_class: entry.vendor_class,
+      vlan_id: entry.vlan_id,
+      vlan_evidence: entry.vlan_evidence,
+      discovered_via: entry.discovered_via,
+    }));
 }
 
 async function scanNetwork() {
@@ -189,11 +205,11 @@ async function scanNetwork() {
 
   const byMac = new Map();
   for (const entry of arpEntries) {
-    if (ownAddresses.has(entry.ip)) continue;
+    if (ownAddresses.has(entry.ip) || !isRealUnicastMac(entry.mac)) continue;
     byMac.set(entry.mac, { ip: entry.ip, mac: entry.mac, hostname: null, source: 'arp' });
   }
   for (const [mac, lease] of Object.entries(leases)) {
-    if (ownAddresses.has(lease.ip)) continue;
+    if (ownAddresses.has(lease.ip) || !isRealUnicastMac(mac)) continue;
     const existing = byMac.get(mac);
     if (existing) {
       existing.hostname = lease.hostname;
