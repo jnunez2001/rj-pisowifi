@@ -7,6 +7,7 @@ const DEV_PAGE_SIZE = 25;
 async function loadNetworkDevicesPage() {
   const tbody = document.getElementById('devTable');
   if (!tbody) return;
+  if (document.getElementById('devAutoRefreshToggle')?.checked !== false) startDevAutoRefresh();
   try {
     const [devicesData, groupsData] = await Promise.all([
       apiCall('GET', '/api/admin/network-devices'),
@@ -338,5 +339,34 @@ async function changeDeviceGroup() {
     loadNetworkDevicesPage();
   } catch (e) {
     showToast('Failed to update group', 'error');
+  }
+}
+
+// ===== AUTO REFRESH =====
+// Polling, not a true real-time push (no websocket/SSE infrastructure
+// exists elsewhere in this app to build that on) - same pattern the Vendo
+// Devices page (devices.js) already uses. Matches the mockup's "Auto
+// refresh: On" concept honestly: it's a periodic reload, not live push.
+let devRefreshInterval = null;
+
+function startDevAutoRefresh() {
+  if (devRefreshInterval) clearInterval(devRefreshInterval);
+  devRefreshInterval = setInterval(loadNetworkDevicesPage, 30000);
+}
+
+function toggleDevAutoRefresh() {
+  const on = document.getElementById('devAutoRefreshToggle').checked;
+  if (on) {
+    startDevAutoRefresh();
+  } else if (devRefreshInterval) {
+    clearInterval(devRefreshInterval);
+    devRefreshInterval = null;
+  }
+}
+
+function destroyNetworkDevices() {
+  if (devRefreshInterval) {
+    clearInterval(devRefreshInterval);
+    devRefreshInterval = null;
   }
 }

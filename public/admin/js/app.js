@@ -298,6 +298,7 @@ async function navigateTo(page) {
   if (typeof destroyVouchersPage === 'function') destroyVouchersPage();
   if (typeof destroyHotspotDashboard === 'function') destroyHotspotDashboard();
   if (typeof destroyDevices === 'function') destroyDevices();
+  if (typeof destroyNetworkDevices === 'function') destroyNetworkDevices();
 
   currentPage = page;
 
@@ -463,6 +464,7 @@ function handleAuthFailure() {
   if (typeof destroySessions === 'function') destroySessions();
   if (typeof destroyUsersPage === 'function') destroyUsersPage();
   if (typeof destroyDevices === 'function') destroyDevices();
+  if (typeof destroyNetworkDevices === 'function') destroyNetworkDevices();
   if (typeof destroyAbout === 'function') destroyAbout();
   if (typeof destroyAnalytics === 'function') destroyAnalytics();
   if (typeof destroyVouchersPage === 'function') destroyVouchersPage();

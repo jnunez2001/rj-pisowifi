@@ -74,10 +74,16 @@
   </div>
   <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-top:1px solid var(--border-color);font-size:13px;color:var(--text-muted);">
     <span id="devSummary">Loading...</span>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <button class="btn btn-sm btn-secondary" id="devPrevPage" onclick="changeDevPage(-1)"><i class="fas fa-chevron-left"></i></button>
-      <span id="devPageInfo">Page 1</span>
-      <button class="btn btn-sm btn-secondary" id="devNextPage" onclick="changeDevPage(1)"><i class="fas fa-chevron-right"></i></button>
+    <div style="display:flex;gap:16px;align-items:center;">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">
+        <input type="checkbox" id="devAutoRefreshToggle" checked onchange="toggleDevAutoRefresh()">
+        Auto refresh (30s)
+      </label>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-sm btn-secondary" id="devPrevPage" onclick="changeDevPage(-1)"><i class="fas fa-chevron-left"></i></button>
+        <span id="devPageInfo">Page 1</span>
+        <button class="btn btn-sm btn-secondary" id="devNextPage" onclick="changeDevPage(1)"><i class="fas fa-chevron-right"></i></button>
+      </div>
     </div>
   </div>
 </div>
