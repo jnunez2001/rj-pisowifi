@@ -3470,6 +3470,10 @@ router.get('/network/mikrotik/firewall-zones', adminAuth, async (req, res) => {
 // POST /api/admin/network/mikrotik/firewall-zones
 router.post('/network/mikrotik/firewall-zones', adminAuth, validateBody(mikrotikZonePolicySchema), async (req, res) => {
   try {
+    const { canUse } = require('../services/entitlementService');
+    if (!canUse('firewall_zones')) {
+      return res.status(403).json({ success: false, message: 'Custom firewall zone policies are a Pro feature. ZenFi is currently using the recommended secure firewall configuration.' });
+    }
     const mikrotikService = require('../services/mikrotikService');
     if (!mikrotikService.isMikrotikModeEnabled()) {
       return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
@@ -3656,6 +3660,10 @@ router.get('/bandwidth-profiles', adminAuth, (req, res) => {
 // POST /api/admin/bandwidth-profiles
 router.post('/bandwidth-profiles', adminAuth, validateBody(bandwidthProfileSchema), (req, res) => {
   try {
+    const { canUse } = require('../services/entitlementService');
+    if (!canUse('bandwidth_profiles')) {
+      return res.status(403).json({ success: false, message: 'Named bandwidth profiles are a Pro feature. Upgrade to create custom traffic policies.' });
+    }
     const { name, downloadMbps, uploadMbps, burstMbps } = req.body;
     const result = db.prepare(
       'INSERT INTO bandwidth_profiles (name, download_mbps, upload_mbps, burst_mbps) VALUES (?, ?, ?, ?)'
@@ -4109,6 +4117,18 @@ router.post('/network/standalone/ports', adminAuth, (req, res) => {
     if (!Array.isArray(lanes)) {
       return res.status(400).json({ success: false, message: 'lanes array required' });
     }
+
+    // A second 'wan'-role lane is what actually activates multi-WAN
+    // failover (see the comment on GET /network/multi-wan) - gate it
+    // there rather than adding a separate endpoint, so an unentitled
+    // install saving its port layout is blocked from ever getting a
+    // second WAN lane in the first place, not just from viewing status.
+    const { canUse } = require('../services/entitlementService');
+    const requestedWanCount = lanes.filter((l) => l.role === 'wan').length;
+    if (requestedWanCount > 1 && !canUse('multi_wan')) {
+      return res.status(403).json({ success: false, message: 'Multi-WAN failover (a second WAN lane) is a Pro feature. Upgrade to add a backup connection.' });
+    }
+
     const localNames = getLocalPhysicalInterfaces();
     const validRoles = ['wan', 'gated', 'open', 'unused'];
     const keyOf = (l) => `${l.port_name}::${parseInt(l.vlan_id, 10) || 0}`;
@@ -4630,6 +4650,27 @@ router.get('/routers/self', adminAuth, async (req, res) => {
     });
   } catch (err) {
     console.error('Router self-status error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/entitlements — lets the frontend render locked-feature
+// UI ("PRO FEATURE, upgrade to unlock") without duplicating tier logic.
+// The list of capability names here must stay in sync with
+// entitlementService.js's TIER_CAPABILITIES; backend enforcement at each
+// write endpoint (see /bandwidth-profiles, /network/mikrotik/firewall-zones,
+// /network/standalone/ports) is what actually matters - this is display
+// only, never trust a frontend capability check for authorization.
+router.get('/entitlements', adminAuth, (req, res) => {
+  try {
+    const { getCurrentTier, canUse } = require('../services/entitlementService');
+    const tier = getCurrentTier();
+    const capabilities = ['router_mode', 'multi_wan', 'bandwidth_profiles', 'firewall_zones'];
+    const entitlements = {};
+    for (const cap of capabilities) entitlements[cap] = canUse(cap);
+    return res.json({ success: true, tier, entitlements });
+  } catch (err) {
+    console.error('Entitlements error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
