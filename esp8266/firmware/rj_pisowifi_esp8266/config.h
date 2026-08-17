@@ -49,7 +49,7 @@
 // reset/power blip still reconnects to saved WiFi on its own, it does
 // not fall into setup mode.
 #define COIN_PIN    5
-#define RELAY_PIN   4
+#define RELAY_PIN   14
 #define LED_PIN     2
 #define SETUP_BTN   0
 
