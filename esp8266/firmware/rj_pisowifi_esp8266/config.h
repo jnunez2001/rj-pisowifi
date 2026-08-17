@@ -5,7 +5,7 @@
 #include <ESP8266WebServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.1"
+#define FIRMWARE_VERSION "v1.0.2"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
@@ -57,7 +57,12 @@
 // Set to true if your relay module is ACTIVE-LOW
 // (i.e. LOW = relay ON, HIGH = relay OFF). Most cheap Songle
 // 1-channel boards without an H/L jumper are active-LOW.
-#define RELAY_ACTIVE_LOW  true
+//
+// false here: this custom hat doesn't use a relay module at all - whatever
+// switching circuit (MOSFET/transistor) drives coin-slot power from the
+// SET pin is active-HIGH (HIGH = coin slot on), the opposite of a typical
+// relay module's default.
+#define RELAY_ACTIVE_LOW  false
 
 #if RELAY_ACTIVE_LOW
   #define RELAY_ON_STATE   LOW
