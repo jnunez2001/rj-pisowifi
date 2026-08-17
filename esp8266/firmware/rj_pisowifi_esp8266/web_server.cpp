@@ -162,7 +162,7 @@ void startSetupMode() {
 
   lcdClear();
   lcdPrint(0, "=== SETUP MODE ===");
-  lcdPrint(1, "WiFi:RJ-Vendo-Setup");
+  lcdPrint(1, "WiFi:" + String(AP_SSID));
   lcdPrint(2, "Pass:rjpisowifi");
   lcdPrint(3, "IP:" + apIP.toString());
 

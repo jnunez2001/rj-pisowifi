@@ -7,11 +7,11 @@ Full feature parity with the ESP32 version (`esp32/firmware/rj_pisowifi/`) — c
 | Function    | Pin        |
 |-------------|------------|
 | Coin sensor | D1 (GPIO5) |
-| Setup button| D2 (GPIO4) — this custom board's own SET button, not the devboard's onboard "FLASH" button |
-| Relay       | D3 (GPIO0) — has a boot-time role (must not be pulled LOW while the chip is starting), safe once running |
+| Coin-slot power relay | D2 (GPIO4) — this custom board's dedicated relay pin; the portal's Insert Coin flow powers it on/off exactly like every other RELAY_PIN use in this codebase, just on this board's own pin for it |
+| Setup button| D3 (GPIO0) — the devboard's onboard "FLASH" button, no extra wiring needed |
 | Status LED  | D4 (GPIO2) — reserved only, no LED is wired on this board, firmware never drives it |
 
-The devboard's own RST button is a hardware reset line, not a GPIO — it fully powers the chip off while held, so firmware cannot detect a long-press on it the way it does on the SET button. Setup mode is entered only by holding SET (GPIO4) for 5 seconds, or automatically on first boot with no saved config; a plain reset or power blip reconnects to saved WiFi on its own.
+The devboard's own RST button is a hardware reset line, not a GPIO — it fully powers the chip off while held, so firmware cannot detect a long-press on it the way it does on the FLASH/setup button. Setup mode is entered only by holding the FLASH button (GPIO0) for 5 seconds, or automatically on first boot with no saved config; a plain reset or power blip reconnects to saved WiFi on its own.
 
 ## Arduino IDE setup
 

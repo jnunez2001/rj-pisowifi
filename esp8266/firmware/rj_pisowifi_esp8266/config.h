@@ -12,21 +12,29 @@
 // factor), not the generic NodeMCU/Wemos D1 Mini pin choice this firmware
 // used before:
 //   D1 (GPIO5)  - COIN_PIN:   plain GPIO, interrupt-capable, no boot role.
-//   D2 (GPIO4)  - SETUP_BTN:  plain GPIO, no boot role - wired to this
-//                             custom board's own physical SET button, not
-//                             the devboard's onboard GPIO0 FLASH button.
-//   D3 (GPIO0)  - RELAY_PIN:  boot-strapping pin (must not be pulled LOW
+//   D2 (GPIO4)  - RELAY_PIN:  this board's own "coin slot power" line -
+//                             the SAME concept as every other RELAY_PIN
+//                             use in this codebase (activateRelay() powers
+//                             the coin acceptor on when the portal's
+//                             Insert Coin flow starts, deactivateRelay()
+//                             powers it off, checkRelayTimeout() auto-offs
+//                             if no coin arrives in time), just wired to
+//                             this board's dedicated pin for it. Plain
+//                             GPIO, no boot role.
+//   D3 (GPIO0)  - SETUP_BTN:  boot-strapping pin (must not be pulled LOW
 //                             during the brief ROM-bootloader window
 //                             before setup() runs, or the chip enters
-//                             flash mode instead of booting normally).
-//                             Safe to drive as a normal output once
-//                             setup()/loop() are running, same reasoning
-//                             this firmware already applies to LED_PIN.
-//                             If this custom board's relay driver circuit
-//                             actively holds its input LOW while
-//                             unpowered/idle, that could interfere with
-//                             boot - worth confirming against the board's
-//                             actual schematic if boot becomes unreliable.
+//                             flash mode instead of booting normally) -
+//                             which is exactly why nearly every ESP8266
+//                             devboard already has its own onboard
+//                             "FLASH" button wired here with a pullup.
+//                             Reusing it needs no extra wiring and is the
+//                             same safe INPUT_PULLUP pattern used
+//                             everywhere else in this firmware; the
+//                             devboard's separate RST button is a
+//                             hardware reset line, not a GPIO, so it
+//                             cannot be read as a held button the way
+//                             this one can (see note below).
 //   D4 (GPIO2)  - LED_PIN:    RESERVED ONLY. No LED is wired on this
 //                             board - nothing in this firmware drives
 //                             this pin (see lcd_display.cpp's ledBlink()
@@ -34,18 +42,16 @@
 //                             revision with an LED doesn't need a config
 //                             change, not because anything uses it today.
 //
-// The devboard's own RST button is a hardware reset line, not a GPIO -
-// while held, the chip is off and nothing is running, so there is no way
-// for firmware to distinguish a brief tap from a long hold. It cannot be
-// used the way SETUP_BTN is (hold-for-5-seconds); every RST press just
-// causes a normal reboot, same as power-cycling. Setup mode is entered
-// only via SETUP_BTN (GPIO4) or automatically when there's no saved
-// config yet - a plain reset/power blip still reconnects to saved WiFi
-// on its own, it does not fall into setup mode.
+// Note on RST: while it's held, the chip is fully off and nothing is
+// running, so there is no way for firmware to distinguish a brief tap
+// from a long hold. Setup mode is entered only via SETUP_BTN (GPIO0,
+// hold 5s) or automatically when there's no saved config yet - a plain
+// reset/power blip still reconnects to saved WiFi on its own, it does
+// not fall into setup mode.
 #define COIN_PIN    5
-#define RELAY_PIN   0
+#define RELAY_PIN   4
 #define LED_PIN     2
-#define SETUP_BTN   4
+#define SETUP_BTN   0
 
 // ===== RELAY LOGIC =====
 // Set to true if your relay module is ACTIVE-LOW
@@ -62,7 +68,7 @@
 #endif
 
 // ===== AP MODE =====
-#define AP_SSID     "RJ-Vendo-Setup"
+#define AP_SSID     "ZenFi-Setup"
 #define AP_PASS     "rjpisowifi"
 
 // ===== TIMING =====
