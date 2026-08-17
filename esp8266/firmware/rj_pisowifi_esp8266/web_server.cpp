@@ -66,9 +66,31 @@ void setupWebServer() {
   });
 
   // GET WiFi scan
+  // Bug found live: WiFi.scanNetworks() (blocking/synchronous form) could
+  // hang far longer than a scan should ever take - this device is running
+  // as an access point (WIFI_AP_STA) the whole time, and scanning while
+  // also serving as an AP is a known-flaky combination on ESP8266's SDK.
+  // A hung scan blocked EVERYTHING else in loop() too (coin pulses, relay
+  // timeout, WiFi reconnect checks), not just this one request. Switched
+  // to the async scan API with a hard cap: starts the scan, polls with a
+  // short delay, and gives up after SCAN_TIMEOUT_MS rather than waiting
+  // indefinitely - the device stays responsive either way, and the admin
+  // sees a fast, clear failure to retry instead of a 30-minute hang.
   server.on("/scan", HTTP_GET, []() {
     if (!rejectUnlessSetupMode()) return;
-    int n = WiFi.scanNetworks();
+    const unsigned long SCAN_TIMEOUT_MS = 8000;
+    WiFi.scanNetworks(true);
+    unsigned long start = millis();
+    int n;
+    while ((n = WiFi.scanComplete()) == WIFI_SCAN_RUNNING) {
+      if (millis() - start >= SCAN_TIMEOUT_MS) {
+        Serial.println("WiFi scan timed out");
+        WiFi.scanDelete();
+        server.send(200, "application/json", "[]");
+        return;
+      }
+      delay(100);
+    }
     String json = "[";
     for (int i = 0; i < n; i++) {
       if (i > 0) json += ",";
@@ -597,7 +619,12 @@ String getFallbackHTML() {
       showToast('Scanning WiFi networks...');
 
       try {
-        const res = await fetch('/scan');
+        // Real bug found live: this fetch had no timeout, so if the device
+        // ever failed to respond at all, the page just sat on "Scanning..."
+        // indefinitely - the firmware side now bounds its own scan time,
+        // but this belt-and-suspenders timeout means the page recovers
+        // quickly no matter what.
+        const res = await fetch('/scan', { signal: AbortSignal.timeout(10000) });
         const networks = await res.json();
 
         sel.innerHTML = '<option value="">-- Select Network --</option>';
