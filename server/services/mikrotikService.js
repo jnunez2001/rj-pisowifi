@@ -231,11 +231,18 @@ async function addOrUpdateQueue(client, words) {
     const existing = await client.talk(['/queue/simple/print', `?name=${name}`]);
     if (existing.re.length === 0) throw err;
     // target/parent/max-limit/priority/burst-* etc - same fields, just via
-    // set instead of add. Unverified against real hardware: whether
-    // /queue/simple/set accepts place-before the same way add does varies
-    // by RouterOS version - if it doesn't, this throws and falls through
-    // to setClientBandwidth's own catch/log, no worse than before this fix.
-    const setWords = words.filter((w) => w !== '/queue/simple/add' && !w.startsWith('=name='));
+    // set instead of add. Confirmed live: RouterOS rejects place-before on
+    // /queue/simple/set ("unknown parameter place-before") - it's an
+    // add-only positional parameter, not a settable property, so it's
+    // dropped here. The existing queue keeps whatever position it already
+    // has; place-before only ever mattered at initial creation time to
+    // rank this client's cap above its lane's own wider queue (see the
+    // comment above this queue's original /add call) - a queue being
+    // refreshed here was already created correctly-positioned the first
+    // time, so losing place-before on a refresh doesn't reopen that bug.
+    const setWords = words.filter((w) =>
+      w !== '/queue/simple/add' && !w.startsWith('=name=') && !w.startsWith('=place-before=')
+    );
     await client.talk(['/queue/simple/set', `=.id=${existing.re[0]['.id']}`, ...setWords]);
   }
 }
