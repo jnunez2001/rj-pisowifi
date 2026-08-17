@@ -5,6 +5,13 @@
 // app's offline-first design). Needs no backend involvement at all: the
 // browser talks directly to the USB device.
 //
+// The current firmware for both chip families ships bundled with the app
+// (assets/firmware/*.bin + manifest.json) - once connected, the detected
+// chip is looked up in the manifest and its bundled image loads
+// automatically, no file picker needed for the common case. Manual file
+// selection still works and overrides the bundled pick, for a custom or
+// newer build not yet baked into this release.
+//
 // This is a module script (see index.html's <script type="module">), so
 // top-level functions are NOT automatically global the way classic
 // <script> files' functions are - anything called from an onclick= in the
@@ -13,17 +20,14 @@
 
 import { ESPLoader, Transport } from './vendor/esptool-js/bundle.js';
 
-// Flash offset: 0x0 for ESP8266 (Arduino/arduino-cli's "Export Compiled
-// Binary" produces one merged image, unlike ESP32 which needs separate
-// bootloader/partition-table/app images at different offsets). ESP32
-// support would need a real offset table here, not a single constant -
-// out of scope until this app actually needs to flash ESP32 vendos too.
-const FLASH_ADDRESS = 0x0;
+const FIRMWARE_ASSETS_BASE = 'assets/firmware/';
 
+let flasherManifest = null;
 let flasherPort = null;
 let flasherTransport = null;
 let flasherEsploader = null;
-let flasherFileBytes = null;
+let flasherFileArray = null; // [{data: Uint8Array, address: number}, ...]
+let flasherManualOverride = false;
 
 function flasherLog(line) {
   const el = document.getElementById('flasherLog');
@@ -51,25 +55,74 @@ function checkFlasherSupport() {
   return supported;
 }
 
-function loadFirmwareFlasherPage() {
-  checkFlasherSupport();
-  flasherFileBytes = null;
+async function loadFirmwareFlasherPage() {
+  if (!checkFlasherSupport()) return;
+  flasherFileArray = null;
+  flasherManualOverride = false;
   document.getElementById('flasherFileInfo').textContent = '';
   document.getElementById('flasherFlashBtn').disabled = true;
+
+  try {
+    flasherManifest = await fetch(FIRMWARE_ASSETS_BASE + 'manifest.json').then((r) => r.json());
+  } catch (e) {
+    flasherManifest = null;
+  }
 
   const fileInput = document.getElementById('flasherFile');
   fileInput.onchange = async () => {
     const file = fileInput.files[0];
     if (!file) return;
-    flasherFileBytes = new Uint8Array(await file.arrayBuffer());
-    document.getElementById('flasherFileInfo').textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+    flasherManualOverride = true;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    flasherFileArray = [{ data: bytes, address: 0 }];
+    document.getElementById('flasherFileInfo').textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB) - manual selection`;
     updateFlasherFlashButtonState();
   };
 }
 
 function updateFlasherFlashButtonState() {
   const btn = document.getElementById('flasherFlashBtn');
-  btn.disabled = !(flasherFileBytes && flasherEsploader);
+  btn.disabled = !(flasherFileArray && flasherEsploader);
+}
+
+// esptool-js's main() returns a detailed package/revision description
+// (e.g. "ESP8266EX", "ESP32-D0WDQ6", "ESP32-D0WD (revision 3)"), not a
+// plain "ESP8266"/"ESP32" string - and each ESP32 sub-family (classic,
+// S2, S3, C3, ...) has its own distinct description format, which matters
+// here since this app's bundled esp32-vendo.bin is compiled for classic
+// ESP32 only and would be the WRONG image for an S2/S3/C3 board. Matching
+// is prefix-based against every known classic-ESP32 package variant
+// string (manifest.json's chipNamePrefixes) rather than a single fixed
+// name, and anything that doesn't match falls through to "no bundled
+// firmware" rather than guessing - never auto-flash an unverified chip
+// family's board with firmware built for a different one.
+async function autoLoadBundledFirmware(chipName) {
+  if (flasherManualOverride || !flasherManifest) return;
+  const entry = Object.values(flasherManifest).find((e) =>
+    e.chipNamePrefixes.some((prefix) => chipName.startsWith(prefix))
+  );
+  const info = document.getElementById('flasherFileInfo');
+  if (!entry) {
+    info.textContent = `No bundled firmware for "${chipName}" - choose a .bin file manually above.`;
+    return;
+  }
+  info.textContent = `Loading bundled firmware (${chipName}, ${entry.version})...`;
+  try {
+    const files = await Promise.all(entry.files.map(async (f) => {
+      const buf = await fetch(FIRMWARE_ASSETS_BASE + f.file).then((r) => {
+        if (!r.ok) throw new Error(`${f.file}: HTTP ${r.status}`);
+        return r.arrayBuffer();
+      });
+      return { data: new Uint8Array(buf), address: f.address };
+    }));
+    flasherFileArray = files;
+    info.textContent = `Bundled: ${chipName} vendo firmware ${entry.version} (auto-loaded)`;
+    flasherLog(`Auto-loaded bundled firmware for ${chipName} (${entry.version}).`);
+    updateFlasherFlashButtonState();
+  } catch (e) {
+    info.textContent = `Failed to load bundled firmware: ${e.message}. Choose a .bin file manually above.`;
+    flasherLog('Bundled firmware load failed: ' + e.message);
+  }
 }
 
 async function flasherConnect() {
@@ -91,6 +144,7 @@ async function flasherConnect() {
     status.textContent = `Connected: ${chipName}`;
     status.style.color = 'var(--accent-green)';
     btn.innerHTML = '<i class="fas fa-plug-circle-check"></i> Connected';
+    await autoLoadBundledFirmware(chipName);
     updateFlasherFlashButtonState();
   } catch (e) {
     flasherLog('Connection failed: ' + (e.message || e));
@@ -102,7 +156,7 @@ async function flasherConnect() {
 }
 
 async function flasherFlash() {
-  if (!flasherEsploader || !flasherFileBytes) return;
+  if (!flasherEsploader || !flasherFileArray) return;
   const btn = document.getElementById('flasherFlashBtn');
   const progressWrap = document.getElementById('flasherProgressWrap');
   const progressBar = document.getElementById('flasherProgressBar');
@@ -114,7 +168,7 @@ async function flasherFlash() {
 
   try {
     await flasherEsploader.writeFlash({
-      fileArray: [{ data: flasherFileBytes, address: FLASH_ADDRESS }],
+      fileArray: flasherFileArray,
       flashMode: 'dio',
       flashFreq: '40m',
       flashSize: 'keep',
