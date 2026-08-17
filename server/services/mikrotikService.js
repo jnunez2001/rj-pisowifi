@@ -205,6 +205,41 @@ async function pruneOrphanedQueues(activeMacs) {
 // RouterOS export would expect. uploadMbps defaults to downloadMbps when
 // omitted, so any caller still passing one argument keeps its old behavior
 // instead of silently breaking.
+// Real bug found live: setClientBandwidth() is called every 30s for every
+// active session (timerService.js's tick, see its own comment - "resolve
+// the client's CURRENT IP/state fresh on every call and are idempotent,
+// refresh an existing binding rather than erroring"), and deleteQueue()
+// runs immediately before every add here specifically to make that true.
+// In practice RouterOS still occasionally rejected the add with "already
+// have such name" - the remove and the very next add land close enough
+// together that the router hasn't finished dropping the old queue from
+// its name-uniqueness index yet, even though our API session already got
+// a clean "!done" for the remove. Rather than trying to out-race that
+// (a fixed delay would either be too short some of the time or waste time
+// every time), add falls back to updating the existing queue by name when
+// the add is rejected for exactly this reason - actually honoring
+// "refresh" instead of erroring on every tick for an already-active
+// session.
+async function addOrUpdateQueue(client, words) {
+  try {
+    await client.talk(words);
+  } catch (err) {
+    if (!/already have such name/i.test(err.message || '')) throw err;
+    const nameWord = words.find((w) => w.startsWith('=name='));
+    const name = nameWord ? nameWord.slice('=name='.length) : null;
+    if (!name) throw err;
+    const existing = await client.talk(['/queue/simple/print', `?name=${name}`]);
+    if (existing.re.length === 0) throw err;
+    // target/parent/max-limit/priority/burst-* etc - same fields, just via
+    // set instead of add. Unverified against real hardware: whether
+    // /queue/simple/set accepts place-before the same way add does varies
+    // by RouterOS version - if it doesn't, this throws and falls through
+    // to setClientBandwidth's own catch/log, no worse than before this fix.
+    const setWords = words.filter((w) => w !== '/queue/simple/add' && !w.startsWith('=name='));
+    await client.talk(['/queue/simple/set', `=.id=${existing.re[0]['.id']}`, ...setWords]);
+  }
+}
+
 // burst is optional: { mbps, seconds } - a genuine, RouterOS-native burst
 // (real router-enforced QoS, not anything that fakes or hides itself from
 // a speed test). RouterOS allows a client to run at burst-limit as long as
@@ -300,7 +335,7 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
         parentWords.push(`=burst-threshold=${upload}M/${download}M`);
         parentWords.push(`=burst-time=${burstSeconds}s/${burstSeconds}s`);
       }
-      await client.talk(parentWords);
+      await addOrUpdateQueue(client, parentWords);
 
       // Bug found live: burst was configured on the parent queue only. Real
       // traffic never actually flows through the parent itself in a RouterOS
@@ -316,12 +351,12 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
         `=burst-time=${burstSeconds}s/${burstSeconds}s`,
       ] : [];
 
-      await client.talk([
+      await addOrUpdateQueue(client, [
         '/queue/simple/add', `=name=${baseName}-udp`, `=parent=${baseName}`,
         '=packet-marks=rj-game-priority', `=max-limit=${upload}M/${download}M`, '=priority=1/1',
         ...childBurstWords,
       ]);
-      await client.talk([
+      await addOrUpdateQueue(client, [
         '/queue/simple/add', `=name=${baseName}-other`, `=parent=${baseName}`,
         `=max-limit=${upload}M/${download}M`, '=priority=8/8',
         ...childBurstWords,
