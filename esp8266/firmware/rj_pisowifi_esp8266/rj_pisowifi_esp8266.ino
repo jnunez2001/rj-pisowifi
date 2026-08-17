@@ -52,6 +52,21 @@ void setup() {
     server.begin();
     Serial.println("Ready!");
     ledBlink(3, 200);
+
+    // Bug found live: lastOTACheck starts at 0 every boot, and loop()'s
+    // check only fires once millis() - lastOTACheck >= OTA_CHECK_INTERVAL_MS
+    // has elapsed - since millis() also starts at 0, a fresh boot's FIRST
+    // check didn't happen until a full 10 minutes after that boot, not
+    // shortly after connecting. Power-cycling a device to "force" a
+    // faster update check actually made it slower, resetting the wait
+    // back to the full interval instead of picking up wherever a
+    // continuously-running device's periodic timer already was. Checking
+    // once here, right after a successful boot, means a fresh device (or
+    // an operator power-cycling one on purpose) gets update-checked
+    // promptly; lastOTACheck below still seeds the normal 10-minute
+    // periodic check in loop() from this point onward.
+    checkForFirmwareUpdate();
+    lastOTACheck = millis();
   }
 }
 
