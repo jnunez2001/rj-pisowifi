@@ -28,11 +28,15 @@
 
   <div class="zf3-card" style="margin-top:16px;">
     <div class="zf3-card-title" style="margin-bottom:10px;">2. Flash</div>
-    <div class="zf3-row-hint" style="padding:0 0 10px;">Need a different build? Pick a .bin to override.</div>
-    <input type="file" id="flasherFile" class="form-control" accept=".bin" style="margin-bottom:14px;max-width:400px;">
     <button class="btn btn-primary" id="flasherFlashBtn" onclick="flasherFlash()" disabled>
       <i class="fas fa-bolt"></i> Flash Firmware
     </button>
+    <div style="margin-top:12px;">
+      <a href="#" onclick="document.getElementById('flasherFileWrap').style.display='block'; this.style.display='none'; return false;" style="font-size:12px;color:var(--text-muted);">Use a different file instead</a>
+      <div id="flasherFileWrap" style="display:none;margin-top:8px;">
+        <input type="file" id="flasherFile" class="form-control" accept=".bin" style="max-width:400px;">
+      </div>
+    </div>
     <div style="margin-top:14px;display:none;" id="flasherProgressWrap">
       <div style="background:var(--border-color);border-radius:6px;height:10px;overflow:hidden;">
         <div id="flasherProgressBar" style="background:var(--accent-blue,#2563eb);height:100%;width:0%;transition:width 0.2s;"></div>
