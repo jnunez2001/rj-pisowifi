@@ -61,7 +61,8 @@ let portalSettings = {
   allow_pause: '1',
   max_pause_minutes: '30',
   grace_period_minutes: '0',
-  payment_methods: 'both'
+  payment_methods: 'both',
+  portal_hostname: ''
 };
 
 // ===== COIN MODAL TIMER =====
@@ -217,7 +218,7 @@ async function enableNotifications() {
     // MAC detection on the HTTPS side re-derives from IP the same way the
     // HTTP side does, so nothing extra needs to be passed here.
     const httpsUrl = `https://${location.hostname}:8443${location.pathname}`;
-    alert('You\'ll see a one-time security warning on the next page - that\'s expected for this WiFi\'s own address, not a problem. Tap through it to continue.');
+    alert('You may see a one-time security warning on the next page — tap through to continue.');
     window.location.href = httpsUrl;
     return;
   }
@@ -483,6 +484,44 @@ function handleInsertCoin() {
   activateVendoRelay();
 }
 
+// Lets the customer skip the rest of the silence window (server-side
+// PENDING_TIMEOUT_MS) once they're done dropping coins, instead of always
+// having to wait it out. Only meaningful if at least one coin has actually
+// landed (insertedTotal > 0) — otherwise there's nothing to finalize, so
+// just close like before.
+async function finishInsertingCoins() {
+  if (insertedTotal <= 0) {
+    closeCoinModal();
+    return;
+  }
+  const mac = getMac();
+  try {
+    const res = await fetch(`${SERVER}/api/coin/finalize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac })
+    });
+    const data = await res.json();
+    if (data.success) {
+      redirectAfterCoinModal = true;
+    } else if (data.reason === 'no_matching_rate') {
+      showToast(data.message || 'That amount doesn\'t match a rate yet.', 'error');
+      return; // leave the modal open so they can insert more
+    }
+    // Any other failure (including no_pending_coins) still falls through
+    // to closeCoinModal() below — the coins, if any, are still safely
+    // waiting in the server's pending window and will finalize on their
+    // own once it goes quiet.
+  } catch (e) {
+    // Network/server unreachable — nothing was finalized. Don't pretend it
+    // was: keep the modal open (the fast pending-poll keeps retrying) and
+    // let the customer know, instead of silently closing as if connected.
+    showToast('Could not reach the server — please try again.', 'error');
+    return;
+  }
+  closeCoinModal();
+}
+
 function closeCoinModal() {
   stopSound('insert');
   stopCoinTimer();
@@ -514,6 +553,19 @@ function applyPortalSettings() {
   const pauseBtn = document.getElementById('pauseBtn');
   if (pauseBtn) {
     pauseBtn.style.display = portalSettings.allow_pause === '1' ? 'block' : 'none';
+  }
+
+  // Lets a customer who already closed this page find their way back to
+  // pause or top up, instead of only ever seeing this button once, right
+  // when they first connect.
+  const hostnameHint = document.getElementById('portalHostnameHint');
+  if (hostnameHint) {
+    if (portalSettings.portal_hostname) {
+      hostnameHint.textContent = `Return anytime at ${portalSettings.portal_hostname}`;
+      hostnameHint.style.display = 'block';
+    } else {
+      hostnameHint.style.display = 'none';
+    }
   }
 
   const showCoin = portalSettings.payment_methods !== 'voucher';
@@ -751,6 +803,7 @@ async function loadSettings() {
     portalSettings.vendo_ip = data.vendo_ip || '';
     portalSettings.payment_methods = data.payment_methods || 'both';
     portalSettings.vapid_public_key = data.vapid_public_key || '';
+    portalSettings.portal_hostname = data.portal_hostname || '';
     applyPortalSettings();
     updateNotificationsButton();
 

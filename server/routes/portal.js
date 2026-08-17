@@ -122,7 +122,8 @@ router.get('/rates', (req, res) => {
       grace_period_minutes: getSetting('grace_period_minutes', '0'),
       rates,
       vendo_ip: getSetting('vendo_ip', ''),
-      vapid_public_key: getSetting('vapid_public_key', '')
+      vapid_public_key: getSetting('vapid_public_key', ''),
+      portal_hostname: getSetting('portal_hostname', '')
     });
 
   } catch (err) {

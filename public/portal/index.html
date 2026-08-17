@@ -90,8 +90,7 @@
 
     <!-- EXPIRY WARNING -->
     <div class="expiry-warning" id="expiryWarning" onclick="handleInsertCoin()" style="cursor:pointer;">
-      <i class="fas fa-exclamation-triangle"></i>&nbsp;
-      Time is almost up. Tap here to add more.
+      <i class="fas fa-exclamation-triangle"></i>&nbsp; Time almost up — tap to add more
     </div>
 
     <!-- DISCONNECTED -->
@@ -127,6 +126,7 @@
 
     <!-- CONNECTED -->
     <div id="sectionConnected" style="display:none">
+      <div id="portalHostnameHint" style="display:none;text-align:center;font-size:13px;color:var(--text-muted, #888);margin-bottom:12px;"></div>
       <button class="btn btn-insert" id="insertBtnConnected" onclick="handleInsertCoin()">
         <span class="coin-spin">🪙</span>&nbsp; INSERT COIN TO ADD TIME
       </button>
@@ -172,10 +172,7 @@
     <div id="sectionPaused" style="display:none">
       <div class="paused-info">
         <i class="fas fa-pause-circle" style="font-size:50px;color:#ffa000;"></i>
-        <p style="color:#888;font-size:16px;font-weight:700;margin-top:10px;letter-spacing:1px;">
-          YOUR SESSION IS PAUSED<br>
-          <span style="font-size:13px;color:#aaa;font-weight:600;">Resume anytime before expiry.</span>
-        </p>
+        <p style="color:#888;font-size:16px;font-weight:700;margin-top:10px;letter-spacing:1px;">SESSION PAUSED</p>
       </div>
       <button class="btn btn-resume" onclick="resumeSession()">
         <i class="fas fa-play"></i>&nbsp; RESUME SESSION
@@ -225,13 +222,10 @@
           </div>
         </div>
 
-        <p class="coin-timer-msg">
-          Insert coin into the vendo machine.<br>
-          Internet starts <strong style="color:#00a844;">automatically!</strong>
-        </p>
+        <p class="coin-timer-msg">Internet connects automatically.</p>
 
-        <button class="btn btn-activate" onclick="closeCoinModal()">
-          <i class="fas fa-plug"></i>&nbsp; ALREADY INSERTED? CONNECT
+        <button class="btn btn-activate" onclick="finishInsertingCoins()">
+          <i class="fas fa-plug"></i>&nbsp; DONE / CONNECT NOW
         </button>
 
         <div id="coinRatesList"></div>

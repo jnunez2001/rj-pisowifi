@@ -825,6 +825,7 @@ async function loadNetworkPage() {
   setTimeout(loadCurrentIp, 500);
   await loadNetworkModeSettings();
   await loadAdminHostname();
+  await loadPortalHostname();
   await loadInterfaces();
   await loadVlans();
   await loadClientLabels();
@@ -832,12 +833,11 @@ async function loadNetworkPage() {
 }
 
 function showRouterModeCards(show) {
-  ['routerSetupCard', 'portalAddressCard', 'routerStatusCard', 'routerTerminalCard', 'routerPowerCard'].forEach(id => {
+  ['routerSetupCard', 'routerStatusCard', 'routerTerminalCard', 'routerPowerCard'].forEach(id => {
     document.getElementById(id).style.display = show ? 'block' : 'none';
   });
   if (show) {
     loadIspPlan();
-    loadPortalHostname();
     loadRouterPorts();
     loadRouterStatus();
     loadMikrotikNetworkPowerSummaries();
