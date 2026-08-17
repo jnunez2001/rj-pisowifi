@@ -6,6 +6,7 @@ server/database/
 .env
 public/uploads/
 server/logs/
+data/
 
 # Arduino/arduino-cli compile output (esp32/esp8266 firmware) - generated,
 # never committed

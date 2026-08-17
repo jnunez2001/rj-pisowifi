@@ -25,6 +25,56 @@ async function loadFirmwareInfo() {
   } catch (e) {
     console.error('Firmware info error:', e);
   }
+  await loadBundledFirmwareInfo();
+}
+
+// Bug found live: this used to update a <span> nested inside the button
+// rather than owning the button's whole innerHTML - pushBundledFirmware()
+// replaces the ENTIRE innerHTML while pushing ("Pushing..."), which
+// destroys that span, so this then threw trying to update a now-gone
+// element and left the button stuck on "Pushing..." forever. This
+// function now always fully rebuilds the button's content itself instead
+// of assuming any previous markup survived.
+async function loadBundledFirmwareInfo() {
+  const btn = document.getElementById('pushBundledFirmwareBtn');
+  try {
+    const data = await apiCall('GET', '/api/admin/vendo/firmware/bundled');
+    if (!data.success || !data.esp8266) {
+      btn.innerHTML = '<i class="fas fa-bolt"></i> Bundled firmware unavailable';
+      btn.disabled = true;
+      return;
+    }
+    const upToDate = data.currentVersion === data.esp8266.version;
+    btn.disabled = upToDate;
+    btn.innerHTML = upToDate
+      ? `<i class="fas fa-check"></i> Already on ${data.esp8266.version}`
+      : `<i class="fas fa-bolt"></i> Update to ${data.esp8266.version}`;
+  } catch (e) {
+    btn.innerHTML = '<i class="fas fa-bolt"></i> Bundled firmware unavailable';
+    btn.disabled = true;
+  }
+}
+
+async function pushBundledFirmware() {
+  const btn = document.getElementById('pushBundledFirmwareBtn');
+  btn.disabled = true;
+  const originalHtml = btn.innerHTML;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Pushing...';
+  try {
+    const data = await apiCall('POST', '/api/admin/vendo/firmware/push-bundled');
+    if (data.success) {
+      showToast(data.message || 'Firmware pushed!', 'success');
+      loadFirmwareInfo();
+    } else {
+      showToast(data.message || 'Push failed', 'error');
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
+  } catch (e) {
+    showToast('Push failed', 'error');
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+  }
 }
 
 async function uploadFirmware() {

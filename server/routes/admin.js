@@ -2555,6 +2555,51 @@ router.post('/vendo/firmware', adminAuth, firmwareUpload.single('firmware'), (re
   }
 });
 
+// GET /api/admin/vendo/firmware/bundled — what version ships with this app
+// right now (public/admin/assets/firmware/manifest.json), so the admin
+// panel can show a one-click "Update to vX.X.X" button instead of making
+// the admin locate and upload a .bin by hand every time.
+router.get('/vendo/firmware/bundled', adminAuth, (req, res) => {
+  try {
+    const manifestPath = path.join(__dirname, '../../public/admin/assets/firmware/manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const currentVersion = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value || null;
+    return res.json({ success: true, esp8266: manifest.esp8266, currentVersion });
+  } catch (err) {
+    console.error('Bundled vendo firmware read error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/vendo/firmware/push-bundled — one click, no file upload:
+// copies the ESP8266 build already shipped with this app straight into
+// the OTA slot every adopted vendo checks against. Same effect as the
+// manual upload route above, just sourcing the file from
+// assets/firmware/ instead of a multipart upload.
+router.post('/vendo/firmware/push-bundled', adminAuth, (req, res) => {
+  try {
+    const manifestPath = path.join(__dirname, '../../public/admin/assets/firmware/manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    const entry = manifest.esp8266;
+    if (!entry || !entry.files?.[0]?.file) {
+      return res.status(500).json({ success: false, message: 'No bundled ESP8266 firmware found' });
+    }
+    const bundledPath = path.join(__dirname, '../../public/admin/assets/firmware', entry.files[0].file);
+    if (!fs.existsSync(bundledPath)) {
+      return res.status(500).json({ success: false, message: 'Bundled firmware file is missing' });
+    }
+    fs.copyFileSync(bundledPath, firmwarePath);
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    upsert.run('vendo_firmware_version', entry.version);
+    upsert.run('vendo_firmware_uploaded_at', new Date().toISOString().slice(0, 19).replace('T', ' '));
+    console.log(`📦 Vendo firmware updated (bundled): ${entry.version}`);
+    return res.json({ success: true, version: entry.version, message: `Pushed ${entry.version} — vendos will pick it up on their next check-in` });
+  } catch (err) {
+    console.error('Push bundled vendo firmware error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/vendo/firmware/version — unauthenticated, same reasoning
 // as /vendo/register above: called directly by ESP32 firmware with no
 // admin password. Just the version string so a device can cheaply decide
