@@ -103,10 +103,10 @@ async function autoLoadBundledFirmware(chipName) {
   );
   const info = document.getElementById('flasherFileInfo');
   if (!entry) {
-    info.textContent = `No bundled firmware for "${chipName}" - choose a .bin file manually above.`;
+    info.textContent = `No bundled firmware for ${chipName}. Pick a .bin above.`;
     return;
   }
-  info.textContent = `Loading bundled firmware (${chipName}, ${entry.version})...`;
+  info.textContent = `Loading ${chipName} firmware...`;
   try {
     const files = await Promise.all(entry.files.map(async (f) => {
       const buf = await fetch(FIRMWARE_ASSETS_BASE + f.file).then((r) => {
@@ -116,12 +116,12 @@ async function autoLoadBundledFirmware(chipName) {
       return { data: new Uint8Array(buf), address: f.address };
     }));
     flasherFileArray = files;
-    info.textContent = `Bundled: ${chipName} vendo firmware ${entry.version} (auto-loaded)`;
-    flasherLog(`Auto-loaded bundled firmware for ${chipName} (${entry.version}).`);
+    info.textContent = `Loaded: ${chipName} ${entry.version}`;
+    flasherLog(`Loaded ${chipName} firmware ${entry.version}.`);
     updateFlasherFlashButtonState();
   } catch (e) {
-    info.textContent = `Failed to load bundled firmware: ${e.message}. Choose a .bin file manually above.`;
-    flasherLog('Bundled firmware load failed: ' + e.message);
+    info.textContent = `Couldn't load firmware: ${e.message}. Pick a .bin above.`;
+    flasherLog('Firmware load failed: ' + e.message);
   }
 }
 
@@ -180,10 +180,10 @@ async function flasherFlash() {
         progressText.textContent = pct + '%';
       },
     });
-    flasherLog('Flash complete! Resetting device...');
+    flasherLog('Flashed. Resetting...');
     await flasherEsploader.after('hard_reset');
-    flasherLog('Done. The device is rebooting into the new firmware.');
-    showToast('Firmware flashed successfully!', 'success');
+    flasherLog('Done. Device is rebooting.');
+    showToast('Firmware flashed!', 'success');
     btn.innerHTML = '<i class="fas fa-check"></i> Flashed!';
   } catch (e) {
     flasherLog('Flash failed: ' + (e.message || e));
