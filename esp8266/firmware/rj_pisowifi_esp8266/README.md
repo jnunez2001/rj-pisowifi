@@ -2,16 +2,16 @@
 
 Full feature parity with the ESP32 version (`esp32/firmware/rj_pisowifi/`) — coin detection, relay control, WiFi setup hotspot, auto-recovery on WiFi failure, and OTA updates from the admin panel — ported to run on the cheaper ESP8266.
 
-## Wiring (NodeMCU / Wemos D1 Mini -style boards)
+## Wiring (custom ESP8266 hat, NodeMCU/ESP-12E form factor)
 
 | Function    | Pin        |
 |-------------|------------|
-| Coin sensor | D2 (GPIO4) |
-| Relay       | D1 (GPIO5) |
-| Status LED  | D4 (GPIO2) — usually the board's own onboard LED |
-| Setup button| D3 (GPIO0) — usually the board's own onboard "FLASH" button, no extra wiring needed |
+| Coin sensor | D1 (GPIO5) |
+| Setup button| D2 (GPIO4) — this custom board's own SET button, not the devboard's onboard "FLASH" button |
+| Relay       | D3 (GPIO0) — has a boot-time role (must not be pulled LOW while the chip is starting), safe once running |
+| Status LED  | D4 (GPIO2) — reserved only, no LED is wired on this board, firmware never drives it |
 
-D2/D1 have no boot-time role on ESP8266, unlike D4/D3, which is exactly why nearly every ESP8266 board already has its onboard LED and FLASH button wired to those two specific pins — reusing them here is standard practice, not a workaround.
+The devboard's own RST button is a hardware reset line, not a GPIO — it fully powers the chip off while held, so firmware cannot detect a long-press on it the way it does on the SET button. Setup mode is entered only by holding SET (GPIO4) for 5 seconds, or automatically on first boot with no saved config; a plain reset or power blip reconnects to saved WiFi on its own.
 
 ## Arduino IDE setup
 

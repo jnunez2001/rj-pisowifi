@@ -28,7 +28,6 @@ bool connectWiFi() {
   while (WiFi.status() != WL_CONNECTED && attempts < WIFI_RETRY_COUNT) {
     delay(500);
     Serial.print(".");
-    digitalWrite(LED_PIN, !digitalRead(LED_PIN));
     attempts++;
   }
 
@@ -38,7 +37,6 @@ bool connectWiFi() {
     lcdPrint(1, "Connected!");
     lcdPrint(2, WiFi.localIP().toString());
     lcdPrint(3, "Server: " + config.server_ip);
-    digitalWrite(LED_PIN, HIGH);
     return true;
   }
 
@@ -47,7 +45,6 @@ bool connectWiFi() {
   lcdPrint(1, "WiFi Failed!");
   lcdPrint(2, "Hold BTN 5s");
   lcdPrint(3, "for Setup Mode");
-  digitalWrite(LED_PIN, LOW);
   return false;
 }
 

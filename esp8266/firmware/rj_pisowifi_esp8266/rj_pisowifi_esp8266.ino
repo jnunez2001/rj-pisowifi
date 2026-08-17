@@ -9,12 +9,12 @@ void setup() {
   // Pin modes
   pinMode(COIN_PIN, INPUT_PULLUP);
   pinMode(RELAY_PIN, OUTPUT);
-  pinMode(LED_PIN, OUTPUT);
   pinMode(SETUP_BTN, INPUT_PULLUP);
+  // LED_PIN is reserved only (see config.h) — no LED on this board, so it
+  // is never configured as an output or driven.
 
   // Safe defaults — relay OFF using correct logic level for this board
   digitalWrite(RELAY_PIN, RELAY_OFF_STATE);
-  digitalWrite(LED_PIN, LOW);
 
   // Init LittleFS (ESP8266's standard filesystem — the ESP32 version uses
   // SPIFFS, but LittleFS is what config.cpp's flat-file config storage and

@@ -8,30 +8,44 @@
 #define FIRMWARE_VERSION "v1.0.0"
 
 // ===== PINS =====
-// ESP8266 (NodeMCU/Wemos D1 Mini -style D-labels) has far fewer usable
-// GPIOs than ESP32, several with real boot-mode constraints. Picked to
-// avoid every one of those constraints EXCEPT where reusing a
-// board-provided button is actually the safer, more convenient choice:
-//   D2 (GPIO4)  - COIN_PIN:   plain GPIO, interrupt-capable, no boot role.
-//   D1 (GPIO5)  - RELAY_PIN:  plain GPIO, no boot role.
-//   D4 (GPIO2)  - LED_PIN:    a boot-strapping pin (must be HIGH at boot),
-//                             but this is also the standard onboard-LED
-//                             pin on nearly every ESP8266 dev board for
-//                             exactly this reason - completely safe to
-//                             drive from user code once setup()/loop() are
-//                             running, well past the boot-mode window.
-//   D3 (GPIO0)  - SETUP_BTN:  also boot-strapping (LOW during reset means
-//                             "enter flash mode"), which is precisely why
-//                             most ESP8266 boards already have their own
-//                             physical "FLASH" button wired here with a
-//                             pullup - reusing it as SETUP_BTN needs no
-//                             extra wiring on most boards and is the same
-//                             safe INPUT_PULLUP pattern used everywhere
-//                             else in this firmware.
-#define COIN_PIN    4
-#define RELAY_PIN   5
+// Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
+// factor), not the generic NodeMCU/Wemos D1 Mini pin choice this firmware
+// used before:
+//   D1 (GPIO5)  - COIN_PIN:   plain GPIO, interrupt-capable, no boot role.
+//   D2 (GPIO4)  - SETUP_BTN:  plain GPIO, no boot role - wired to this
+//                             custom board's own physical SET button, not
+//                             the devboard's onboard GPIO0 FLASH button.
+//   D3 (GPIO0)  - RELAY_PIN:  boot-strapping pin (must not be pulled LOW
+//                             during the brief ROM-bootloader window
+//                             before setup() runs, or the chip enters
+//                             flash mode instead of booting normally).
+//                             Safe to drive as a normal output once
+//                             setup()/loop() are running, same reasoning
+//                             this firmware already applies to LED_PIN.
+//                             If this custom board's relay driver circuit
+//                             actively holds its input LOW while
+//                             unpowered/idle, that could interfere with
+//                             boot - worth confirming against the board's
+//                             actual schematic if boot becomes unreliable.
+//   D4 (GPIO2)  - LED_PIN:    RESERVED ONLY. No LED is wired on this
+//                             board - nothing in this firmware drives
+//                             this pin (see lcd_display.cpp's ledBlink()
+//                             stub). Kept defined so a future board
+//                             revision with an LED doesn't need a config
+//                             change, not because anything uses it today.
+//
+// The devboard's own RST button is a hardware reset line, not a GPIO -
+// while held, the chip is off and nothing is running, so there is no way
+// for firmware to distinguish a brief tap from a long hold. It cannot be
+// used the way SETUP_BTN is (hold-for-5-seconds); every RST press just
+// causes a normal reboot, same as power-cycling. Setup mode is entered
+// only via SETUP_BTN (GPIO4) or automatically when there's no saved
+// config yet - a plain reset/power blip still reconnects to saved WiFi
+// on its own, it does not fall into setup mode.
+#define COIN_PIN    5
+#define RELAY_PIN   0
 #define LED_PIN     2
-#define SETUP_BTN   0
+#define SETUP_BTN   4
 
 // ===== RELAY LOGIC =====
 // Set to true if your relay module is ACTIVE-LOW
