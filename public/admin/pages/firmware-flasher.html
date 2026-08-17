@@ -1,0 +1,51 @@
+<div class="zf3-header">
+  <div>
+    <div class="page-title">Firmware Flasher</div>
+    <div class="page-subtitle">Flash a vendo's firmware directly over USB, right from this browser &mdash; no separate flashing tool needed</div>
+  </div>
+</div>
+
+<div class="zf3-card" id="flasherUnsupportedCard" style="display:none;">
+  <div class="empty-state">
+    <i class="fas fa-triangle-exclamation"></i>
+    <h3>This browser can't do USB flashing</h3>
+    <p>This feature needs the Web Serial API, which only Chrome and Microsoft Edge support (version 89+). Open this page in one of those browsers to flash over USB, or use Arduino IDE / esptool.py instead.</p>
+  </div>
+</div>
+
+<div id="flasherMainCard">
+  <div class="zf3-card">
+    <div class="zf3-card-title" style="margin-bottom:10px;">1. Choose Firmware File</div>
+    <input type="file" id="flasherFile" class="form-control" accept=".bin">
+    <div id="flasherFileInfo" style="font-size:12px;color:var(--text-muted);margin-top:6px;"></div>
+  </div>
+
+  <div class="zf3-card" style="margin-top:16px;">
+    <div class="zf3-card-title" style="margin-bottom:10px;">2. Connect the Device</div>
+    <div class="zf3-row-hint" style="padding:0 0 10px;">Plug the ESP8266/ESP32 in via USB directly (not through a hub), then click Connect &mdash; your browser will ask you to pick the serial device.</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <button class="btn btn-secondary" id="flasherConnectBtn" onclick="flasherConnect()">
+        <i class="fas fa-plug"></i> Connect
+      </button>
+      <span id="flasherConnectionStatus" style="font-size:13px;color:var(--text-muted);">Not connected</span>
+    </div>
+  </div>
+
+  <div class="zf3-card" style="margin-top:16px;">
+    <div class="zf3-card-title" style="margin-bottom:10px;">3. Flash</div>
+    <button class="btn btn-primary" id="flasherFlashBtn" onclick="flasherFlash()" disabled>
+      <i class="fas fa-bolt"></i> Flash Firmware
+    </button>
+    <div style="margin-top:14px;display:none;" id="flasherProgressWrap">
+      <div style="background:var(--border-color);border-radius:6px;height:10px;overflow:hidden;">
+        <div id="flasherProgressBar" style="background:var(--accent-blue,#2563eb);height:100%;width:0%;transition:width 0.2s;"></div>
+      </div>
+      <div id="flasherProgressText" style="font-size:12px;color:var(--text-muted);margin-top:4px;">0%</div>
+    </div>
+  </div>
+
+  <div class="zf3-card" style="margin-top:16px;">
+    <div class="zf3-card-title" style="margin-bottom:10px;">Log</div>
+    <pre id="flasherLog" style="background:#0d1117;color:#c9d1d9;padding:12px;border-radius:8px;font-size:12px;height:220px;overflow-y:auto;white-space:pre-wrap;margin:0;font-family:monospace;">Waiting for device connection...</pre>
+  </div>
+</div>

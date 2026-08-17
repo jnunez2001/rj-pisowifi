@@ -7,6 +7,11 @@ server/database/
 public/uploads/
 server/logs/
 
+# Arduino/arduino-cli compile output (esp32/esp8266 firmware) - generated,
+# never committed
+esp32/firmware/*/build/
+esp8266/firmware/*/build/
+
 # Internal planning/business docs - kept locally for reference, never
 # committed (would ship to client devices via install.sh's git clone
 # otherwise)
