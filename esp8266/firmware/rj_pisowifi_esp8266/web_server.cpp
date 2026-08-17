@@ -158,6 +158,33 @@ void setupWebServer() {
     server.send(200, "application/json", "{\"success\":true}");
   });
 
+  // POST /coin-power/test?level=high|low - raw pin-level test, bypassing
+  // RELAY_ACTIVE_LOW/activateRelay() entirely. Built for exactly this
+  // situation: verifying which logic level actually powers a specific
+  // board's coin-slot switching circuit, without needing to flip
+  // RELAY_ACTIVE_LOW and reflash between every attempt. Same
+  // server-only restriction as /relay/on|off - this directly drives
+  // hardware, not something to leave reachable from the customer network.
+  server.on("/coin-power/test", HTTP_POST, []() {
+    if (!rejectUnlessFromServer()) return;
+    if (!server.hasArg("level")) {
+      server.send(400, "application/json", "{\"success\":false,\"message\":\"Missing ?level=high or ?level=low\"}");
+      return;
+    }
+    String level = server.arg("level");
+    level.toLowerCase();
+    if (level == "high") {
+      digitalWrite(RELAY_PIN, HIGH);
+    } else if (level == "low") {
+      digitalWrite(RELAY_PIN, LOW);
+    } else {
+      server.send(400, "application/json", "{\"success\":false,\"message\":\"level must be 'high' or 'low'\"}");
+      return;
+    }
+    Serial.println("Coin-power test: SET pin (D2/GPIO4) driven " + level);
+    server.send(200, "application/json", "{\"success\":true,\"pin\":\"D2\",\"level\":\"" + level + "\"}");
+  });
+
   // GET status
   server.on("/status", HTTP_GET, []() {
     String json = "{";
