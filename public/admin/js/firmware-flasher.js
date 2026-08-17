@@ -76,6 +76,7 @@ async function loadFirmwareFlasherPage() {
     const bytes = new Uint8Array(await file.arrayBuffer());
     flasherFileArray = [{ data: bytes, address: 0 }];
     document.getElementById('flasherFileInfo').textContent = `${file.name} (${(file.size / 1024).toFixed(1)} KB) - manual selection`;
+    if (flasherEsploader) flasherLog('Ready to flash. Click "Flash Firmware".');
     updateFlasherFlashButtonState();
   };
 }
@@ -118,6 +119,7 @@ async function autoLoadBundledFirmware(chipName) {
     flasherFileArray = files;
     info.textContent = `Loaded: ${chipName} ${entry.version}`;
     flasherLog(`Loaded ${chipName} firmware ${entry.version}.`);
+    flasherLog('Ready to flash. Click "Flash Firmware".');
     updateFlasherFlashButtonState();
   } catch (e) {
     info.textContent = `Couldn't load firmware: ${e.message}. Pick a .bin above.`;
