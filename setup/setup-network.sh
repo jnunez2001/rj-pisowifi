@@ -189,6 +189,34 @@ if [ -z "$LAN_IF" ] && [ "$NETWORK_MODE" = "mikrotik" ] && [ -n "$WAN_IF" ]; the
     LAN_IF="$WAN_IF"
     echo "Single-NIC Controller Mode: using $WAN_IF as both WAN and LAN" >> $LOG
 fi
+# Real bug found live (root cause of the box losing its static IP on a
+# brownout, not just on reboot): WAN_IF's own auto-detect above depends on
+# `ip route show default` - the LIVE routing table - and neither
+# wan_interface nor lan_interface is ever actually saved by the admin app
+# (both DB reads above always return empty), so this fallback runs on
+# EVERY invocation, not just first boot. relink.sh restarts this whole
+# script the moment the link carrier changes state (exactly what happens
+# when the paired MikroTik loses power during a brownout) - if it fires in
+# the split second the route table is momentarily empty, WAN_IF comes back
+# blank, which means the single-NIC fallback just above (itself requiring
+# WAN_IF to be non-empty) can't fire either, LAN_IF stays empty, and the
+# script hits "No LAN interface found" below and exits WITHOUT ever
+# reaching the static IP assignment code - silently leaving the interface
+# addressless until something else happens to trigger a working run.
+#
+# Fix: for single-NIC Controller Mode, detect the interface directly from
+# what physically exists (/sys/class/net), not from momentarily-flappable
+# live route state. If there is exactly one physical interface on the box,
+# that IS the WAN/LAN interface, full stop - no route table involved.
+if [ -z "$LAN_IF" ] && [ "$NETWORK_MODE" = "mikrotik" ]; then
+    PHYS_IFACES=$(ls /sys/class/net/ | grep -E '^(eth|enp|ens|enx)')
+    PHYS_IFACE_COUNT=$(echo "$PHYS_IFACES" | grep -c .)
+    if [ "$PHYS_IFACE_COUNT" -eq 1 ]; then
+        LAN_IF="$PHYS_IFACES"
+        WAN_IF="$PHYS_IFACES"
+        echo "Single-NIC Controller Mode: using $PHYS_IFACES as both WAN and LAN (detected directly, not via route table)" >> $LOG
+    fi
+fi
 # 'nodogsplash' was this project's old internal name for standalone mode
 # (the real Nodogsplash software was replaced by this script's own
 # nftables/tc setup long ago; only the label lingered). The database was
