@@ -5,6 +5,117 @@ let plEditingId = null;
 
 async function loadPlansPage() {
   await loadPlansList();
+  await loadCoinRatesForPlans();
+}
+
+// ===== COIN VENDO RATES (shown on this page per the operator's request -
+// "where can I configure coin rates" kept landing here, not on the
+// separate Rates page). Reuses the same /api/admin/rates endpoints
+// rates.js already calls - this is the one real coin-to-minutes table
+// the coin slot actually reads, Plans itself doesn't touch it. Distinct
+// function/element names from rates.js (both scripts load on every admin
+// page) so the two don't collide if Rates' own page is ever open in
+// another tab session-wise - not strictly required since only one page
+// is visible at a time, but keeps this addition self-contained. =====
+let plCoinRateEditId = null;
+
+async function loadCoinRatesForPlans() {
+  const tbody = document.getElementById('plansCoinRatesTable');
+  if (!tbody) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/rates');
+    if (!data.success || !data.rates.length) {
+      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">No coin rates configured</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = data.rates.map(r => `
+      <tr>
+        <td>${escapeHtml(r.label)}</td>
+        <td><span style="font-family:monospace;font-weight:700;color:var(--accent-red);">₱${r.coin_value}</span></td>
+        <td>${r.minutes}</td>
+        <td>${r.expiration_minutes}</td>
+        <td style="text-align:right;">
+          <button class="btn btn-sm btn-secondary" onclick="editCoinRate(${r.id}, ${r.coin_value}, ${r.minutes}, ${r.expiration_minutes}, '${escapeHtml(r.label)}')" title="Edit">
+            <i class="fas fa-edit"></i>
+          </button>
+          <button class="btn btn-sm btn-danger" onclick="deleteCoinRate(${r.id}, '${escapeHtml(r.label)}')" title="Delete">
+            <i class="fas fa-trash"></i>
+          </button>
+        </td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    console.error('Coin rates error:', e);
+  }
+}
+
+function openAddCoinRate() {
+  plCoinRateEditId = null;
+  document.getElementById('coinRateModalTitle').textContent = 'Add Coin Rate';
+  document.getElementById('coinRateLabel').value = '';
+  document.getElementById('coinRateValue').value = '';
+  document.getElementById('coinRateMinutes').value = '';
+  document.getElementById('coinRateExpiration').value = '';
+  document.getElementById('coinRateModal').classList.add('show');
+}
+
+function editCoinRate(id, coinValue, minutes, expiration, label) {
+  plCoinRateEditId = id;
+  document.getElementById('coinRateModalTitle').textContent = 'Edit Coin Rate';
+  document.getElementById('coinRateLabel').value = label;
+  document.getElementById('coinRateValue').value = coinValue;
+  document.getElementById('coinRateMinutes').value = minutes;
+  document.getElementById('coinRateExpiration').value = expiration;
+  document.getElementById('coinRateModal').classList.add('show');
+}
+
+async function saveCoinRate() {
+  const label = document.getElementById('coinRateLabel').value.trim();
+  const coinValue = parseInt(document.getElementById('coinRateValue').value);
+  const minutes = parseFloat(document.getElementById('coinRateMinutes').value);
+  const expirationRaw = document.getElementById('coinRateExpiration').value;
+  const expiration = expirationRaw ? parseFloat(expirationRaw) : minutes;
+
+  if (!label || !coinValue || !minutes) {
+    showToast('Label, coin value, and minutes are required', 'error');
+    return;
+  }
+  if (expiration < minutes) {
+    showToast('Expiration must be ≥ minutes', 'error');
+    return;
+  }
+
+  try {
+    const body = { coin_value: coinValue, minutes, expiration_minutes: expiration, label };
+    const data = plCoinRateEditId
+      ? await apiCall('PUT', `/api/admin/rates/${plCoinRateEditId}`, body)
+      : await apiCall('POST', '/api/admin/rates', body);
+
+    if (data.success) {
+      showToast(plCoinRateEditId ? 'Rate updated!' : 'Rate added!', 'success');
+      closeModal('coinRateModal');
+      loadCoinRatesForPlans();
+    } else {
+      showToast(data.message || 'Failed to save rate', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
+  }
+}
+
+async function deleteCoinRate(id, label) {
+  if (!confirm(`Delete coin rate "${label}"?`)) return;
+  try {
+    const data = await apiCall('DELETE', `/api/admin/rates/${id}`);
+    if (data.success) {
+      showToast('Rate deleted', 'success');
+      loadCoinRatesForPlans();
+    } else {
+      showToast(data.message || 'Failed to delete', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
+  }
 }
 
 async function loadPlansList() {
