@@ -63,7 +63,7 @@ async function loadFirmwareFlasherPage() {
   document.getElementById('flasherFlashBtn').disabled = true;
 
   try {
-    flasherManifest = await fetch(FIRMWARE_ASSETS_BASE + 'manifest.json').then((r) => r.json());
+    flasherManifest = await fetch(FIRMWARE_ASSETS_BASE + 'manifest.json?t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
   } catch (e) {
     flasherManifest = null;
   }
@@ -110,7 +110,7 @@ async function autoLoadBundledFirmware(chipName) {
   info.textContent = `Loading ${chipName} firmware...`;
   try {
     const files = await Promise.all(entry.files.map(async (f) => {
-      const buf = await fetch(FIRMWARE_ASSETS_BASE + f.file).then((r) => {
+      const buf = await fetch(FIRMWARE_ASSETS_BASE + f.file + '?t=' + Date.now(), { cache: 'no-store' }).then((r) => {
         if (!r.ok) throw new Error(`${f.file}: HTTP ${r.status}`);
         return r.arrayBuffer();
       });

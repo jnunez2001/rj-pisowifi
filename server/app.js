@@ -174,6 +174,22 @@ function restrictAdminToLocalhost(req, res, next) {
 app.use('/admin', restrictAdminToLocalhost);
 app.use('/api/admin', restrictAdminToLocalhost);
 
+// Bug found live: the Firmware Flasher page (public/admin/js/firmware-flasher.js)
+// fetches manifest.json and the bundled .bin files with plain relative
+// fetch() calls, no cache-busting. Express's static middleware sends
+// Last-Modified/ETag but no Cache-Control, so with no explicit directive a
+// browser is free to apply HTTP heuristic caching and serve a stale
+// firmware binary from a previous page load without ever revalidating -
+// an operator reflashing after a firmware push could silently re-flash
+// the OLD build and see no error, just a version number that never moves.
+// Firmware bytes are correctness-critical, never a caching win worth
+// taking - force revalidation on every request for this one directory,
+// ahead of the general static mount below so it takes precedence.
+app.use('/admin/assets/firmware', (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+}, express.static(path.join(__dirname, '../public/admin/assets/firmware')));
+
 app.use(express.static(path.join(__dirname, '../public')));
 
 // ── Caching ──────────────────────────────────────────────────────
