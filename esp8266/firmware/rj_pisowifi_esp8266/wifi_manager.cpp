@@ -85,6 +85,17 @@ bool discoverServer() {
 bool connectWiFi() {
   if (config.wifi_ssid.isEmpty()) return false;
 
+  // Bug found live: WiFi.config() was called before WiFi.mode(WIFI_STA) -
+  // on ESP8266, setting a static IP before the WiFi subsystem is actually
+  // in station mode gets silently ignored, not deferred. This meant the
+  // static IP never actually applied on ANY boot, not just after a
+  // brownout - the device always came up on whatever DHCP handed it,
+  // masked during initial testing because the freshly-set IP happened to
+  // still be reachable from whatever DHCP gave it that one time. Order
+  // matters: mode must be set first, config() right after and before
+  // begin(), same sequence the ESP8266 Arduino core's own examples use.
+  WiFi.mode(WIFI_STA);
+
   if (config.static_ip && !config.device_ip.isEmpty()) {
     IPAddress ip, gw, sn;
     ip.fromString(config.device_ip);
@@ -93,7 +104,6 @@ bool connectWiFi() {
     WiFi.config(ip, gw, sn);
   }
 
-  WiFi.mode(WIFI_STA);
   WiFi.begin(config.wifi_ssid.c_str(), config.wifi_pass.c_str());
 
   Serial.print("Connecting to WiFi");
