@@ -29,11 +29,21 @@ class NoMatchingRateError extends Error {
 // `kioskId` is optional — null means "Main Kiosk or an unregistered
 // Satellite Kiosk," both indistinguishable from generic Coins revenue
 // until that specific relay device is paired (see satelliteKioskService.js).
-async function creditCoinValue(mac, coinValue, ip = '', kioskId = null) {
+// `isPremium` - which button the customer tapped (portal.js's gold
+// PREMIUM button vs the normal INSERT COIN one). Premium rates share the
+// exact same coin_value as their regular counterpart (₱10 Normal and ₱10
+// Premium both exist), so the coin's own denomination can no longer tell
+// them apart on its own - this filters to ONLY Premium or ONLY regular
+// rates before matching, so a customer who tapped Premium always gets
+// the Premium tier for whatever they insert, never silently falls back
+// to the regular one sharing that price.
+async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremium = false) {
   const { getRates } = require('./voucherService');
   const { creditOrCreateSession } = require('./sessionService');
 
-  const allRates = getRates().sort((a, b) => b.coin_value - a.coin_value);
+  const allRates = getRates()
+    .filter((r) => !!r.download_mbps === isPremium)
+    .sort((a, b) => b.coin_value - a.coin_value);
 
   let remaining = coinValue;
   const matchedRates = [];

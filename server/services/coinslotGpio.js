@@ -36,6 +36,7 @@ const EDGE_VALUES = new Set(['falling', 'rising', 'both']);
 // ---- Busy-lock (one coin window active at a time) ----
 let _waitingMac = '';
 let _waitingUntil = 0; // epoch ms
+let _waitingIsPremium = false;
 
 // ---- Empty-open rate limiter: { mac: [{ts, inserted}] } ----
 const _openHistory = new Map();
@@ -164,8 +165,12 @@ function markCoinInserted(mac) {
 }
 
 // Marks the freshest waiting portal client as ready for coin pulses.
+// `isPremium` - which button the customer tapped on the portal (normal
+// vs the gold PREMIUM button) - remembered here so creditWaitingClient()
+// below knows to match against the Premium rate for whatever coin value
+// comes in, not the regular one sharing the same coin_value.
 // Returns { status, windowSeconds }.
-function registerWaitingClient(mac) {
+function registerWaitingClient(mac, isPremium = false) {
   const normalized = normalizeMac(mac);
   if (!normalized) return { status: REGISTER_OK, windowSeconds: 0 };
 
@@ -189,6 +194,7 @@ function registerWaitingClient(mac) {
   const until = Date.now() + cfg.activeWindowSeconds * 1000;
   _waitingMac = normalized;
   _waitingUntil = until;
+  _waitingIsPremium = !!isPremium;
   setAcceptorEnabled(true, cfg);
   scheduleAcceptorDisable(cfg, until);
   return { status: REGISTER_OK, windowSeconds: cfg.activeWindowSeconds };
@@ -209,6 +215,7 @@ function cancelWaitingClient(mac) {
   if (_waitingMac === normalized && _waitingUntil > Date.now()) {
     _waitingMac = '';
     _waitingUntil = 0;
+    _waitingIsPremium = false;
     cancelled = true;
   }
   if (cancelled || cfg.resolvedMode === MODE_DIRECT_GPIO) {
@@ -370,7 +377,7 @@ async function creditWaitingClient(pulses = 1, cfg = null) {
   const phpAmount = Math.max(1, pulses) * Math.max(1, cfg.phpPerPulse);
 
   try {
-    await creditCoinValue(mac, phpAmount, '');
+    await creditCoinValue(mac, phpAmount, '', null, _waitingIsPremium);
     markCoinInserted(mac);
     console.log(`[CoinslotGPIO] Credited direct GPIO coin pulse: mac=${mac} php=${phpAmount}`);
     return true;

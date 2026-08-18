@@ -5,140 +5,76 @@ let plEditingId = null;
 
 async function loadPlansPage() {
   await loadPlansList();
-  await loadCoinRatesForPlans();
+  await loadBandwidthProfilesForPlans();
 }
 
-// ===== COIN VENDO RATES (shown on this page per the operator's request -
-// "where can I configure coin rates" kept landing here, not on the
-// separate Rates page). Reuses the same /api/admin/rates endpoints
-// rates.js already calls - this is the one real coin-to-minutes table
-// the coin slot actually reads, Plans itself doesn't touch it. Distinct
-// function/element names from rates.js (both scripts load on every admin
-// page) so the two don't collide if Rates' own page is ever open in
-// another tab session-wise - not strictly required since only one page
-// is visible at a time, but keeps this addition self-contained. =====
-let plCoinRateEditId = null;
+// Bandwidth Profiles (Network > Bandwidth Profiles) are just a named
+// download/upload/burst preset - reused here as a shortcut so an operator
+// doesn't have to remember and retype the same numbers on every plan.
+// Picking one only copies its speeds into the plan's own fields at save
+// time, it's not a live link - editing the profile later doesn't retroactively
+// change plans that borrowed its numbers, same one-way relationship
+// vouchers' own bandwidth_profile_id picker has.
+let plBandwidthProfiles = [];
 
-// Coin rates are looked up by id when editing/deleting (not passed inline
-// through onclick args) so a value like a quote in the label, or null
-// speed fields, never has to survive round-tripping through an HTML
-// attribute string.
-let plCoinRates = [];
-
-async function loadCoinRatesForPlans() {
-  const tbody = document.getElementById('plansCoinRatesTable');
-  if (!tbody) return;
+async function loadBandwidthProfilesForPlans() {
+  const select = document.getElementById('planBandwidthProfile');
+  if (!select) return;
   try {
-    const data = await apiCall('GET', '/api/admin/rates');
-    if (!data.success || !data.rates.length) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">No coin rates configured</td></tr>`;
-      return;
-    }
-    plCoinRates = data.rates;
-    tbody.innerHTML = data.rates.map(r => `
-      <tr>
-        <td>${escapeHtml(r.label)}</td>
-        <td><span style="font-family:monospace;font-weight:700;color:var(--accent-red);">₱${r.coin_value}</span></td>
-        <td>${r.minutes}</td>
-        <td>${r.expiration_minutes}</td>
-        <td>${r.download_mbps
-          ? `<span class="badge badge-blue"><i class="fas fa-bolt"></i> Premium ${r.download_mbps}/${r.upload_mbps || r.download_mbps} Mbps</span>`
-          : '<span style="color:var(--text-muted);">Normal</span>'}</td>
-        <td style="text-align:right;">
-          <button class="btn btn-sm btn-secondary" onclick="editCoinRate(${r.id})" title="Edit">
-            <i class="fas fa-edit"></i>
-          </button>
-          <button class="btn btn-sm btn-danger" onclick="deleteCoinRate(${r.id}, '${escapeHtml(r.label)}')" title="Delete">
-            <i class="fas fa-trash"></i>
-          </button>
-        </td>
-      </tr>
-    `).join('');
+    const data = await apiCall('GET', '/api/admin/bandwidth-profiles');
+    if (!data.success) return;
+    plBandwidthProfiles = data.profiles;
+    select.innerHTML = '<option value="">Custom (set speeds manually)</option>' +
+      data.profiles.map(p => `<option value="${p.id}">${escapeHtml(p.name)} (${p.download_mbps}/${p.upload_mbps} Mbps)</option>`).join('');
   } catch (e) {
-    console.error('Coin rates error:', e);
+    console.error('Bandwidth profiles load error:', e);
   }
 }
 
-function openAddCoinRate() {
-  plCoinRateEditId = null;
-  document.getElementById('coinRateModalTitle').textContent = 'Add Coin Rate';
-  document.getElementById('coinRateLabel').value = '';
-  document.getElementById('coinRateValue').value = '';
-  document.getElementById('coinRateMinutes').value = '';
-  document.getElementById('coinRateExpiration').value = '';
-  document.getElementById('coinRateDownload').value = '';
-  document.getElementById('coinRateUpload').value = '';
-  document.getElementById('coinRateModal').classList.add('show');
+function onPlanBandwidthProfileChange() {
+  const id = document.getElementById('planBandwidthProfile').value;
+  if (!id) return;
+  const profile = plBandwidthProfiles.find(p => String(p.id) === id);
+  if (!profile) return;
+  document.getElementById('planDownload').value = profile.download_mbps;
+  document.getElementById('planUpload').value = profile.upload_mbps;
+  if (document.getElementById('planIsPremium').checked) onPlanCoinVendoChannelChange();
 }
 
-function editCoinRate(id) {
-  const r = plCoinRates.find(x => x.id === id);
-  if (!r) return;
-  plCoinRateEditId = id;
-  document.getElementById('coinRateModalTitle').textContent = 'Edit Coin Rate';
-  document.getElementById('coinRateLabel').value = r.label;
-  document.getElementById('coinRateValue').value = r.coin_value;
-  document.getElementById('coinRateMinutes').value = r.minutes;
-  document.getElementById('coinRateExpiration').value = r.expiration_minutes;
-  document.getElementById('coinRateDownload').value = r.download_mbps || '';
-  document.getElementById('coinRateUpload').value = r.upload_mbps || '';
-  document.getElementById('coinRateModal').classList.add('show');
-}
-
-async function saveCoinRate() {
-  const label = document.getElementById('coinRateLabel').value.trim();
-  const coinValue = parseInt(document.getElementById('coinRateValue').value);
-  const minutes = parseFloat(document.getElementById('coinRateMinutes').value);
-  const expirationRaw = document.getElementById('coinRateExpiration').value;
-  const expiration = expirationRaw ? parseFloat(expirationRaw) : minutes;
-  const downloadRaw = document.getElementById('coinRateDownload').value;
-  const uploadRaw = document.getElementById('coinRateUpload').value;
-  const downloadMbps = downloadRaw ? parseFloat(downloadRaw) : null;
-  const uploadMbps = uploadRaw ? parseFloat(uploadRaw) : downloadMbps;
-
-  if (!label || !coinValue || !minutes) {
-    showToast('Label, coin value, and minutes are required', 'error');
+// Coin Vendo is now a real channel (server/routes/admin.js's
+// syncPlanCoinVendoRate keeps a linked rates-table row whenever this is
+// checked on an active plan with a whole-peso price and a duration) - warn
+// inline when those conditions won't actually be met, instead of the
+// checkbox silently doing nothing.
+function onPlanCoinVendoChannelChange() {
+  const checked = document.getElementById('planChannelCoinVendo').checked;
+  const hint = document.getElementById('planChannelHint');
+  if (!checked) {
+    hint.textContent = '';
     return;
   }
-  if (expiration < minutes) {
-    showToast('Expiration must be ≥ minutes', 'error');
-    return;
-  }
-
-  try {
-    const body = {
-      coin_value: coinValue, minutes, expiration_minutes: expiration, label,
-      download_mbps: downloadMbps, upload_mbps: uploadMbps
-    };
-    const data = plCoinRateEditId
-      ? await apiCall('PUT', `/api/admin/rates/${plCoinRateEditId}`, body)
-      : await apiCall('POST', '/api/admin/rates', body);
-
-    if (data.success) {
-      showToast(plCoinRateEditId ? 'Rate updated!' : 'Rate added!', 'success');
-      closeModal('coinRateModal');
-      loadCoinRatesForPlans();
-    } else {
-      showToast(data.message || 'Failed to save rate', 'error');
-    }
-  } catch (e) {
-    showToast('Server error', 'error');
+  const price = Number(document.getElementById('planPrice').value);
+  const duration = Number(document.getElementById('planDuration').value);
+  const status = document.getElementById('planStatus').value;
+  if (!Number.isInteger(price) || price <= 0 || !duration || status !== 'active') {
+    hint.innerHTML = '<i class="fas fa-triangle-exclamation" style="color:var(--accent-orange);"></i> Coin Vendo needs an active plan with a whole-peso price and a duration set - this plan won\'t show up in the coin slot until those are filled in.';
+  } else {
+    hint.textContent = '';
   }
 }
 
-async function deleteCoinRate(id, label) {
-  if (!confirm(`Delete coin rate "${label}"?`)) return;
-  try {
-    const data = await apiCall('DELETE', `/api/admin/rates/${id}`);
-    if (data.success) {
-      showToast('Rate deleted', 'success');
-      loadCoinRatesForPlans();
-    } else {
-      showToast(data.message || 'Failed to delete', 'error');
-    }
-  } catch (e) {
-    showToast('Server error', 'error');
+// Premium is now an explicit flag (plans.is_premium), not inferred from
+// whether Download Speed happens to be filled in - a Regular plan can still
+// carry its own speed cap for other reasons, so guessing off that field
+// alone was ambiguous. Requires Download Speed since that's the number
+// syncPlanCoinVendoRate actually copies into the linked rates row.
+function onPlanPremiumChange() {
+  const checked = document.getElementById('planIsPremium').checked;
+  if (checked && !document.getElementById('planDownload').value) {
+    document.getElementById('planDownload').value = 10;
+    if (!document.getElementById('planUpload').value) document.getElementById('planUpload').value = 5;
   }
+  onPlanCoinVendoChannelChange();
 }
 
 async function loadPlansList() {
@@ -264,7 +200,12 @@ function renderPlansTable() {
           <div style="font-weight:700;color:var(--text-primary);">${escapeHtml(p.name)}</div>
           <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(p.description || '')}</div>
         </td>
-        <td><span class="badge badge-blue">${planTypeLabel(p.type)}</span></td>
+        <td>
+          <div style="display:flex;flex-direction:column;align-items:flex-start;gap:5px;">
+            <span class="badge" style="background:var(--bg-body);color:var(--text-secondary);border:1px solid var(--border-color);">${planTypeLabel(p.type)}</span>
+            ${p.is_premium ? '<span class="badge" style="background:var(--bg-body);color:var(--text-secondary);border:1px solid var(--border-color);"><i class="fas fa-bolt"></i> Premium</span>' : ''}
+          </div>
+        </td>
         <td style="font-weight:700;">₱${Number(p.price).toFixed(2)}</td>
         <td>
           <div>${durationLabel}</div>
@@ -277,7 +218,7 @@ function renderPlansTable() {
         <td>${formatDataLimit(p.data_limit_mb)}</td>
         <td>${(p.used_today || 0).toLocaleString()} sessions</td>
         <td>${statusBadge}</td>
-        <td>
+        <td style="position:sticky;right:0;background:var(--bg-card);">
           <div style="display:flex;gap:6px;">
             <button class="btn btn-sm btn-secondary btn-icon" onclick="viewPlan(${p.id})" title="View"><i class="fas fa-eye"></i></button>
             <button class="btn btn-sm btn-secondary btn-icon" onclick="editPlan(${p.id})" title="Edit"><i class="fas fa-pen"></i></button>
@@ -345,6 +286,8 @@ function resetPlanForm() {
   document.getElementById('planPrice').value = '';
   document.getElementById('planDuration').value = '';
   document.getElementById('planValidity').value = '';
+  document.getElementById('planIsPremium').checked = false;
+  document.getElementById('planBandwidthProfile').value = '';
   document.getElementById('planDownload').value = '';
   document.getElementById('planUpload').value = '';
   document.getElementById('planDataLimit').value = '';
@@ -357,6 +300,7 @@ function resetPlanForm() {
   document.getElementById('planChannelAccount').checked = false;
   document.getElementById('planUsageWarning').style.display = 'none';
   onPlanTypeChange();
+  onPlanCoinVendoChannelChange();
 }
 
 function openCreatePlan() {
@@ -377,6 +321,7 @@ async function editPlan(id) {
   document.getElementById('planPrice').value = plan.price;
   document.getElementById('planDuration').value = plan.duration_minutes || '';
   document.getElementById('planValidity').value = plan.validity_minutes || '';
+  document.getElementById('planIsPremium').checked = !!plan.is_premium;
   document.getElementById('planDownload').value = plan.download_mbps ?? '';
   document.getElementById('planUpload').value = plan.upload_mbps ?? '';
   document.getElementById('planDataLimit').value = plan.data_limit_mb ?? '';
@@ -388,6 +333,7 @@ async function editPlan(id) {
   document.getElementById('planChannelCoinVendo').checked = !!plan.channels.coin_vendo;
   document.getElementById('planChannelAccount').checked = !!plan.channels.account;
   onPlanTypeChange();
+  onPlanCoinVendoChannelChange();
 
   try {
     const data = await apiCall('GET', `/api/admin/plans/${id}`);
@@ -410,8 +356,12 @@ async function savePlan() {
   const price = document.getElementById('planPrice').value;
   const type = document.getElementById('planType').value;
 
+  const isPremium = document.getElementById('planIsPremium').checked;
+  const downloadMbps = document.getElementById('planDownload').value;
+
   if (!name) { showToast('Plan name is required.', 'error'); return; }
   if (price === '' || Number(price) < 0) { showToast('Please enter a valid price.', 'error'); return; }
+  if (isPremium && !downloadMbps) { showToast('Premium plans need a Download Speed set.', 'error'); return; }
 
   const payload = {
     name,
@@ -421,7 +371,8 @@ async function savePlan() {
     price: Number(price),
     duration_minutes: document.getElementById('planDuration').value || null,
     validity_minutes: document.getElementById('planValidity').value || null,
-    download_mbps: document.getElementById('planDownload').value || null,
+    is_premium: isPremium,
+    download_mbps: downloadMbps || null,
     upload_mbps: document.getElementById('planUpload').value || null,
     data_limit_mb: document.getElementById('planDataLimit').value || null,
     device_limit: document.getElementById('planDeviceLimit').value || 1,

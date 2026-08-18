@@ -1330,6 +1330,7 @@ function planRowToJson(row) {
     validity_minutes: row.validity_minutes,
     download_mbps: row.download_mbps,
     upload_mbps: row.upload_mbps,
+    is_premium: !!row.is_premium,
     data_limit_mb: row.data_limit_mb,
     device_limit: row.device_limit,
     session_limit: row.session_limit,
@@ -1345,6 +1346,57 @@ function planRowToJson(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+// Keeps the coin slot's rates table (the one thing coinCreditService.js
+// actually reads at insert time) in sync with a Plan's "Coin Vendo"
+// availability channel, so checking that box on a Plan is real instead of
+// the "(not yet connected)" no-op it used to be. Coin Vendo Rates used to
+// be a second, separate editor on this same page - removed in favor of
+// this, so there's exactly one place to manage coin pricing.
+// A rates row needs whole-peso pricing and a real duration to mean
+// anything to the coin slot, so a Plan missing either (e.g. a Data or
+// Unlimited plan with no duration_minutes) just doesn't get a linked row -
+// same as unchecking the channel.
+function syncPlanCoinVendoRate(planId) {
+  const plan = db.prepare('SELECT * FROM plans WHERE id = ?').get(planId);
+  const existing = db.prepare('SELECT id FROM rates WHERE plan_id = ?').get(planId);
+
+  const eligible = plan && plan.channel_coin_vendo && plan.status === 'active'
+    && Number.isInteger(plan.price) && plan.price > 0 && plan.duration_minutes > 0;
+
+  if (!eligible) {
+    if (existing) db.prepare('DELETE FROM rates WHERE id = ?').run(existing.id);
+    return;
+  }
+
+  // coinCreditService.js tells Normal and Premium tiers apart purely by
+  // whether a rates row has a download_mbps override - so only carry the
+  // plan's speed fields through when is_premium is actually checked, even
+  // if a Regular plan happens to have its own download_mbps set for
+  // unrelated reasons (e.g. a capped voucher plan). A Regular coin-vendo
+  // rate must always land as NULL/NULL here so it falls back to the global
+  // bandwidth cap, not accidentally read as Premium.
+  const fields = {
+    coin_value: plan.price,
+    minutes: plan.duration_minutes,
+    expiration_minutes: plan.validity_minutes || plan.duration_minutes,
+    label: plan.name,
+    download_mbps: plan.is_premium ? (plan.download_mbps || null) : null,
+    upload_mbps: plan.is_premium ? (plan.upload_mbps || plan.download_mbps || null) : null,
+  };
+
+  if (existing) {
+    db.prepare(`
+      UPDATE rates SET coin_value = ?, minutes = ?, expiration_minutes = ?, label = ?, download_mbps = ?, upload_mbps = ?
+      WHERE id = ?
+    `).run(fields.coin_value, fields.minutes, fields.expiration_minutes, fields.label, fields.download_mbps, fields.upload_mbps, existing.id);
+  } else {
+    db.prepare(`
+      INSERT INTO rates (coin_value, minutes, expiration_minutes, label, download_mbps, upload_mbps, plan_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(fields.coin_value, fields.minutes, fields.expiration_minutes, fields.label, fields.download_mbps, fields.upload_mbps, planId);
+  }
 }
 
 const PLAN_TYPES = ['time', 'data', 'unlimited', 'custom'];
@@ -1398,6 +1450,22 @@ function validatePlanInput(body, { partial = false } = {}) {
     const v = body.upload_mbps === null || body.upload_mbps === '' ? null : Number(body.upload_mbps);
     if (v !== null && (!Number.isFinite(v) || v < 0)) errors.push('Upload speed cannot be negative.');
     out.upload_mbps = v;
+  }
+  if (body.is_premium !== undefined) {
+    out.is_premium = body.is_premium ? 1 : 0;
+  } else if (!partial) {
+    out.is_premium = 0;
+  }
+  // Premium's whole point is trading duration for a real speed boost - a
+  // Premium plan with no download speed set is indistinguishable from
+  // Regular once it reaches the coin slot (syncPlanCoinVendoRate keys
+  // Normal vs Premium off download_mbps being set), so catch that at
+  // save time instead of letting it silently misfile.
+  const willBePremium = out.is_premium !== undefined ? !!out.is_premium
+    : (partial ? undefined : false);
+  const downloadAfterSave = out.download_mbps !== undefined ? out.download_mbps : undefined;
+  if (willBePremium && downloadAfterSave === null) {
+    errors.push('Premium plans need a Download Speed set - that\'s what makes them Premium.');
   }
   if (body.data_limit_mb !== undefined) {
     const v = body.data_limit_mb === null || body.data_limit_mb === '' ? null : Number(body.data_limit_mb);
@@ -1484,20 +1552,21 @@ router.post('/plans', adminAuth, (req, res) => {
     const result = db.prepare(`
       INSERT INTO plans (
         name, description, type, status, price, duration_minutes, validity_minutes,
-        download_mbps, upload_mbps, data_limit_mb, device_limit, session_limit,
+        download_mbps, upload_mbps, is_premium, data_limit_mb, device_limit, session_limit,
         schedule_start, schedule_end, channel_voucher, channel_portal, channel_coin_vendo,
         channel_account, display_order
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       out.name, out.description || null, out.type, out.status, out.price,
       out.duration_minutes ?? null, out.validity_minutes ?? null,
-      out.download_mbps ?? null, out.upload_mbps ?? null, out.data_limit_mb ?? null,
+      out.download_mbps ?? null, out.upload_mbps ?? null, out.is_premium ?? 0, out.data_limit_mb ?? null,
       out.device_limit ?? 1, out.session_limit ?? null,
       out.schedule_start ?? null, out.schedule_end ?? null,
       out.channel_voucher, out.channel_portal, out.channel_coin_vendo, out.channel_account,
       out.display_order ?? 0
     );
     console.log(`📦 Plan created: "${out.name}" (₱${out.price})`);
+    syncPlanCoinVendoRate(result.lastInsertRowid);
     const row = db.prepare('SELECT * FROM plans WHERE id = ?').get(result.lastInsertRowid);
     return res.json({ success: true, plan: planRowToJson(row) });
   } catch (err) {
@@ -1522,6 +1591,7 @@ router.patch('/plans/:id', adminAuth, (req, res) => {
     db.prepare(`UPDATE plans SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values, req.params.id);
 
     console.log(`📦 Plan updated: "${existing.name}" (#${req.params.id})`);
+    syncPlanCoinVendoRate(req.params.id);
     const row = db.prepare('SELECT * FROM plans WHERE id = ?').get(req.params.id);
     return res.json({ success: true, plan: planRowToJson(row) });
   } catch (err) {
@@ -1545,20 +1615,21 @@ router.post('/plans/:id/duplicate', adminAuth, (req, res) => {
     const result = db.prepare(`
       INSERT INTO plans (
         name, description, type, status, price, duration_minutes, validity_minutes,
-        download_mbps, upload_mbps, data_limit_mb, device_limit, session_limit,
+        download_mbps, upload_mbps, is_premium, data_limit_mb, device_limit, session_limit,
         schedule_start, schedule_end, channel_voucher, channel_portal, channel_coin_vendo,
         channel_account, display_order
-      ) VALUES (?, ?, ?, 'inactive', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, 'inactive', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       newName, existing.description, existing.type, existing.price,
       existing.duration_minutes, existing.validity_minutes,
-      existing.download_mbps, existing.upload_mbps, existing.data_limit_mb,
+      existing.download_mbps, existing.upload_mbps, existing.is_premium, existing.data_limit_mb,
       existing.device_limit, existing.session_limit,
       existing.schedule_start, existing.schedule_end,
       existing.channel_voucher, existing.channel_portal, existing.channel_coin_vendo, existing.channel_account,
       existing.display_order
     );
     console.log(`📦 Plan duplicated: "${existing.name}" -> "${newName}"`);
+    syncPlanCoinVendoRate(result.lastInsertRowid);
     const row = db.prepare('SELECT * FROM plans WHERE id = ?').get(result.lastInsertRowid);
     return res.json({ success: true, plan: planRowToJson(row) });
   } catch (err) {
@@ -1571,6 +1642,7 @@ router.post('/plans/:id/activate', adminAuth, (req, res) => {
   try {
     const result = db.prepare("UPDATE plans SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
     if (result.changes === 0) return res.status(404).json({ success: false, message: 'Plan not found' });
+    syncPlanCoinVendoRate(req.params.id);
     return res.json({ success: true });
   } catch (err) {
     console.error('Admin activate plan error:', err);
@@ -1582,6 +1654,7 @@ router.post('/plans/:id/deactivate', adminAuth, (req, res) => {
   try {
     const result = db.prepare("UPDATE plans SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(req.params.id);
     if (result.changes === 0) return res.status(404).json({ success: false, message: 'Plan not found' });
+    syncPlanCoinVendoRate(req.params.id);
     return res.json({ success: true });
   } catch (err) {
     console.error('Admin deactivate plan error:', err);
@@ -1603,6 +1676,7 @@ router.delete('/plans/:id', adminAuth, (req, res) => {
         message: `This plan cannot be deleted because it is referenced by ${groupCount} voucher group(s). Deactivate it instead.`,
       });
     }
+    db.prepare('DELETE FROM rates WHERE plan_id = ?').run(req.params.id);
     db.prepare('DELETE FROM plans WHERE id = ?').run(req.params.id);
     console.log(`📦 Plan deleted: "${existing.name}" (#${req.params.id})`);
     return res.json({ success: true });

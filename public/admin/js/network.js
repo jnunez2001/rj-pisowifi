@@ -254,7 +254,11 @@ async function savePortalHostname() {
   try {
     const data = await apiCall('POST', '/api/admin/settings', { portal_hostname: hostname });
     if (data.success) {
-      showToast(hostname ? 'Portal address saved! Run Configure to apply it.' : 'Portal address cleared.');
+      // admin.js's POST /settings already applies this the moment it saves
+      // (MikroTik: pushes one DNS static record; Router Mode: regenerates
+      // dnsmasq's address= line) - neither path needs a full Configure
+      // re-run, so don't tell the operator to run one.
+      showToast(hostname ? 'Portal address saved and applied.' : 'Portal address cleared.');
     } else {
       showToast(data.message || 'Failed to save.', 'error');
     }

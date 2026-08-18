@@ -58,9 +58,14 @@ function ensureDefaultRates() {
   const insertPremiumRate = db.prepare(
     'INSERT INTO rates (coin_value, minutes, expiration_minutes, label, download_mbps, upload_mbps) VALUES (?, ?, ?, ?, ?, ?)'
   );
-  insertPremiumRate.run(25,  15,  30,  '₱25 Premium = 15 mins (10 Mbps)', 10, 5);
-  insertPremiumRate.run(60,  60,  120, '₱60 Premium = 1 hour (10 Mbps)',  10, 5);
-  insertPremiumRate.run(150, 180, 300, '₱150 Premium = 3 hours (10 Mbps)', 10, 5);
+  insertPremiumRate.run(1,   1,    15,    '₱1 Premium = 1 min (10/5 Mbps)', 10, 5);
+  insertPremiumRate.run(5,   15,   60,    '₱5 Premium = 15 mins (10/5 Mbps)', 10, 5);
+  insertPremiumRate.run(10,  30,   120,   '₱10 Premium = 30 mins (10/5 Mbps)', 10, 5);
+  insertPremiumRate.run(15,  45,   150,   '₱15 Premium = 45 mins (10/5 Mbps)', 10, 5);
+  insertPremiumRate.run(20,  75,   240,   '₱20 Premium = 1hr 15min (10/5 Mbps)', 10, 5);
+  insertPremiumRate.run(50,  1080, 2160,  '₱50 Premium = 18 hours (10/5 Mbps)', 10, 5);
+  insertPremiumRate.run(100, 2520, 5040,  '₱100 Premium = 1.75 days (10/5 Mbps)', 10, 5);
+  insertPremiumRate.run(300, 10800,21600, '₱300 Premium = 7.5 days (10/5 Mbps)', 10, 5);
 
   console.log('💡 Rates table was empty — reseeded default tiers');
 }

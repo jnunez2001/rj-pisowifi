@@ -132,6 +132,7 @@ db.exec(`
     validity_minutes REAL,
     download_mbps REAL,
     upload_mbps REAL,
+    is_premium INTEGER NOT NULL DEFAULT 0,
     data_limit_mb INTEGER, -- NULL = unlimited
     device_limit INTEGER DEFAULT 1,
     session_limit INTEGER,
@@ -739,6 +740,27 @@ try {
   // already applied
 }
 
+// Explicit Premium flag for plans created before this column existed -
+// separate from whether download_mbps happens to be set, since a plan's
+// own speed cap and "is this the Premium tier" are two different
+// questions (see admin.js's syncPlanCoinVendoRate).
+try {
+  db.exec('ALTER TABLE plans ADD COLUMN is_premium INTEGER NOT NULL DEFAULT 0');
+} catch (e) {
+  // already applied
+}
+
+// Links a rates row back to the Plan it was generated from, so admin.js's
+// plan save/delete handlers can find and sync "their" rates row instead of
+// guessing by coin_value (which collides - a Normal and Premium plan can
+// share the same price). NULL for rows created directly on the old Rates
+// page (never plan-backed).
+try {
+  db.exec('ALTER TABLE rates ADD COLUMN plan_id INTEGER');
+} catch (e) {
+  // already applied
+}
+
 // Bug found in review: a Premium coin purchase's speed boost was being
 // stored in the SAME sessions.download_mbps/upload_mbps columns a
 // voucher's own permanent bandwidth override already uses - a later
@@ -801,16 +823,17 @@ if (rateCount.count === 0) {
   insertRate.run(300, 43200,43200, '₱300 = 30 days');
 }
 
-// Premium rates: same coin-to-minutes mechanism, plus a bandwidth
-// override (coinCreditService.js applies it to the session same way a
-// voucher's own download_mbps/upload_mbps override already works) -
-// "high speed, less time" per the operator's own framing. Guarded on its
-// own (not folded into the rateCount===0 check above) so it seeds
-// exactly once even on an existing box that already has the original 8
-// non-premium tiers. Distinct coin values from every existing tier
-// (1/5/10/15/20/50/100/300) so the greedy coin-matching in
-// coinCreditService.js can never confuse a premium insert for a regular
-// one - inserting exactly ₱25, ₱60, or ₱150 is unambiguous.
+// Premium rates: same coin_value AND same minutes/expiration as their
+// regular counterpart (₱1 Premium costs ₱1 and lasts exactly as long as
+// regular ₱1) - the only difference is 10 Mbps down / 10 Mbps up instead
+// of the normal bandwidth cap. Since the coin denomination (and now the
+// duration too) can no longer disambiguate "which ₱1 did they mean," the
+// customer's choice of button on the portal (normal INSERT COIN vs the
+// gold PREMIUM button) is what selects between them - see
+// coinCreditService.js's isPremium filter and coin.js's pendingIsPremium.
+// Guarded on its own (not folded into the rateCount===0 check above) so
+// it seeds exactly once even on an existing box that already has the
+// original 8 non-premium tiers.
 const premiumRateCount = db.prepare(
   "SELECT COUNT(*) as count FROM rates WHERE download_mbps IS NOT NULL"
 ).get();
@@ -819,9 +842,14 @@ if (premiumRateCount.count === 0) {
   const insertPremiumRate = db.prepare(
     'INSERT INTO rates (coin_value, minutes, expiration_minutes, label, download_mbps, upload_mbps) VALUES (?, ?, ?, ?, ?, ?)'
   );
-  insertPremiumRate.run(25,  15,  30,  '₱25 Premium = 15 mins (10 Mbps)', 10, 5);
-  insertPremiumRate.run(60,  60,  120, '₱60 Premium = 1 hour (10 Mbps)',  10, 5);
-  insertPremiumRate.run(150, 180, 300, '₱150 Premium = 3 hours (10 Mbps)', 10, 5);
+  insertPremiumRate.run(1,   1,    30,    '₱1 Premium = 1 min (10 Mbps)', 10, 10);
+  insertPremiumRate.run(5,   15,   120,   '₱5 Premium = 15 mins (10 Mbps)', 10, 10);
+  insertPremiumRate.run(10,  30,   240,   '₱10 Premium = 30 mins (10 Mbps)', 10, 10);
+  insertPremiumRate.run(15,  45,   300,   '₱15 Premium = 45 mins (10 Mbps)', 10, 10);
+  insertPremiumRate.run(20,  75,   480,   '₱20 Premium = 1hr 15min (10 Mbps)', 10, 10);
+  insertPremiumRate.run(50,  1080, 4320,  '₱50 Premium = 18 hours (10 Mbps)', 10, 10);
+  insertPremiumRate.run(100, 2520, 10080, '₱100 Premium = 1.75 days (10 Mbps)', 10, 10);
+  insertPremiumRate.run(300, 10800,43200, '₱300 Premium = 7.5 days (10 Mbps)', 10, 10);
 }
 
 // Same reasoning as the rates seed above, for the newer Plans module - an
@@ -906,7 +934,7 @@ if (settingCount.count === 0) {
   // Bandwidth control (disabled by default to test full speed)
   insertSetting.run('enable_bandwidth_cap', '0');
   insertSetting.run('bandwidth_cap_download_mbps', '5');
-  insertSetting.run('bandwidth_cap_upload_mbps', '5');
+  insertSetting.run('bandwidth_cap_upload_mbps', '2');
   insertSetting.run('enable_bandwidth_burst', '0');
   insertSetting.run('bandwidth_burst_mbps', '20');
   insertSetting.run('bandwidth_burst_seconds', '8');
@@ -1033,6 +1061,36 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // mechanism-only until a real Privacy Policy is published and a UI
   // toggle is exposed (see that file's header for the full reasoning).
   upsertIfMissing('telemetry_enabled', '0');
+}
+
+// One-time migration for existing installs: Premium rate tiers were seeded
+// with upload_mbps = download_mbps (10/10) and an expiration_minutes equal
+// to the matching regular tier's, so Premium never actually differed from
+// Regular except in minutes granted. Bring already-seeded rows in line with
+// the new defaults (10 down / 5 up, expiration halved). Guarded by a
+// settings flag so this only ever runs once, since expiration_minutes/2
+// isn't idempotent.
+{
+  const already = db.prepare("SELECT value FROM settings WHERE key = 'premium_rate_speed_migration_done'").get();
+  if (!already) {
+    db.prepare('UPDATE rates SET upload_mbps = 5 WHERE download_mbps IS NOT NULL AND upload_mbps = 10').run();
+    db.prepare('UPDATE rates SET expiration_minutes = CAST(expiration_minutes / 2 AS INTEGER) WHERE download_mbps IS NOT NULL').run();
+
+    // Some installs' Premium rows had minutes equal to the matching Regular
+    // tier's (Premium should always grant less time than Regular for the
+    // same coin value, since it trades duration for speed) - reset to the
+    // intended defaults, keyed by coin_value, same values voucherService.js
+    // seeds fresh.
+    const premiumMinutesByCoin = { 1: 1, 5: 15, 10: 30, 15: 45, 20: 75, 50: 1080, 100: 2520, 300: 10800 };
+    const updateMinutes = db.prepare('UPDATE rates SET minutes = ? WHERE download_mbps IS NOT NULL AND coin_value = ?');
+    for (const [coinValue, minutes] of Object.entries(premiumMinutesByCoin)) {
+      updateMinutes.run(minutes, parseInt(coinValue, 10));
+    }
+
+    db.prepare("UPDATE settings SET value = '2' WHERE key = 'bandwidth_cap_upload_mbps' AND value = '5'").run();
+
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('premium_rate_speed_migration_done', '1')").run();
+  }
 }
 
 // Tracks whether the 2-minutes-remaining push notification has already

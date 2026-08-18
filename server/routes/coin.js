@@ -24,6 +24,12 @@ let pendingTotal = 0;
 let pendingIp = '';
 let pendingKioskId = null;
 let pendingFinalizeTimer = null;
+// Which button the customer tapped on the portal (normal vs the gold
+// PREMIUM button) - set once when the window opens (POST /pending) and
+// used at finalize to match against the Premium rate rather than the
+// regular one sharing the same coin_value, since coin denominations no
+// longer disambiguate Premium from regular on their own.
+let pendingIsPremium = false;
 const PENDING_TIMEOUT_MS = 40000; // must match/slightly exceed portal's 30s coin timer
 
 // Bug found live: crediting each coin the instant it was detected meant a
@@ -54,6 +60,7 @@ async function finalizePendingCoins(mac) {
   const total = pendingTotal;
   const ip = pendingIp;
   const kioskId = pendingKioskId;
+  const isPremium = pendingIsPremium;
 
   // Clear the window before crediting, not after — a coin that happens to
   // land while creditCoinValue() is mid-flight should start a fresh
@@ -62,11 +69,12 @@ async function finalizePendingCoins(mac) {
   pendingTotal = 0;
   pendingIp = '';
   pendingKioskId = null;
+  pendingIsPremium = false;
   if (pendingFinalizeTimer) clearTimeout(pendingFinalizeTimer);
   pendingFinalizeTimer = null;
 
   try {
-    const result = await creditCoinValue(mac, total, ip, kioskId);
+    const result = await creditCoinValue(mac, total, ip, kioskId, isPremium);
     console.log(`✅ Pending window closed for ${mac}: credited ₱${total} (${result.matched_as})`);
     return { success: true, result };
   } catch (err) {
@@ -107,7 +115,7 @@ function pruneCoinEventCache() {
 
 // POST /api/coin/pending — portal calls this right when INSERT COIN modal opens
 router.post('/pending', (req, res) => {
-  const { mac } = req.body;
+  const { mac, is_premium } = req.body;
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
@@ -117,8 +125,9 @@ router.post('/pending', (req, res) => {
   pendingTotal = 0;
   pendingIp = '';
   pendingKioskId = null;
+  pendingIsPremium = !!is_premium;
   pendingFinalizeTimer = null;
-  console.log(`⏳ Pending coin registered for ${pendingCoinMac}`);
+  console.log(`⏳ Pending coin registered for ${pendingCoinMac}${pendingIsPremium ? ' (Premium)' : ''}`);
   return res.json({ success: true });
 });
 
@@ -313,12 +322,12 @@ router.post('/', async (req, res) => {
 // POST /api/coin/gpio/register — portal calls this when Insert Coin opens
 // in direct-GPIO mode.
 router.post('/gpio/register', (req, res) => {
-  const { mac } = req.body;
+  const { mac, is_premium } = req.body;
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
   const coinslotGpio = require('../services/coinslotGpio');
-  const { status, windowSeconds } = coinslotGpio.registerWaitingClient(mac);
+  const { status, windowSeconds } = coinslotGpio.registerWaitingClient(mac, !!is_premium);
   if (status === coinslotGpio.REGISTER_BUSY) {
     return res.status(409).json({ success: false, status, message: 'Coin slot is busy with another customer.' });
   }

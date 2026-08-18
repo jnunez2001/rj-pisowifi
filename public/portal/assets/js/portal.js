@@ -442,7 +442,7 @@ async function registerPendingCoin() {
     await fetch(`${SERVER}/api/coin/pending`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mac })
+      body: JSON.stringify({ mac, is_premium: insertingPremium })
     });
     // Only now is it safe to trust GET /api/coin/pending/:mac — before
     // this resolves, a read could still return a leftover total from
@@ -471,7 +471,7 @@ async function registerPendingGpioCoin() {
     await fetch(`${SERVER}/api/coin/gpio/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mac })
+      body: JSON.stringify({ mac, is_premium: insertingPremium })
     });
   } catch(e) {
     console.log('Failed to register GPIO coin window');
@@ -490,12 +490,31 @@ async function cancelPendingGpioCoin() {
   } catch(e) {}
 }
 
-function handleInsertCoin() {
+// `isPremium` - which button the customer tapped (normal INSERT COIN vs
+// the gold PREMIUM button). Doesn't change what the coin acceptor
+// physically does - the server still decides what a coin buys purely
+// from its value (coinCreditService.js) - this only decides what the
+// modal SHOWS, so a customer heading for premium sees the premium price
+// list (and knows which coin to actually drop) instead of the full mixed
+// list.
+let insertingPremium = false;
+
+function handleInsertCoin(isPremium) {
   if (isBlocked) return;
   playSound('insert');
   insertedTotal = 0;
   pendingRegistered = false;
-  document.getElementById('coinModal').classList.add('show');
+  insertingPremium = !!isPremium;
+
+  const modal = document.getElementById('coinModal');
+  modal.classList.toggle('coin-modal-premium', insertingPremium);
+  const title = document.getElementById('coinModalTitle');
+  title.innerHTML = insertingPremium
+    ? '<i class="fas fa-bolt"></i>&nbsp; INSERT COIN (PREMIUM)'
+    : '<i class="fas fa-coins"></i>&nbsp; INSERT COIN';
+  renderCoinRatesList();
+
+  modal.classList.add('show');
   startCoinTimer();
   registerPendingCoin();
   registerPendingGpioCoin();
@@ -898,13 +917,17 @@ function buildRatesUI(rates) {
   const premiumTab = document.getElementById('rateTabPremium');
   if (premiumTab) premiumTab.style.display = premiumRates.length ? 'block' : 'none';
 
-  const html = standardRates.map(renderRateItem).join('');
-  document.getElementById('ratesList').innerHTML = html;
-  // Insert Coin modal's own list always shows everything - no tabs there,
-  // it's a quick reference while a coin is already in hand, not a
-  // decision point the way opening WiFi Rates from the disconnected
-  // screen is.
-  document.getElementById('coinRatesList').innerHTML = rates.map(renderRateItem).join('');
+  // The gold PREMIUM insert-coin buttons only make sense to show once
+  // there's actually at least one Premium rate configured - same
+  // condition the WiFi Rates modal's own Premium tab already uses.
+  const hasPremium = premiumRates.length > 0;
+  ['premiumBtn', 'premiumBtnConnected'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.style.display = hasPremium ? 'block' : 'none';
+  });
+
+  document.getElementById('ratesList').innerHTML = standardRates.map(renderRateItem).join('');
+  renderCoinRatesList();
 }
 
 function setRatesTab(tab) {
@@ -912,6 +935,14 @@ function setRatesTab(tab) {
   document.getElementById('ratesList').innerHTML = list.map(renderRateItem).join('');
   document.getElementById('rateTabStandard').classList.toggle('active', tab === 'standard');
   document.getElementById('rateTabPremium').classList.toggle('active', tab === 'premium');
+}
+
+// Insert Coin modal's own list matches whichever button the customer
+// tapped to get here (insertingPremium) - shows exactly the rates
+// relevant to what they're about to do, not the full mixed list.
+function renderCoinRatesList() {
+  const list = insertingPremium ? premiumRates : standardRates;
+  document.getElementById('coinRatesList').innerHTML = list.map(renderRateItem).join('');
 }
 
 // ===== MODALS =====

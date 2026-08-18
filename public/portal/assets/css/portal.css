@@ -349,6 +349,23 @@ body {
   cursor: not-allowed;
 }
 
+.btn-premium {
+  background: linear-gradient(135deg, #d4af37, #b8860b);
+  color: #fff;
+  font-size: 17px;
+  padding: 17px;
+  box-shadow: 0 4px 14px rgba(184,134,11,0.35);
+}
+
+.btn-premium:hover { background: linear-gradient(135deg, #c9a233, #a67809); }
+
+.btn-premium:disabled {
+  background: #e0e0e0;
+  color: #bbb;
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
 .btn-pause {
   background: var(--accent-orange);
   color: #fff;
@@ -692,6 +709,15 @@ body {
 .timer-arc.danger {
   stroke: var(--accent-red);
 }
+
+/* Gold accent for the Insert Coin modal when opened via the PREMIUM
+   button (portal.js's handleInsertCoin(true)) - a visual reminder of
+   which track they're on while the coin acceptor is running, since
+   nothing else on this modal differs except which rate list shows below
+   the timer. */
+.coin-modal-premium #coinModalTitle { color: #b8860b; }
+.coin-modal-premium .timer-arc { stroke: #d4af37; }
+.coin-modal-premium .timer-track { stroke: #f5e6b8; }
 
 .coin-timer-inner {
   position: absolute;
