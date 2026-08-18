@@ -276,6 +276,7 @@ db.exec(`
     name TEXT NOT NULL,
     ip_address TEXT,
     firmware TEXT,
+    device_secret TEXT,
     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -712,6 +713,12 @@ try {
 try {
   db.exec('ALTER TABLE promo_vouchers ADD COLUMN download_mbps INTEGER');
   db.exec('ALTER TABLE promo_vouchers ADD COLUMN upload_mbps INTEGER');
+} catch (e) {
+  // already applied
+}
+
+try {
+  db.exec('ALTER TABLE vendos ADD COLUMN device_secret TEXT');
 } catch (e) {
   // already applied
 }

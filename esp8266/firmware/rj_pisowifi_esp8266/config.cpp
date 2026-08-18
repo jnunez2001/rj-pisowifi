@@ -35,6 +35,7 @@ void loadConfig() {
   config.device_ip   = "";
   config.gateway     = "";
   config.subnet      = "255.255.255.0";
+  config.device_secret = "";
 
   File f = LittleFS.open(CONFIG_PATH, "r");
   if (f) {
@@ -49,6 +50,13 @@ void loadConfig() {
     config.device_ip   = f.readStringUntil('\n');
     config.gateway     = f.readStringUntil('\n');
     config.subnet      = f.readStringUntil('\n');
+    // Added after the original nine-line format shipped - a config file
+    // saved by older firmware simply ends before this line, and
+    // readStringUntil('\n') on an exhausted file returns "" rather than
+    // erroring, so an upgrading device just starts with an empty secret
+    // (gets issued a fresh one on its next register call) instead of
+    // failing to load its config at all.
+    config.device_secret = f.readStringUntil('\n');
     f.close();
 
     // Every line above still carries its trailing '\n' except possibly
@@ -63,6 +71,7 @@ void loadConfig() {
     config.device_ip.trim();
     config.gateway.trim();
     config.subnet.trim();
+    config.device_secret.trim();
   }
 
   Serial.println("Config loaded:");
@@ -87,6 +96,7 @@ void saveConfig() {
   f.println(config.device_ip);
   f.println(config.gateway);
   f.println(config.subnet);
+  f.println(config.device_secret);
   f.close();
   Serial.println("Config saved.");
 }

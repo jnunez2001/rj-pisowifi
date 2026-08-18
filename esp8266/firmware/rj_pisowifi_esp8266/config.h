@@ -5,7 +5,7 @@
 #include <ESP8266WebServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.7"
+#define FIRMWARE_VERSION "v1.0.8"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
@@ -133,6 +133,13 @@ struct Config {
   String device_ip;
   String gateway;
   String subnet;
+  // Issued by the server on this device's first successful registration
+  // (server/routes/admin.js's POST /vendo/register) and sent back on
+  // every register/heartbeat call afterward - proves to the server this
+  // MAC is genuinely the same hardware it registered before, not another
+  // device on the LAN claiming the same MAC. Empty until the first
+  // successful register response.
+  String device_secret;
 };
 
 // ===== GLOBAL VARIABLES =====

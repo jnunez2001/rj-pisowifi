@@ -142,11 +142,36 @@ void registerVendo() {
   payload += "\"mac\":\"" + WiFi.macAddress() + "\",";
   payload += "\"name\":\"" + config.vendo_name + "\",";
   payload += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
-  payload += "\"version\":\"" + String(FIRMWARE_VERSION) + "\"";
+  payload += "\"version\":\"" + String(FIRMWARE_VERSION) + "\",";
+  payload += "\"device_secret\":\"" + config.device_secret + "\"";
   payload += "}";
 
   int code = http.POST(payload);
   Serial.println("Register response: " + String(code));
+
+  // First-ever register (or a legacy device that never had one) gets a
+  // secret back to remember for every future call - same hand-rolled
+  // extraction ota.cpp already uses for its own one-field response, not
+  // worth a JSON library for this. A device already carrying a secret
+  // that doesn't match what the server has on file gets 403'd here with
+  // nothing to extract, and correctly keeps failing registration rather
+  // than silently adopting a value from whoever answered.
+  if (code == 200) {
+    String body = http.getString();
+    int key = body.indexOf("\"device_secret\"");
+    if (key >= 0) {
+      int start = body.indexOf('"', body.indexOf(':', key) + 1) + 1;
+      int end = body.indexOf('"', start);
+      if (start > 0 && end > start) {
+        String issued = body.substring(start, end);
+        if (issued.length() && issued != config.device_secret) {
+          config.device_secret = issued;
+          saveConfig();
+        }
+      }
+    }
+  }
+
   http.end();
 }
 

@@ -2459,7 +2459,7 @@ router.get('/sysinfo', adminAuth, async (req, res) => {
 // /api/coin (also called directly by the ESP32, also no admin password).
 router.post('/vendo/register', (req, res) => {
   try {
-    const { name, ip, version } = req.body;
+    const { name, ip, version, device_secret } = req.body;
 
     if (!req.body.mac || !name) {
       return res.status(400).json({ success: false, message: 'MAC and name required' });
@@ -2479,17 +2479,39 @@ router.post('/vendo/register', (req, res) => {
     // capability behind adoption (this table has never been used for
     // financial attribution), so this is a visibility/approval gate, not
     // an access-control one.
-    const existing = db.prepare('SELECT id FROM vendos WHERE mac_address = ?').get(mac);
+    const existing = db.prepare('SELECT id, device_secret FROM vendos WHERE mac_address = ?').get(mac);
+
+    // Bug: trust in this MAC (adoption, trusted-device bypass) was based on
+    // the bare MAC address alone — trivially spoofable by anything on the
+    // same LAN claiming to be it. Same secret pattern already used for
+    // Satellite Kiosks (device_key): generated once on first registration,
+    // handed back to the firmware to store, then required on every future
+    // call. A device that's already been issued one but doesn't send it
+    // back (or sends the wrong one) is rejected outright — someone else's
+    // hardware can still register under a NEW candidate MAC, but it can't
+    // impersonate an already-known one. A legacy row from before this
+    // feature existed (device_secret NULL) gets one issued on its next
+    // check-in instead of being locked out.
+    if (existing && existing.device_secret && device_secret !== existing.device_secret) {
+      console.warn(`⚠️ Vendo register rejected: ${mac} sent a missing/incorrect device secret`);
+      return res.status(403).json({ success: false, message: 'Invalid device secret' });
+    }
+
+    let issuedSecret = existing ? existing.device_secret : null;
+    if (!issuedSecret) {
+      issuedSecret = require('crypto').randomBytes(20).toString('hex');
+    }
+
     if (existing) {
       db.prepare(`
-        UPDATE vendos SET name = ?, ip_address = ?, firmware = ?, last_seen = CURRENT_TIMESTAMP
+        UPDATE vendos SET name = ?, ip_address = ?, firmware = ?, device_secret = ?, last_seen = CURRENT_TIMESTAMP
         WHERE mac_address = ?
-      `).run(name, ip || '', version || '', mac);
+      `).run(name, ip || '', version || '', issuedSecret, mac);
     } else {
       db.prepare(`
-        INSERT INTO vendos (mac_address, name, ip_address, firmware, last_seen, status)
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, 'candidate')
-      `).run(mac, name, ip || '', version || '');
+        INSERT INTO vendos (mac_address, name, ip_address, firmware, device_secret, last_seen, status)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'candidate')
+      `).run(mac, name, ip || '', version || '', issuedSecret);
     }
 
     // No auth on this route (see note above) means anyone on the LAN could
@@ -2505,7 +2527,7 @@ router.post('/vendo/register', (req, res) => {
     }
 
     console.log(`📡 Vendo registered: ${name} (${mac}) at ${ip}`);
-    return res.json({ success: true, message: 'Vendo registered' });
+    return res.json({ success: true, message: 'Vendo registered', device_secret: issuedSecret });
 
   } catch (err) {
     console.error('Vendo register error:', err);
@@ -2637,17 +2659,31 @@ router.get('/vendos', adminAuth, (req, res) => {
 });
 
 // DELETE /api/admin/vendos/:id — removes a stale/replaced ESP32 entry from
-// the Devices list. Purely a DB row (the device re-registers itself via
-// POST /vendo/register on its next check-in if it's still actually live),
-// so this is safe to use for "that unit got swapped out" or "that MAC is
-// a dead board" cleanup without any live-access side effects.
-router.delete('/vendos/:id', adminAuth, (req, res) => {
+// the Devices list. The device re-registers itself via POST /vendo/register
+// on its next check-in if it's still actually live (as a fresh candidate,
+// needing re-adoption — its device_secret is gone with the row). Also
+// revokes the trust adopt granted it: leaving a removed device's bypass in
+// place would mean "removed" doesn't actually mean removed, it'd keep
+// skipping the captive portal forever.
+router.delete('/vendos/:id', adminAuth, async (req, res) => {
   try {
     const vendo = db.prepare('SELECT * FROM vendos WHERE id = ?').get(req.params.id);
     if (!vendo) {
       return res.status(404).json({ success: false, message: 'Device not found' });
     }
     db.prepare('DELETE FROM vendos WHERE id = ?').run(req.params.id);
+
+    const trusted = db.prepare('SELECT id FROM trusted_devices WHERE mac_address = ?').get(vendo.mac_address);
+    if (trusted) {
+      db.prepare('DELETE FROM trusted_devices WHERE id = ?').run(trusted.id);
+      const { blockClient } = require('../services/networkService');
+      try {
+        await blockClient(vendo.mac_address);
+      } catch (err) {
+        console.error('Vendo removed but revoking trust bypass failed:', err.message);
+      }
+    }
+
     require('../services/networkDevicesService').logDeviceEvent(vendo.mac_address, 'vendo_removed', `"${vendo.name}" removed from ZenFi`);
     console.log(`🗑️  Vendo removed: ${vendo.mac_address} (${vendo.name})`);
     return res.json({ success: true, message: 'Device removed' });
@@ -2658,8 +2694,14 @@ router.delete('/vendos/:id', adminAuth, (req, res) => {
 });
 
 // POST /api/admin/vendos/:id/adopt — approves a candidate device (a MAC
-// this box has never seen before, per POST /vendo/register above).
-router.post('/vendos/:id/adopt', adminAuth, (req, res) => {
+// this box has never seen before, per POST /vendo/register above). Also
+// trusts it in the same step - a Vendo shares the customer WiFi/VLAN and
+// would otherwise sit behind the captive portal like any paying customer,
+// unable to reach this server at all. Adopting used to require a second,
+// manual step (Trusted Devices card: copy the MAC, paste it, submit) for
+// something that's true of every adopted Vendo without exception - folded
+// in here so there's one action instead of two.
+router.post('/vendos/:id/adopt', adminAuth, async (req, res) => {
   try {
     const vendo = db.prepare('SELECT mac_address, name FROM vendos WHERE id = ?').get(req.params.id);
     const result = db.prepare("UPDATE vendos SET status = 'adopted' WHERE id = ?").run(req.params.id);
@@ -2668,6 +2710,26 @@ router.post('/vendos/:id/adopt', adminAuth, (req, res) => {
     }
     if (vendo) {
       require('../services/networkDevicesService').logDeviceEvent(vendo.mac_address, 'vendo_adopted', `"${vendo.name}" adopted`);
+
+      // OR IGNORE instead of a separate check-then-insert: mac_address is
+      // UNIQUE, so a double-click or client retry racing two adopt calls
+      // for the same device would otherwise throw an uncaught constraint
+      // violation on the loser, surfacing as a spurious 500 to the admin
+      // even though the device was already successfully adopted+trusted
+      // by the winner.
+      const inserted = db.prepare('INSERT OR IGNORE INTO trusted_devices (mac_address, label) VALUES (?, ?)')
+        .run(vendo.mac_address, `Vendo: ${vendo.name}`);
+      if (inserted.changes > 0) {
+        const { allowClient } = require('../services/networkService');
+        try {
+          await allowClient(vendo.mac_address);
+        } catch (err) {
+          // Row is saved either way — timerService.js's boot-time restore
+          // will retry the actual bypass later (e.g. router unreachable
+          // right now), same fallback the manual Trusted Devices flow relied on.
+          console.error('Vendo adopted but trust bypass failed to apply immediately:', err.message);
+        }
+      }
     }
     return res.json({ success: true, message: 'Device adopted' });
   } catch (err) {
