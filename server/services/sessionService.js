@@ -94,6 +94,48 @@ function normalizeMac(mac) {
   return String(mac || '').trim().toLowerCase();
 }
 
+// Bug found live: two callers (coin credit and the portal's free-minutes
+// claim) each did their own "getSessionByMac, then create if nothing
+// found" — a plain check-then-act with an async gap in between
+// (createSession() awaits allowClient() before returning). A coin landing
+// at nearly the same moment as a free-minutes claim could have both
+// requests see "no session yet" and both call createSession(), producing
+// two separate session rows for the same physical device: the admin
+// panel counted it as two connected devices, and whichever row the
+// portal's own getSessionByMac() happened to resolve to (no ORDER BY —
+// whichever SQLite returns first) silently orphaned the other, making
+// coins that landed in the losing row look like they were never
+// credited. Node is single-threaded and better-sqlite3 is synchronous,
+// so serializing same-mac callers through this in-memory queue closes
+// the gap entirely — no DB schema change needed.
+const macLocks = new Map();
+function withMacLock(mac, fn) {
+  const key = normalizeMac(mac);
+  const previous = macLocks.get(key) || Promise.resolve();
+  const next = previous.then(fn, fn);
+  macLocks.set(key, next.catch(() => {}));
+  return next;
+}
+
+// Shared "top up if a session exists, otherwise create one" used by every
+// caller that doesn't need free-claim's "refuse if one already exists"
+// business rule (coin credit, voucher redemption) — see creditCoinValue()
+// in coinCreditService.js. Free-claim (server/routes/session.js) keeps its
+// own check-then-refuse-or-create, just wrapped in withMacLock() too, so
+// both paths serialize against each other without free-claim silently
+// topping up a session it's supposed to reject.
+async function creditOrCreateSession(mac, ip, minutes, expirationMinutes) {
+  return withMacLock(mac, async () => {
+    const existing = getSessionByMac(mac);
+    if (existing) {
+      const updated = await addTimeToSession(mac, minutes, expirationMinutes);
+      return { session: updated, created: false };
+    }
+    const created = await createSession(mac, ip, minutes, expirationMinutes);
+    return { session: created, created: true };
+  });
+}
+
 function getSessionByMac(mac) {
   return db.prepare(`
     SELECT * FROM sessions
@@ -418,6 +460,8 @@ module.exports = {
   getSessionByVoucher,
   createSession,
   addTimeToSession,
+  creditOrCreateSession,
+  withMacLock,
   pauseSession,
   resumeSession,
   expireSession,

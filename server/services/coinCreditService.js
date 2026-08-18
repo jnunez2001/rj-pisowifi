@@ -31,7 +31,7 @@ class NoMatchingRateError extends Error {
 // until that specific relay device is paired (see satelliteKioskService.js).
 async function creditCoinValue(mac, coinValue, ip = '', kioskId = null) {
   const { getRates } = require('./voucherService');
-  const { getSessionByMac, createSession, addTimeToSession } = require('./sessionService');
+  const { creditOrCreateSession } = require('./sessionService');
 
   const allRates = getRates().sort((a, b) => b.coin_value - a.coin_value);
 
@@ -63,54 +63,41 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null) {
     .join(' + ');
   console.log(`💡 ₱${coinValue} matched as: ${matchLog} = ${totalMinutes} mins (mac: ${mac})`);
 
-  const existingSession = getSessionByMac(mac);
-  let result;
+  // Bug found live: this used to do its own getSessionByMac() check then
+  // pick createSession() or addTimeToSession() — a plain check-then-act
+  // with an async gap (createSession() awaits allowClient() before
+  // returning). A coin landing at nearly the same moment as a free-minutes
+  // claim (server/routes/session.js) could see "no session yet" from both
+  // requests and each create its own row for the same device: two rows in
+  // the admin's connected-devices list, and whichever row the portal's
+  // own lookup happened to resolve to silently orphaned the other,
+  // stranding whatever coins landed in the row that lost the race.
+  // creditOrCreateSession() serializes same-mac callers through an
+  // in-memory lock so this check-then-act is atomic against every other
+  // caller of it (and against free-claim, which locks on the same mac).
+  const { session, created } = await creditOrCreateSession(mac, ip || '', totalMinutes, totalExpirationMinutes);
 
-  if (existingSession) {
-    const updated = await addTimeToSession(mac, totalMinutes, totalExpirationMinutes);
+  db.prepare(`
+    INSERT INTO transactions
+    (voucher_code, coin_value, minutes_added, type, kiosk_id, mac_address)
+    VALUES (?, ?, ?, 'coin', ?, ?)
+  `).run(session.voucher_code, coinValue, totalMinutes, kioskId, mac);
+  logFinancialEvent({ voucher_code: session.voucher_code, coin_value: coinValue, minutes_added: totalMinutes, type: 'coin', mac });
 
-    db.prepare(`
-      INSERT INTO transactions
-      (voucher_code, coin_value, minutes_added, type, kiosk_id, mac_address)
-      VALUES (?, ?, ?, 'coin', ?, ?)
-    `).run(existingSession.voucher_code, coinValue, totalMinutes, kioskId, mac);
-    logFinancialEvent({ voucher_code: existingSession.voucher_code, coin_value: coinValue, minutes_added: totalMinutes, type: 'coin', mac });
+  console.log(created
+    ? `🆕 New session: ${session.voucher_code} for ${mac}`
+    : `💰 Added ${totalMinutes} mins to ${session.voucher_code}`);
 
-    console.log(`💰 Added ${totalMinutes} mins to ${existingSession.voucher_code}`);
-
-    result = {
-      success: true,
-      action: 'time_added',
-      voucher_code: updated.voucher_code,
-      minutes_added: totalMinutes,
-      minutes_remaining: updated.minutes_remaining,
-      expires_at: updated.expires_at,
-      hard_expires_at: updated.hard_expires_at,
-      matched_as: matchLog
-    };
-  } else {
-    const session = await createSession(mac, ip || '', totalMinutes, totalExpirationMinutes);
-
-    db.prepare(`
-      INSERT INTO transactions
-      (voucher_code, coin_value, minutes_added, type, kiosk_id, mac_address)
-      VALUES (?, ?, ?, 'coin', ?, ?)
-    `).run(session.voucher_code, coinValue, totalMinutes, kioskId, mac);
-    logFinancialEvent({ voucher_code: session.voucher_code, coin_value: coinValue, minutes_added: totalMinutes, type: 'coin', mac });
-
-    console.log(`🆕 New session: ${session.voucher_code} for ${mac}`);
-
-    result = {
-      success: true,
-      action: 'session_created',
-      voucher_code: session.voucher_code,
-      minutes_added: totalMinutes,
-      minutes_remaining: session.minutes_remaining,
-      expires_at: session.expires_at,
-      hard_expires_at: session.hard_expires_at,
-      matched_as: matchLog
-    };
-  }
+  const result = {
+    success: true,
+    action: created ? 'session_created' : 'time_added',
+    voucher_code: session.voucher_code,
+    minutes_added: totalMinutes,
+    minutes_remaining: session.minutes_remaining,
+    expires_at: session.expires_at,
+    hard_expires_at: session.hard_expires_at,
+    matched_as: matchLog
+  };
 
   return result;
 }

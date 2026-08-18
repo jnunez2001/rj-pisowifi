@@ -80,6 +80,18 @@ let pendingPollInterval = null;
 const PENDING_POLL_MS = 1500;
 let redirectAfterCoinModal = false;
 
+// Bug found live: a phantom ₱1 (or more) could show the instant the Insert
+// Coin modal opened, before any real coin landed. registerPendingCoin()'s
+// POST /api/coin/pending reset (server/routes/coin.js) and this client's
+// own poll/SSE-triggered reads of GET /api/coin/pending/:mac are separate
+// HTTP round-trips with no guaranteed ordering — if a poll (especially the
+// SSE-triggered one in connectEventStream's onmessage, which can fire the
+// instant the modal shows) reached the server before the reset did, it
+// could read a leftover total from a PREVIOUS pending window for the same
+// MAC that hadn't timed out yet (up to 40s old). Gating every read behind
+// "the reset has actually been confirmed" closes that gap.
+let pendingRegistered = false;
+
 function startCoinTimer() {
   coinTimeLeft = COIN_TIMER_DURATION;
   updateCoinTimerUI();
@@ -125,6 +137,7 @@ function updateCoinTimerUI() {
 // This polls much faster than the normal 8s session poll specifically so a
 // new coin resets the countdown promptly, and shows a running peso total.
 async function pollPendingTotal() {
+  if (!pendingRegistered) return;
   const mac = getMac();
   if (!mac) return;
   try {
@@ -422,6 +435,7 @@ async function deactivateVendoRelay() {
 }
 
 async function registerPendingCoin() {
+  pendingRegistered = false;
   const mac = getMac();
   if (!mac) return;
   try {
@@ -430,6 +444,10 @@ async function registerPendingCoin() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mac })
     });
+    // Only now is it safe to trust GET /api/coin/pending/:mac — before
+    // this resolves, a read could still return a leftover total from
+    // whatever pending window existed before this one.
+    pendingRegistered = true;
     console.log('Pending coin registered for', mac);
   } catch(e) {
     console.log('Failed to register pending coin');
@@ -476,6 +494,7 @@ function handleInsertCoin() {
   if (isBlocked) return;
   playSound('insert');
   insertedTotal = 0;
+  pendingRegistered = false;
   document.getElementById('coinModal').classList.add('show');
   startCoinTimer();
   registerPendingCoin();
@@ -526,6 +545,7 @@ function closeCoinModal() {
   stopSound('insert');
   stopCoinTimer();
   stopPendingPoll();
+  pendingRegistered = false;
   document.getElementById('coinModal').classList.remove('show');
   deactivateVendoRelay();
   cancelPendingGpioCoin();

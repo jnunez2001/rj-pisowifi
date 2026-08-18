@@ -4,6 +4,7 @@ const db = require('../config/database');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
 const { creditCoinValue, NoMatchingRateError } = require('../services/coinCreditService');
 const { resolveDeviceKey } = require('../services/satelliteKioskService');
+const sseService = require('../services/sseService');
 
 // MAC address validation helper (Bug #27)
 function isValidMac(mac) {
@@ -248,6 +249,15 @@ router.post('/', async (req, res) => {
       pendingIp = ip || pendingIp;
       if (kioskId != null) pendingKioskId = kioskId;
       scheduleFinalize(mac);
+
+      // Bug found live: nothing pushed a wake-up while coins were still
+      // accumulating (sseService.notify() only ever fired once a session
+      // was actually created/topped-up, i.e. at finalize) — the portal's
+      // running total only moved on its 1.5s poll tick, so a customer
+      // watching the modal saw their credit lag 1-3 seconds behind the
+      // coin acceptor's own beep/LED. Notifying here lets the portal's
+      // already-open SSE connection trigger an immediate poll per coin.
+      sseService.notify(mac);
 
       clearAttempts(mac);
 

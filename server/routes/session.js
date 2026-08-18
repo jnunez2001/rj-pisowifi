@@ -350,24 +350,35 @@ router.post('/free-claim', async (req, res) => {
       }
     }
 
-    const { getSessionByMac, createSession } = require('../services/sessionService');
-    const existingSession = getSessionByMac(mac);
+    const freeMinutes = parseInt(
+      db.prepare("SELECT value FROM settings WHERE key = 'free_minutes_amount'").get()?.value || '5'
+    );
 
-    if (existingSession) {
+    // Bug found live: this used to check getSessionByMac() then call
+    // createSession() with nothing atomic in between — a coin landing at
+    // nearly the same moment (server/services/coinCreditService.js) could
+    // see "no session yet" too and both requests would create their own
+    // session row for the same device (2 rows = admin panel showing 2
+    // connected devices for 1 customer, and whichever coin landed in the
+    // row this claim didn't create looked like it was never credited).
+    // withMacLock() serializes this check-then-act against every other
+    // caller locking on the same mac (coin credit uses the same lock via
+    // creditOrCreateSession()), so only one of the two can win the
+    // "session doesn't exist yet" check.
+    const { getSessionByMac, createSession, withMacLock } = require('../services/sessionService');
+    const session = await withMacLock(mac, async () => {
+      if (getSessionByMac(mac)) return null; // already exists — refuse below
+      return createSession(mac, ip || '', freeMinutes, freeMinutes);
+    });
+
+    if (!session) {
       return res.status(403).json({
         success: false,
         message: 'Free minutes are only for new connections.'
       });
     }
 
-    const freeMinutes = parseInt(
-      db.prepare("SELECT value FROM settings WHERE key = 'free_minutes_amount'").get()?.value || '5'
-    );
-
-    const session = await createSession(mac, ip || '', freeMinutes, freeMinutes);
-
-    // Verify session was created successfully
-    if (!session || !session.voucher_code) {
+    if (!session.voucher_code) {
       return res.status(500).json({
         success: false,
         message: 'Failed to create session. Please try again.'
