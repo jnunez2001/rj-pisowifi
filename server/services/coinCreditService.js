@@ -63,6 +63,26 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null) {
     .join(' + ');
   console.log(`💡 ₱${coinValue} matched as: ${matchLog} = ${totalMinutes} mins (mac: ${mac})`);
 
+  // Premium rates carry a bandwidth override (high speed, less time),
+  // tracked separately from totalMinutes (sessionService.js's
+  // premium_expires_at, not the regular minutes_remaining countdown) so
+  // it actually expires instead of sticking around on later plain
+  // top-ups. Coin-matching is greedy across multiple tiers, so in
+  // principle a mixed insert could match more than one premium tier at
+  // once - their minutes stack (that's genuinely how much premium time
+  // was paid for), but the higher of any two different speeds wins
+  // rather than whichever was encountered last.
+  let bandwidthOverride = null;
+  let premiumMinutes = 0;
+  for (const { rate, times } of matchedRates) {
+    if (!rate.download_mbps) continue;
+    premiumMinutes += rate.minutes * times;
+    if (!bandwidthOverride || rate.download_mbps > bandwidthOverride.download_mbps) {
+      bandwidthOverride = { download_mbps: rate.download_mbps, upload_mbps: rate.upload_mbps };
+    }
+  }
+  if (bandwidthOverride) bandwidthOverride.minutes = premiumMinutes;
+
   // Bug found live: this used to do its own getSessionByMac() check then
   // pick createSession() or addTimeToSession() — a plain check-then-act
   // with an async gap (createSession() awaits allowClient() before
@@ -75,7 +95,7 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null) {
   // creditOrCreateSession() serializes same-mac callers through an
   // in-memory lock so this check-then-act is atomic against every other
   // caller of it (and against free-claim, which locks on the same mac).
-  const { session, created } = await creditOrCreateSession(mac, ip || '', totalMinutes, totalExpirationMinutes);
+  const { session, created } = await creditOrCreateSession(mac, ip || '', totalMinutes, totalExpirationMinutes, bandwidthOverride);
 
   db.prepare(`
     INSERT INTO transactions
@@ -96,7 +116,11 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null) {
     minutes_remaining: session.minutes_remaining,
     expires_at: session.expires_at,
     hard_expires_at: session.hard_expires_at,
-    matched_as: matchLog
+    matched_as: matchLog,
+    premium: !!bandwidthOverride,
+    premium_download_mbps: session.premium_download_mbps,
+    premium_upload_mbps: session.premium_upload_mbps,
+    premium_expires_at: session.premium_expires_at
   };
 
   return result;

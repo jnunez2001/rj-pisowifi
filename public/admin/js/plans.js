@@ -19,23 +19,33 @@ async function loadPlansPage() {
 // is visible at a time, but keeps this addition self-contained. =====
 let plCoinRateEditId = null;
 
+// Coin rates are looked up by id when editing/deleting (not passed inline
+// through onclick args) so a value like a quote in the label, or null
+// speed fields, never has to survive round-tripping through an HTML
+// attribute string.
+let plCoinRates = [];
+
 async function loadCoinRatesForPlans() {
   const tbody = document.getElementById('plansCoinRatesTable');
   if (!tbody) return;
   try {
     const data = await apiCall('GET', '/api/admin/rates');
     if (!data.success || !data.rates.length) {
-      tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">No coin rates configured</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">No coin rates configured</td></tr>`;
       return;
     }
+    plCoinRates = data.rates;
     tbody.innerHTML = data.rates.map(r => `
       <tr>
         <td>${escapeHtml(r.label)}</td>
         <td><span style="font-family:monospace;font-weight:700;color:var(--accent-red);">₱${r.coin_value}</span></td>
         <td>${r.minutes}</td>
         <td>${r.expiration_minutes}</td>
+        <td>${r.download_mbps
+          ? `<span class="badge badge-blue"><i class="fas fa-bolt"></i> Premium ${r.download_mbps}/${r.upload_mbps || r.download_mbps} Mbps</span>`
+          : '<span style="color:var(--text-muted);">Normal</span>'}</td>
         <td style="text-align:right;">
-          <button class="btn btn-sm btn-secondary" onclick="editCoinRate(${r.id}, ${r.coin_value}, ${r.minutes}, ${r.expiration_minutes}, '${escapeHtml(r.label)}')" title="Edit">
+          <button class="btn btn-sm btn-secondary" onclick="editCoinRate(${r.id})" title="Edit">
             <i class="fas fa-edit"></i>
           </button>
           <button class="btn btn-sm btn-danger" onclick="deleteCoinRate(${r.id}, '${escapeHtml(r.label)}')" title="Delete">
@@ -56,16 +66,22 @@ function openAddCoinRate() {
   document.getElementById('coinRateValue').value = '';
   document.getElementById('coinRateMinutes').value = '';
   document.getElementById('coinRateExpiration').value = '';
+  document.getElementById('coinRateDownload').value = '';
+  document.getElementById('coinRateUpload').value = '';
   document.getElementById('coinRateModal').classList.add('show');
 }
 
-function editCoinRate(id, coinValue, minutes, expiration, label) {
+function editCoinRate(id) {
+  const r = plCoinRates.find(x => x.id === id);
+  if (!r) return;
   plCoinRateEditId = id;
   document.getElementById('coinRateModalTitle').textContent = 'Edit Coin Rate';
-  document.getElementById('coinRateLabel').value = label;
-  document.getElementById('coinRateValue').value = coinValue;
-  document.getElementById('coinRateMinutes').value = minutes;
-  document.getElementById('coinRateExpiration').value = expiration;
+  document.getElementById('coinRateLabel').value = r.label;
+  document.getElementById('coinRateValue').value = r.coin_value;
+  document.getElementById('coinRateMinutes').value = r.minutes;
+  document.getElementById('coinRateExpiration').value = r.expiration_minutes;
+  document.getElementById('coinRateDownload').value = r.download_mbps || '';
+  document.getElementById('coinRateUpload').value = r.upload_mbps || '';
   document.getElementById('coinRateModal').classList.add('show');
 }
 
@@ -75,6 +91,10 @@ async function saveCoinRate() {
   const minutes = parseFloat(document.getElementById('coinRateMinutes').value);
   const expirationRaw = document.getElementById('coinRateExpiration').value;
   const expiration = expirationRaw ? parseFloat(expirationRaw) : minutes;
+  const downloadRaw = document.getElementById('coinRateDownload').value;
+  const uploadRaw = document.getElementById('coinRateUpload').value;
+  const downloadMbps = downloadRaw ? parseFloat(downloadRaw) : null;
+  const uploadMbps = uploadRaw ? parseFloat(uploadRaw) : downloadMbps;
 
   if (!label || !coinValue || !minutes) {
     showToast('Label, coin value, and minutes are required', 'error');
@@ -86,7 +106,10 @@ async function saveCoinRate() {
   }
 
   try {
-    const body = { coin_value: coinValue, minutes, expiration_minutes: expiration, label };
+    const body = {
+      coin_value: coinValue, minutes, expiration_minutes: expiration, label,
+      download_mbps: downloadMbps, upload_mbps: uploadMbps
+    };
     const data = plCoinRateEditId
       ? await apiCall('PUT', `/api/admin/rates/${plCoinRateEditId}`, body)
       : await apiCall('POST', '/api/admin/rates', body);

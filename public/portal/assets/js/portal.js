@@ -856,36 +856,67 @@ async function loadSettings() {
 }
 
 // ===== RATES UI =====
-function buildRatesUI(rates) {
-  let html = '';
-  rates.forEach(r => {
-    const expLabel = r.expiration_minutes >= 1440
-      ? `${Math.round(r.expiration_minutes/1440)} day expiry`
-      : r.expiration_minutes >= 60
-        ? `${Math.round(r.expiration_minutes/60)}hr expiry`
-        : `${r.expiration_minutes}min expiry`;
+// Split once here rather than re-filtering on every tab click - Premium
+// is any rate with a download_mbps set (coinCreditService.js's own
+// definition of "premium," not a separate flag, so the two can never
+// drift apart).
+let standardRates = [];
+let premiumRates = [];
 
-    html += `
-      <div class="rate-item">
-        <div class="rate-left">
-          <div class="rate-icon"><i class="fas fa-coins"></i></div>
-          <div>
-            <div class="rate-price">₱${r.coin_value}</div>
-            <div class="rate-label">${expLabel}</div>
-          </div>
-        </div>
+function renderRateItem(r) {
+  const expLabel = r.expiration_minutes >= 1440
+    ? `${Math.round(r.expiration_minutes/1440)} day expiry`
+    : r.expiration_minutes >= 60
+      ? `${Math.round(r.expiration_minutes/60)}hr expiry`
+      : `${r.expiration_minutes}min expiry`;
+
+  const speedLine = r.download_mbps
+    ? `<div class="rate-label" style="color:#00a844;"><i class="fas fa-bolt"></i> ${r.download_mbps}/${r.upload_mbps || r.download_mbps} Mbps</div>`
+    : '';
+
+  return `
+    <div class="rate-item">
+      <div class="rate-left">
+        <div class="rate-icon"><i class="fas ${r.download_mbps ? 'fa-bolt' : 'fa-coins'}"></i></div>
         <div>
-          <div class="rate-time">${formatMinutes(r.minutes)}</div>
-          <div class="rate-expiry">Valid ${expLabel}</div>
+          <div class="rate-price">₱${r.coin_value}</div>
+          <div class="rate-label">${expLabel}</div>
+          ${speedLine}
         </div>
-      </div>`;
-  });
+      </div>
+      <div>
+        <div class="rate-time">${formatMinutes(r.minutes)}</div>
+        <div class="rate-expiry">Valid ${expLabel}</div>
+      </div>
+    </div>`;
+}
+
+function buildRatesUI(rates) {
+  standardRates = rates.filter(r => !r.download_mbps);
+  premiumRates = rates.filter(r => r.download_mbps);
+
+  const premiumTab = document.getElementById('rateTabPremium');
+  if (premiumTab) premiumTab.style.display = premiumRates.length ? 'block' : 'none';
+
+  const html = standardRates.map(renderRateItem).join('');
   document.getElementById('ratesList').innerHTML = html;
-  document.getElementById('coinRatesList').innerHTML = html;
+  // Insert Coin modal's own list always shows everything - no tabs there,
+  // it's a quick reference while a coin is already in hand, not a
+  // decision point the way opening WiFi Rates from the disconnected
+  // screen is.
+  document.getElementById('coinRatesList').innerHTML = rates.map(renderRateItem).join('');
+}
+
+function setRatesTab(tab) {
+  const list = tab === 'premium' ? premiumRates : standardRates;
+  document.getElementById('ratesList').innerHTML = list.map(renderRateItem).join('');
+  document.getElementById('rateTabStandard').classList.toggle('active', tab === 'standard');
+  document.getElementById('rateTabPremium').classList.toggle('active', tab === 'premium');
 }
 
 // ===== MODALS =====
 function showRates() {
+  setRatesTab('standard');
   document.getElementById('ratesModal').classList.add('show');
 }
 

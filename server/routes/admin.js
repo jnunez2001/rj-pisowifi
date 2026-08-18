@@ -1728,6 +1728,23 @@ router.get('/rates', adminAuth, (req, res) => {
 });
 
 // POST /api/admin/rates
+// Bandwidth fields are optional on both routes below - null/absent means
+// a normal rate (uses the global bandwidth cap, same as before Premium
+// rates existed); a positive download_mbps marks it Premium
+// (coinCreditService.js applies it as a session-level override, "high
+// speed, less time"). Upload defaults to the download value when omitted,
+// same convention setClientBandwidth() callers already use elsewhere -
+// callers below force upload to null whenever download is null too, so
+// an admin can't save a half-set rate (upload without download) that
+// coinCreditService.js's premium check (keyed on download_mbps alone)
+// would silently treat as a normal rate while an orphaned upload value
+// sits in the row doing nothing.
+function parseOptionalMbps(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = parseFloat(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 router.post('/rates', adminAuth, (req, res) => {
   try {
     const { coin_value, minutes, expiration_minutes, label } = req.body;
@@ -1736,6 +1753,8 @@ router.post('/rates', adminAuth, (req, res) => {
     const cv = parseInt(coin_value, 10);
     const m = parseInt(minutes, 10);
     const em = parseInt(expiration_minutes, 10);
+    const downloadMbps = parseOptionalMbps(req.body.download_mbps);
+    const uploadMbps = downloadMbps ? (parseOptionalMbps(req.body.upload_mbps) || downloadMbps) : null;
 
     if (!Number.isFinite(cv) || cv <= 0) {
       return res.status(400).json({ success: false, message: 'coin_value must be a positive number' });
@@ -1750,7 +1769,8 @@ router.post('/rates', adminAuth, (req, res) => {
       return res.status(400).json({ success: false, message: 'label is required' });
     }
 
-    db.prepare('INSERT INTO rates (coin_value, minutes, expiration_minutes, label) VALUES (?, ?, ?, ?)').run(cv, m, em, label.trim());
+    db.prepare('INSERT INTO rates (coin_value, minutes, expiration_minutes, label, download_mbps, upload_mbps) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(cv, m, em, label.trim(), downloadMbps, uploadMbps);
     return res.json({ success: true, message: 'Rate added' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -1767,6 +1787,8 @@ router.put('/rates/:id', adminAuth, (req, res) => {
     const cv = parseInt(coin_value, 10);
     const m = parseInt(minutes, 10);
     const em = parseInt(expiration_minutes, 10);
+    const downloadMbps = parseOptionalMbps(req.body.download_mbps);
+    const uploadMbps = downloadMbps ? (parseOptionalMbps(req.body.upload_mbps) || downloadMbps) : null;
 
     if (!Number.isFinite(cv) || cv <= 0) {
       return res.status(400).json({ success: false, message: 'coin_value must be a positive number' });
@@ -1781,7 +1803,8 @@ router.put('/rates/:id', adminAuth, (req, res) => {
       return res.status(400).json({ success: false, message: 'label is required' });
     }
 
-    db.prepare('UPDATE rates SET coin_value = ?, minutes = ?, expiration_minutes = ?, label = ? WHERE id = ?').run(cv, m, em, label.trim(), id);
+    db.prepare('UPDATE rates SET coin_value = ?, minutes = ?, expiration_minutes = ?, label = ?, download_mbps = ?, upload_mbps = ? WHERE id = ?')
+      .run(cv, m, em, label.trim(), downloadMbps, uploadMbps, id);
     return res.json({ success: true, message: 'Rate updated' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });

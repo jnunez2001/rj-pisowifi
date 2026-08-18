@@ -299,6 +299,29 @@ async function startTimer() {
         }
       }
 
+      // Premium coin rates (Plans page) grant a temporary bandwidth boost
+      // separate from a session's regular minutes_remaining countdown -
+      // nothing else ever revisits a session once created/topped-up, so
+      // once premium_expires_at passes there'd be no reversion event
+      // without this: the customer would just keep whatever speed they
+      // had baked into the last setClientBandwidth() call forever.
+      const expiredPremium = db.prepare(`
+        SELECT mac_address FROM sessions
+        WHERE premium_expires_at IS NOT NULL AND premium_expires_at <= ?
+      `).all(now);
+      if (expiredPremium.length) {
+        const { reapplyBandwidth } = require('./sessionService');
+        for (const { mac_address } of expiredPremium) {
+          console.log(`⚡ Premium speed expired for ${mac_address}, reverting bandwidth`);
+          await reapplyBandwidth(mac_address);
+        }
+        db.prepare(`
+          UPDATE sessions
+          SET premium_download_mbps = NULL, premium_upload_mbps = NULL, premium_expires_at = NULL
+          WHERE premium_expires_at IS NOT NULL AND premium_expires_at <= ?
+        `).run(now);
+      }
+
       // Scheduled Vendo restarts (admin panel's per-device restart_schedule,
       // 'HH:MM' 24h). Compared against the minute this tick falls in, not
       // an exact-second match, since this cron only runs every 30s and a

@@ -212,7 +212,9 @@ db.exec(`
     coin_value INTEGER NOT NULL,
     minutes REAL NOT NULL,
     expiration_minutes REAL NOT NULL,
-    label TEXT NOT NULL
+    label TEXT NOT NULL,
+    download_mbps REAL,
+    upload_mbps REAL
   );
 
   CREATE TABLE IF NOT EXISTS settings (
@@ -723,6 +725,47 @@ try {
   // already applied
 }
 
+// Premium rates: same coin-to-minutes tier, plus an optional bandwidth
+// override applied to the session (high speed, less time) - separate
+// try/catch per column, same reasoning as the vendos migration above.
+try {
+  db.exec('ALTER TABLE rates ADD COLUMN download_mbps REAL');
+} catch (e) {
+  // already applied
+}
+try {
+  db.exec('ALTER TABLE rates ADD COLUMN upload_mbps REAL');
+} catch (e) {
+  // already applied
+}
+
+// Bug found in review: a Premium coin purchase's speed boost was being
+// stored in the SAME sessions.download_mbps/upload_mbps columns a
+// voucher's own permanent bandwidth override already uses - a later
+// plain (non-Premium) top-up had no way to tell "this is a voucher's
+// forever-override" apart from "this is a Premium purchase that should
+// wear off," so it always just kept reapplying whatever was already
+// there. A customer who bought Premium once, then kept adding regular
+// time, got Premium speed forever for free. Tracked separately here so
+// Premium can actually expire (timerService.js's cron reverts it once
+// premium_expires_at passes) without touching voucher override behavior
+// at all.
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN premium_download_mbps REAL');
+} catch (e) {
+  // already applied
+}
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN premium_upload_mbps REAL');
+} catch (e) {
+  // already applied
+}
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN premium_expires_at TEXT');
+} catch (e) {
+  // already applied
+}
+
 // Separate try/catch per column, not one shared block - if this box was
 // ever left in a partially-migrated state (has one of these two columns
 // but not the other), a shared block would throw "duplicate column" on
@@ -756,6 +799,29 @@ if (rateCount.count === 0) {
   insertRate.run(50,  4320, 4320,  '₱50 = 3 days');
   insertRate.run(100, 10080,10080, '₱100 = 7 days');
   insertRate.run(300, 43200,43200, '₱300 = 30 days');
+}
+
+// Premium rates: same coin-to-minutes mechanism, plus a bandwidth
+// override (coinCreditService.js applies it to the session same way a
+// voucher's own download_mbps/upload_mbps override already works) -
+// "high speed, less time" per the operator's own framing. Guarded on its
+// own (not folded into the rateCount===0 check above) so it seeds
+// exactly once even on an existing box that already has the original 8
+// non-premium tiers. Distinct coin values from every existing tier
+// (1/5/10/15/20/50/100/300) so the greedy coin-matching in
+// coinCreditService.js can never confuse a premium insert for a regular
+// one - inserting exactly ₱25, ₱60, or ₱150 is unambiguous.
+const premiumRateCount = db.prepare(
+  "SELECT COUNT(*) as count FROM rates WHERE download_mbps IS NOT NULL"
+).get();
+
+if (premiumRateCount.count === 0) {
+  const insertPremiumRate = db.prepare(
+    'INSERT INTO rates (coin_value, minutes, expiration_minutes, label, download_mbps, upload_mbps) VALUES (?, ?, ?, ?, ?, ?)'
+  );
+  insertPremiumRate.run(25,  15,  30,  '₱25 Premium = 15 mins (10 Mbps)', 10, 5);
+  insertPremiumRate.run(60,  60,  120, '₱60 Premium = 1 hour (10 Mbps)',  10, 5);
+  insertPremiumRate.run(150, 180, 300, '₱150 Premium = 3 hours (10 Mbps)', 10, 5);
 }
 
 // Same reasoning as the rates seed above, for the newer Plans module - an

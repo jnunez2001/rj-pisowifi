@@ -195,6 +195,14 @@
           <i class="fas fa-times"></i>
         </button>
       </div>
+      <div class="rate-tabs" style="display:flex;gap:8px;margin-bottom:12px;">
+        <button class="btn btn-outline rate-tab active" id="rateTabStandard" onclick="setRatesTab('standard')" style="flex:1;">
+          Standard
+        </button>
+        <button class="btn btn-outline rate-tab" id="rateTabPremium" onclick="setRatesTab('premium')" style="flex:1;display:none;">
+          <i class="fas fa-bolt"></i>&nbsp; Premium
+        </button>
+      </div>
       <div id="ratesList"></div>
     </div>
   </div>

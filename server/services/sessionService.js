@@ -124,16 +124,38 @@ function withMacLock(mac, fn) {
 // own check-then-refuse-or-create, just wrapped in withMacLock() too, so
 // both paths serialize against each other without free-claim silently
 // topping up a session it's supposed to reject.
-async function creditOrCreateSession(mac, ip, minutes, expirationMinutes) {
+async function creditOrCreateSession(mac, ip, minutes, expirationMinutes, bandwidthOverride = null) {
   return withMacLock(mac, async () => {
     const existing = getSessionByMac(mac);
     if (existing) {
-      const updated = await addTimeToSession(mac, minutes, expirationMinutes);
+      const updated = await addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverride);
       return { session: updated, created: false };
     }
-    const created = await createSession(mac, ip, minutes, expirationMinutes);
+    const created = await createSession(mac, ip, minutes, expirationMinutes, bandwidthOverride);
     return { session: created, created: true };
   });
+}
+
+// Called by timerService.js's cron once a session's premium_expires_at
+// passes, to actually revert network-level bandwidth back to whatever
+// applies next (a voucher's permanent override, the global cap, or
+// unrestricted) - effectiveBandwidth() alone only decides what SHOULD be
+// applied, this is what makes it real on the router/nftables side.
+async function reapplyBandwidth(mac) {
+  const session = getSessionByMac(mac);
+  if (!session) return;
+  const bw = effectiveBandwidth(session);
+  try {
+    if (bw) {
+      await setClientBandwidth(mac, bw.download, bw.upload, getBurstConfig());
+    } else if (isBandwidthCapEnabled()) {
+      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
+    } else {
+      await removeClientBandwidth(mac);
+    }
+  } catch (e) {
+    console.error(`[Network] Failed to reapply bandwidth for ${mac}:`, e.message);
+  }
 }
 
 function getSessionByMac(mac) {
@@ -149,7 +171,36 @@ function getSessionByVoucher(voucherCode) {
   ).get(voucherCode);
 }
 
-async function createSession(mac, ip, minutes, expirationMinutes) {
+// Premium (temporary, coin-purchased "high speed, less time") and a
+// voucher's own bandwidth override are deliberately kept in SEPARATE
+// columns, not conflated - a voucher's download_mbps/upload_mbps is a
+// permanent property of that redemption and should keep reasserting
+// itself forever (the original intent of the "reapply on every top-up"
+// logic below), while Premium is temporary and must actually expire.
+// Storing both in the same columns (an earlier version of this code did)
+// made a Premium purchase's speed stick around forever on every later
+// plain top-up, since there was no way to tell "this session has a
+// permanent override" apart from "this session had a temporary one that
+// should have worn off by now."
+//
+// Picks whichever of the two is currently in effect: an unexpired
+// Premium purchase wins over a voucher's permanent override (Premium was
+// paid for specifically), which wins over the global bandwidth cap.
+function effectiveBandwidth(session) {
+  if (session.premium_expires_at && new Date(session.premium_expires_at).getTime() > Date.now()) {
+    return { download: session.premium_download_mbps, upload: session.premium_upload_mbps || session.premium_download_mbps };
+  }
+  if (session.download_mbps) {
+    return { download: session.download_mbps, upload: session.upload_mbps || session.download_mbps };
+  }
+  return null;
+}
+
+// `bandwidthOverride` - optional { download_mbps, upload_mbps, minutes }
+// from a Premium coin rate (coinCreditService.js) - `minutes` is
+// specifically the premium-tier duration, not the total credited this
+// call, so premium_expires_at reflects only what was actually paid for.
+async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverride = null) {
   mac = normalizeMac(mac);
   const voucherCode = generateVoucherCode();
   const now = Date.now();
@@ -168,18 +219,30 @@ async function createSession(mac, ip, minutes, expirationMinutes) {
 
   console.log(`Creating session: ${mins} mins, expires: ${expiresAt}, hard: ${hardExpiresAt}`);
 
+  const premiumDownload = bandwidthOverride ? bandwidthOverride.download_mbps : null;
+  const premiumUpload = bandwidthOverride ? (bandwidthOverride.upload_mbps || bandwidthOverride.download_mbps) : null;
+  const premiumExpiresAt = bandwidthOverride
+    ? new Date(now + Math.floor(bandwidthOverride.minutes || 0) * 60 * 1000).toISOString()
+    : null;
+
   db.prepare(`
-    INSERT INTO sessions 
-    (voucher_code, mac_address, ip_address, minutes_remaining, 
-     expires_at, hard_expires_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(voucherCode, mac, ip, mins, expiresAt, hardExpiresAt);
+    INSERT INTO sessions
+    (voucher_code, mac_address, ip_address, minutes_remaining,
+     expires_at, hard_expires_at, premium_download_mbps, premium_upload_mbps, premium_expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(voucherCode, mac, ip, mins, expiresAt, hardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt);
+
+  const session = db.prepare('SELECT * FROM sessions WHERE voucher_code = ?').get(voucherCode);
+  const bw = effectiveBandwidth(session);
 
   // Allow internet access
   try {
     await allowClient(mac);
     console.log(`[Network] Internet unlocked for ${mac}`);
-    if (isBandwidthCapEnabled()) {
+    if (bw) {
+      await setClientBandwidth(mac, bw.download, bw.upload, getBurstConfig());
+      console.log(`[Network] ${bandwidthOverride ? 'Premium' : 'Voucher'} bandwidth applied to ${mac}: ${bw.download}Mbps down / ${bw.upload}Mbps up`);
+    } else if (isBandwidthCapEnabled()) {
       await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
       console.log(`[Network] Bandwidth cap applied to ${mac}: ${getMaxMbps()}Mbps down / ${getMaxUploadMbps()}Mbps up`);
     } else {
@@ -194,12 +257,16 @@ async function createSession(mac, ip, minutes, expirationMinutes) {
   // instead of it waiting on its next poll tick.
   sseService.notify(mac);
 
-  return db.prepare(
-    'SELECT * FROM sessions WHERE voucher_code = ?'
-  ).get(voucherCode);
+  return session;
 }
 
-async function addTimeToSession(mac, minutes, expirationMinutes) {
+// `bandwidthOverride` - optional { download_mbps, upload_mbps, minutes }
+// from a Premium coin rate. A top-up WITHOUT one leaves the session's
+// existing premium_expires_at untouched (it keeps counting down/expiring
+// on its own schedule) rather than reapplying it - the actual "still
+// active?" decision happens once, in effectiveBandwidth(), from whatever
+// premium_expires_at already says.
+async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverride = null) {
   mac = normalizeMac(mac);
   const session = getSessionByMac(mac);
   if (!session) return null;
@@ -214,6 +281,23 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
     now + expirationMinutes * 60 * 1000
   ).toISOString();
 
+  let premiumDownload = session.premium_download_mbps;
+  let premiumUpload = session.premium_upload_mbps;
+  let premiumExpiresAt = session.premium_expires_at;
+
+  if (bandwidthOverride) {
+    // Stacks with time still remaining on an existing Premium purchase
+    // instead of overwriting it (buying two Premium coins back to back
+    // should add up, not just reset the clock), and always adopts the
+    // new override's own Mbps values (a higher-tier Premium purchase
+    // should take effect immediately, not wait for the old one to lapse).
+    const currentExpiryMs = premiumExpiresAt ? new Date(premiumExpiresAt).getTime() : 0;
+    const extendFromMs = Math.max(now, currentExpiryMs);
+    premiumDownload = bandwidthOverride.download_mbps;
+    premiumUpload = bandwidthOverride.upload_mbps || bandwidthOverride.download_mbps;
+    premiumExpiresAt = new Date(extendFromMs + Math.floor(bandwidthOverride.minutes || 0) * 60 * 1000).toISOString();
+  }
+
   // push_2min_sent reset to 0: a customer topping up before running out
   // should get warned again the NEXT time they cross under 2 minutes, not
   // have that suppressed forever because it already fired once earlier.
@@ -222,9 +306,15 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
     SET minutes_remaining = ?,
         expires_at = ?,
         hard_expires_at = ?,
-        push_2min_sent = 0
+        push_2min_sent = 0,
+        premium_download_mbps = ?,
+        premium_upload_mbps = ?,
+        premium_expires_at = ?
     WHERE mac_address = ?
-  `).run(newMinutes, newExpiresAt, newHardExpiresAt, mac);
+  `).run(newMinutes, newExpiresAt, newHardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, mac);
+
+  const updated = db.prepare('SELECT * FROM sessions WHERE mac_address = ?').get(mac);
+  const bw = effectiveBandwidth(updated);
 
   // Ensure internet access is still allowed (in case of reboot)
   try {
@@ -233,8 +323,8 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
     // voucher's own bandwidth override (Create Voucher's optional Mbps
     // fields, set on the session at redemption time) the moment a
     // customer added more time to an existing session.
-    if (session.download_mbps) {
-      await setClientBandwidth(mac, session.download_mbps, session.upload_mbps || session.download_mbps, getBurstConfig());
+    if (bw) {
+      await setClientBandwidth(mac, bw.download, bw.upload, getBurstConfig());
     } else if (isBandwidthCapEnabled()) {
       await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
     }
@@ -242,9 +332,7 @@ async function addTimeToSession(mac, minutes, expirationMinutes) {
 
   sseService.notify(mac);
 
-  return db.prepare(
-    'SELECT * FROM sessions WHERE mac_address = ?'
-  ).get(mac);
+  return updated;
 }
 
 async function pauseSession(voucherCode) {
@@ -468,5 +556,7 @@ module.exports = {
   getActiveSessions,
   getBurstConfig,
   isBandwidthCapEnabled,
-  repairRoamedSessions
+  repairRoamedSessions,
+  effectiveBandwidth,
+  reapplyBandwidth
 };
