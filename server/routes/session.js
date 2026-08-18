@@ -83,9 +83,21 @@ router.get('/mac/:mac', async (req, res) => {
     }
 
     const now = new Date();
-    const hardExpires = new Date(session.hard_expires_at);
 
-    if (now >= hardExpires && session.is_paused === 0) {
+    // Bug found live: this used to compare against hard_expires_at, a much
+    // later outer bound meant to cap how long a PAUSED session stays
+    // resumable, not when an active session's actual purchased time runs
+    // out (that's expires_at). The 30s cron sweep in timerService.js
+    // already correctly blocks internet access the moment expires_at
+    // passes, but this endpoint — what the portal actually polls every
+    // ~8s — kept reporting active:true with time clamped to 0 until
+    // hard_expires_at ALSO passed (often hours later), so the portal page
+    // just sat frozen at 00:00:00 on the connected screen instead of
+    // flipping to the disconnected/expired state, even though their
+    // internet access was already gone.
+    const expires = new Date(session.expires_at);
+
+    if (now >= expires && session.is_paused === 0) {
       await expireSession(session.voucher_code);
       return res.json({
         success: false,
