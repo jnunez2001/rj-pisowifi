@@ -95,6 +95,7 @@ async function listDevices() {
       vendor: d.vendor,
       vendor_class: d.vendor_class,
       vlan_id: d.vlan_id,
+      discovered_via: d.discovered_via,
     });
   }
   // A Vendo might be adopted but not currently answering ARP/DHCP (e.g.
@@ -111,7 +112,18 @@ async function listDevices() {
     const isVendo = !!vendo;
     const isAccessPoint = apMacs.has(entry.mac);
     const hasActiveSession = sessionMacs.has(entry.mac);
-    const online = !!entry.ip; // seen in the live discovery pass this call
+    // Bug found live: a device that disconnected from WiFi entirely could
+    // sit in the DHCP lease file for hours (dnsmasq doesn't drop a lease
+    // just because the client stopped responding), so "has an IP" alone
+    // kept marking it online long after it actually left — a customer
+    // with paid time remaining but no longer connected still showed as a
+    // live client until the lease itself expired. discovered_via
+    // distinguishes genuine current ARP presence ('arp'/'arp+dhcp',
+    // MikroTik mode's 'mikrotik_arp'/'mikrotik_arp+dhcp' — the router's
+    // own live ARP table, always) from a lease-only sighting ('dhcp') that
+    // just means this device was on the network at some point before its
+    // lease expires, not that it's here right now.
+    const online = !!entry.ip && entry.discovered_via !== 'dhcp';
 
     let traffic = null;
     if (hasActiveSession) {
