@@ -3,6 +3,42 @@
 #include <HTTPClient.h>
 #include <Update.h>
 
+// Bug found live (same root cause as the ESP8266 build): the old check
+// only asked "is the server's version DIFFERENT from mine", not "is it
+// NEWER". A device manually reflashed to a newer build (USB/Web Serial,
+// bypassing OTA entirely) would boot, check in, see the server still
+// advertising whatever older version was last pushed there, treat
+// "different" as "update available", and silently re-flash itself back
+// down to that older build within seconds of boot - undoing the manual
+// flash every single time, with no error, no warning. Parses "vX.Y.Z"
+// into three ints and only proceeds when the server's version actually
+// outranks this device's own. Malformed input degrades to 0.0.0 (never
+// triggers an update), never to garbage - a version check that quietly
+// fails is much safer than one that quietly flashes the wrong thing.
+struct FwVersion { int major, minor, patch; };
+
+FwVersion parseFwVersion(const String &raw) {
+  String s = raw;
+  if (s.startsWith("v") || s.startsWith("V")) s = s.substring(1);
+  FwVersion v = {0, 0, 0};
+  int firstDot = s.indexOf('.');
+  if (firstDot < 0) { v.major = s.toInt(); return v; }
+  int secondDot = s.indexOf('.', firstDot + 1);
+  v.major = s.substring(0, firstDot).toInt();
+  if (secondDot < 0) { v.minor = s.substring(firstDot + 1).toInt(); return v; }
+  v.minor = s.substring(firstDot + 1, secondDot).toInt();
+  v.patch = s.substring(secondDot + 1).toInt();
+  return v;
+}
+
+bool isNewerVersion(const String &serverVersion, const String &localVersion) {
+  FwVersion server = parseFwVersion(serverVersion);
+  FwVersion local = parseFwVersion(localVersion);
+  if (server.major != local.major) return server.major > local.major;
+  if (server.minor != local.minor) return server.minor > local.minor;
+  return server.patch > local.patch;
+}
+
 // Lets the admin panel push a firmware update to this device without a USB
 // cable - the same idea as the main app's own "System Update" button, just
 // for the ESP32 side. This device already tells the server its current
@@ -33,8 +69,8 @@ void checkForFirmwareUpdate() {
   if (start < 2 || end < 0) return;
   String serverVersion = body.substring(start, end);
 
-  if (serverVersion.isEmpty() || serverVersion == String(FIRMWARE_VERSION)) {
-    return; // already current, or server has nothing configured yet
+  if (serverVersion.isEmpty() || !isNewerVersion(serverVersion, String(FIRMWARE_VERSION))) {
+    return; // already current, server has nothing configured yet, or server's version is not newer (stale/older push, or a manual reflash already ahead of it)
   }
 
   Serial.println("New firmware available: " + serverVersion + " (current: " + String(FIRMWARE_VERSION) + ")");

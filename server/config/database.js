@@ -1104,6 +1104,82 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   }
 }
 
+// One-time migration: makes the default coin-to-minutes tiers real Plans
+// with the Coin Vendo channel checked, instead of bare rows only the Rates
+// table ever knew about - so the Plans page always reflects what the coin
+// slot can actually sell, per the operator's own request ("seed the
+// default tiers as Plans"). Adopts each EXISTING legacy rates row (set its
+// plan_id) rather than inserting a duplicate, since installs that had
+// coin vendo working before Plans existed already have these 16 rows.
+// Regular-tier plans (channel_voucher=1 already, from an earlier/separate
+// default-plans seed) just get channel_coin_vendo turned on; Premium-tier
+// plans don't exist yet anywhere, so those are inserted fresh.
+{
+  const already = db.prepare("SELECT value FROM settings WHERE key = 'coin_vendo_default_plans_seeded'").get();
+  if (!already) {
+    const regularTiers = [
+      { price: 1, name: '5 Minutes', duration_minutes: 5, validity_minutes: 30 },
+      { price: 5, name: '1 Hour', duration_minutes: 60, validity_minutes: 120 },
+      { price: 10, name: '2 Hours', duration_minutes: 120, validity_minutes: 240 },
+      { price: 15, name: '3 Hours', duration_minutes: 180, validity_minutes: 300 },
+      { price: 20, name: '5 Hours', duration_minutes: 300, validity_minutes: 480 },
+      { price: 50, name: '3 Days', duration_minutes: 4320, validity_minutes: 4320 },
+      { price: 100, name: '7 Days', duration_minutes: 10080, validity_minutes: 10080 },
+      { price: 300, name: '30 Days', duration_minutes: 43200, validity_minutes: 43200 },
+    ];
+    const premiumTiers = [
+      { price: 1, name: '₱1 Premium', duration_minutes: 1, validity_minutes: 15 },
+      { price: 5, name: '₱5 Premium', duration_minutes: 15, validity_minutes: 60 },
+      { price: 10, name: '₱10 Premium', duration_minutes: 30, validity_minutes: 120 },
+      { price: 15, name: '₱15 Premium', duration_minutes: 45, validity_minutes: 150 },
+      { price: 20, name: '₱20 Premium', duration_minutes: 75, validity_minutes: 240 },
+      { price: 50, name: '₱50 Premium', duration_minutes: 1080, validity_minutes: 2160 },
+      { price: 100, name: '₱100 Premium', duration_minutes: 2520, validity_minutes: 5040 },
+      { price: 300, name: '₱300 Premium', duration_minutes: 10800, validity_minutes: 21600 },
+    ];
+
+    // A plan matching a Regular tier's exact price+duration but flagged
+    // is_premium (e.g. from testing the Premium checkbox in the admin UI)
+    // is contradictory - Premium always has a shorter duration than
+    // Regular for the same price - so it's mislabeled test data, not a
+    // real Premium plan. Fix it in place rather than seeding a duplicate.
+    const fixMislabeled = db.prepare("UPDATE plans SET is_premium = 0, download_mbps = NULL, upload_mbps = NULL WHERE price = ? AND duration_minutes = ? AND is_premium = 1");
+    for (const tier of regularTiers) fixMislabeled.run(tier.price, tier.duration_minutes);
+
+    const findRegularPlan = db.prepare("SELECT id FROM plans WHERE price = ? AND (is_premium = 0 OR is_premium IS NULL)");
+    const findLegacyRate = db.prepare('SELECT id FROM rates WHERE coin_value = ? AND plan_id IS NULL AND download_mbps IS NULL');
+    const findLegacyPremiumRate = db.prepare('SELECT id FROM rates WHERE coin_value = ? AND plan_id IS NULL AND download_mbps IS NOT NULL');
+    const linkRate = db.prepare('UPDATE rates SET plan_id = ? WHERE id = ?');
+    const enableCoinVendo = db.prepare('UPDATE plans SET channel_coin_vendo = 1 WHERE id = ?');
+    const insertPlan = db.prepare(`
+      INSERT INTO plans (name, type, status, price, duration_minutes, validity_minutes, download_mbps, upload_mbps, is_premium, channel_voucher, channel_coin_vendo)
+      VALUES (?, 'time', 'active', ?, ?, ?, ?, ?, ?, 1, 1)
+    `);
+
+    for (const tier of regularTiers) {
+      const existingPlan = findRegularPlan.get(tier.price);
+      let planId;
+      if (existingPlan) {
+        planId = existingPlan.id;
+        enableCoinVendo.run(planId);
+      } else {
+        planId = insertPlan.run(tier.name, tier.price, tier.duration_minutes, tier.validity_minutes, null, null, 0).lastInsertRowid;
+      }
+      const legacyRate = findLegacyRate.get(tier.price);
+      if (legacyRate) linkRate.run(planId, legacyRate.id);
+    }
+
+    for (const tier of premiumTiers) {
+      const planId = insertPlan.run(tier.name, tier.price, tier.duration_minutes, tier.validity_minutes, 10, 5, 1).lastInsertRowid;
+      const legacyRate = findLegacyPremiumRate.get(tier.price);
+      if (legacyRate) linkRate.run(planId, legacyRate.id);
+    }
+
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('coin_vendo_default_plans_seeded', '1')").run();
+    console.log('💡 Default coin-to-minutes tiers seeded/linked as Plans (Coin Vendo channel)');
+  }
+}
+
 // Tracks whether the 2-minutes-remaining push notification has already
 // been sent for THIS session, so timerService.js's 30s tick (which
 // re-checks every active session every cycle) doesn't re-send it over and

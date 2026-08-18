@@ -6,7 +6,7 @@
 #include <WebServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.1"
+#define FIRMWARE_VERSION "v1.0.2"
 
 // ===== PINS =====
 #define COIN_PIN    4

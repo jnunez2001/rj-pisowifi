@@ -1,7 +1,7 @@
 {
   "esp8266": {
     "chipNamePrefixes": ["ESP8266EX", "ESP8285"],
-    "version": "v1.0.11",
+    "version": "v1.0.12",
     "files": [
       { "file": "esp8266-vendo.bin", "address": 0 }
     ]
@@ -12,7 +12,7 @@
       "ESP32-PICO-D4", "ESP32-PICO-V3", "ESP32-S0WDQ6", "ESP32-S0WD",
       "Unknown ESP32"
     ],
-    "version": "v1.0.1",
+    "version": "v1.0.2",
     "files": [
       { "file": "esp32-vendo.bin", "address": 0 }
     ]
