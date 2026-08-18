@@ -4,6 +4,7 @@ void activateRelay() {
   digitalWrite(RELAY_PIN, RELAY_ON_STATE);
   relayActive = true;
   relayActivatedAt = millis();
+  relayArmedAt = relayActivatedAt;
   coinSlotActive = true;
   Serial.println("Relay ON");
   lcdPrint(2, "Insert coin now");

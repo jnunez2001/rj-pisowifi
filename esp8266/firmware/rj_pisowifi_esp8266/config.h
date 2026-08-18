@@ -5,7 +5,7 @@
 #include <ESP8266WebServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.10"
+#define FIRMWARE_VERSION "v1.0.11"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
@@ -105,6 +105,20 @@
 // can fully filter.
 #define COIN_DEBOUNCE_MS  15
 
+// Bug found live: COIN_DEBOUNCE_MS above only rejects a pulse that lands
+// too soon after the PREVIOUS pulse - it does nothing for the very first
+// edge after activateRelay() arms the coin slot, since lastPulseTime is
+// stale from whenever the last coin (or last session) happened, often
+// seconds or minutes earlier. That means the SET-pin switching transient
+// itself (the thing COIN_DEBOUNCE_MS's own comment blames for the phantom
+// ₱1) was NEVER actually debounced - it deterministically got counted as
+// a real pulse every single time the relay armed, regardless of how long
+// COIN_DEBOUNCE_MS was set to. This guards a fixed window from arm-time
+// itself (relay.cpp's activateRelay() sets relayArmedAt), independent of
+// inter-pulse spacing, so the arming transient is rejected the same way
+// every time instead of only when a previous pulse happened to be recent.
+#define COIN_ARM_GUARD_MS 200
+
 // How often to ask the server whether newer firmware is available
 // (ota.cpp). Every boot already tells the server this device's current
 // FIRMWARE_VERSION via registerVendo(), so this only needs to catch a
@@ -151,6 +165,7 @@ extern unsigned long relayActivatedAt;
 extern volatile bool coinSlotActive;
 extern volatile int coinPulseCount;
 extern volatile unsigned long lastPulseTime;
+extern volatile unsigned long relayArmedAt;
 extern bool processingCoin;
 extern bool btnHeld;
 extern unsigned long btnPressStart;

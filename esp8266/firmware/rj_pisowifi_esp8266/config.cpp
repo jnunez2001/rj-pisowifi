@@ -10,6 +10,7 @@ unsigned long relayActivatedAt = 0;
 volatile bool coinSlotActive = false;
 volatile int coinPulseCount = 0;
 volatile unsigned long lastPulseTime = 0;
+volatile unsigned long relayArmedAt = 0;
 bool processingCoin = false;
 bool btnHeld = false;
 unsigned long btnPressStart = 0;

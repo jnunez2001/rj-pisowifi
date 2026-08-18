@@ -11,6 +11,12 @@ void IRAM_ATTR onCoinPulse() {
   if (!coinSlotActive) return;
 
   unsigned long now = millis();
+  // Rejects the relay's own SET-pin switching transient, which lands at a
+  // fixed offset from arm-time regardless of how recently a real pulse
+  // happened - the lastPulseTime check below can't catch it since
+  // lastPulseTime is usually stale (last coin/session, seconds or minutes
+  // ago) at the exact moment the relay arms.
+  if (now - relayArmedAt < COIN_ARM_GUARD_MS) return;
   if (now - lastPulseTime < COIN_DEBOUNCE_MS) return;
 
   noInterrupts();
