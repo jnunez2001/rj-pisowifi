@@ -12,7 +12,7 @@
       "ESP32-PICO-D4", "ESP32-PICO-V3", "ESP32-S0WDQ6", "ESP32-S0WD",
       "Unknown ESP32"
     ],
-    "version": "v1.0.0",
+    "version": "v1.0.1",
     "files": [
       { "file": "esp32-vendo.bin", "address": 0 }
     ]

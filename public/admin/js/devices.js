@@ -22,10 +22,64 @@ async function loadFirmwareInfo() {
     if (!data.success) return;
     document.getElementById('firmwareCurrentVersion').textContent = data.version || 'None uploaded yet';
     document.getElementById('firmwareUploadedAt').textContent = data.uploaded_at ? timeAgo(data.uploaded_at) : '--';
+
+    document.getElementById('firmwareAutoUpdateToggle').checked = !!data.auto_update;
+    const hint = document.getElementById('firmwareAutoUpdateHint');
+    hint.textContent = data.auto_update
+      ? ''
+      : 'Off - a push is staged only. Click Release Update below to send it to devices.';
+
+    const statusEl = document.getElementById('firmwareReleaseStatus');
+    const releaseBtn = document.getElementById('releaseFirmwareBtn');
+    if (!data.version) {
+      statusEl.textContent = '--';
+      releaseBtn.style.display = 'none';
+    } else if (data.released) {
+      statusEl.innerHTML = '<span class="badge badge-green">Live on fleet</span>';
+      releaseBtn.style.display = 'none';
+    } else {
+      statusEl.innerHTML = '<span class="badge badge-orange">Staged - not yet released</span>';
+      releaseBtn.style.display = 'inline-flex';
+    }
   } catch (e) {
     console.error('Firmware info error:', e);
   }
   await loadBundledFirmwareInfo();
+}
+
+async function toggleFirmwareAutoUpdate() {
+  const enabled = document.getElementById('firmwareAutoUpdateToggle').checked;
+  try {
+    const data = await apiCall('POST', '/api/admin/vendo/firmware/auto-update', { enabled });
+    if (data.success) {
+      showToast(enabled ? 'Auto-update enabled' : 'Auto-update disabled - pushes will stage until released', 'success');
+      loadFirmwareInfo();
+    } else {
+      showToast(data.message || 'Failed to update setting', 'error');
+      document.getElementById('firmwareAutoUpdateToggle').checked = !enabled;
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
+    document.getElementById('firmwareAutoUpdateToggle').checked = !enabled;
+  }
+}
+
+async function releaseFirmware() {
+  const btn = document.getElementById('releaseFirmwareBtn');
+  btn.disabled = true;
+  try {
+    const data = await apiCall('POST', '/api/admin/vendo/firmware/release');
+    if (data.success) {
+      showToast(`Released ${data.version} to the fleet`, 'success');
+      loadFirmwareInfo();
+    } else {
+      showToast(data.message || 'Release failed', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // Bug found live: this used to update a <span> nested inside the button
@@ -104,7 +158,7 @@ async function uploadFirmware() {
     const data = await res.json();
 
     if (data.success) {
-      showToast('Firmware pushed! Vendos will update on their next check-in.', 'success');
+      showToast(data.message || 'Firmware pushed!', 'success');
       fileInput.value = '';
       loadFirmwareInfo();
     } else {

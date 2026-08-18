@@ -897,7 +897,7 @@ if (settingCount.count === 0) {
   insertSetting.run('currency', '₱');
   insertSetting.run('banner_text', 'HIGH SPEED CONNECTION!');
   insertSetting.run('max_mbps', '5');
-  insertSetting.run('spam_max_attempts', '3');
+  insertSetting.run('spam_max_attempts', '5');
   insertSetting.run('spam_block_minutes', '1');
   // Cafe info
   insertSetting.run('cafe_address', '');
@@ -1061,6 +1061,17 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // mechanism-only until a real Privacy Policy is published and a UI
   // toggle is exposed (see that file's header for the full reasoning).
   upsertIfMissing('telemetry_enabled', '0');
+  // Vendo fleet OTA auto-update - defaults on so existing installs keep
+  // today's "push = every device updates on next check-in" behavior
+  // unchanged. An install that already has a firmware version pushed
+  // before this setting existed was already live under the old
+  // always-auto behavior - mark it released so this migration doesn't
+  // retroactively "unrelease" firmware devices may have already fetched.
+  upsertIfMissing('vendo_firmware_auto_update', '1');
+  if (!db.prepare("SELECT key FROM settings WHERE key = 'vendo_firmware_released'").get()) {
+    const hadVersion = !!db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value;
+    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('vendo_firmware_released', hadVersion ? '1' : '0');
+  }
 }
 
 // One-time migration for existing installs: Premium rate tiers were seeded

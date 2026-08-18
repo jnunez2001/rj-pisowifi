@@ -6,7 +6,7 @@
 #include <WebServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.0"
+#define FIRMWARE_VERSION "v1.0.1"
 
 // ===== PINS =====
 #define COIN_PIN    4
@@ -41,7 +41,7 @@
 #endif
 
 // ===== AP MODE =====
-#define AP_SSID     "RJ-Vendo-Setup"
+#define AP_SSID     "ZenFi-Setup"
 #define AP_PASS     "rjpisowifi"
 
 // ===== TIMING =====

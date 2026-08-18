@@ -2632,6 +2632,21 @@ router.post('/vendo/register', (req, res) => {
   }
 });
 
+// Every firmware push used to go straight to every vendo's next check-in
+// with no way to stage it first - fine for a one-device test setup, risky
+// for a fleet where a bad build now means every coin slot in the field
+// bricks itself overnight. `vendo_firmware_auto_update` ('0'/'1', default
+// on so existing behavior doesn't change for anyone who never touches this)
+// decides whether a push goes live immediately (sets `released`) or just
+// stages the version+file until the admin explicitly clicks Release
+// (POST /vendo/firmware/release below). Returns whether auto-update is on,
+// so callers can word their success message accordingly.
+function stageOrReleaseVendoFirmware(upsert) {
+  const autoUpdate = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_auto_update'").get()?.value !== '0';
+  upsert.run('vendo_firmware_released', autoUpdate ? '1' : '0');
+  return autoUpdate;
+}
+
 // GET /api/admin/vendo/firmware — current pushed version, for the Devices
 // page's own display (admin-authenticated, this one's a UI read, not
 // something the ESP32 itself needs to call).
@@ -2640,7 +2655,9 @@ router.get('/vendo/firmware', adminAuth, (req, res) => {
     const version = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value || null;
     const uploadedAt = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_uploaded_at'").get()?.value || null;
     const hasFile = fs.existsSync(firmwarePath);
-    return res.json({ success: true, version, uploaded_at: uploadedAt, has_file: hasFile });
+    const autoUpdate = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_auto_update'").get()?.value !== '0';
+    const released = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_released'").get()?.value === '1';
+    return res.json({ success: true, version, uploaded_at: uploadedAt, has_file: hasFile, auto_update: autoUpdate, released: autoUpdate || released });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
   }
@@ -2666,8 +2683,14 @@ router.post('/vendo/firmware', adminAuth, firmwareUpload.single('firmware'), (re
     // toISOString() has a "T" and trailing "Z" already, which timeAgo()'s
     // own "add a Z" step would double up into an unparseable string.
     upsert.run('vendo_firmware_uploaded_at', new Date().toISOString().slice(0, 19).replace('T', ' '));
-    console.log(`📦 Vendo firmware updated: ${version}`);
-    return res.json({ success: true, message: 'Firmware uploaded — vendos will pick it up on their next check-in' });
+    const autoUpdate = stageOrReleaseVendoFirmware(upsert);
+    console.log(`📦 Vendo firmware updated: ${version}${autoUpdate ? '' : ' (staged, not yet released)'}`);
+    return res.json({
+      success: true,
+      message: autoUpdate
+        ? 'Firmware uploaded — vendos will pick it up on their next check-in'
+        : 'Firmware staged — click "Release Update" to push it to devices',
+    });
   } catch (err) {
     console.error('Vendo firmware upload error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
@@ -2711,10 +2734,46 @@ router.post('/vendo/firmware/push-bundled', adminAuth, (req, res) => {
     const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
     upsert.run('vendo_firmware_version', entry.version);
     upsert.run('vendo_firmware_uploaded_at', new Date().toISOString().slice(0, 19).replace('T', ' '));
-    console.log(`📦 Vendo firmware updated (bundled): ${entry.version}`);
-    return res.json({ success: true, version: entry.version, message: `Pushed ${entry.version} — vendos will pick it up on their next check-in` });
+    const autoUpdate = stageOrReleaseVendoFirmware(upsert);
+    console.log(`📦 Vendo firmware updated (bundled): ${entry.version}${autoUpdate ? '' : ' (staged, not yet released)'}`);
+    return res.json({
+      success: true,
+      version: entry.version,
+      message: autoUpdate
+        ? `Pushed ${entry.version} — vendos will pick it up on their next check-in`
+        : `Staged ${entry.version} — click "Release Update" to push it to devices`,
+    });
   } catch (err) {
     console.error('Push bundled vendo firmware error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/vendo/firmware/auto-update — toggles whether a firmware
+// push goes live to the fleet immediately (on) or just stages until the
+// admin explicitly releases it (off, see /release below).
+router.post('/vendo/firmware/auto-update', adminAuth, (req, res) => {
+  try {
+    const enabled = !!req.body.enabled;
+    db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)').run('vendo_firmware_auto_update', enabled ? '1' : '0');
+    console.log(`📦 Vendo firmware auto-update: ${enabled ? 'ON' : 'OFF'}`);
+    return res.json({ success: true, auto_update: enabled });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/vendo/firmware/release — manually releases an already-
+// staged version to the fleet (auto-update off path only; a no-op, still
+// success, if there's nothing staged or auto-update is already on).
+router.post('/vendo/firmware/release', adminAuth, (req, res) => {
+  try {
+    const version = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value;
+    if (!version) return res.status(400).json({ success: false, message: 'No firmware staged yet' });
+    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('vendo_firmware_released', '1')").run();
+    console.log(`📦 Vendo firmware released to fleet: ${version}`);
+    return res.json({ success: true, version });
+  } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -2725,7 +2784,15 @@ router.post('/vendo/firmware/push-bundled', adminAuth, (req, res) => {
 // whether it needs to bother downloading the actual binary.
 router.get('/vendo/firmware/version', (req, res) => {
   try {
-    const version = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value || '';
+    // Staged-but-not-released firmware (auto-update off, admin hasn't
+    // clicked Release yet) must not be advertised here - a device treats
+    // any non-matching version as "go download and flash this now", so
+    // reporting an unreleased version would defeat the whole point of the
+    // manual-release gate.
+    const released = db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_released'").get()?.value === '1';
+    const version = released
+      ? db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value || ''
+      : '';
     return res.json({ version });
   } catch (err) {
     res.status(500).json({ version: '' });
