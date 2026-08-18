@@ -279,6 +279,26 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
     }
   }
 
+  // Real problems found live with a per-MAC queue for every single session
+  // (the original design): (1) a device that rotates its MAC mid-session
+  // (iOS/Android privacy MAC randomization) gets a fresh DHCP lease its old
+  // queue was never told about, and just... isn't capped anymore until
+  // something re-provisions it; (2) the queue list fills up with one rj-<mac>
+  // entry per customer who's ever connected, most of them for the exact same
+  // flat rate. When this call is just the plain global default cap (no real
+  // per-client override - Premium, a custom voucher rate, etc.) AND the
+  // router actually has mikrotikProvisioner.js's lane-wide "<bridge>-
+  // regular-cap" PCQ queue provisioned, skip creating an individual queue
+  // entirely and rely on that shared queue instead - RouterOS dynamically
+  // sub-divides it by IP on its own, immune to MAC rotation and adding zero
+  // objects per client. The regular-cap queue's existence is checked live,
+  // not assumed - a router that hasn't had Configure re-run since this
+  // existed falls back to the original per-client queue behavior below
+  // rather than silently leaving default-rate customers uncapped.
+  const defaultDownload = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_download_mbps'").get()?.value || '0', 10);
+  const defaultUpload = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_upload_mbps'").get()?.value || '0', 10);
+  const isPlainDefaultCap = !burstMbps && download === defaultDownload && upload === defaultUpload;
+
   try {
     return await withMikrotik(config, async (client) => {
       // Find the client's current IP via its DHCP lease
@@ -304,13 +324,31 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
       // limit is what actually gets evaluated first. Lane name is derived
       // from the DHCP server name on this lease ("<bridge>-dhcp"), matching
       // mikrotikProvisioner.js's own naming convention exactly.
+      // Looked up before "<bridge>-queue" fairness queue for a router that
+      // hasn't had Configure re-run since regular-cap was introduced -
+      // either way, an override queue just needs to rank above whatever
+      // wider queue would otherwise also match this client's /32 address.
       let placeBeforeId = null;
+      let regularCapExists = false;
       if (lease.server) {
-        const laneQueueName = lease.server.replace(/-dhcp$/, '-queue');
-        const laneQueueRes = await client.talk(['/queue/simple/print', `?name=${laneQueueName}`]);
-        if (laneQueueRes.re.length > 0) {
-          placeBeforeId = laneQueueRes.re[0]['.id'];
+        const bridgeName = lease.server.replace(/-dhcp$/, '');
+        const regularCapRes = await client.talk(['/queue/simple/print', `?name=${bridgeName}-regular-cap`]);
+        if (regularCapRes.re.length > 0) {
+          placeBeforeId = regularCapRes.re[0]['.id'];
+          regularCapExists = true;
+        } else {
+          const laneQueueRes = await client.talk(['/queue/simple/print', `?name=${bridgeName}-queue`]);
+          if (laneQueueRes.re.length > 0) placeBeforeId = laneQueueRes.re[0]['.id'];
         }
+      }
+
+      if (isPlainDefaultCap && regularCapExists) {
+        await deleteQueue(client, mac);
+        console.log(`📶 MikroTik: ${mac} is on the plain default cap - relying on the lane's shared PCQ queue, no individual queue created`);
+        return true;
+      }
+      if (isPlainDefaultCap && !regularCapExists) {
+        console.warn(`📶 MikroTik: ${mac} needs the default cap but this lane has no regular-cap queue yet (Configure hasn't been re-run since this feature was added) - falling back to an individual queue for now. Re-run Configure to switch this lane to the shared PCQ queue.`);
       }
 
       // Remove any existing queue for this client first (avoid duplicates)

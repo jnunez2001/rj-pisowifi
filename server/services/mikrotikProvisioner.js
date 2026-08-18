@@ -336,6 +336,40 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
   // lane plus a VLAN-tagged lane on the same wire) only gets freed once -
   // freeing it again after it's already a member of its first bridge would
   // rip it right back out.
+  // Per-client bandwidth caps used to mean one Simple Queue per MAC for
+  // every customer, forever - a router with any real customer turnover ends
+  // up with a queue list nobody can read, and a customer whose device
+  // rotates its MAC mid-session (iOS/Android privacy MAC randomization)
+  // just silently stops being capped, since the queue was created against
+  // their OLD MAC's leased IP and nothing ever re-targets it. RouterOS's
+  // own PCQ (per-connection-queue) type is the right tool for a FLAT rate
+  // shared by many clients: one Simple Queue per lane, using a PCQ type
+  // with a fixed pcq-rate, and RouterOS dynamically sub-divides it by IP
+  // on its own - zero objects for this app to create or clean up per
+  // client, and immune to MAC rotation since it's just watching IPs that
+  // come and go naturally. Only real overrides (Premium's higher rate, a
+  // bandwidth-profile-backed voucher) still get an individual per-client
+  // queue (mikrotikService.js's setClientBandwidth) - deliberately still
+  // per-MAC, but for a much smaller, intentional subset instead of every
+  // customer who's ever paid. pcq-rate=0 means "no cap, just fair sharing"
+  // - matches "Enable Bandwidth Cap" being off (global cap disabled).
+  const capEnabled = db.prepare("SELECT value FROM settings WHERE key = 'enable_bandwidth_cap'").get()?.value === '1';
+  const defaultDownloadMbps = capEnabled ? (parseInt(db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_download_mbps'").get()?.value || '5', 10) || 5) : 0;
+  const defaultUploadMbps = capEnabled ? (parseInt(db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_upload_mbps'").get()?.value || '5', 10) || 5) : 0;
+  // upsert-queue-type (not the generic add+skip-if-exists path every other
+  // step uses): re-running Configure after the operator changes the global
+  // Mbps cap in Settings needs to actually UPDATE the rate on an
+  // already-provisioned router, not silently skip because a queue type
+  // with that name already exists from the first run.
+  steps.push({
+    type: 'upsert-queue-type', name: 'rj-pcq-download-regular', classifier: 'dst-address', rateMbps: defaultDownloadMbps,
+    description: `Define/update the shared regular-tier PCQ download queue type (${capEnabled ? `${defaultDownloadMbps}M per client` : 'no cap, fair sharing only'})`,
+  });
+  steps.push({
+    type: 'upsert-queue-type', name: 'rj-pcq-upload-regular', classifier: 'src-address', rateMbps: defaultUploadMbps,
+    description: `Define/update the shared regular-tier PCQ upload queue type (${capEnabled ? `${defaultUploadMbps}M per client` : 'no cap, fair sharing only'})`,
+  });
+
   const freedPorts = new Set();
   function freeStepFor(portName) {
     if (freedPorts.has(portName)) return null;
@@ -381,6 +415,22 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
     // other query upstream, so this doesn't change normal browsing.
     const lanePointsAtRouterDns = lane.role === 'gated' && portalHostname;
     steps.push({ description: `[${laneLabel}] Configure DHCP network`, words: ['/ip/dhcp-server/network/add', `=address=${network}/${cidr}`, `=gateway=${gateway}`, `=dns-server=${lanePointsAtRouterDns ? gateway : '8.8.8.8'}`] });
+
+    // Regular-tier per-client cap, lane-wide - one Simple Queue per lane
+    // using the PCQ queue types defined above (rj-pcq-download-regular /
+    // rj-pcq-upload-regular), instead of setClientBandwidth() creating an
+    // individual queue for every single customer. RouterOS's own PCQ
+    // sub-divides this by IP dynamically - no per-client object, immune to
+    // MAC rotation. Pushed BEFORE the lane's own wider fairness/smart queue
+    // below so it's evaluated first (RouterOS Simple Queues match top-to-
+    // bottom list order when targets overlap) - a per-client Premium/
+    // override queue (mikrotikService.js) still needs to rank even higher
+    // than this one, which it does via place-before against this queue's
+    // name at the moment it's created.
+    steps.push({
+      description: `[${laneLabel}] Regular-tier bandwidth cap (shared PCQ, no per-client queue needed)`,
+      words: ['/queue/simple/add', `=name=${bridgeName}-regular-cap`, `=target=${network}/${cidr}`, '=queue=rj-pcq-upload-regular/rj-pcq-download-regular'],
+    });
 
     // Smart queue (ROUTER_MODE_PLAN.md §9) - always on, per lane, using the
     // guaranteed/burst caps saved for this lane. CAKE when actually
@@ -585,6 +635,19 @@ async function apply() {
             await client.talk(['/interface/bridge/port/remove', `=.id=${row['.id']}`]);
           }
           log.push({ step: step.description, ok: true, detail: `${existing.re.length} removed` });
+          continue;
+        }
+
+        if (step.type === 'upsert-queue-type') {
+          const existing = await client.talk(['/queue/type/print', `?name=${step.name}`]);
+          const rate = `${step.rateMbps}M`;
+          if (existing.re.length > 0) {
+            await client.talk(['/queue/type/set', `=.id=${existing.re[0]['.id']}`, `=pcq-rate=${rate}`, `=pcq-classifier=${step.classifier}`]);
+            log.push({ step: step.description, ok: true, detail: `updated existing queue type to ${rate}` });
+          } else {
+            await client.talk(['/queue/type/add', `=name=${step.name}`, '=kind=pcq', `=pcq-classifier=${step.classifier}`, `=pcq-rate=${rate}`]);
+            log.push({ step: step.description, ok: true, detail: `created at ${rate}` });
+          }
           continue;
         }
 
