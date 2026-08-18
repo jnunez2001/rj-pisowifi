@@ -299,6 +299,41 @@ async function startTimer() {
         }
       }
 
+      // Scheduled Vendo restarts (admin panel's per-device restart_schedule,
+      // 'HH:MM' 24h). Compared against the minute this tick falls in, not
+      // an exact-second match, since this cron only runs every 30s and a
+      // tick can land a few seconds either side of :00. last_scheduled_restart
+      // (the "YYYY-MM-DD HH:MM" this last actually fired) stops it firing
+      // twice within the same minute, or re-firing after a server restart
+      // that happens to land in the same minute as an already-completed one.
+      //
+      // Uses this server's OS-configured timezone, not the admin browser's -
+      // the <input type="time"> in the Devices page's Device Details modal
+      // is only "3am" in the sense the admin meant if this box's own clock
+      // is already set to their local timezone (e.g. `sudo timedatectl
+      // set-timezone Asia/Manila`, same as any other server-side scheduled
+      // job). A box left on its default UTC install would fire restarts at
+      // the wrong real-world hour.
+      const dueVendos = db.prepare(`SELECT id, mac_address, ip_address, restart_schedule, last_scheduled_restart FROM vendos WHERE restart_schedule IS NOT NULL`).all();
+      if (dueVendos.length) {
+        const nowDate = new Date();
+        const currentHHMM = `${String(nowDate.getHours()).padStart(2, '0')}:${String(nowDate.getMinutes()).padStart(2, '0')}`;
+        const currentStamp = nowDate.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:MM"
+        for (const v of dueVendos) {
+          if (v.restart_schedule !== currentHHMM) continue;
+          if (v.last_scheduled_restart === currentStamp) continue; // already fired this minute
+          if (!v.ip_address) continue;
+
+          db.prepare('UPDATE vendos SET last_scheduled_restart = ? WHERE id = ?').run(currentStamp, v.id);
+          console.log(`⏰ Scheduled restart firing for vendo ${v.mac_address} (${v.restart_schedule})`);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 5000);
+          fetch(`http://${v.ip_address}/restart`, { method: 'POST', signal: controller.signal })
+            .catch((e) => console.error(`Scheduled restart failed for vendo ${v.mac_address}:`, e.message))
+            .finally(() => clearTimeout(timeout));
+        }
+      }
+
     } catch (err) {
       console.error('Timer error:', err.message);
     } finally {

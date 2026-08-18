@@ -194,6 +194,9 @@ async function loadDevices() {
                 <i class="fas fa-check"></i> Adopt
               </button>
             ` : `
+              <button class="btn btn-sm btn-secondary" onclick="openVendoDetails(${v.id}, '${escapeHtml(v.name)}', '${escapeHtml(v.restart_schedule || '')}')" title="Device details">
+                <i class="fas fa-gear"></i>
+              </button>
               <button class="btn btn-sm btn-secondary" onclick="restartVendo(${v.id}, '${escapeHtml(v.name)}')" title="Restart device">
                 <i class="fas fa-rotate"></i>
               </button>
@@ -251,6 +254,127 @@ async function restartVendo(id, name) {
       showToast(`${name} is restarting`, 'success');
     } else {
       showToast(data.message || 'Failed to restart device', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
+  }
+}
+
+// ===== DEVICE DETAILS MODAL =====
+let vdCurrentId = null;
+
+function formatUptime(seconds) {
+  if (seconds == null) return '--';
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function openVendoDetails(id, name, restartSchedule) {
+  vdCurrentId = id;
+  document.getElementById('vdName').value = name;
+  document.getElementById('vdRestartSchedule').value = restartSchedule || '';
+  document.getElementById('vdUptime').textContent = 'Loading...';
+  document.getElementById('vdWifi').textContent = '--';
+  document.getElementById('vdRelay').textContent = '--';
+  document.getElementById('vdFirmware').textContent = '--';
+  document.getElementById('vdMac').textContent = '--';
+  document.getElementById('vdStaticIp').checked = false;
+  document.getElementById('vdDeviceIp').value = '';
+  document.getElementById('vdGateway').value = '';
+  document.getElementById('vdSubnet').value = '';
+  toggleVdStaticFields();
+  document.getElementById('vendoDetailsModal').classList.add('show');
+  refreshVendoHealth();
+}
+
+function toggleVdStaticFields() {
+  document.getElementById('vdStaticFields').style.display =
+    document.getElementById('vdStaticIp').checked ? 'block' : 'none';
+}
+
+async function refreshVendoHealth() {
+  if (!vdCurrentId) return;
+  document.getElementById('vdUptime').textContent = 'Loading...';
+  try {
+    const data = await apiCall('GET', `/api/admin/vendos/${vdCurrentId}/health`);
+    if (!data.success) {
+      showToast(data.message || 'Could not reach device', 'error');
+      document.getElementById('vdUptime').textContent = 'Unreachable';
+      return;
+    }
+    document.getElementById('vdUptime').textContent = formatUptime(data.uptime_seconds);
+    document.getElementById('vdWifi').textContent = data.wifi ? 'Connected' : 'Disconnected';
+    document.getElementById('vdRelay').textContent = data.relay ? 'Active' : 'Idle';
+    document.getElementById('vdFirmware').textContent = data.firmware || '--';
+    document.getElementById('vdMac').textContent = data.mac || '--';
+    document.getElementById('vdStaticIp').checked = !!data.static_ip;
+    document.getElementById('vdDeviceIp').value = data.device_ip || '';
+    document.getElementById('vdGateway').value = data.gateway || '';
+    document.getElementById('vdSubnet').value = data.subnet || '';
+    toggleVdStaticFields();
+  } catch (e) {
+    document.getElementById('vdUptime').textContent = 'Unreachable';
+  }
+}
+
+async function saveVendoName() {
+  if (!vdCurrentId) return;
+  const name = document.getElementById('vdName').value.trim();
+  if (!name) { showToast('Name is required', 'error'); return; }
+  try {
+    const data = await apiCall('PATCH', `/api/admin/vendos/${vdCurrentId}`, { name });
+    if (data.success) {
+      showToast('Device renamed', 'success');
+      loadDevices();
+    } else {
+      showToast(data.message || 'Failed to rename device', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
+  }
+}
+
+async function saveVendoNetwork() {
+  if (!vdCurrentId) return;
+  const staticIp = document.getElementById('vdStaticIp').checked;
+  const deviceIp = document.getElementById('vdDeviceIp').value.trim();
+  const gateway = document.getElementById('vdGateway').value.trim();
+  const subnet = document.getElementById('vdSubnet').value.trim();
+
+  if (staticIp && (!deviceIp || !gateway || !subnet)) {
+    showToast('Device IP, gateway, and subnet are required for a static IP', 'error');
+    return;
+  }
+  if (!confirm('Apply network settings and restart the device? A wrong static IP can make it unreachable until reset by hand.')) return;
+
+  try {
+    const data = await apiCall('POST', `/api/admin/vendos/${vdCurrentId}/network`, {
+      static_ip: staticIp, device_ip: deviceIp, gateway, subnet
+    });
+    if (data.success) {
+      showToast(data.message || 'Network settings applied', 'success');
+    } else {
+      showToast(data.message || 'Failed to apply network settings', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
+  }
+}
+
+async function saveVendoSchedule() {
+  if (!vdCurrentId) return;
+  const time = document.getElementById('vdRestartSchedule').value || null;
+  try {
+    const data = await apiCall('PUT', `/api/admin/vendos/${vdCurrentId}/restart-schedule`, { time });
+    if (data.success) {
+      showToast(data.message || 'Schedule saved', 'success');
+      loadDevices();
+    } else {
+      showToast(data.message || 'Failed to save schedule', 'error');
     }
   } catch (e) {
     showToast('Server error', 'error');

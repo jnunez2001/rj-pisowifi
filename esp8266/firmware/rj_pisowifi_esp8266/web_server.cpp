@@ -197,6 +197,48 @@ void setupWebServer() {
     ESP.restart();
   });
 
+  // POST rename — updates the name shown on this device's own LCD/status,
+  // so a rename from the admin panel actually reaches the hardware instead
+  // of only existing in the server's own vendos table. Server-only, same
+  // gating as /restart - not something a customer on the same network
+  // should be able to trigger.
+  server.on("/rename", HTTP_POST, []() {
+    if (!rejectUnlessFromServer()) return;
+    if (!server.hasArg("name") || server.arg("name").isEmpty()) {
+      server.send(400, "application/json", "{\"success\":false,\"message\":\"Missing name\"}");
+      return;
+    }
+    config.vendo_name = server.arg("name");
+    saveConfig();
+    server.send(200, "application/json", "{\"success\":true}");
+  });
+
+  // POST network — switches this device between DHCP and a static IP
+  // while it's live on the customer network, without needing to walk over
+  // and use the setup-mode page. Always restarts afterward: WiFi.config()
+  // only takes effect cleanly applied before WiFi.begin(), not hot-swapped
+  // mid-connection, same reason connectWiFi() only ever calls it once at
+  // boot. Server-only gated like /restart - a wrong IP here can strand the
+  // device, this must never be reachable from the customer network.
+  server.on("/network", HTTP_POST, []() {
+    if (!rejectUnlessFromServer()) return;
+    bool useStatic = server.hasArg("static_ip") && server.arg("static_ip") == "true";
+    if (useStatic) {
+      if (!server.hasArg("device_ip") || !server.hasArg("gateway") || !server.hasArg("subnet")) {
+        server.send(400, "application/json", "{\"success\":false,\"message\":\"Missing device_ip/gateway/subnet\"}");
+        return;
+      }
+      config.device_ip = server.arg("device_ip");
+      config.gateway    = server.arg("gateway");
+      config.subnet     = server.arg("subnet");
+    }
+    config.static_ip = useStatic;
+    saveConfig();
+    server.send(200, "application/json", "{\"success\":true,\"message\":\"Applying new network settings, restarting...\"}");
+    delay(500);
+    ESP.restart();
+  });
+
   // GET status
   server.on("/status", HTTP_GET, []() {
     String json = "{";
@@ -205,7 +247,18 @@ void setupWebServer() {
     json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
     json += "\"relay\":" + String(relayActive ? "true" : "false") + ",";
     json += "\"wifi\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
-    json += "\"firmware\":\"" + String(FIRMWARE_VERSION) + "\"";
+    json += "\"firmware\":\"" + String(FIRMWARE_VERSION) + "\",";
+    // millis() overflows/wraps at ~49.7 days of continuous uptime - not
+    // corrected for here since a vendo restarting (scheduled or manual)
+    // long before that is the realistic case, same "good enough" tradeoff
+    // this firmware already takes elsewhere (e.g. the /24 broadcast
+    // assumption in discoverServer()) rather than pulling in a 64-bit
+    // uptime library for an edge case this hardware won't actually hit.
+    json += "\"uptime_seconds\":" + String(millis() / 1000) + ",";
+    json += "\"static_ip\":" + String(config.static_ip ? "true" : "false") + ",";
+    json += "\"device_ip\":\"" + config.device_ip + "\",";
+    json += "\"gateway\":\"" + config.gateway + "\",";
+    json += "\"subnet\":\"" + config.subnet + "\"";
     json += "}";
     server.send(200, "application/json", json);
   });

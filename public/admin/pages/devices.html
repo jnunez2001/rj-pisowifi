@@ -87,6 +87,96 @@
   </div>
 </div>
 
+<!-- DEVICE DETAILS MODAL -->
+<div class="modal-overlay" id="vendoDetailsModal">
+  <div class="modal-box">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <h3><i class="fas fa-microchip"></i>&nbsp; Device Details</h3>
+      <button class="modal-close" onclick="closeModal('vendoDetailsModal')">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="vdName" class="form-control">
+        <button class="btn btn-secondary" onclick="saveVendoName()"><i class="fas fa-save"></i></button>
+      </div>
+    </div>
+
+    <div class="sysinfo-table" style="margin:16px 0;">
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">Uptime</span>
+        <span class="sysinfo-value" id="vdUptime">--</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">WiFi</span>
+        <span class="sysinfo-value" id="vdWifi">--</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">Coin Slot Relay</span>
+        <span class="sysinfo-value" id="vdRelay">--</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">Firmware</span>
+        <span class="sysinfo-value" id="vdFirmware">--</span>
+      </div>
+      <div class="sysinfo-row">
+        <span class="sysinfo-label">MAC Address</span>
+        <span class="sysinfo-value" id="vdMac" style="font-family:monospace;">--</span>
+      </div>
+    </div>
+    <button class="btn btn-sm btn-secondary" onclick="refreshVendoHealth()" style="margin-bottom:16px;">
+      <i class="fas fa-sync-alt"></i> Refresh
+    </button>
+
+    <div class="card-title" style="margin-bottom:10px;">Network</div>
+    <div class="toggle-row" style="margin-bottom:10px;">
+      <span class="toggle-label">Static IP</span>
+      <label class="switch">
+        <input type="checkbox" id="vdStaticIp" onchange="toggleVdStaticFields()">
+        <span class="slider"></span>
+      </label>
+    </div>
+    <div id="vdStaticFields" style="display:none;">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Device IP</label>
+          <input type="text" id="vdDeviceIp" class="form-control" placeholder="192.168.0.30">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Gateway</label>
+          <input type="text" id="vdGateway" class="form-control" placeholder="192.168.0.1">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Subnet Mask</label>
+        <input type="text" id="vdSubnet" class="form-control" placeholder="255.255.255.0">
+      </div>
+    </div>
+    <div class="alert alert-info" style="margin:10px 0;font-size:12px;">
+      <i class="fas fa-triangle-exclamation"></i>
+      Applying network changes restarts the device. A wrong static IP can make it unreachable until it's reset by hand.
+    </div>
+    <button class="btn btn-secondary" onclick="saveVendoNetwork()" style="margin-bottom:20px;">
+      <i class="fas fa-network-wired"></i> Apply Network Settings
+    </button>
+
+    <div class="card-title" style="margin-bottom:10px;">Scheduled Restart</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Restart daily at (leave blank to disable)</label>
+        <input type="time" id="vdRestartSchedule" class="form-control">
+      </div>
+    </div>
+    <button class="btn btn-secondary" onclick="saveVendoSchedule()">
+      <i class="fas fa-clock"></i> Save Schedule
+    </button>
+  </div>
+</div>
+
 <!-- DEVICE STATS -->
 <div class="grid-2" style="margin-top:20px;">
   <div class="card">

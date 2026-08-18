@@ -2693,6 +2693,135 @@ router.delete('/vendos/:id', adminAuth, async (req, res) => {
   }
 });
 
+// PATCH /api/admin/vendos/:id — rename. Updates both this box's own record
+// (what the Devices list shows) and pushes the new name to the device
+// itself (its /rename, server-only gated) so its own LCD/status agree
+// instead of drifting from what the admin panel calls it.
+router.patch('/vendos/:id', adminAuth, async (req, res) => {
+  try {
+    const name = String(req.body.name || '').trim();
+    if (!name) {
+      return res.status(400).json({ success: false, message: 'Name is required' });
+    }
+    const vendo = db.prepare('SELECT ip_address FROM vendos WHERE id = ?').get(req.params.id);
+    if (!vendo) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    db.prepare('UPDATE vendos SET name = ? WHERE id = ?').run(name, req.params.id);
+
+    if (vendo.ip_address) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      try {
+        await fetch(`http://${vendo.ip_address}/rename?name=${encodeURIComponent(name)}`, { method: 'POST', signal: controller.signal });
+      } catch (err) {
+        // Saved either way — the device's own LCD/status will just show
+        // the old name until its next successful contact with this box,
+        // same fallback shape as the trust-bypass/adopt flow above.
+        console.error('Vendo renamed but could not reach device to sync:', err.message);
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+
+    return res.json({ success: true, message: 'Device renamed' });
+  } catch (err) {
+    console.error('Vendo rename error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/vendos/:id/health — live detail beyond what the Devices
+// list shows (uptime, static-IP config, relay/WiFi state), fetched
+// straight from the device's own /status rather than duplicating any of
+// it into this box's database.
+router.get('/vendos/:id/health', adminAuth, async (req, res) => {
+  try {
+    const vendo = db.prepare('SELECT ip_address FROM vendos WHERE id = ?').get(req.params.id);
+    if (!vendo) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    if (!vendo.ip_address) {
+      return res.status(400).json({ success: false, message: 'No known IP for this device yet' });
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    let statusRes;
+    try {
+      statusRes = await fetch(`http://${vendo.ip_address}/status`, { signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+    const status = await statusRes.json();
+    return res.json({ success: true, ...status });
+  } catch (err) {
+    console.error('Vendo health error:', err.message);
+    res.status(502).json({ success: false, message: 'Could not reach device — it may be offline' });
+  }
+});
+
+// POST /api/admin/vendos/:id/network — { static_ip, device_ip, gateway, subnet }
+// Proxies to the device's own /network (server-only gated). Restarts the
+// device to apply, same as the firmware side already requires.
+router.post('/vendos/:id/network', adminAuth, async (req, res) => {
+  try {
+    const vendo = db.prepare('SELECT ip_address FROM vendos WHERE id = ?').get(req.params.id);
+    if (!vendo) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    if (!vendo.ip_address) {
+      return res.status(400).json({ success: false, message: 'No known IP for this device yet' });
+    }
+
+    const { static_ip, device_ip, gateway, subnet } = req.body;
+    const body = new URLSearchParams({ static_ip: static_ip ? 'true' : 'false' });
+    if (static_ip) {
+      if (!device_ip || !gateway || !subnet) {
+        return res.status(400).json({ success: false, message: 'device_ip, gateway, and subnet are required for a static IP' });
+      }
+      body.set('device_ip', device_ip);
+      body.set('gateway', gateway);
+      body.set('subnet', subnet);
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      await fetch(`http://${vendo.ip_address}/network`, { method: 'POST', body, signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    return res.json({ success: true, message: 'Network settings applied — device is restarting' });
+  } catch (err) {
+    console.error('Vendo network update error:', err.message);
+    res.status(502).json({ success: false, message: 'Could not reach device — it may be offline' });
+  }
+});
+
+// PUT /api/admin/vendos/:id/restart-schedule — { time: 'HH:MM' | null }
+// Read by timerService.js's minute-tick cron, which restarts the device at
+// that local time each day (comparing against last_scheduled_restart so a
+// slow tick or a server restart doesn't fire it twice in the same minute
+// window, or skip a day if the cron runs a few seconds late/early).
+router.put('/vendos/:id/restart-schedule', adminAuth, (req, res) => {
+  try {
+    const time = req.body.time ? String(req.body.time).trim() : null;
+    if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
+      return res.status(400).json({ success: false, message: 'Time must be in 24h HH:MM format' });
+    }
+    const result = db.prepare('UPDATE vendos SET restart_schedule = ? WHERE id = ?').run(time, req.params.id);
+    if (result.changes === 0) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    return res.json({ success: true, message: time ? `Scheduled to restart daily at ${time}` : 'Scheduled restart cleared' });
+  } catch (err) {
+    console.error('Vendo restart-schedule error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // POST /api/admin/vendos/:id/adopt — approves a candidate device (a MAC
 // this box has never seen before, per POST /vendo/register above). Also
 // trusts it in the same step - a Vendo shares the customer WiFi/VLAN and

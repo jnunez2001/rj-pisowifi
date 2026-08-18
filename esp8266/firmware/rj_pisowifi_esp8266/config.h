@@ -5,7 +5,7 @@
 #include <ESP8266WebServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.8"
+#define FIRMWARE_VERSION "v1.0.9"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form

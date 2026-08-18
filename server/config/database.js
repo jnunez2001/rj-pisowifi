@@ -723,6 +723,23 @@ try {
   // already applied
 }
 
+// Separate try/catch per column, not one shared block - if this box was
+// ever left in a partially-migrated state (has one of these two columns
+// but not the other), a shared block would throw "duplicate column" on
+// the first ALTER and never reach the second, permanently skipping it.
+try {
+  // 'HH:MM' (24h) or NULL for no scheduled restart - checked once a
+  // minute by timerService.js's cron job.
+  db.exec('ALTER TABLE vendos ADD COLUMN restart_schedule TEXT');
+} catch (e) {
+  // already applied
+}
+try {
+  db.exec('ALTER TABLE vendos ADD COLUMN last_scheduled_restart TEXT');
+} catch (e) {
+  // already applied
+}
+
 const rateCount = db.prepare(
   'SELECT COUNT(*) as count FROM rates'
 ).get();
