@@ -741,6 +741,33 @@ if (rateCount.count === 0) {
   insertRate.run(300, 43200,43200, '₱300 = 30 days');
 }
 
+// Same reasoning as the rates seed above, for the newer Plans module - an
+// admin opening Plans for the first time got an empty list and "Create
+// Plan" as the only option, when the same ready-made tiers already used
+// for coin rates make just as much sense as a starting point here. Tied
+// to the Voucher channel specifically, since that's the one channel this
+// table is actually wired to today (voucher_groups.plan_id) - Client
+// Portal/Coin Vendo/Account channels stay off since nothing consumes
+// plans through them yet (see this table's own definition comment above).
+const planCount = db.prepare('SELECT COUNT(*) as count FROM plans').get();
+
+if (planCount.count === 0) {
+  const insertPlan = db.prepare(`
+    INSERT INTO plans (
+      name, description, type, status, price, duration_minutes, validity_minutes,
+      channel_voucher, channel_portal, channel_coin_vendo, channel_account, display_order
+    ) VALUES (?, ?, 'time', 'active', ?, ?, ?, 1, 0, 0, 0, ?)
+  `);
+  insertPlan.run('5 Minutes',  '₱1 voucher',   1,   5,    30,    0);
+  insertPlan.run('1 Hour',     '₱5 voucher',   5,   60,   120,   1);
+  insertPlan.run('2 Hours',    '₱10 voucher',  10,  120,  240,   2);
+  insertPlan.run('3 Hours',    '₱15 voucher',  15,  180,  300,   3);
+  insertPlan.run('5 Hours',    '₱20 voucher',  20,  300,  480,   4);
+  insertPlan.run('3 Days',     '₱50 voucher',  50,  4320, 4320,  5);
+  insertPlan.run('7 Days',     '₱100 voucher', 100, 10080,10080, 6);
+  insertPlan.run('30 Days',    '₱300 voucher', 300, 43200,43200, 7);
+}
+
 const settingCount = db.prepare(
   'SELECT COUNT(*) as count FROM settings'
 ).get();
