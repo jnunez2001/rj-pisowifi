@@ -10,9 +10,12 @@
 void IRAM_ATTR onCoinPulse() {
   if (!coinSlotActive) return;
 
+  unsigned long now = millis();
+  if (now - lastPulseTime < COIN_DEBOUNCE_MS) return;
+
   noInterrupts();
   coinPulseCount++;
-  lastPulseTime = millis();
+  lastPulseTime = now;
   interrupts();
 }
 

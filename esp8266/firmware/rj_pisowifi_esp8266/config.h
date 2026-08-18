@@ -5,7 +5,7 @@
 #include <ESP8266WebServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.5"
+#define FIRMWARE_VERSION "v1.0.6"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
@@ -88,6 +88,22 @@
 // whole pulse train in well under 300ms), but every extra millisecond here
 // is money-in-hand-to-credit-on-screen delay the customer directly feels.
 #define COIN_WAIT_MS      400
+
+// Minimum gap between two pulses for both to count as real (coin.cpp's
+// onCoinPulse()). Re-added after field testing showed this hat's coin
+// acceptor needs it after all: without it, a customer inserting a real ₱5
+// coin saw it credited as ₱8 or more, and a phantom ₱1 could even appear
+// the instant the coin slot powered on (activateRelay() driving the SET
+// pin) with no coin inserted at all - both are extra FALLING edges from
+// contact bounce / motor-switching EMI on the coin pulse line, not real
+// coin pulses. Real pulse-per-peso trains from mechanical coin acceptors
+// space pulses far wider than this, so it never throws away a genuine
+// pulse. If noise this coarse (spaced further apart than this window)
+// still gets through after this fix, that's a wiring issue - the COIN_PIN
+// signal wire should be kept away from and ideally shielded/twisted-pair
+// separate from the SET/motor power wiring, not something firmware alone
+// can fully filter.
+#define COIN_DEBOUNCE_MS  15
 
 // How often to ask the server whether newer firmware is available
 // (ota.cpp). Every boot already tells the server this device's current
