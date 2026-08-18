@@ -407,14 +407,14 @@ async function loadSalesStats() {
 
     document.getElementById('todaySales').textContent = `₱${todayIncome.toFixed(2)}`;
     document.getElementById('todayTransactions').textContent = todayTx;
-    document.getElementById('minutesSold').textContent = `${todayMinutes} mins`;
+    document.getElementById('minutesSold').textContent = formatDurationShort(todayMinutes);
     // Hotspot Overview card mirrors the same real today-figures (separate
     // element ids from the stat cards above, so both can render without
     // duplicate-id conflicts).
     const hoTx = document.getElementById('hoTransactions');
     const hoMin = document.getElementById('hoMinutes');
     if (hoTx) hoTx.textContent = todayTx;
-    if (hoMin) hoMin.textContent = `${todayMinutes} mins`;
+    if (hoMin) hoMin.textContent = formatDurationShort(todayMinutes);
 
     // Real "vs yesterday" revenue trend - data.week is ordered DESC by
     // date (today first, if any transactions happened today), so the

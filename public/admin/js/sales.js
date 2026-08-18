@@ -17,7 +17,7 @@ async function loadSales() {
     document.getElementById('salesTodayCount').textContent =
       `${data.today.transactions || 0} transactions`;
     document.getElementById('salesMinutes').textContent =
-      `${Math.round(data.today.minutes_sold || 0)}`;
+      formatDurationShort(data.today.minutes_sold || 0);
 
     const weekTotal = data.week.reduce((s, d) => s + (d.total || 0), 0);
     document.getElementById('salesWeekTotal').textContent = `₱${weekTotal.toFixed(2)}`;

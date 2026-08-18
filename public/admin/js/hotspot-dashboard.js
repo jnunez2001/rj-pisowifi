@@ -154,7 +154,7 @@ async function hsLoadSalesStats() {
 
     const t = data.today;
     document.getElementById('hsTodaySales').textContent = `₱${(t.total_income || 0).toFixed(2)}`;
-    document.getElementById('hsMinutesSold').textContent = `${Math.round(t.minutes_sold || 0)} mins`;
+    document.getElementById('hsMinutesSold').textContent = formatDurationShort(t.minutes_sold || 0);
 
     const weekTotal = data.week.reduce((sum, d) => sum + (d.total || 0), 0);
     document.getElementById('hsWeeklySales').textContent = `₱${weekTotal.toFixed(2)}`;

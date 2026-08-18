@@ -508,6 +508,25 @@ async function apiCall(method, endpoint, body = null) {
   return res.json();
 }
 
+// ===== DURATION FORMATTING =====
+// "Minutes Sold" style stats used to show a raw minute count (e.g. "2000
+// mins") once a busy day added up - reads as a big, hard-to-parse number
+// instead of the "about 1 day 9 hours" an owner actually wants at a
+// glance. Auto-scales to the coarsest unit that still fits.
+function formatDurationShort(totalMinutes) {
+  const mins = Math.round(totalMinutes || 0);
+  if (mins < 60) return `${mins} min${mins === 1 ? '' : 's'}`;
+
+  const days = Math.floor(mins / 1440);
+  const hours = Math.floor((mins % 1440) / 60);
+  const remMins = mins % 60;
+
+  if (days > 0) {
+    return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  }
+  return remMins > 0 ? `${hours}h ${remMins}m` : `${hours}h`;
+}
+
 // ===== TOAST NOTIFICATION =====
 function showToast(message, type = 'success') {
   const existing = document.getElementById('toast');
