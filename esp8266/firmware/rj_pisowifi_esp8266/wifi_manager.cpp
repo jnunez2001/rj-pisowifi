@@ -1,8 +1,86 @@
 #include "config.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
+#include <WiFiUdp.h>
 
 unsigned long lastHeartbeat = 0;
+
+// Zero-config discovery (server/services/vendoDiscoveryService.js) - lets
+// this device find the ZenFi server's address on its own instead of
+// someone typing it into the setup page by hand. Can only run once this
+// device has actually joined the target WiFi (setup mode's own isolated
+// AP has no path to the real server), so this is called from setup() right
+// after connectWiFi() succeeds, before the first registerVendo() - not from
+// the setup page itself. Broadcasts the server's documented discovery
+// request on the LAN and waits briefly for its unicast JSON reply
+// ({"address":"...","port":NNNN,...}); a plain substring extraction is
+// used instead of a JSON library, same "one known fixed shape, not worth
+// the dependency" reasoning as ota.cpp's version-string parsing.
+bool discoverServer() {
+  WiFiUDP udp;
+  if (!udp.begin(6971)) {
+    Serial.println("UDP discovery: failed to bind local port");
+    return false;
+  }
+
+  // Simple /24 broadcast assumption - same "good enough for the common
+  // case" convention this codebase already uses elsewhere (e.g.
+  // networkDiscoveryService.js's own primary-LAN-address heuristic) rather
+  // than computing a real subnet broadcast from an arbitrary mask.
+  IPAddress broadcastIp = WiFi.localIP();
+  broadcastIp[3] = 255;
+
+  udp.beginPacket(broadcastIp, 6970);
+  udp.write((const uint8_t*)"ZENFI_DISCOVER_V1", 17);
+  udp.endPacket();
+  Serial.println("UDP discovery: broadcast sent to " + broadcastIp.toString() + ":6970, waiting for reply...");
+
+  const unsigned long DISCOVERY_TIMEOUT_MS = 3000;
+  unsigned long start = millis();
+  while (millis() - start < DISCOVERY_TIMEOUT_MS) {
+    int packetSize = udp.parsePacket();
+    if (packetSize > 0) {
+      char buf[256];
+      int len = udp.read(buf, sizeof(buf) - 1);
+      if (len <= 0) { udp.stop(); return false; }
+      buf[len] = '\0';
+      String body(buf);
+
+      String foundIp;
+      int foundPort = 0;
+
+      int addrKey = body.indexOf("\"address\"");
+      if (addrKey >= 0) {
+        int addrStart = body.indexOf('"', body.indexOf(':', addrKey) + 1) + 1;
+        int addrEnd = body.indexOf('"', addrStart);
+        if (addrStart > 0 && addrEnd > addrStart) {
+          foundIp = body.substring(addrStart, addrEnd);
+        }
+      }
+      int portKey = body.indexOf("\"port\"");
+      if (portKey >= 0) {
+        int portStart = body.indexOf(':', portKey) + 1;
+        int portEnd = body.indexOf(',', portStart);
+        if (portEnd < 0) portEnd = body.indexOf('}', portStart);
+        if (portStart > 0 && portEnd > portStart) {
+          foundPort = body.substring(portStart, portEnd).toInt();
+        }
+      }
+
+      udp.stop();
+      if (foundIp.isEmpty() || foundPort <= 0) return false;
+      config.server_ip = foundIp;
+      config.server_port = foundPort;
+      Serial.println("UDP discovery: found server at " + config.server_ip + ":" + String(config.server_port));
+      return true;
+    }
+    delay(50);
+  }
+
+  udp.stop();
+  Serial.println("UDP discovery: no reply, timed out");
+  return false;
+}
 
 bool connectWiFi() {
   if (config.wifi_ssid.isEmpty()) return false;

@@ -2676,6 +2676,38 @@ router.post('/vendos/:id/adopt', adminAuth, (req, res) => {
   }
 });
 
+// POST /api/admin/vendos/:id/restart — proxies to the device's own
+// server-only-gated POST /restart (esp8266/firmware/.../web_server.cpp),
+// so an owner doesn't need to walk over and power-cycle a coin slot that's
+// misbehaving. Requires the device's last-known IP, same LAN reachability
+// assumption every other direct-to-vendo call in this app already makes.
+router.post('/vendos/:id/restart', adminAuth, async (req, res) => {
+  try {
+    const vendo = db.prepare('SELECT mac_address, name, ip_address FROM vendos WHERE id = ?').get(req.params.id);
+    if (!vendo) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    if (!vendo.ip_address) {
+      return res.status(400).json({ success: false, message: 'No known IP for this device yet' });
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      await fetch(`http://${vendo.ip_address}/restart`, { method: 'POST', signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    require('../services/networkDevicesService').logDeviceEvent(vendo.mac_address, 'vendo_restarted', `"${vendo.name}" restarted from admin panel`);
+    console.log(`🔄 Vendo restart requested: ${vendo.mac_address} (${vendo.name})`);
+    return res.json({ success: true, message: 'Restart command sent' });
+  } catch (err) {
+    console.error('Vendo restart error:', err.message);
+    res.status(502).json({ success: false, message: 'Could not reach device — it may be offline' });
+  }
+});
+
 // PUT /api/admin/vendos/:id/role — { role: 'main' | 'sub' | 'standalone' }
 // Purely organizational (spec section 17) - doesn't hard-code a single
 // "main" Vendo, an operator can mark multiple as Main across sites.

@@ -185,6 +185,18 @@ void setupWebServer() {
     server.send(200, "application/json", "{\"success\":true,\"pin\":\"D2\",\"level\":\"" + level + "\"}");
   });
 
+  // POST restart — remote restart from the admin panel while the device is
+  // in normal (non-setup) operation. Distinct from /reboot above, which is
+  // setup-mode-only: this needs to work while the device is live on the
+  // customer network, so it's gated the same way as /relay/on|off instead
+  // (server-IP-only), not rejectUnlessSetupMode().
+  server.on("/restart", HTTP_POST, []() {
+    if (!rejectUnlessFromServer()) return;
+    server.send(200, "application/json", "{\"success\":true,\"message\":\"Restarting...\"}");
+    delay(500);
+    ESP.restart();
+  });
+
   // GET status
   server.on("/status", HTTP_GET, []() {
     String json = "{";
@@ -566,8 +578,8 @@ String getFallbackHTML() {
   <!-- Server Settings -->
   <div class="card">
     <div class="card-title">Server Settings</div>
-    <label class="field-label">Server IP</label>
-    <input type="text" id="server_ip" placeholder="192.168.0.132">
+    <label class="field-label">Server IP (optional — auto-detected if left blank)</label>
+    <input type="text" id="server_ip" placeholder="Leave blank to auto-discover">
     <label class="field-label">Server Port</label>
     <input type="number" id="server_port" placeholder="3000">
   </div>

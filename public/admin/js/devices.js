@@ -194,7 +194,11 @@ async function loadDevices() {
               <button class="btn btn-sm btn-primary" onclick="adoptVendoDevice(${v.id}, '${escapeHtml(v.name)}')">
                 <i class="fas fa-check"></i> Adopt
               </button>
-            ` : ''}
+            ` : `
+              <button class="btn btn-sm btn-secondary" onclick="restartVendo(${v.id}, '${escapeHtml(v.name)}')" title="Restart device">
+                <i class="fas fa-rotate"></i>
+              </button>
+            `}
             <button class="btn btn-sm btn-danger" onclick="removeVendo(${v.id}, '${escapeHtml(v.name)}')">
               <i class="fas fa-trash"></i>
             </button>
@@ -234,6 +238,20 @@ async function adoptVendoDevice(id, name) {
       loadDevices();
     } else {
       showToast(data.message || 'Failed to adopt device', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
+  }
+}
+
+async function restartVendo(id, name) {
+  if (!confirm(`Restart "${name}"? It'll be briefly unreachable for paying customers while it reboots.`)) return;
+  try {
+    const data = await apiCall('POST', `/api/admin/vendos/${id}/restart`);
+    if (data.success) {
+      showToast(`${name} is restarting`, 'success');
+    } else {
+      showToast(data.message || 'Failed to restart device', 'error');
     }
   } catch (e) {
     showToast('Server error', 'error');

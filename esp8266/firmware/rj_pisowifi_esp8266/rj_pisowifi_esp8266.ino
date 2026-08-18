@@ -46,6 +46,17 @@ void setup() {
   // Normal mode
   bool connected = connectWiFi();
   if (connected) {
+    // Zero-config discovery: if no server was manually configured during
+    // setup, find it on the LAN now instead of registering nowhere. Saves
+    // the discovered address so this only needs to happen once, not on
+    // every boot - a later admin-panel/settings change to config.server_ip
+    // still takes priority over rediscovering.
+    if (config.server_ip.isEmpty()) {
+      lcdPrint(1, "Finding server...");
+      if (discoverServer()) {
+        saveConfig();
+      }
+    }
     registerVendo();
     attachInterrupt(digitalPinToInterrupt(COIN_PIN), onCoinPulse, FALLING);
     setupWebServer();

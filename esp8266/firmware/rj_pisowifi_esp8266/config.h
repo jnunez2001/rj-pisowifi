@@ -5,7 +5,7 @@
 #include <ESP8266WebServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.6"
+#define FIRMWARE_VERSION "v1.0.7"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
@@ -166,6 +166,7 @@ void ledBlink(int times, int ms);
 bool connectWiFi();
 void registerVendo();
 void checkWiFiReconnect();
+bool discoverServer();
 
 // web_server.cpp
 void setupWebServer();
