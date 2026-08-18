@@ -522,11 +522,15 @@ function handleInsertCoin(isPremium) {
   activateVendoRelay();
 }
 
-// Lets the customer skip the rest of the silence window (server-side
-// PENDING_TIMEOUT_MS) once they're done dropping coins, instead of always
-// having to wait it out. Only meaningful if at least one coin has actually
-// landed (insertedTotal > 0) — otherwise there's nothing to finalize, so
-// just close like before.
+// Shared handler for both the CONNECT button and the modal's X close
+// button. Bug found live: X used to call closeCoinModal() directly, which
+// only cancels the GPIO "waiting for a coin" window - it never finalized,
+// so already-inserted coins just sat in the server's pending window for up
+// to PENDING_TIMEOUT_MS (40s) with zero feedback before quietly granting
+// access on their own. From the operator/customer's side that reads as
+// "the coins didn't count," even though nothing was actually lost. X now
+// finalizes immediately, same as CONNECT - only a truly empty session
+// (insertedTotal <= 0, nothing to finalize) still just closes.
 async function finishInsertingCoins() {
   if (insertedTotal <= 0) {
     closeCoinModal();
@@ -570,9 +574,13 @@ function closeCoinModal() {
   cancelPendingGpioCoin();
   if (redirectAfterCoinModal) {
     redirectAfterCoinModal = false;
+    // Was 500ms - too fast for the "success" sound (triggered separately,
+    // by updateUI() once the session actually goes active) to finish
+    // before the page navigated away and cut it off. Matches the delay
+    // already used for the no-modal connect path below.
     setTimeout(() => {
       window.location.href = portalSettings.redirect_url;
-    }, 500);
+    }, 2000);
   }
 }
 
