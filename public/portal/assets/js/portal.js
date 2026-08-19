@@ -8,7 +8,7 @@ let isBlocked = false;
 let detectedMac = '';
 
 // Improvement: checkSession()'s catch block used to just console.error and
-// silently do nothing — a customer with a live session but a flaky/dropped
+// silently do nothing. A customer with a live session but a flaky/dropped
 // connection to the server would see a frozen screen with zero indication
 // anything was wrong, easy to mistake for their session having ended.
 let consecutivePollFailures = 0;
@@ -28,8 +28,8 @@ function updateConnectionBanner(failed) {
   }
 }
 
-// Bug: the portal only ever found out about a coin credit by polling —
-// every 8s normally, every 1.5s while the Insert Coin modal was open — so
+// Bug: the portal only ever found out about a coin credit by polling,
+// every 8s normally, every 1.5s while the Insert Coin modal was open, so
 // even the fast path meant waiting up to ~1.5s to reflect a coin that
 // already physically landed. This opens a live push connection so the
 // server can wake the portal up the instant a coin/promo/free-claim
@@ -48,7 +48,7 @@ function connectEventStream(mac) {
       pollPendingTotal();
     }
   };
-  // No custom onerror handling needed — EventSource reconnects
+  // No custom onerror handling needed, EventSource reconnects
   // automatically on its own after a drop.
 }
 
@@ -71,7 +71,7 @@ let coinTimeLeft = 30;
 const COIN_TIMER_DURATION = 30;
 const CIRCUMFERENCE = 314;
 
-// Running total (pesos) credited so far during this INSERT COIN session —
+// Running total (pesos) credited so far during this INSERT COIN session,
 // fetched from the server rather than derived from minutes, since pesos
 // aren't reliably recoverable from a minutes delta (different coin
 // denominations buy minutes at different rates).
@@ -84,7 +84,7 @@ let redirectAfterCoinModal = false;
 // Coin modal opened, before any real coin landed. registerPendingCoin()'s
 // POST /api/coin/pending reset (server/routes/coin.js) and this client's
 // own poll/SSE-triggered reads of GET /api/coin/pending/:mac are separate
-// HTTP round-trips with no guaranteed ordering — if a poll (especially the
+// HTTP round-trips with no guaranteed ordering. If a poll (especially the
 // SSE-triggered one in connectEventStream's onmessage, which can fire the
 // instant the modal shows) reached the server before the reset did, it
 // could read a leftover total from a PREVIOUS pending window for the same
@@ -132,7 +132,7 @@ function updateCoinTimerUI() {
 }
 
 // ===== PENDING COIN TOTAL (fast-polled while modal is open) =====
-// Bug: the modal's 30s countdown never reset as coins came in — someone
+// Bug: the modal's 30s countdown never reset as coins came in. Someone
 // dropping coins a few seconds apart could run out of time mid-insertion.
 // This polls much faster than the normal 8s session poll specifically so a
 // new coin resets the countdown promptly, and shows a running peso total.
@@ -231,7 +231,7 @@ async function enableNotifications() {
     // MAC detection on the HTTPS side re-derives from IP the same way the
     // HTTP side does, so nothing extra needs to be passed here.
     const httpsUrl = `https://${location.hostname}:8443${location.pathname}`;
-    alert('You may see a one-time security warning on the next page — tap through to continue.');
+    alert('You may see a one-time security warning on the next page. Tap through to continue.');
     window.location.href = httpsUrl;
     return;
   }
@@ -444,7 +444,7 @@ async function registerPendingCoin() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mac, is_premium: insertingPremium })
     });
-    // Only now is it safe to trust GET /api/coin/pending/:mac — before
+    // Only now is it safe to trust GET /api/coin/pending/:mac. Before
     // this resolves, a read could still return a leftover total from
     // whatever pending window existed before this one.
     pendingRegistered = true;
@@ -551,14 +551,14 @@ async function finishInsertingCoins() {
       return; // leave the modal open so they can insert more
     }
     // Any other failure (including no_pending_coins) still falls through
-    // to closeCoinModal() below — the coins, if any, are still safely
+    // to closeCoinModal() below. The coins, if any, are still safely
     // waiting in the server's pending window and will finalize on their
     // own once it goes quiet.
   } catch (e) {
-    // Network/server unreachable — nothing was finalized. Don't pretend it
+    // Network/server unreachable, nothing was finalized. Don't pretend it
     // was: keep the modal open (the fast pending-poll keeps retrying) and
     // let the customer know, instead of silently closing as if connected.
-    showToast('Could not reach the server — please try again.', 'error');
+    showToast('Could not reach the server, please try again.', 'error');
     return;
   }
   closeCoinModal();
@@ -732,7 +732,7 @@ function updateUI(session) {
       playSound('success');
       if (coinModalOpen) {
         // Bug: this used to force-close the modal (and redirect) the instant
-        // the first coin created a session — cutting the customer off mid
+        // the first coin created a session, cutting the customer off mid
         // insertion if they were still dropping more coins. The coin's
         // already reflected via pollPendingTotal's own faster poll; let the
         // modal's own timer or a manual close decide when insertion is done,

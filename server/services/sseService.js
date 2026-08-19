@@ -1,6 +1,6 @@
 // ===== REAL-TIME SESSION PUSH (Server-Sent Events) =====
 // Bug: the portal only ever found out about a coin credit by polling
-// (every 8s normally, every 1.5s while the Insert Coin modal was open) —
+// (every 8s normally, every 1.5s while the Insert Coin modal was open),
 // noticeably slower than competitors, since even the fast path meant
 // waiting up to ~1.5s for the next tick. This lets sessionService push an
 // instant "something changed, refetch now" signal to a MAC's open portal

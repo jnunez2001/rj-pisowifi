@@ -2,13 +2,13 @@
 // Replaces the old always-expanded accordion for large tab groups.
 // Sidebar items with many children (MikroTik Control Center's 13 tabs,
 // ISP Tools' 7, etc.) are single flyout triggers instead of dozens of
-// individual rows — the panel opens beside the sidebar, columned, plain
+// individual rows. The panel opens beside the sidebar, columned, plain
 // links, closes on outside-click or Escape. See docs/design/omada-
 // reference.md for the reference this pattern is drawn from.
 
 // Column definitions per the named settings taxonomy. Each column has a
 // heading and a list of { page, label, icon } entries that call the
-// existing navigateTo(page) — no new routing needed, this is purely a
+// existing navigateTo(page), no new routing needed, this is purely a
 // different way of presenting the same nav targets.
 const FLYOUT_MENUS = {
   network: {
@@ -257,7 +257,7 @@ function _buildFlyoutPanel(key) {
     el.addEventListener('click', () => {
       const page = el.dataset.page;
       closeFlyout();
-      // Reuse the existing router — flyout links are just another way to
+      // Reuse the existing router, flyout links are just another way to
       // reach the same navigateTo() targets every other nav item uses.
       navigateTo(page);
     });
@@ -317,7 +317,7 @@ function _handleEscape(e) {
   if (e.key === 'Escape') closeFlyout();
 }
 
-// Router flyout trigger only makes sense when network_mode = mikrotik —
+// Router flyout trigger only makes sense when network_mode = mikrotik,
 // checked once after login and whenever Network settings are saved.
 async function refreshRouterFlyoutVisibility() {
   try {
@@ -327,6 +327,6 @@ async function refreshRouterFlyoutVisibility() {
       trigger.style.display = data.settings.network_mode === 'mikrotik' ? 'flex' : 'none';
     }
   } catch (e) {
-    // Non-fatal — leave the Router entry hidden if settings can't be read.
+    // Non-fatal. Leave the Router entry hidden if settings can't be read.
   }
 }

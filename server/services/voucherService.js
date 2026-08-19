@@ -33,12 +33,12 @@ function getExpirationMinutesForCoin(coinValue) {
   return rate ? rate.expiration_minutes : 0;
 }
 
-// Same 8 tiers database.js seeds at boot if the rates table is empty —
+// Same 8 tiers database.js seeds at boot if the rates table is empty,
 // duplicated here as a self-heal, not a second source of truth, so an
 // admin opening the Rates page (or any coin credit) never sees a genuinely
 // empty rate list regardless of *why* the boot-time seed didn't stick on
 // a given box (multi-tenant site migrations, a table that briefly existed
-// with 0 rows before a restart, etc.) — getRates() below always guarantees
+// with 0 rows before a restart, etc.), getRates() below always guarantees
 // at least these defaults exist before reading.
 function ensureDefaultRates() {
   const count = db.prepare('SELECT COUNT(*) as count FROM rates').get().count;
@@ -67,7 +67,7 @@ function ensureDefaultRates() {
   insertPremiumRate.run(100, 2520, 5040,  '₱100 Premium = 1.75 days (10/5 Mbps)', 10, 5);
   insertPremiumRate.run(300, 10800,21600, '₱300 Premium = 7.5 days (10/5 Mbps)', 10, 5);
 
-  console.log('💡 Rates table was empty — reseeded default tiers');
+  console.log('💡 Rates table was empty, reseeded default tiers');
 }
 
 function getRates() {

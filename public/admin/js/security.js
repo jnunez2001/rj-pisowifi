@@ -6,7 +6,7 @@ async function loadSecurity() {
     document.getElementById('blockMinutes').value = data.spam_block_minutes || 1;
     // Bug: this used to read/write `max_mbps`, a setting the actual
     // bandwidth-shaping code (sessionService.js/networkService.js) never
-    // reads — it uses enable_bandwidth_cap + bandwidth_cap_download_mbps.
+    // reads. It uses enable_bandwidth_cap + bandwidth_cap_download_mbps.
     // Changing "Max Speed" here previously had zero real effect.
     setToggle('enableBandwidthCap', 'enableBandwidthCapLabel', data.enable_bandwidth_cap === '1');
     document.getElementById('maxMbps').value = data.bandwidth_cap_download_mbps || 5;

@@ -1,6 +1,6 @@
 // ===== STANDALONE DRIVER (local nftables/tc) =====
 // Extracted from the pre-Workstream-1 networkService.js with NO logic
-// changes — same nft/tc commands, same bug-fix comments, same behavior.
+// changes, same nft/tc commands, same bug-fix comments, same behavior.
 // This is the box acting as its own router/gateway.
 
 const { exec } = require('child_process');
@@ -273,13 +273,13 @@ function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst 
 
 // Detects a roam: the client's MAC now resolves (via the live DHCP lease
 // table) to a different IP than the one its bandwidth shaping was last
-// applied against. Internet access itself doesn't need this — the
-// allowed_macs firewall set is shared across every lane already — but the
+// applied against. Internet access itself doesn't need this, the
+// allowed_macs firewall set is shared across every lane already, but the
 // tc/HTB class setClientBandwidth() installs is bound to one specific
 // interface+IP, so a roam leaves the old class orphaned and the new IP
 // unshaped until something reapplies it. Callers (sessionService's roam
 // repair, run periodically by watchdogService) act on this by calling
-// removeClientBandwidth() then setClientBandwidth() again in sequence —
+// removeClientBandwidth() then setClientBandwidth() again in sequence,
 // both already resolve the correct IP/interface on their own, this
 // function only detects that a repair is needed.
 function checkRoam(mac) {

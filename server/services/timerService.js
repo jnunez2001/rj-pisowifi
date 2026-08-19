@@ -13,7 +13,7 @@ async function restoreActiveSessions() {
     const { getBurstConfig } = require('./sessionService');
 
     // Bug: this used to select ALL sessions, including paused ones, and
-    // called allowClient() for every row — so a customer who had paused
+    // called allowClient() for every row, so a customer who had paused
     // their session (internet deliberately blocked, per pauseSession())
     // got un-paused for free on every reboot, since the fresh nftables
     // table setup-network.sh creates on boot has no memory of who was
@@ -63,7 +63,7 @@ async function restoreActiveSessions() {
 }
 
 // Re-applies every trusted device's bypass on startup, same reasoning as
-// restoreActiveSessions() above — a router reboot/reconfigure or a fresh
+// restoreActiveSessions() above, a router reboot/reconfigure or a fresh
 // setup-network.sh run has no memory of who was trusted before, so this
 // needs reapplying every time the server starts, not just once when the
 // device was originally trusted.
@@ -146,7 +146,7 @@ async function startTimer() {
 
       // Bug: grace_period_minutes was a real, saved setting ("Extra time
       // before disconnecting after session ends" in Settings > Session
-      // Settings) that nothing ever read — sessions were always cut the
+      // Settings) that nothing ever read, sessions were always cut the
       // instant expires_at passed. Shift the expiry cutoff back by the
       // grace period instead of comparing against `now` directly. Defaults
       // to 0, which reproduces the old (no-grace) behavior exactly.
@@ -176,7 +176,7 @@ async function startTimer() {
 
       // Bug: max_pause_minutes was a real, saved setting ("Auto-resume after
       // this many minutes while paused" in Settings > Session Settings) that
-      // nothing ever read — a paused session stayed paused (internet
+      // nothing ever read, a paused session stayed paused (internet
       // blocked, minutes frozen, slot held) forever with no time limit.
       const maxPauseMinutes = getSetting('max_pause_minutes', 30);
       const pauseCutoff = new Date(Date.now() - maxPauseMinutes * 60000).toISOString();

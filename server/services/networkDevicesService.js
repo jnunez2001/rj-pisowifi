@@ -115,11 +115,11 @@ async function listDevices() {
     // Bug found live: a device that disconnected from WiFi entirely could
     // sit in the DHCP lease file for hours (dnsmasq doesn't drop a lease
     // just because the client stopped responding), so "has an IP" alone
-    // kept marking it online long after it actually left — a customer
+    // kept marking it online long after it actually left, a customer
     // with paid time remaining but no longer connected still showed as a
     // live client until the lease itself expired. discovered_via
     // distinguishes genuine current ARP presence ('arp'/'arp+dhcp',
-    // MikroTik mode's 'mikrotik_arp'/'mikrotik_arp+dhcp' — the router's
+    // MikroTik mode's 'mikrotik_arp'/'mikrotik_arp+dhcp', the router's
     // own live ARP table, always) from a lease-only sighting ('dhcp') that
     // just means this device was on the network at some point before its
     // lease expires, not that it's here right now.

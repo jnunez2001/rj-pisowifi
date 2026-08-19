@@ -1,29 +1,13 @@
 <div class="zf3-header">
   <div>
     <div class="page-title">Access Points</div>
-    <div class="page-subtitle">Discover, monitor and manage access points on your network</div>
   </div>
   <div class="zf3-header-right">
     <div class="zf3-icon-btn" onclick="loadAccessPointsPage()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
     <button class="btn btn-secondary" onclick="openAddAp()">
       <i class="fas fa-plus"></i> Add AP
     </button>
-    <button class="btn btn-primary" id="scanApBtn" onclick="scanForAps()">
-      <i class="fas fa-satellite-dish"></i> Scan Network
-    </button>
   </div>
-</div>
-
-<!-- DISCOVERED CANDIDATES (shown after a scan finds unregistered devices) -->
-<div class="zf3-card" id="apCandidatesCard" style="display:none;margin-bottom:16px;">
-  <div class="zf3-card-head">
-    <div class="zf3-card-title" style="text-transform:none;font-size:14px;">Discovered on Last Scan</div>
-    <div class="zf3-icon-btn" onclick="dismissApCandidates()" title="Dismiss"><i class="fas fa-times"></i></div>
-  </div>
-  <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
-    StarkFi found these devices via ARP/DHCP (passive, no active probing), including devices on VLANs behind your router. It cannot tell which are actually access points versus other devices &mdash; review and add the ones that are.
-  </div>
-  <div id="apCandidatesList"></div>
 </div>
 
 <!-- SUMMARY CARDS -->
@@ -87,7 +71,6 @@
         <tr>
           <th>Access Point</th>
           <th>Status</th>
-          <th>IP Address</th>
           <th>MAC Address</th>
           <th>VLAN</th>
           <th>Site</th>
@@ -97,7 +80,7 @@
         </tr>
       </thead>
       <tbody id="apTable">
-        <tr><td colspan="9"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+        <tr><td colspan="8"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
       </tbody>
     </table>
   </div>

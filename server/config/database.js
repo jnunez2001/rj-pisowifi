@@ -63,7 +63,7 @@ db.exec(`
     download_mbps INTEGER,
     upload_mbps INTEGER
   );
-  -- Note: status column removed (Bug #1) — sessions are deleted on expiry, so existing sessions are always active
+  -- Note: status column removed (Bug #1), sessions are deleted on expiry, so existing sessions are always active
 
   -- No FOREIGN KEY on voucher_code (bug fix, see the migration below for
   -- existing databases that already have one). Sessions are deleted on
@@ -938,7 +938,7 @@ if (settingCount.count === 0) {
   insertSetting.run('cafe_name', 'StarkFi');
   insertSetting.run('admin_password', hashPassword('admin123'));
   insertSetting.run('admin_username', 'admin');
-  // Fresh installs start with the default password — force a change before
+  // Fresh installs start with the default password, force a change before
   // the admin panel is usable for real (Bug: default admin123 previously
   // shipped with no forced-change flow at all).
   insertSetting.run('must_change_password', '1');
@@ -1010,7 +1010,7 @@ if (settingCount.count === 0) {
   insertSetting.run('mikrotik_user', 'admin');
   insertSetting.run('mikrotik_pass', '');
   insertSetting.run('mikrotik_interface', 'ether1');
-  // Router mode: real ISP plan speed, never hardcoded — every port-role
+  // Router mode: real ISP plan speed, never hardcoded, every port-role
   // speed warning scales off this (ROUTER_MODE_PLAN.md §4.1).
   insertSetting.run('isp_plan_mbps', '0');
   // Memorable address for gated-lane customers to return to (check/add
@@ -1049,7 +1049,7 @@ if (settingCount.count === 0) {
 
 // One-time migration for existing installs: 'nodogsplash' was the old
 // internal name for the standalone mode (the actual Nodogsplash software
-// was replaced by this project's own nftables/tc code long ago — only the
+// was replaced by this project's own nftables/tc code long ago, only the
 // label lingered). Nothing in the codebase checks for the literal string
 // 'nodogsplash' (networkService only ever checks `=== 'mikrotik'`), so this
 // is a safe rename, not a behavior change.
@@ -1058,7 +1058,7 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
 // One-time migration for existing installs: admin_password was stored in
 // plaintext. Hash it in place. If it's still the untouched default
 // ('admin123'), also flag must_change_password so the admin is forced to
-// pick a real one — but if they'd already customized it, leave it as their
+// pick a real one, but if they'd already customized it, leave it as their
 // chosen password (just hash it), no need to disrupt a working login.
 {
   const existing = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get();
@@ -1077,7 +1077,7 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
 }
 
 // One-time migration for existing installs: mikrotik_pass was stored in
-// plaintext — a MikroTik router's credentials have real value (resale risk
+// plaintext, a MikroTik router's credentials have real value (resale risk
 // for router configs is a real concern here), so encrypt it in place with a
 // key that lives outside the DB file (server/utils/secretCrypto.js). Also
 // backfill mikrotik_ssl/mikrotik_port for installs that predate those

@@ -1,7 +1,7 @@
 // ===== COMING SOON PLACEHOLDER =====
 // Renders an honest "not built yet" state for tabs that exist in the nav
 // (so the full StarkFi roadmap is visible) but have no backend behind them
-// yet. No fake data, no dead buttons — just the page title, what it will
+// yet. No fake data, no dead buttons, just the page title, what it will
 // do once built, and which roadmap workstream it belongs to.
 function renderComingSoon(container, { icon = 'fa-hourglass-half', title, description, workstream }) {
   container.innerHTML = `
@@ -17,7 +17,7 @@ function renderComingSoon(container, { icon = 'fa-hourglass-half', title, descri
 }
 
 // Registry of not-yet-built pages: page key -> { icon, title, description, workstream }.
-// navigateTo() in app.js checks this before attempting to fetch pages/<page>.html —
+// navigateTo() in app.js checks this before attempting to fetch pages/<page>.html,
 // so these tabs never 404, they just render this placeholder directly.
 const COMING_SOON_PAGES = {
   'wallet': {

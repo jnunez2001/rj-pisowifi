@@ -183,7 +183,7 @@ function formatSalesMins(mins) {
 
 // Improvement: the only way to get transaction data out of this system was
 // the full JSON backup (settings + rates + promos + everything else mixed
-// together) — no quick way for an admin to open sales in Excel/Sheets for
+// together), no quick way for an admin to open sales in Excel/Sheets for
 // bookkeeping. Exports the complete history (not just the 20-row preview).
 function csvEscape(value) {
   const str = String(value ?? '');

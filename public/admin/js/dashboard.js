@@ -8,7 +8,7 @@ let uptimeInterval = null;
 async function loadDashboard() {
   // Bug: initChart() used to run AFTER loadSalesStats(), so on every fresh
   // dashboard load, updateChartData()'s `if (revenueChart && ...)` guard
-  // was always false (the chart didn't exist yet) — the revenue chart
+  // was always false (the chart didn't exist yet). The revenue chart
   // always rendered as a flat zero line until an admin happened to click
   // one of the Daily/Weekly/Monthly buttons, easy to mistake for "no sales".
   const rangeEl = document.getElementById('dashboardDateRange');
@@ -343,10 +343,10 @@ function destroyDashboard() {
 }
 
 // Bug: "Server Uptime" ran its own client-side timer starting from page
-// load, so every browser refresh reset it to 00:00:00 — it never reflected
+// load, so every browser refresh reset it to 00:00:00. It never reflected
 // how long the actual server process had been running. "WiFi AP" was
 // hardcoded HTML that always said Online no matter what. "Coin Slot" had
-// an id in the markup but nothing anywhere ever wrote to it — permanently
+// an id in the markup but nothing anywhere ever wrote to it, permanently
 // stuck at "Unknown".
 async function loadSystemStatus() {
   try {
@@ -446,8 +446,8 @@ async function loadSalesStats() {
       }
     }
 
-    // Bug: the Daily/Weekly/Monthly buttons never changed what was charted
-    // — every click re-rendered the same fixed 7-day view. data.chart is
+    // Bug: the Daily/Weekly/Monthly buttons never changed what was charted.
+    // Every click re-rendered the same fixed 7-day view. data.chart is
     // now genuinely scoped to the selected range.
     if (revenueChart && data.chart) {
       updateChartData(data.chart, data.chart_format);
@@ -462,7 +462,7 @@ async function loadActiveSessionsCount() {
   try {
     const data = await apiCall('GET', '/api/admin/sessions');
     if (data.success) {
-      // Bug: this used to be `count` (all sessions, including paused —
+      // Bug: this used to be `count` (all sessions, including paused,
       // internet blocked), but the card is labeled "Currently Connected".
       const count = data.active_count ?? data.count ?? 0;
       document.getElementById('activeSessions').textContent = count;

@@ -6,7 +6,7 @@
 //    automatically, capped, so a burst of repairs can't mask a real
 //    hardware problem behind an endless retry loop.
 //  - anything bigger (the firewall table itself missing) is never
-//    auto-rebuilt from here — that ruleset lives in setup-network.sh and
+//    auto-rebuilt from here. That ruleset lives in setup-network.sh and
 //    depends on interface/lane detection this service has no business
 //    replicating unattended. It's surfaced as a critical alert instead,
 //    per the "backup/confirm before risky changes" reliability rule.
@@ -75,7 +75,7 @@ async function checkFirewallReachable() {
 // currently be allowed on the network. If one has silently dropped out of
 // the allow set (e.g. ephemeral nftables state lost across a reboot), this
 // re-applies it via the exact same allowClient() call sessionService
-// already makes on session creation — not a new code path.
+// already makes on session creation, not a new code path.
 async function repairActiveSessionAccess() {
   const now = new Date().toISOString();
   const activeSessions = db.prepare(`
@@ -309,7 +309,7 @@ async function runHealthCheck() {
   issues.push(...(await checkNetworkReachability()));
 
   // MikroTik/pfSense own their own access-control state on external
-  // hardware — this box isn't the source of truth for it, so the
+  // hardware. This box isn't the source of truth for it, so the
   // firewall-reachability + per-session repair checks only apply where
   // this box itself enforces access (standalone/OpenWRT).
   if (mode === 'standalone' || mode === 'openwrt') {
@@ -318,9 +318,9 @@ async function runHealthCheck() {
       issues.push({
         severity: 'critical',
         code: 'firewall_unreachable',
-        message: 'The network access-control table is missing or unreachable. WiFi access enforcement may not be working. This needs manual attention — re-run network setup.',
+        message: 'The network access-control table is missing or unreachable. WiFi access enforcement may not be working. This needs manual attention. Re-run network setup.',
       });
-      console.error('🛡️ [Watchdog] Firewall/network driver unreachable — not attempting an automatic full rebuild (too risky to do unattended). Run setup-network.sh manually.');
+      console.error('🛡️ [Watchdog] Firewall/network driver unreachable. Not attempting an automatic full rebuild (too risky to do unattended). Run setup-network.sh manually.');
     } else {
       const repaired = await repairActiveSessionAccess();
       if (repaired.length) {
@@ -353,7 +353,7 @@ async function runHealthCheck() {
     issues.push({
       severity: 'critical',
       code: 'low_disk_space',
-      message: `Only ${freeMb}MB of disk space left. The system may fail to save new sessions/transactions soon — free up space or expand storage.`,
+      message: `Only ${freeMb}MB of disk space left. The system may fail to save new sessions/transactions soon. Free up space or expand storage.`,
     });
   }
 

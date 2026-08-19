@@ -43,7 +43,7 @@ const upload = multer({
   }
 });
 
-// ESP32 vendo firmware (.bin) storage — same reasoning as DB_PATH/
+// ESP32 vendo firmware (.bin) storage, same reasoning as DB_PATH/
 // FINANCIAL_LOG_DIR living outside the app directory (server/config/
 // database.js, server/services/financialLogService.js): a re-clone or
 // reset of the app directory shouldn't be able to wipe out the currently-
@@ -89,11 +89,11 @@ function getRealClientIp(req) {
     .replace('::ffff:', '').trim();
   // WAN admin access now goes through nginx (setup/nginx.conf), which always
   // connects from loopback and sets X-Forwarded-For to the real client IP.
-  // Only trust that header when the TCP connection itself is from loopback —
+  // Only trust that header when the TCP connection itself is from loopback,
   // a remote attacker can set whatever X-Forwarded-For they like, but they
   // cannot make their own raw socket connection originate from 127.0.0.1,
   // so this can't be spoofed by anyone except nginx itself. LAN clients
-  // (never proxied — DNAT'd straight to this app) fall through to raw below.
+  // (never proxied, DNAT'd straight to this app) fall through to raw below.
   if (raw === '127.0.0.1' || raw === '::1') {
     const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
     if (forwarded) return forwarded;
@@ -168,7 +168,7 @@ function rememberVerified(password, hash) {
 // NOTE: Passwords stored in plaintext (Bug #10). Acceptable for offline single-admin deployments.
 // For wider deployment, consider: bcrypt hashing, OAuth2, or certificate-based auth.
 //
-// Bug: there was no rate limiting at all here — with a plaintext password
+// Bug: there was no rate limiting at all here, with a plaintext password
 // and no dedicated /login route (the admin panel authenticates by sending
 // the password header on every request, starting with GET /settings), an
 // attacker could brute-force the admin password with unlimited requests.
@@ -304,7 +304,7 @@ router.get('/sessions', adminAuth, async (req, res) => {
     }));
 
     // Bug: `count` included paused sessions, but the dashboard/sidebar/
-    // sessions-page all label this "Currently Connected"/"connected" —
+    // sessions-page all label this "Currently Connected"/"connected",
     // a paused session has its internet blocked, so it isn't connected.
     // `count` is kept as the total row count (the table shows paused rows
     // too, correctly marked); `active_count` is the real "connected" number.
@@ -333,7 +333,7 @@ router.get('/satellite-kiosks', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/satellite-kiosks — { name } -> returns the unmasked
+// POST /api/admin/satellite-kiosks, { name } -> returns the unmasked
 // device_key exactly once, for the operator to copy into that kiosk's own
 // config. It is never returned again after this response.
 router.post('/satellite-kiosks', adminAuth, (req, res) => {
@@ -345,7 +345,7 @@ router.post('/satellite-kiosks', adminAuth, (req, res) => {
   }
 });
 
-// PUT /api/admin/satellite-kiosks/:id — { name }
+// PUT /api/admin/satellite-kiosks/:id, { name }
 router.put('/satellite-kiosks/:id', adminAuth, (req, res) => {
   try {
     kioskService.renameKiosk(req.params.id, req.body.name);
@@ -355,7 +355,7 @@ router.put('/satellite-kiosks/:id', adminAuth, (req, res) => {
   }
 });
 
-// DELETE /api/admin/satellite-kiosks/:id — preserves that kiosk's
+// DELETE /api/admin/satellite-kiosks/:id, preserves that kiosk's
 // transaction history, only detaches it (see satelliteKioskService.js)
 router.delete('/satellite-kiosks/:id', adminAuth, (req, res) => {
   try {
@@ -409,7 +409,7 @@ router.delete('/network-devices/groups/:id', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/network-devices/:mac/group — { group_id } (null/absent clears it)
+// POST /api/admin/network-devices/:mac/group, { group_id } (null/absent clears it)
 router.post('/network-devices/:mac/group', adminAuth, (req, res) => {
   try {
     const networkDevicesService = require('../services/networkDevicesService');
@@ -489,7 +489,7 @@ router.post('/session/:code/addtime', adminAuth, async (req, res) => {
     const newExpiresAt = new Date(Date.now() + newMinutes * 60 * 1000).toISOString();
 
     // Keep hard_expires_at in sync (Bug: admin-added time could get silently
-    // wiped — resumeSession() and GET /api/session/mac/:mac both force-expire
+    // wiped, resumeSession() and GET /api/session/mac/:mac both force-expire
     // once hard_expires_at passes, regardless of minutes_remaining/expires_at.
     // Shift it by the same delta being added/removed here, never letting it
     // fall behind the new expires_at.
@@ -521,7 +521,7 @@ router.post('/session/:code/addtime', adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/session/:code/pause — staff-initiated pause (e.g. a
+// POST /api/admin/session/:code/pause, staff-initiated pause (e.g. a
 // customer at the counter asks to pause while they step out), reusing the
 // exact same pauseSession() the customer-facing portal uses.
 router.post('/session/:code/pause', adminAuth, async (req, res) => {
@@ -616,7 +616,7 @@ router.get('/sales', adminAuth, (req, res) => {
       GROUP BY date(created_at) ORDER BY date DESC
     `).all();
 
-    // Bug: the admin UI showed "Monthly Sales" as weekTotal * 4 — a rough
+    // Bug: the admin UI showed "Monthly Sales" as weekTotal * 4, a rough
     // guess, not real data (wrong the moment revenue isn't perfectly flat
     // week to week, and dashboard.html didn't even label it an estimate).
     // Compute the real month-to-date total instead.
@@ -626,7 +626,7 @@ router.get('/sales', adminAuth, (req, res) => {
     `).get();
 
     // Bug: the dashboard's Daily/Weekly/Monthly chart-range buttons never
-    // actually changed what was charted — every click re-rendered the same
+    // actually changed what was charted, every click re-rendered the same
     // fixed 7-day view. `range` now genuinely changes the granularity;
     // `week` above is kept as-is for the "This Week" stat card, which
     // should stay accurate regardless of which chart range is selected.
@@ -751,7 +751,7 @@ router.get('/sales', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/analytics/summary?days=7 — the Analytics page's single
+// GET /api/admin/analytics/summary?days=7, the Analytics page's single
 // aggregation endpoint (one round trip, matching the design guide's
 // ===== USERS: GUESTS =====
 // GET /api/admin/users/guests?days=N - real guest (anonymous hotspot
@@ -873,7 +873,7 @@ router.get('/users/devices', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/analytics/summary?days=7 — the Analytics page's single
+// GET /api/admin/analytics/summary?days=7, the Analytics page's single
 // aggregation endpoint (one round trip, matching the design guide's
 // "prefer backend aggregation" rule rather than N separate widget
 // calls). Compares the selected period against the immediately prior
@@ -1047,7 +1047,7 @@ router.get('/analytics/summary', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/dashboard/top-spenders-today — real per-client revenue
+// GET /api/admin/dashboard/top-spenders-today, real per-client revenue
 // ranking for today (Dashboard's "Top Users" slot in the mockup asked for
 // data-usage-in-GB, which this app doesn't track per client; revenue is
 // the closest real per-client ranking this app actually has, grouped
@@ -1070,7 +1070,7 @@ router.get('/dashboard/top-spenders-today', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/transactions/export — full transaction history for CSV
+// GET /api/admin/transactions/export, full transaction history for CSV
 // export. /sales' recent_transactions is capped at 20 for the dashboard
 // preview table; this returns everything for bookkeeping purposes.
 router.get('/transactions/export', adminAuth, (req, res) => {
@@ -1085,7 +1085,7 @@ router.get('/transactions/export', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/promos — one-off codes only. Codes created as part of a
+// GET /api/admin/promos, one-off codes only. Codes created as part of a
 // group (voucher_groups) are deliberately excluded here: they already have
 // their own dedicated card below (Voucher Groups), and showing every
 // individual grouped code in this flat table too just duplicated them,
@@ -1099,7 +1099,7 @@ router.get('/promos', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/promos — a one-off code, generated the same way a
+// POST /api/admin/promos, a one-off code, generated the same way a
 // voucher group's codes are (see generateCustomVoucherCode() below) rather
 // than the old fixed "PROMO-XXXXXX" format, so a single voucher and a
 // batch-created one look and behave the same to a customer.
@@ -1138,7 +1138,7 @@ router.post('/promos', adminAuth, (req, res) => {
     const durationDays = minutes / 1440;
     db.prepare('INSERT INTO promo_vouchers (code, duration_days, price, download_mbps, upload_mbps) VALUES (?, ?, ?, ?, ?)')
       .run(code, durationDays, p, downloadMbps, uploadMbps);
-    console.log(`🎫 Promo created: ${code} — ${minutes} mins${downloadMbps ? ` (custom ${downloadMbps}/${uploadMbps || downloadMbps}Mbps)` : ''}`);
+    console.log(`🎫 Promo created: ${code}, ${minutes} mins${downloadMbps ? ` (custom ${downloadMbps}/${uploadMbps || downloadMbps}Mbps)` : ''}`);
     return res.json({ success: true, code, duration_minutes: minutes, price: p });
   } catch (err) {
     console.error('Admin create promo error:', err);
@@ -1186,10 +1186,10 @@ function generateCustomVoucherCode(length, charset, caseOption) {
     const exists = db.prepare('SELECT id FROM promo_vouchers WHERE code = ?').get(code);
     if (!exists) return code;
   }
-  throw new Error('Could not generate a unique code — try a longer length or wider character set');
+  throw new Error('Could not generate a unique code, try a longer length or wider character set');
 }
 
-// POST /api/admin/vouchers/groups — batch-create N vouchers at once with a
+// POST /api/admin/vouchers/groups, batch-create N vouchers at once with a
 // configurable code format (length/charset/case), tagged together so they
 // can be viewed and printed as one batch later.
 router.post('/vouchers/groups', adminAuth, (req, res) => {
@@ -1255,7 +1255,7 @@ router.post('/vouchers/groups', adminAuth, (req, res) => {
     });
     insertBatch();
 
-    console.log(`🎫 Voucher group created: "${name}" — ${qty} codes, ${minutes} mins each`);
+    console.log(`🎫 Voucher group created: "${name}", ${qty} codes, ${minutes} mins each`);
     return res.json({ success: true, group_id: groupId, codes });
   } catch (err) {
     console.error('Admin create voucher group error:', err);
@@ -1263,7 +1263,7 @@ router.post('/vouchers/groups', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/vouchers/groups — list all groups with usage counts
+// GET /api/admin/vouchers/groups, list all groups with usage counts
 // GET /api/admin/vouchers/redemption-summary?days=30 - real voucher
 // redemption revenue over time, for the Vouchers Overview page. Sources
 // only transactions.type IN ('voucher','promo') - the real distinction
@@ -1320,7 +1320,7 @@ router.get('/vouchers/groups', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/vouchers/groups/:id — a group's vouchers, for printing
+// GET /api/admin/vouchers/groups/:id, a group's vouchers, for printing
 router.get('/vouchers/groups/:id', adminAuth, (req, res) => {
   try {
     const group = db.prepare('SELECT * FROM voucher_groups WHERE id = ?').get(req.params.id);
@@ -1335,7 +1335,7 @@ router.get('/vouchers/groups/:id', adminAuth, (req, res) => {
   }
 });
 
-// DELETE /api/admin/vouchers/groups/:id — deletes the group and its vouchers
+// DELETE /api/admin/vouchers/groups/:id, deletes the group and its vouchers
 router.delete('/vouchers/groups/:id', adminAuth, (req, res) => {
   try {
     db.prepare('DELETE FROM promo_vouchers WHERE group_id = ?').run(req.params.id);
@@ -1538,7 +1538,7 @@ function validatePlanInput(body, { partial = false } = {}) {
   return { errors, out };
 }
 
-// GET /api/admin/plans — list all plans with real "used today" / total
+// GET /api/admin/plans, list all plans with real "used today" / total
 // usage counts, derived from session_history joined through promo_vouchers
 // -> voucher_groups.plan_id. Coin-vendo/portal usage isn't counted since
 // those channels aren't wired to a plan yet (would be double-counting or
@@ -1723,7 +1723,7 @@ router.delete('/plans/:id', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/plans/active/list — lightweight list for pickers (e.g.
+// GET /api/admin/plans/active/list, lightweight list for pickers (e.g.
 // the Create Voucher Group form's Plan selector) - active plans only.
 router.get('/plans-active/list', adminAuth, (req, res) => {
   try {
@@ -1955,7 +1955,7 @@ router.get('/settings', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/router/password — reveals the saved MikroTik password on
+// GET /api/admin/router/password, reveals the saved MikroTik password on
 // demand. Deliberately a separate endpoint from GET /settings (which never
 // includes it) so the plaintext password is only ever sent to the browser
 // when an authenticated admin explicitly clicks "Show," not on every page
@@ -2009,7 +2009,7 @@ router.post('/settings', adminAuth, (req, res) => {
         continue;
       }
       if (key === 'mikrotik_pass' || key === 'openwrt_pass') {
-        // Router credentials have real resale value here — never store raw
+        // Router credentials have real resale value here, never store raw
         // (Bug: was plaintext at rest, same class as admin_password above).
         // Blank means "leave current value alone" (matches the frontend's
         // "leave blank to keep current" pattern for admin_password).
@@ -2349,7 +2349,7 @@ router.post('/restore', adminAuth, (req, res) => {
 });
 
 // Bug: the Dashboard's "WiFi AP" status badge was hardcoded HTML
-// ("Online", no id, nothing ever touches it) — it would say Online even
+// ("Online", no id, nothing ever touches it), it would say Online even
 // if the AP interface were physically down. Checks the actual LAN
 // interface link state (same interface bandwidth shaping already targets).
 //
@@ -2367,7 +2367,7 @@ async function getWifiApStatus() {
   if (mode === 'mikrotik') {
     try {
       const gatedPorts = db.prepare("SELECT port_name FROM router_ports WHERE role = 'gated'").all().map(r => r.port_name);
-      if (gatedPorts.length === 0) return { status: 'unknown', detail: 'No gated (customer WiFi) port assigned yet — set one up in Network > Ports and Roles.' };
+      if (gatedPorts.length === 0) return { status: 'unknown', detail: 'No gated (customer WiFi) port assigned yet. Set one up in Network > Ports and Roles.' };
       const ports = await require('../services/mikrotikService').getRouterPorts();
       const relevant = ports.filter(p => gatedPorts.includes(p.name));
       if (relevant.length === 0) return { status: 'unknown', detail: 'Assigned port not found on the router.' };
@@ -2393,7 +2393,7 @@ async function getWifiApStatus() {
 }
 
 // Bug: os.cpus()[i].times are cumulative tick counts since the system
-// booted, not since the last check — computing usage from a single
+// booted, not since the last check, computing usage from a single
 // snapshot gives "average load since boot" (barely moves, and on a
 // server that's been up for weeks looks nothing like current load).
 // Real usage needs two samples with a delay and the delta between them.
@@ -2410,7 +2410,7 @@ async function getCpuUsagePercents(cpusBefore, sampleMs = 300) {
   });
 }
 
-// Bug: os.freemem() counts reclaimable page cache/buffers as "used" —
+// Bug: os.freemem() counts reclaimable page cache/buffers as "used",
 // on Linux that overstates real memory pressure (this project's docs
 // elsewhere are explicit about caring about accurate RAM usage on
 // low-spec hardware). /proc/meminfo's MemAvailable is the real figure
@@ -2426,7 +2426,7 @@ function getAvailableMem() {
 }
 
 // GET /api/admin/sysinfo
-// GET /api/admin/network-stats — Dashboard's optional (comprehensive mode
+// GET /api/admin/network-stats, Dashboard's optional (comprehensive mode
 // only) live bandwidth graph. Standalone mode computes a rate from two
 // interface byte-counter samples (module-level cache below); router mode
 // asks the MikroTik directly for an instant rate on the gated port(s),
@@ -2466,7 +2466,7 @@ router.get('/network-stats', adminAuth, async (req, res) => {
   }
 });
 
-// GET /api/admin/hardware/gpio-capability — lets the Main Kiosk Coin Slot
+// GET /api/admin/hardware/gpio-capability, lets the Main Kiosk Coin Slot
 // settings page tell an operator up front whether their actual hardware
 // can support direct-GPIO wiring at all, instead of letting them configure
 // something that can never work on a Windows box, a generic Linux PC, or a
@@ -2496,7 +2496,7 @@ router.get('/sysinfo', adminAuth, async (req, res) => {
     const mins = Math.floor((uptimeSecs % 3600) / 60);
     const uptime = `${days}d ${hours}h ${mins}m`;
     // Bug: the Dashboard's "Server Uptime" widget never called this endpoint
-    // at all — it ran its own client-side timer starting from page load, so
+    // at all, it ran its own client-side timer starting from page load, so
     // every browser refresh reset it to 00:00:00 regardless of how long the
     // actual server had been running. Raw seconds let it seed a real base.
     const uptimeSeconds = Math.floor(uptimeSecs);
@@ -2584,7 +2584,7 @@ router.get('/sysinfo', adminAuth, async (req, res) => {
 
 // POST /api/vendo/register
 // Bug: this required adminAuth, but it's called by the ESP32 vendo
-// hardware itself (on boot, and every ~60s as a heartbeat) — the firmware
+// hardware itself (on boot, and every ~60s as a heartbeat), the firmware
 // has no admin password and was never built to send one, so every single
 // registration/heartbeat call has always been silently rejected with 401.
 // In practice this meant the Devices page and the Dashboard's "Coin Slot"
@@ -2599,7 +2599,7 @@ router.post('/vendo/register', (req, res) => {
       return res.status(400).json({ success: false, message: 'MAC and name required' });
     }
 
-    // Normalize casing — vendos.mac_address is UNIQUE with an ON CONFLICT
+    // Normalize casing, vendos.mac_address is UNIQUE with an ON CONFLICT
     // upsert below, which only matches same-case duplicates.
     const mac = String(req.body.mac).trim().toLowerCase();
 
@@ -2616,12 +2616,12 @@ router.post('/vendo/register', (req, res) => {
     const existing = db.prepare('SELECT id, device_secret FROM vendos WHERE mac_address = ?').get(mac);
 
     // Bug: trust in this MAC (adoption, trusted-device bypass) was based on
-    // the bare MAC address alone — trivially spoofable by anything on the
+    // the bare MAC address alone, trivially spoofable by anything on the
     // same LAN claiming to be it. Same secret pattern already used for
     // Satellite Kiosks (device_key): generated once on first registration,
     // handed back to the firmware to store, then required on every future
     // call. A device that's already been issued one but doesn't send it
-    // back (or sends the wrong one) is rejected outright — someone else's
+    // back (or sends the wrong one) is rejected outright, someone else's
     // hardware can still register under a NEW candidate MAC, but it can't
     // impersonate an already-known one. A legacy row from before this
     // feature existed (device_secret NULL) gets one issued on its next
@@ -2650,7 +2650,7 @@ router.post('/vendo/register', (req, res) => {
     }
 
     // No auth on this route (see note above) means anyone on the LAN could
-    // otherwise POST a fake ip here and hijack vendo_ip — the address
+    // otherwise POST a fake ip here and hijack vendo_ip, the address
     // portal.js's /relay/:action route sends every "Insert Coin" relay
     // trigger to. Confining it to private LAN ranges at least keeps a
     // hijack attempt on-network rather than redirecting relay calls to an
@@ -2685,7 +2685,7 @@ function stageOrReleaseVendoFirmware(upsert) {
   return autoUpdate;
 }
 
-// GET /api/admin/vendo/firmware — current pushed version, for the Devices
+// GET /api/admin/vendo/firmware, current pushed version, for the Devices
 // page's own display (admin-authenticated, this one's a UI read, not
 // something the ESP32 itself needs to call).
 router.get('/vendo/firmware', adminAuth, (req, res) => {
@@ -2701,7 +2701,7 @@ router.get('/vendo/firmware', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/vendo/firmware — push a new firmware .bin (compiled via
+// POST /api/admin/vendo/firmware, push a new firmware .bin (compiled via
 // Arduino IDE's Sketch > Export Compiled Binary) for every ESP32 vendo to
 // pick up over its next OTA check (esp32/firmware/rj_pisowifi/ota.cpp),
 // instead of needing a USB cable and Arduino IDE on-site for every update.
@@ -2726,8 +2726,8 @@ router.post('/vendo/firmware', adminAuth, firmwareUpload.single('firmware'), (re
     return res.json({
       success: true,
       message: autoUpdate
-        ? 'Firmware uploaded — vendos will pick it up on their next check-in'
-        : 'Firmware staged — click "Release Update" to push it to devices',
+        ? 'Firmware uploaded. Vendos will pick it up on their next check-in'
+        : 'Firmware staged. Click "Release Update" to push it to devices',
     });
   } catch (err) {
     console.error('Vendo firmware upload error:', err);
@@ -2735,7 +2735,7 @@ router.post('/vendo/firmware', adminAuth, firmwareUpload.single('firmware'), (re
   }
 });
 
-// GET /api/admin/vendo/firmware/bundled — what version ships with this app
+// GET /api/admin/vendo/firmware/bundled, what version ships with this app
 // right now (public/admin/assets/firmware/manifest.json), so the admin
 // panel can show a one-click "Update to vX.X.X" button instead of making
 // the admin locate and upload a .bin by hand every time.
@@ -2751,7 +2751,7 @@ router.get('/vendo/firmware/bundled', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/vendo/firmware/push-bundled — one click, no file upload:
+// POST /api/admin/vendo/firmware/push-bundled, one click, no file upload:
 // copies the ESP8266 build already shipped with this app straight into
 // the OTA slot every adopted vendo checks against. Same effect as the
 // manual upload route above, just sourcing the file from
@@ -2778,8 +2778,8 @@ router.post('/vendo/firmware/push-bundled', adminAuth, (req, res) => {
       success: true,
       version: entry.version,
       message: autoUpdate
-        ? `Pushed ${entry.version} — vendos will pick it up on their next check-in`
-        : `Staged ${entry.version} — click "Release Update" to push it to devices`,
+        ? `Pushed ${entry.version}. Vendos will pick it up on their next check-in`
+        : `Staged ${entry.version}. Click "Release Update" to push it to devices`,
     });
   } catch (err) {
     console.error('Push bundled vendo firmware error:', err);
@@ -2787,7 +2787,7 @@ router.post('/vendo/firmware/push-bundled', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/vendo/firmware/auto-update — toggles whether a firmware
+// POST /api/admin/vendo/firmware/auto-update, toggles whether a firmware
 // push goes live to the fleet immediately (on) or just stages until the
 // admin explicitly releases it (off, see /release below).
 router.post('/vendo/firmware/auto-update', adminAuth, (req, res) => {
@@ -2801,7 +2801,7 @@ router.post('/vendo/firmware/auto-update', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/vendo/firmware/release — manually releases an already-
+// POST /api/admin/vendo/firmware/release, manually releases an already-
 // staged version to the fleet (auto-update off path only; a no-op, still
 // success, if there's nothing staged or auto-update is already on).
 router.post('/vendo/firmware/release', adminAuth, (req, res) => {
@@ -2816,7 +2816,7 @@ router.post('/vendo/firmware/release', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/vendo/firmware/version — unauthenticated, same reasoning
+// GET /api/admin/vendo/firmware/version, unauthenticated, same reasoning
 // as /vendo/register above: called directly by ESP32 firmware with no
 // admin password. Just the version string so a device can cheaply decide
 // whether it needs to bother downloading the actual binary.
@@ -2837,7 +2837,7 @@ router.get('/vendo/firmware/version', (req, res) => {
   }
 });
 
-// GET /api/admin/vendo/firmware/download — unauthenticated, same reasoning
+// GET /api/admin/vendo/firmware/download, unauthenticated, same reasoning
 // as above. Serves the raw .bin an ESP32 flashes itself with via ota.cpp.
 router.get('/vendo/firmware/download', (req, res) => {
   if (!fs.existsSync(firmwarePath)) {
@@ -2860,10 +2860,10 @@ router.get('/vendos', adminAuth, (req, res) => {
   }
 });
 
-// DELETE /api/admin/vendos/:id — removes a stale/replaced ESP32 entry from
+// DELETE /api/admin/vendos/:id, removes a stale/replaced ESP32 entry from
 // the Devices list. The device re-registers itself via POST /vendo/register
 // on its next check-in if it's still actually live (as a fresh candidate,
-// needing re-adoption — its device_secret is gone with the row). Also
+// needing re-adoption, its device_secret is gone with the row). Also
 // revokes the trust adopt granted it: leaving a removed device's bypass in
 // place would mean "removed" doesn't actually mean removed, it'd keep
 // skipping the captive portal forever.
@@ -2895,7 +2895,7 @@ router.delete('/vendos/:id', adminAuth, async (req, res) => {
   }
 });
 
-// PATCH /api/admin/vendos/:id — rename. Updates both this box's own record
+// PATCH /api/admin/vendos/:id, rename. Updates both this box's own record
 // (what the Devices list shows) and pushes the new name to the device
 // itself (its /rename, server-only gated) so its own LCD/status agree
 // instead of drifting from what the admin panel calls it.
@@ -2917,7 +2917,7 @@ router.patch('/vendos/:id', adminAuth, async (req, res) => {
       try {
         await fetch(`http://${vendo.ip_address}/rename?name=${encodeURIComponent(name)}`, { method: 'POST', signal: controller.signal });
       } catch (err) {
-        // Saved either way — the device's own LCD/status will just show
+        // Saved either way, the device's own LCD/status will just show
         // the old name until its next successful contact with this box,
         // same fallback shape as the trust-bypass/adopt flow above.
         console.error('Vendo renamed but could not reach device to sync:', err.message);
@@ -2933,7 +2933,7 @@ router.patch('/vendos/:id', adminAuth, async (req, res) => {
   }
 });
 
-// GET /api/admin/vendos/:id/health — live detail beyond what the Devices
+// GET /api/admin/vendos/:id/health, live detail beyond what the Devices
 // list shows (uptime, static-IP config, relay/WiFi state), fetched
 // straight from the device's own /status rather than duplicating any of
 // it into this box's database.
@@ -2959,11 +2959,11 @@ router.get('/vendos/:id/health', adminAuth, async (req, res) => {
     return res.json({ success: true, ...status });
   } catch (err) {
     console.error('Vendo health error:', err.message);
-    res.status(502).json({ success: false, message: 'Could not reach device — it may be offline' });
+    res.status(502).json({ success: false, message: 'Could not reach device. It may be offline' });
   }
 });
 
-// POST /api/admin/vendos/:id/network — { static_ip, device_ip, gateway, subnet }
+// POST /api/admin/vendos/:id/network, { static_ip, device_ip, gateway, subnet }
 // Proxies to the device's own /network (server-only gated). Restarts the
 // device to apply, same as the firmware side already requires.
 router.post('/vendos/:id/network', adminAuth, async (req, res) => {
@@ -2995,14 +2995,14 @@ router.post('/vendos/:id/network', adminAuth, async (req, res) => {
       clearTimeout(timeout);
     }
 
-    return res.json({ success: true, message: 'Network settings applied — device is restarting' });
+    return res.json({ success: true, message: 'Network settings applied. Device is restarting' });
   } catch (err) {
     console.error('Vendo network update error:', err.message);
-    res.status(502).json({ success: false, message: 'Could not reach device — it may be offline' });
+    res.status(502).json({ success: false, message: 'Could not reach device. It may be offline' });
   }
 });
 
-// PUT /api/admin/vendos/:id/restart-schedule — { time: 'HH:MM' | null }
+// PUT /api/admin/vendos/:id/restart-schedule, { time: 'HH:MM' | null }
 // Read by timerService.js's minute-tick cron, which restarts the device at
 // that local time each day (comparing against last_scheduled_restart so a
 // slow tick or a server restart doesn't fire it twice in the same minute
@@ -3024,7 +3024,7 @@ router.put('/vendos/:id/restart-schedule', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/vendos/:id/adopt — approves a candidate device (a MAC
+// POST /api/admin/vendos/:id/adopt, approves a candidate device (a MAC
 // this box has never seen before, per POST /vendo/register above). Also
 // trusts it in the same step - a Vendo shares the customer WiFi/VLAN and
 // would otherwise sit behind the captive portal like any paying customer,
@@ -3055,7 +3055,7 @@ router.post('/vendos/:id/adopt', adminAuth, async (req, res) => {
         try {
           await allowClient(vendo.mac_address);
         } catch (err) {
-          // Row is saved either way — timerService.js's boot-time restore
+          // Row is saved either way, timerService.js's boot-time restore
           // will retry the actual bypass later (e.g. router unreachable
           // right now), same fallback the manual Trusted Devices flow relied on.
           console.error('Vendo adopted but trust bypass failed to apply immediately:', err.message);
@@ -3069,7 +3069,7 @@ router.post('/vendos/:id/adopt', adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/vendos/:id/restart — proxies to the device's own
+// POST /api/admin/vendos/:id/restart, proxies to the device's own
 // server-only-gated POST /restart (esp8266/firmware/.../web_server.cpp),
 // so an owner doesn't need to walk over and power-cycle a coin slot that's
 // misbehaving. Requires the device's last-known IP, same LAN reachability
@@ -3097,11 +3097,11 @@ router.post('/vendos/:id/restart', adminAuth, async (req, res) => {
     return res.json({ success: true, message: 'Restart command sent' });
   } catch (err) {
     console.error('Vendo restart error:', err.message);
-    res.status(502).json({ success: false, message: 'Could not reach device — it may be offline' });
+    res.status(502).json({ success: false, message: 'Could not reach device. It may be offline' });
   }
 });
 
-// PUT /api/admin/vendos/:id/role — { role: 'main' | 'sub' | 'standalone' }
+// PUT /api/admin/vendos/:id/role, { role: 'main' | 'sub' | 'standalone' }
 // Purely organizational (spec section 17) - doesn't hard-code a single
 // "main" Vendo, an operator can mark multiple as Main across sites.
 router.put('/vendos/:id/role', adminAuth, (req, res) => {
@@ -3124,7 +3124,7 @@ router.put('/vendos/:id/role', adminAuth, (req, res) => {
 // ===== TRUSTED DEVICES =====
 // Devices that should always have internet access, never gated behind
 // payment (see database.js's trusted_devices table comment for why this
-// exists — a coin-slot ESP32 sharing WiFi with paying customers because
+// exists, a coin-slot ESP32 sharing WiFi with paying customers because
 // the access point can't reliably tag a second SSID onto its own VLAN,
 // bugslog.md Bug #78). Trusting a device calls the same allowClient()
 // bypass a paid session uses, works identically in both standalone and
@@ -3162,7 +3162,7 @@ router.post('/trusted-devices', adminAuth, async (req, res) => {
     try {
       await allowClient(mac);
     } catch (err) {
-      // Row is saved either way — timerService.js's boot-time restore will
+      // Row is saved either way, timerService.js's boot-time restore will
       // retry the actual bypass later (e.g. router unreachable right now).
       console.error('Trusted device saved but bypass failed to apply immediately:', err.message);
     }
@@ -3410,17 +3410,17 @@ router.get('/version', adminAuth, (req, res) => {
   res.json({ success: true, version: pkg.version });
 });
 
-// POST /api/admin/system/reboot — the admin panel requires typing "REBOOT"
+// POST /api/admin/system/reboot, the admin panel requires typing "REBOOT"
 // before this fires, but the server checks the exact same word again
 // server-side too, since a client-side-only check is trivially bypassable
 // by anyone calling the API directly (this is a real power action, not a
-// cosmetic one). Uses execFile (Bug #22 pattern) — no shell interpolation.
+// cosmetic one). Uses execFile (Bug #22 pattern), no shell interpolation.
 router.post('/system/reboot', adminAuth, (req, res) => {
   if (req.body.confirm !== 'REBOOT') {
     return res.status(400).json({ success: false, message: 'Confirmation text did not match' });
   }
   console.log('🔄 Admin triggered server reboot');
-  res.json({ success: true, message: 'Rebooting now — this may take a minute.' });
+  res.json({ success: true, message: 'Rebooting now. This may take a minute.' });
   setTimeout(() => {
     execFile('sudo', ['reboot'], (err) => {
       if (err) console.error('Reboot command failed:', err.message);
@@ -3428,9 +3428,9 @@ router.post('/system/reboot', adminAuth, (req, res) => {
   }, 500);
 });
 
-// POST /api/admin/system/shutdown — same server-side confirmation
+// POST /api/admin/system/shutdown, same server-side confirmation
 // requirement as reboot above. Unlike reboot, this does NOT come back on
-// its own — flagged clearly in the confirmation dialog on the frontend.
+// its own, flagged clearly in the confirmation dialog on the frontend.
 router.post('/system/shutdown', adminAuth, (req, res) => {
   if (req.body.confirm !== 'SHUTDOWN') {
     return res.status(400).json({ success: false, message: 'Confirmation text did not match' });
@@ -3461,7 +3461,7 @@ router.post('/network', adminAuth, (req, res) => {
 
     applyNetworkConfig({ type, ip, gateway, dns, subnet })
       .then(() => {
-        // All commands succeeded — update settings
+        // All commands succeeded, update settings
         const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
         upsert.run('network_type', type);
         upsert.run('static_ip', ip || '');
@@ -3482,7 +3482,7 @@ router.post('/network', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/network/wan-health — real, measured latency/packet-loss/
+// GET /api/admin/network/wan-health, real, measured latency/packet-loss/
 // link-state check against a public host, scored 0-100 with each
 // deduction traceable to a stated reason (never fabricated). Standalone
 // mode also reports the local WAN interface's link state; MikroTik mode's
@@ -3498,7 +3498,7 @@ router.get('/network/wan-health', adminAuth, async (req, res) => {
   }
 });
 
-// GET /api/admin/network/multi-wan — status only (primary/backup lanes,
+// GET /api/admin/network/multi-wan, status only (primary/backup lanes,
 // which is currently active, failure/success streak counters). Failover
 // itself runs on multiWanService.js's own 2-minute cron, not triggered by
 // this endpoint - there's no "apply" action here, just visibility. A
@@ -3529,7 +3529,7 @@ router.get('/storage/encryption-status', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/storage/encrypt — one-way migration, requires explicit
+// POST /api/admin/storage/encrypt, one-way migration, requires explicit
 // confirmation. Makes its own fresh pre-migration backup copy (separate
 // from the nightly scheduled one) immediately before migrating, so the
 // backup dbEncryption.js requires can never be stale relative to what's
@@ -3602,7 +3602,7 @@ router.post('/storage/retention-policy', adminAuth, validateBody(retentionSchema
   }
 });
 
-// POST /api/admin/storage/retention-cleanup-now — manual trigger, doesn't
+// POST /api/admin/storage/retention-cleanup-now, manual trigger, doesn't
 // wait for the daily 03:00 cron.
 router.post('/storage/retention-cleanup-now', adminAuth, (req, res) => {
   try {
@@ -3615,7 +3615,7 @@ router.post('/storage/retention-cleanup-now', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/telemetry/status — no UI toggle exists yet (backend
+// GET /api/admin/telemetry/status, no UI toggle exists yet (backend
 // mechanism only, see telemetryService.js header); this just surfaces
 // whether it's enabled and how many rows are queued, for diagnostics.
 router.get('/telemetry/status', adminAuth, (req, res) => {
@@ -3628,7 +3628,7 @@ router.get('/telemetry/status', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/telemetry/toggle — { enabled: boolean }. Kept API-only
+// POST /api/admin/telemetry/toggle, { enabled: boolean }. Kept API-only
 // (no admin UI wired to it yet) until a real Privacy Policy exists to
 // disclose what's collected, per telemetryService.js's header.
 router.post('/telemetry/toggle', adminAuth, (req, res) => {
@@ -3718,7 +3718,7 @@ router.get('/dns-filter/status', adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/dns-filter/update-lists — refreshes the block list inside
+// POST /api/admin/dns-filter/update-lists, refreshes the block list inside
 // the isolated container. Best-effort: if the container isn't running this
 // just fails quietly, same fail-open reasoning as everywhere else this
 // add-on touches.
@@ -3748,7 +3748,7 @@ function applyNetworkSetup(callback) {
   });
 }
 
-// GET /api/admin/network/interfaces — physical interfaces available as a
+// GET /api/admin/network/interfaces, physical interfaces available as a
 // VLAN base (wired/wireless naming only, skips loopback/virtual ones this
 // script itself creates like nft/tc-managed devices or prior VLAN subs).
 router.get('/network/interfaces', adminAuth, (req, res) => {
@@ -3864,7 +3864,7 @@ router.delete('/network/vlans/:id', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/network/mikrotik/capabilities — real, read-only discovery
+// GET /api/admin/network/mikrotik/capabilities, real, read-only discovery
 // of what THIS specific router actually supports (packages, queue types
 // incl. CAKE, and menu-path probes for WireGuard/IPsec/BGP/OSPF/RADIUS/
 // Hotspot/L2TP/OVPN) rather than assuming from RouterOS version or board
@@ -3934,7 +3934,7 @@ router.post('/network/mikrotik/vlans', adminAuth, validateBody(mikrotikVlanSchem
   }
 });
 
-// DELETE /api/admin/network/mikrotik/vlans/:id — :id is RouterOS's own
+// DELETE /api/admin/network/mikrotik/vlans/:id, :id is RouterOS's own
 // ".id" (e.g. "*3"), not a local database row id, since this table isn't
 // mirrored locally at all - MikroTik itself is the only source of truth
 // for its own VLAN interfaces.
@@ -4008,7 +4008,7 @@ router.post('/network/mikrotik/dhcp', adminAuth, validateBody(mikrotikDhcpSchema
   }
 });
 
-// DELETE /api/admin/network/mikrotik/dhcp/:id — RouterOS ".id", same
+// DELETE /api/admin/network/mikrotik/dhcp/:id, RouterOS ".id", same
 // reasoning as the VLAN delete route above (no local mirror table).
 router.delete('/network/mikrotik/dhcp/:id', adminAuth, async (req, res) => {
   try {
@@ -4055,7 +4055,7 @@ router.get('/network/mikrotik/roles', adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/network/mikrotik/roles — goes through configSafety.js's
+// POST /api/admin/network/mikrotik/roles, goes through configSafety.js's
 // applyMikrotikRoleChangeTransaction (risk check -> require confirmation on
 // a management-path-risky change -> apply -> verify connectivity ->
 // automatic rollback to the interface's previous role on failure). This is
@@ -4344,7 +4344,7 @@ router.post('/bandwidth-profiles', adminAuth, validateBody(bandwidthProfileSchem
   }
 });
 
-// DELETE /api/admin/bandwidth-profiles/:id — vouchers referencing this
+// DELETE /api/admin/bandwidth-profiles/:id, vouchers referencing this
 // profile keep working: the FK has no ON DELETE CASCADE/RESTRICT, so a
 // deleted profile just leaves bandwidth_profile_id pointing at nothing;
 // promo.js's resolution falls back to the voucher's own direct fields (or
@@ -4462,7 +4462,7 @@ router.post('/network/client-labels', adminAuth, (req, res) => {
   }
 });
 
-// ── Port forwarding (standalone mode only — MikroTik owns NAT in router mode) ──
+// ── Port forwarding (standalone mode only, MikroTik owns NAT in router mode) ──
 router.get('/network/port-forwards', adminAuth, (req, res) => {
   try {
     const forwards = db.prepare('SELECT * FROM port_forwards ORDER BY id DESC').all();
@@ -4530,7 +4530,7 @@ router.delete('/network/port-forwards/:id', adminAuth, (req, res) => {
 
 // ── In-panel diagnostics ────────────────────────────────────────
 // Target validated as a hostname or IP only (no flags/spaces) before ever
-// reaching execFile — execFile itself doesn't go through a shell, but a
+// reaching execFile, execFile itself doesn't go through a shell, but a
 // value like "-c 100" would still be accepted as a legitimate-looking ping
 // argument and let a caller turn a 4-packet ping into a flood, so the
 // format is restricted regardless.
@@ -4604,7 +4604,7 @@ router.get('/diagnostics/last-boot', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/logs — unified real event log for the System > Logs
+// GET /api/admin/logs, unified real event log for the System > Logs
 // page. Merges watchdog_events (self-heal check history) and
 // network_config_versions (config-change audit trail, already built by
 // configSafety.js) into one time-ordered feed instead of two separate
@@ -4636,7 +4636,7 @@ router.get('/logs', adminAuth, (req, res) => {
       message: r.rolled_back
         ? 'Network config change rolled back'
         : r.applied ? 'Network config applied' : 'Network config change recorded',
-      detail: `${r.operator || 'admin'}${r.reason ? ' — ' + r.reason : ''}`,
+      detail: `${r.operator || 'admin'}${r.reason ? ', ' + r.reason : ''}`,
     }));
     const merged = watchdog.concat(configChanges)
       .sort((a, b) => new Date(b.time) - new Date(a.time))
@@ -4648,7 +4648,7 @@ router.get('/logs', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/alerts — merges two sources, both real:
+// GET /api/admin/alerts, merges two sources, both real:
 //  - live-recomputed checks (watchdog self-heal, WAN health score, disk
 //    space) - same as before, nothing here is persisted per-alert
 //  - the persisted alert_events log (server/services/alertEventService.js),
@@ -4800,7 +4800,7 @@ router.get('/network/standalone/ports', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/network/standalone/ports — same shape/validation as
+// POST /api/admin/network/standalone/ports, same shape/validation as
 // POST /router/ports, but stale-row deletion is scoped to this box's own
 // real interfaces only, so saving Standalone lanes can never wipe out
 // router-mode lane definitions saved for a MikroTik, or vice versa.
@@ -4947,7 +4947,7 @@ router.post('/network/standalone/ports', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/network/standalone/provision/preview — mirrors, in Node,
+// GET /api/admin/network/standalone/provision/preview, mirrors, in Node,
 // the same lane-numbering rule setup-network.sh itself uses (head lanes in
 // id order, octet = 50 + position) purely for display. setup-network.sh
 // remains the actual source of truth; this never touches the network.
@@ -4971,7 +4971,7 @@ router.get('/network/standalone/provision/preview', adminAuth, (req, res) => {
     });
     const warnings = [];
     if (heads.length === 0) {
-      steps.push('No gated/open lanes configured yet — the legacy single-lane 10.0.0.0/24 setup will be used, unchanged.');
+      steps.push('No gated/open lanes configured yet, the legacy single-lane 10.0.0.0/24 setup will be used, unchanged.');
     } else {
       // Any device with a manually-saved server address (the clearest
       // example: an ESP32 coin-slot vendo, configured once through its own
@@ -4988,7 +4988,7 @@ router.get('/network/standalone/provision/preview', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/network/standalone/provision/apply — the actual
+// POST /api/admin/network/standalone/provision/apply, the actual
 // "Configure" action. Previously ran setup-network.sh directly with no
 // safety net (idempotent re-runs were the only protection, which doesn't
 // help if the NEW desired state itself is dangerous - e.g. removing the
@@ -5028,9 +5028,9 @@ router.post('/network/standalone/provision/apply', adminAuth, async (req, res) =
   }
 });
 
-// ===== ROUTER MODE (MikroTik) — ROUTER_MODE_PLAN.md Stage 3 =====
+// ===== ROUTER MODE (MikroTik), ROUTER_MODE_PLAN.md Stage 3 =====
 
-// GET /api/admin/router/ports — live-scans the router's actual physical
+// GET /api/admin/router/ports, live-scans the router's actual physical
 // ports (no hardcoded model list) and returns every saved lane definition
 // alongside them. A physical port can carry more than one lane (an
 // untagged one plus any number of VLAN-tagged ones sharing the same
@@ -5075,7 +5075,7 @@ router.get('/router/ports', adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/router/ports — replaces the full set of saved lane
+// POST /api/admin/router/ports, replaces the full set of saved lane
 // definitions with exactly what's submitted (so removing a lane in the UI
 // actually removes it here too, not just orphans it).
 // Body: { lanes: [{ port_name, vlan_id, role, lane_name, speed_mbps,
@@ -5191,7 +5191,7 @@ router.post('/router/ports', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/router/status — live status card, read straight from the
+// GET /api/admin/router/status, live status card, read straight from the
 // router (ROUTER_MODE_PLAN.md §4.7), not our own database.
 router.get('/router/status', adminAuth, async (req, res) => {
   try {
@@ -5227,7 +5227,7 @@ router.post('/router/openwrt-test-connection', adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/router/terminal — runs a raw MikroTik API command
+// POST /api/admin/router/terminal, runs a raw MikroTik API command
 // straight from the admin panel, so a quick check or fix doesn't require
 // opening WinBox separately. Deliberately unrestricted, same as WinBox's
 // own terminal: this account already has full admin-level MikroTik
@@ -5266,11 +5266,11 @@ router.post('/router/terminal', adminAuth, async (req, res) => {
   }
 });
 
-// GET /api/admin/router/local-interfaces — this server's own network
+// GET /api/admin/router/local-interfaces, this server's own network
 // connections, so the admin can pick which one is on the gated lane
 // (Bug: auto-guessing this on a multi-NIC machine could reserve the wrong
 // device's address, silently breaking the walled-garden fixed-address
-// guarantee — see mikrotikProvisioner.js's getOwnMac()).
+// guarantee, see mikrotikProvisioner.js's getOwnMac()).
 router.get('/router/local-interfaces', adminAuth, (req, res) => {
   try {
     const provisioner = require('../services/mikrotikProvisioner');
@@ -5282,7 +5282,7 @@ router.get('/router/local-interfaces', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/router/provision/preview — shows exactly what "Configure"
+// GET /api/admin/router/provision/preview, shows exactly what "Configure"
 // would run, without touching the router (ROUTER_MODE_PLAN.md §4.6).
 router.get('/router/provision/preview', adminAuth, async (req, res) => {
   try {
@@ -5295,7 +5295,7 @@ router.get('/router/provision/preview', adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/router/provision/apply — the actual "Configure" action.
+// POST /api/admin/router/provision/apply, the actual "Configure" action.
 // Always backs up the router's current config first, stops immediately on
 // the first failed step rather than pushing a half-applied config further.
 router.post('/router/provision/apply', adminAuth, async (req, res) => {
@@ -5351,7 +5351,7 @@ function routerRowToJson(row) {
   };
 }
 
-// GET /api/admin/routers/self — represents THIS box's own real gateway,
+// GET /api/admin/routers/self, represents THIS box's own real gateway,
 // not a row in the `routers` fleet table. When network_mode is
 // 'standalone', this box's existing, already-functional network engine
 // (nftables/tc via hostNetworkService.js, DHCP/DNS/NAT/firewall/hotspot -
@@ -5494,9 +5494,9 @@ function validateApInput(body, { partial = false } = {}) {
     out.site_id = Number.isFinite(v) ? v : null;
   }
   if (body.notes !== undefined) out.notes = String(body.notes || '').trim().slice(0, 500) || null;
-  // Discovery-sourced fields - only ever set from a real scan candidate
-  // (see POST /access-points/scan), never free-typed by the manual-add
-  // form, so they stay honest evidence rather than becoming a guess field.
+  // VLAN evidence fields, populated only where this app has real network
+  // evidence for a manually-added AP (see the "VLAN Evidence" detail tab),
+  // never free-typed by the manual-add form.
   if (body.hostname !== undefined) out.hostname = String(body.hostname || '').trim().slice(0, 200) || null;
   if (body.vlan_id !== undefined) {
     const v = body.vlan_id === null || body.vlan_id === '' ? null : parseInt(body.vlan_id, 10);
@@ -5562,35 +5562,7 @@ router.delete('/access-points/:id', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/access-points/scan — real passive network discovery
-// (ARP table + DHCP leases, no active probing - see
-// networkDiscoveryService.js). Returns candidates only; nothing is
-// inserted into access_points until the administrator explicitly adds
-// one, matching the "discover -> identify -> administrator approves"
-// flow. Already-registered MACs are excluded so a repeat scan doesn't
-// re-surface APs already in the table.
-router.post('/access-points/scan', adminAuth, async (req, res) => {
-  try {
-    const { scanNetwork } = require('../services/networkDiscoveryService');
-    const candidates = await scanNetwork();
-    const known = new Set(
-      db.prepare("SELECT mac_address FROM access_points WHERE mac_address IS NOT NULL").all().map(r => r.mac_address)
-    );
-    const fresh = candidates.filter(c => !known.has(c.mac));
-    db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('ap_last_scanned_at', ?)").run(new Date().toISOString());
-    return res.json({ success: true, candidates: fresh });
-  } catch (err) {
-    console.error('Access point scan error:', err);
-    res.status(500).json({ success: false, message: 'Scan failed: ' + (err.message || 'server error') });
-  }
-});
-
-router.get('/access-points/scan/status', adminAuth, (req, res) => {
-  const row = db.prepare("SELECT value FROM settings WHERE key = 'ap_last_scanned_at'").get();
-  return res.json({ success: true, last_scanned_at: row ? row.value : null });
-});
-
-// POST /api/admin/access-points/:id/ping — the one place this module
+// POST /api/admin/access-points/:id/ping, the one place this module
 // actually touches the network. A real ICMP ping (same execFile pattern
 // as /network/diagnostics/ping), parses real round-trip latency, and
 // persists real status/last_seen_at - never simulated.
@@ -5614,7 +5586,7 @@ router.post('/access-points/:id/ping', adminAuth, (req, res) => {
   });
 });
 
-// POST /api/admin/access-points/:id/identify — unauthenticated vendor
+// POST /api/admin/access-points/:id/identify, unauthenticated vendor
 // fingerprint (AP_INTEGRATION_ARCHITECTURE.md section 6: identify() never
 // takes credentials). Used to suggest an adapter before asking for a
 // password, not to prove the password works.
@@ -5632,7 +5604,7 @@ router.post('/access-points/:id/identify', adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/access-points/:id/adopt — connects a real adapter,
+// POST /api/admin/access-points/:id/adopt, connects a real adapter,
 // verifies the credentials by authenticating once, stores them encrypted
 // (never plaintext, never echoed back), and moves management_state to
 // 'monitored'. Body: { adapter_type, password }.
@@ -5656,7 +5628,7 @@ router.post('/access-points/:id/adopt', adminAuth, async (req, res) => {
   }
 });
 
-// POST /api/admin/access-points/:id/unadopt — reverts to unmanaged and
+// POST /api/admin/access-points/:id/unadopt, reverts to unmanaged and
 // discards the stored credentials.
 router.post('/access-points/:id/unadopt', adminAuth, (req, res) => {
   try {
@@ -5669,7 +5641,7 @@ router.post('/access-points/:id/unadopt', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/access-points/:id/live — real adapter poll (device info,
+// GET /api/admin/access-points/:id/live, real adapter poll (device info,
 // status, wireless, clients). Separate from the plain ICMP /ping route:
 // this only works once an AP has been adopted, and returns much richer
 // data than a ping can.
@@ -5684,7 +5656,7 @@ router.get('/access-points/:id/live', adminAuth, async (req, res) => {
   }
 });
 
-// GET /api/admin/entitlements — lets the frontend render locked-feature
+// GET /api/admin/entitlements, lets the frontend render locked-feature
 // UI ("PRO FEATURE, upgrade to unlock") without duplicating tier logic.
 // The list of capability names here must stay in sync with
 // entitlementService.js's TIER_CAPABILITIES; backend enforcement at each
@@ -5838,7 +5810,7 @@ router.delete('/routers/:id', adminAuth, (req, res) => {
   }
 });
 
-// POST /api/admin/routers/:id/test-connection — the one place this module
+// POST /api/admin/routers/:id/test-connection, the one place this module
 // actually talks to real hardware. Opens a real MikroTik API connection
 // with the router's own stored credentials, reads real /system/resource
 // data (RouterOS version, uptime, CPU, free memory), and persists it so
@@ -5907,7 +5879,7 @@ function parseMikrotikUptime(str) {
   return matched ? total : null;
 }
 
-// GET /api/admin/routers/:id/interfaces — real interface list + traffic
+// GET /api/admin/routers/:id/interfaces, real interface list + traffic
 // from the router itself, for the Router Detail > Interfaces tab.
 router.get('/routers/:id/interfaces', adminAuth, async (req, res) => {
   const existing = db.prepare('SELECT * FROM routers WHERE id = ?').get(req.params.id);

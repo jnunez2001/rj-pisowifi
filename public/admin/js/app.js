@@ -89,7 +89,7 @@ async function doLogin() {
 
     // Bug: default admin123 password shipped with no forced-change flow.
     // must_change_password is set on first install (or migrated from an
-    // unchanged default) — send the admin straight to Settings to pick a
+    // unchanged default), send the admin straight to Settings to pick a
     // real password instead of leaving it silently flagged in the DB.
     if (data.settings?.must_change_password === '1') {
       navigateTo('settings');
@@ -238,7 +238,7 @@ function toggleTheme() {
 }
 
 // ===== SIDEBAR MINIMIZE (Workstream 13) =====
-// Replaces the old per-section accordion (retired — large groups are now
+// Replaces the old per-section accordion (retired, large groups are now
 // flyoutNav.js mega-menus instead) with a single whole-sidebar
 // collapse-to-icon-rail toggle, matching the Omada reference. State
 // persists per-browser so an operator's preference sticks across reloads.
@@ -456,7 +456,7 @@ function toggleSidebar() {
 // Once authToken went stale for any reason (server restored from an older
 // backup with a different password while a tab was still logged in, DB
 // swapped out during testing, etc.), this kept firing every 15s with a bad
-// password forever — each failure recorded against the new admin-login
+// password forever. Each failure recorded against the new admin-login
 // rate limiter, repeatedly re-triggering (and re-extending) a 429 block
 // that never had a chance to clear on its own. From the outside this looks
 // exactly like "everything in the admin panel is broken" (stuck loading,
@@ -493,7 +493,7 @@ async function updateSessionCount() {
 
 // Bug: nothing ever reacted to a 401 from an already-"logged in" session
 // (e.g. the admin password was changed in another tab, or the saved token
-// is just stale) — the background pollers (session count every 15s,
+// is just stale), the background pollers (session count every 15s,
 // sysinfo every 5s) would keep silently retrying with the same bad
 // password forever. Combined with the new admin-auth rate limit, that would
 // lock the real admin out of their own panel. Log back out to the login
@@ -664,7 +664,7 @@ async function executePowerAction() {
       btn.innerHTML = `<i class="fas fa-exclamation-triangle"></i> ${action === 'reboot' ? 'Reboot Now' : 'Shutdown Now'}`;
     }
   } catch (e) {
-    // The connection dropping is expected here — the server is rebooting/
+    // The connection dropping is expected here, the server is rebooting/
     // shutting down mid-response, not necessarily an actual failure.
     showToast(action === 'reboot' ? 'Rebooting...' : 'Shutting down...', 'success');
     closePowerConfirm();

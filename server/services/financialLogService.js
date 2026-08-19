@@ -3,7 +3,7 @@ const path = require('path');
 const { hashMac } = require('../utils/macPrivacy');
 
 // Redundant, append-only backup of every row written to the `transactions`
-// table — plain text on disk, separate from SQLite, so a corrupted database
+// table, plain text on disk, separate from SQLite, so a corrupted database
 // still leaves a readable trail of every peso that moved. One file per day
 // (server's local date), JSON-lines format (one event per line).
 const LOG_DIR = process.env.FINANCIAL_LOG_DIR || path.join(__dirname, '../logs');

@@ -191,7 +191,7 @@ async function hsLoadSalesStats() {
           <td data-label="Source"><i class="fas ${cfg.icon}" style="margin-right:8px;color:${cfg.color};"></i>${cfg.label}${viewByKiosk}</td>
           <td data-label="Amount"><span class="badge badge-green">₱${d.amount.toFixed(2)}</span></td>
           <td data-label="Transactions">${d.count}</td>
-          <td data-label="% of Total">${d.amount > 0 ? pct.toFixed(1) + '%' : '—'}</td>
+          <td data-label="% of Total">${d.amount > 0 ? pct.toFixed(1) + '%' : '–'}</td>
         </tr>`;
     }).join('');
 

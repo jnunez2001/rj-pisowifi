@@ -1,13 +1,13 @@
 // ===== DIRECT GPIO COINSLOT LISTENER =====
-// Literal port of Tarakifi's services/coinslot_gpio.py — debounce, min/max
+// Literal port of Tarakifi's services/coinslot_gpio.py, debounce, min/max
 // pulse-interval filtering, burst-rate limiting (rejects lighter/igniter
 // fraud attempts), per-MAC busy-lock, and empty-open rate limiting/cooldown.
 // Reimplemented in JS (Python subprocess.Popen -> Node child_process.spawn,
-// Python threading.Lock() removed — Node is single-threaded, so the
+// Python threading.Lock() removed, Node is single-threaded, so the
 // module-level state below doesn't need locking the way Tarakifi's does).
 //
 // This is an ALTERNATE credit path alongside the existing ESP32 HTTP-relay
-// flow in routes/coin.js — for boxes with a coin acceptor wired straight
+// flow in routes/coin.js, for boxes with a coin acceptor wired straight
 // into the box's own GPIO header instead of through an ESP32/ESP8266.
 // Both paths ultimately call the same server/services/coinCreditService.js
 // so a coin is credited identically no matter which path it came through.
@@ -19,7 +19,7 @@
 // creditCoinValue(), matching how the existing ESP32 path already behaves
 // (each POST /api/coin call credits immediately). The staging pattern is
 // still the right shared primitive for Workstream 6 (Rental) once that
-// lands — `registerWaitingClient`/`cancelWaitingClient` below are written
+// lands, `registerWaitingClient`/`cancelWaitingClient` below are written
 // so a future staging layer can sit between the pulse listener and the
 // credit call without changing the busy-lock/rate-limiter logic itself.
 
@@ -74,7 +74,7 @@ function resolveMode() {
     // rj-pisowifi has no standalone/router-mode-keyed default the way
     // Tarakifi's resolve_mode() does (that distinguishes "this box IS the
     // router" from "an ESP32 sub-vendo reader is in front of the coin
-    // slot") — default AUTO to disabled until an operator explicitly opts
+    // slot"), default AUTO to disabled until an operator explicitly opts
     // into direct GPIO, since most rj-pisowifi deployments use the ESP32
     // relay path today.
     return MODE_DISABLED;
@@ -155,7 +155,7 @@ function checkRateLimit(mac, cfg) {
   return REGISTER_OK;
 }
 
-// Resets the rate-limit history for this MAC when a coin is inserted — a
+// Resets the rate-limit history for this MAC when a coin is inserted, a
 // paying customer is never penalised for previous empty test-opens.
 function markCoinInserted(mac) {
   const normalized = normalizeMac(mac);
@@ -254,7 +254,7 @@ function buildGpiomonCommand(cfg, bin) {
   const helpText = gpiomonHelp(bin);
   const chip = chipArg(cfg.chip);
   if (helpText.includes('--edges') && helpText.includes('--chip')) {
-    // libgpiod v2 — one consolidated --edges flag. Debounce is enforced in
+    // libgpiod v2, one consolidated --edges flag. Debounce is enforced in
     // JS below, not via --debounce-period (that's a pulse-WIDTH filter in
     // v2, would eat every real coin pulse at typical acceptor pulse widths).
     return [bin, '--chip', chip, '--edges', cfg.edge, cfg.line];
@@ -385,7 +385,7 @@ async function creditWaitingClient(pulses = 1, cfg = null) {
     if (err instanceof NoMatchingRateError) {
       // No configured rate tier accounts for this php amount (e.g. a
       // php_per_pulse setting that doesn't line up with any Rates Manager
-      // tier) — log and let the customer's next pulse accumulate normally
+      // tier), log and let the customer's next pulse accumulate normally
       // rather than silently swallowing their money with no record.
       console.warn(`[CoinslotGPIO] Pulse credit had no matching rate: mac=${mac} php=${phpAmount}`);
       return false;
@@ -470,7 +470,7 @@ class CoinslotGpioListener {
 
           if (interval < cfg.debounceMs) continue; // hard debounce
           if (lastEvent > 0 && interval < minPulseIntervalMs) {
-            console.warn(`[CoinslotGPIO] Pulse rejected — interval ${interval}ms below minimum ${minPulseIntervalMs}ms (igniter/lighter suspected)`);
+            console.warn(`[CoinslotGPIO] Pulse rejected, interval ${interval}ms below minimum ${minPulseIntervalMs}ms (igniter/lighter suspected)`);
             continue;
           }
           if (now - burstWindowStart > burstWindowMs) {
@@ -479,7 +479,7 @@ class CoinslotGpioListener {
           }
           burstCount += 1;
           if (burstCount > burstMax) {
-            console.warn(`[CoinslotGPIO] Pulse rejected — burst rate ${burstCount} pulses in ${burstWindowMs}ms exceeds max ${burstMax} (igniter/lighter suspected)`);
+            console.warn(`[CoinslotGPIO] Pulse rejected, burst rate ${burstCount} pulses in ${burstWindowMs}ms exceeds max ${burstMax} (igniter/lighter suspected)`);
             continue;
           }
           lastEvent = now;

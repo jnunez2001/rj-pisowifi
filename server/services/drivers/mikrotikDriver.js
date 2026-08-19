@@ -1,8 +1,8 @@
 // ===== MIKROTIK DRIVER (interface adapter) =====
-// Thin adapter over the existing mikrotikService.js — NOT a rewrite.
+// Thin adapter over the existing mikrotikService.js, NOT a rewrite.
 // mikrotikService.js is already more battle-tested than Tarakifi's own
 // MikroTik driver (documented real-hardware bug fixes: MAC case-sensitivity,
-// queue priority ordering, burst placement) — this file only makes its
+// queue priority ordering, burst placement), this file only makes its
 // existing exports conform to the shared driver interface shape.
 
 const mikrotikService = require('../mikrotikService');

@@ -1,7 +1,7 @@
 // ===== NETWORK SERVICE (driver dispatcher) =====
 // Network backend is selectable per-deployment (Settings > Network Mode).
 // This file used to branch `if (isMikrotikMode())` inline inside every
-// function — Workstream 1 replaces that with a driver registry
+// function, Workstream 1 replaces that with a driver registry
 // (server/services/drivers/*.js) so adding a new backend (pfSense, etc.)
 // means adding one driver file, not editing every function here again.
 // sessionService.js/timerService.js only ever import from this module, so
@@ -26,7 +26,7 @@ function normalizeMac(mac) {
 // Preserves the exact reject/resolve behavior each caller already relies
 // on from before this refactor (allowClient rejects on a bad MAC,
 // blockClient/setClientBandwidth/removeClientBandwidth just log and
-// resolve) — the drivers themselves also validate, this is only about not
+// resolve), the drivers themselves also validate, this is only about not
 // changing what callers observe.
 
 function allowClient(mac) {

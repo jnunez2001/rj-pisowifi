@@ -1,6 +1,6 @@
 // ===== MIKROTIK NATIVE API CLIENT =====
 // Implements MikroTik's own binary API protocol (TCP port 8728 plain,
-// 8729 TLS) — NOT the REST API. This protocol has been stable and
+// 8729 TLS), NOT the REST API. This protocol has been stable and
 // supported since well before RouterOS 7 and is still fully supported in
 // RouterOS 7 today, so this one implementation drives BOTH RouterOS 6 and
 // RouterOS 7 routers identically. That's the whole reason this exists
@@ -11,7 +11,7 @@
 // Protocol shape, in brief (MikroTik's own published spec):
 // - A "word" is a length-prefixed piece of text. The length prefix uses a
 //   variable number of bytes depending on how big the length is (1-5
-//   bytes) — see encodeLength()/decodeLength() below.
+//   bytes), see encodeLength()/decodeLength() below.
 // - A "sentence" is one or more words followed by a zero-length word
 //   (a single 0x00 byte), which marks the end of that sentence.
 // - Commands look like CLI menu paths: "/ip/hotspot/ip-binding/print",
@@ -68,7 +68,7 @@ function encodeSentence(words) {
 }
 
 // Streaming decoder: fed raw bytes as they arrive over the socket (TCP
-// gives no guarantee a whole word — let alone a whole sentence — arrives
+// gives no guarantee a whole word, let alone a whole sentence, arrives
 // in one chunk), emits one full sentence (array of word strings) at a time
 // via onSentence.
 class SentenceDecoder {
@@ -83,9 +83,9 @@ class SentenceDecoder {
     // Keep decoding as many complete words as are currently available.
     for (;;) {
       const word = this._tryReadWord();
-      if (word === undefined) break; // not enough bytes yet — wait for more
+      if (word === undefined) break; // not enough bytes yet, wait for more
       if (word === null) {
-        // zero-length word — end of sentence
+        // zero-length word, end of sentence
         const sentence = this.currentWords;
         this.currentWords = [];
         this.onSentence(sentence);
@@ -199,7 +199,7 @@ class MikrotikApiClient {
   _onSentence(words) {
     const { type, attrs } = parseSentence(words);
     const pending = this.queue[0];
-    if (!pending) return; // unsolicited/late sentence — nothing to deliver it to
+    if (!pending) return; // unsolicited/late sentence, nothing to deliver it to
     if (type === '!re') {
       pending.results.push(attrs);
     } else if (type === '!done') {
@@ -252,7 +252,7 @@ class MikrotikApiClient {
   }
 }
 
-// Opens a connection, logs in, runs one command, and closes — the shape
+// Opens a connection, logs in, runs one command, and closes, the shape
 // every caller in mikrotikService.js actually needs (short-lived,
 // one-command-at-a-time, matching how the old REST calls worked).
 async function withMikrotik(config, fn) {

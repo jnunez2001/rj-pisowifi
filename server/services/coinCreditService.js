@@ -5,7 +5,7 @@
 // (coinslotGpio.js, Workstream 4) share one crediting implementation
 // instead of two copies that can drift out of sync.
 //
-// No behavior change from the original inline version in coin.js — same
+// No behavior change from the original inline version in coin.js, same
 // greedy largest-tier-first rate matching, same transaction/financial log
 // shape, same result object shape.
 
@@ -43,11 +43,11 @@ class NoMatchingRateError extends Error {
 
 // Credits `coinValue` pesos to `mac` (creating a session if none exists,
 // otherwise topping up the existing one). Throws NoMatchingRateError if no
-// configured rate tier can account for any part of the amount — callers
+// configured rate tier can account for any part of the amount, callers
 // decide how to handle that (coin.js records a spam attempt; direct-GPIO
 // callers just log it, since their own debounce/burst filtering already
 // guards against most bad input).
-// `kioskId` is optional — null means "Main Kiosk or an unregistered
+// `kioskId` is optional, null means "Main Kiosk or an unregistered
 // Satellite Kiosk," both indistinguishable from generic Coins revenue
 // until that specific relay device is paired (see satelliteKioskService.js).
 // `isPremium` - which button the customer tapped (portal.js's gold
@@ -126,7 +126,7 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
   }
 
   // Bug found live: this used to do its own getSessionByMac() check then
-  // pick createSession() or addTimeToSession() — a plain check-then-act
+  // pick createSession() or addTimeToSession(), a plain check-then-act
   // with an async gap (createSession() awaits allowClient() before
   // returning). A coin landing at nearly the same moment as a free-minutes
   // claim (server/routes/session.js) could see "no session yet" from both

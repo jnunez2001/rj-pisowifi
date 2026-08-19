@@ -12,7 +12,7 @@ const { logFinancialEvent } = require('../services/financialLogService');
 const sseService = require('../services/sseService');
 
 // This server has no reverse proxy in front of it (confirmed: setup/nginx.conf
-// is an unused empty placeholder, nothing sets up nginx) — clients hit Express
+// is an unused empty placeholder, nothing sets up nginx), clients hit Express
 // directly, so the real client IP is the raw socket address, never a
 // client-suppliable header or request-body field.
 function getRealClientIp(req) {
@@ -20,7 +20,7 @@ function getRealClientIp(req) {
   return raw.replace('::ffff:', '').trim();
 }
 
-// pause/resume/cancel only require knowing a voucher_code — no login exists
+// pause/resume/cancel only require knowing a voucher_code, no login exists
 // to check "is this actually your session". MAC addresses (the only other
 // piece of identity in this system) are trivially visible to anyone on the
 // LAN via ARP, so without this, a device could mass-guess voucher codes and
@@ -38,7 +38,7 @@ function sessionActionRateLimit(req, res, next) {
   next();
 }
 
-// GET /api/session/events/:mac — Server-Sent Events stream. The portal
+// GET /api/session/events/:mac, Server-Sent Events stream. The portal
 // keeps this connection open and gets pushed an instant wake-up the
 // moment a coin/promo/free-claim credits this MAC, instead of waiting on
 // its next poll (previously the fastest path was still up to ~1.5s).
@@ -89,8 +89,8 @@ router.get('/mac/:mac', async (req, res) => {
     // resumable, not when an active session's actual purchased time runs
     // out (that's expires_at). The 30s cron sweep in timerService.js
     // already correctly blocks internet access the moment expires_at
-    // passes, but this endpoint — what the portal actually polls every
-    // ~8s — kept reporting active:true with time clamped to 0 until
+    // passes, but this endpoint, what the portal actually polls every
+    // ~8s, kept reporting active:true with time clamped to 0 until
     // hard_expires_at ALSO passed (often hours later), so the portal page
     // just sat frozen at 00:00:00 on the connected screen instead of
     // flipping to the disconnected/expired state, even though their
@@ -245,7 +245,7 @@ router.post('/cancel', sessionActionRateLimit, async (req, res) => {
       });
     }
 
-    // Keep the response identical either way (always a generic success) —
+    // Keep the response identical either way (always a generic success),
     // this already didn't leak whether a voucher_code was real before the
     // rate-limit fix, and it shouldn't start now just to decide which
     // rate-limit bucket to increment.
@@ -305,7 +305,7 @@ router.get('/free-claim/status/:mac', (req, res) => {
 router.post('/free-claim', async (req, res) => {
   try {
     // Bug: this used to trust req.body.ip, which the portal always sent as
-    // '' — the IP-based anti-MAC-spoofing check below never actually ran.
+    // '', the IP-based anti-MAC-spoofing check below never actually ran.
     // Derive it from the connection itself instead, so it can't be spoofed.
     const ip = getRealClientIp(req);
     const db = require('../config/database');
@@ -316,7 +316,7 @@ router.post('/free-claim', async (req, res) => {
 
     // Bug: free_claims.mac_address was looked up/stored with whatever case
     // the client sent, but coin.js lowercases MACs before touching the
-    // sessions table — a device could dodge the once-per-day free-minutes
+    // sessions table, a device could dodge the once-per-day free-minutes
     // limit just by hitting this endpoint with different MAC casing.
     const mac = String(req.body.mac).trim().toLowerCase();
 
@@ -330,7 +330,7 @@ router.post('/free-claim', async (req, res) => {
 
     const today = new Date().toISOString().split('T')[0];
 
-    // Check MAC-based claim (Bug #7 — primary check)
+    // Check MAC-based claim (Bug #7, primary check)
     const existingMac = db.prepare(`
       SELECT id FROM free_claims
       WHERE mac_address = ?
@@ -367,7 +367,7 @@ router.post('/free-claim', async (req, res) => {
     );
 
     // Bug found live: this used to check getSessionByMac() then call
-    // createSession() with nothing atomic in between — a coin landing at
+    // createSession() with nothing atomic in between, a coin landing at
     // nearly the same moment (server/services/coinCreditService.js) could
     // see "no session yet" too and both requests would create their own
     // session row for the same device (2 rows = admin panel showing 2
@@ -379,7 +379,7 @@ router.post('/free-claim', async (req, res) => {
     // "session doesn't exist yet" check.
     const { getSessionByMac, createSession, withMacLock } = require('../services/sessionService');
     const session = await withMacLock(mac, async () => {
-      if (getSessionByMac(mac)) return null; // already exists — refuse below
+      if (getSessionByMac(mac)) return null; // already exists, refuse below
       return createSession(mac, ip || '', freeMinutes, freeMinutes);
     });
 

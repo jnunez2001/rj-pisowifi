@@ -1,7 +1,6 @@
 <div class="zf3-header">
   <div>
     <div class="page-title">Vouchers</div>
-    <div class="page-subtitle">Create, manage, and track WiFi vouchers and voucher groups</div>
   </div>
   <div class="zf3-header-right">
     <div class="zf3-icon-btn" onclick="exportVouchersCsv()" title="Export CSV"><i class="fas fa-download"></i></div>
@@ -247,7 +246,7 @@
         <input type="number" id="promoUploadMbps" class="form-control" placeholder="Same as download" min="1">
       </div>
     </div>
-    <small style="color:var(--text-muted);display:block;margin-bottom:16px;">Leave blank to use the global Bandwidth Control setting (Security page) — same as a coin session gets.</small>
+    <small style="color:var(--text-muted);display:block;margin-bottom:16px;">Leave blank to use the global Bandwidth Control setting (Security page), the same as a coin session gets.</small>
     <div style="display:flex;gap:10px;justify-content:flex-end;">
       <button class="btn btn-secondary" onclick="closeModal('promoModal')">Cancel</button>
       <button class="btn btn-primary" onclick="createPromo()">

@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 
 // scrypt over bcrypt/bcryptjs: no new npm dependency (this box's npm install
-// has a history of being fragile — see bugslog.md), and Node's crypto module
+// has a history of being fragile, see bugslog.md), and Node's crypto module
 // already ships a memory-hard KDF that's fine for a single-admin panel.
 function hashPassword(plain) {
   const salt = crypto.randomBytes(16).toString('hex');

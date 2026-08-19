@@ -22,8 +22,8 @@ const redeemSchema = z.object({
   code: z.string().trim().min(3).max(40).regex(/^[A-Za-z0-9-]+$/, 'Invalid code format'),
 });
 
-// Promo redemption is a LAN-only flow — nftables DNATs it straight to this
-// app, bypassing nginx (setup/nginx.conf, WAN admin access only) entirely —
+// Promo redemption is a LAN-only flow, nftables DNATs it straight to this
+// app, bypassing nginx (setup/nginx.conf, WAN admin access only) entirely,
 // so the real client IP is the raw socket address. The portal always sent
 // '' as req.body.ip, which made every promo-redeemed session's stored
 // ip_address useless.
@@ -39,7 +39,7 @@ router.post('/redeem', validateBody(redeemSchema), async (req, res) => {
 
     // Settings > Portal Settings > Payment Methods. Safe to enforce here
     // (unlike coin credits in coin.js) because no real money has changed
-    // hands yet at this point — a voucher code being rejected just tells
+    // hands yet at this point, a voucher code being rejected just tells
     // the customer to use the other method, nothing is lost.
     const paymentMethods = db.prepare("SELECT value FROM settings WHERE key = 'payment_methods'").get()?.value || 'both';
     if (paymentMethods === 'coin') {
@@ -50,14 +50,14 @@ router.post('/redeem', validateBody(redeemSchema), async (req, res) => {
     }
 
     // Bug: promo_vouchers.mac_address is looked up/stored with whatever
-    // case the client sent — coin.js lowercases MACs before touching the
+    // case the client sent, coin.js lowercases MACs before touching the
     // sessions table, but this route didn't, so the same device could look
     // "new" here just from a casing difference against its own coin-created
     // history. Normalize to match the rest of the system.
     const mac = req.body.mac.toLowerCase();
     const code = req.body.code;
 
-    // Normalize code — accept with or without dash
+    // Normalize code, accept with or without dash
     const raw = code.trim().toUpperCase();
     const normalized = raw.includes('-') ? raw : raw.replace(/^(PROMO|RJ)/, '$1-');
 

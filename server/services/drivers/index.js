@@ -1,6 +1,6 @@
 // ===== DRIVER REGISTRY =====
 // One place that maps a network_mode setting value to its driver
-// implementation. Adding a new backend (pfSense — Workstream 3) means
+// implementation. Adding a new backend (pfSense, Workstream 3) means
 // adding one entry here, not editing every function in networkService.js.
 
 const standaloneDriver = require('./standaloneDriver');

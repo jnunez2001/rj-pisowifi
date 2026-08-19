@@ -16,7 +16,7 @@ function isValidMac(mac) {
 let pendingCoinMac = null;
 let pendingSetAt = 0;
 // Running total (pesos) accumulated since this pending window opened, not
-// yet credited to a session — lets the portal show "how much have I
+// yet credited to a session, lets the portal show "how much have I
 // inserted so far" without having to reverse-engineer pesos from minutes
 // (not reliably invertible: different coin denominations buy minutes at
 // different rates).
@@ -35,14 +35,14 @@ const PENDING_TIMEOUT_MS = 40000; // must match/slightly exceed portal's 30s coi
 // Bug found live: crediting each coin the instant it was detected meant a
 // session got created (and network access granted via sessionService's
 // allowClient()) on the very first coin, not once the customer was done
-// inserting — someone burn-testing with 30 pesos in separate coins got
+// inserting. Someone burn-testing with 30 pesos in separate coins got
 // "connected" and had their portal close out after the first one. JuanFi
 // (a comparable PisoWifi coinslot system) accumulates coins into a running
 // total while its own countdown window is open, and only credits/grants
 // access ONCE, when that window closes with no further coins. Mirroring
 // that here: accumulate into pendingTotal per coin, and only call
-// creditCoinValue() — which is what actually creates/tops-up the session
-// and grants access — when the window's silence timer fires.
+// creditCoinValue(), which is what actually creates/tops-up the session
+// and grants access, when the window's silence timer fires.
 function scheduleFinalize(mac) {
   if (pendingFinalizeTimer) clearTimeout(pendingFinalizeTimer);
   pendingFinalizeTimer = setTimeout(() => finalizePendingCoins(mac), PENDING_TIMEOUT_MS);
@@ -50,7 +50,7 @@ function scheduleFinalize(mac) {
 
 // Returns a result object when called from the portal's "Done" button (see
 // POST /finalize below), so the customer gets an immediate answer instead
-// of a silent console log — the timer-driven call (scheduleFinalize) just
+// of a silent console log. The timer-driven call (scheduleFinalize) just
 // ignores the return value, same as before.
 async function finalizePendingCoins(mac) {
   if (pendingCoinMac !== mac || pendingTotal <= 0) {
@@ -62,7 +62,7 @@ async function finalizePendingCoins(mac) {
   const kioskId = pendingKioskId;
   const isPremium = pendingIsPremium;
 
-  // Clear the window before crediting, not after — a coin that happens to
+  // Clear the window before crediting, not after. A coin that happens to
   // land while creditCoinValue() is mid-flight should start a fresh
   // window of its own instead of silently folding into this one.
   pendingCoinMac = null;
@@ -82,11 +82,11 @@ async function finalizePendingCoins(mac) {
       // The old immediate-credit path recorded a spam attempt on every
       // non-matching coin, which is what actually blocks someone (or a
       // miscalibrated coin acceptor) hammering invalid values. Accumulating
-      // silently for the whole window must not lose that — record it here
+      // silently for the whole window must not lose that. Record it here
       // against the final total, same as the still-present fallback branch
       // below does for direct/manual posts.
       const attempt = recordAttempt(mac);
-      console.error(`⚠️ Pending window for ${mac} closed with ₱${total} matching no rate tier — not credited.`);
+      console.error(`⚠️ Pending window for ${mac} closed with ₱${total} matching no rate tier, not credited.`);
       return { success: false, reason: 'no_matching_rate', total, attempt };
     }
     console.error('Finalize pending coin error:', err);
@@ -113,7 +113,7 @@ function pruneCoinEventCache() {
   }
 }
 
-// POST /api/coin/pending — portal calls this right when INSERT COIN modal opens
+// POST /api/coin/pending, portal calls this right when INSERT COIN modal opens
 router.post('/pending', (req, res) => {
   const { mac, is_premium } = req.body;
   if (!mac || !isValidMac(mac)) {
@@ -131,7 +131,7 @@ router.post('/pending', (req, res) => {
   return res.json({ success: true });
 });
 
-// GET /api/coin/pending/:mac — portal polls this while the INSERT COIN modal
+// GET /api/coin/pending/:mac, portal polls this while the INSERT COIN modal
 // is open, to show a running total and detect new coins to reset its timer.
 router.get('/pending/:mac', (req, res) => {
   const mac = String(req.params.mac || '').trim().toLowerCase();
@@ -139,7 +139,7 @@ router.get('/pending/:mac', (req, res) => {
   return res.json({ success: true, pending: stillValid, total: stillValid ? pendingTotal : 0 });
 });
 
-// POST /api/coin/finalize — portal calls this when the customer taps "Done"
+// POST /api/coin/finalize, portal calls this when the customer taps "Done"
 // / "Already inserted? Connect" in the Insert Coin modal, so they don't
 // have to wait out the full silence window (PENDING_TIMEOUT_MS) once
 // they're finished dropping coins.
@@ -149,13 +149,13 @@ router.post('/finalize', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
   if (pendingCoinMac !== mac) {
-    // Nothing pending for this MAC — not an error, the customer may have
+    // Nothing pending for this MAC, not an error, the customer may have
     // an existing session already and just closed the modal with no new
     // coins inserted this time.
     return res.json({
       success: false,
       reason: 'no_pending_coins',
-      message: 'No coins detected yet — insert one first.'
+      message: 'No coins detected yet, insert one first.'
     });
   }
 
@@ -165,22 +165,22 @@ router.post('/finalize', async (req, res) => {
       return res.status(400).json({
         success: false,
         reason: outcome.reason,
-        message: `₱${outcome.total} doesn't match any rate — insert a bit more or a different combination.`
+        message: `₱${outcome.total} doesn't match any rate, insert a bit more or a different combination.`
       });
     }
     if (outcome.reason === 'server_error') {
       return res.status(500).json({
         success: false,
         reason: outcome.reason,
-        message: 'Something went wrong crediting your coins — please try again.'
+        message: 'Something went wrong crediting your coins, please try again.'
       });
     }
-    return res.json({ ...outcome, message: outcome.message || 'No coins detected yet — insert one first.' });
+    return res.json({ ...outcome, message: outcome.message || 'No coins detected yet, insert one first.' });
   }
   return res.json({ success: true, ...outcome.result });
 });
 
-// POST /api/coin — ESP32 calls this when a coin is detected
+// POST /api/coin, ESP32 calls this when a coin is detected
 router.post('/', async (req, res) => {
   try {
     const { mac: deviceMac, coin_value, ip, device_key, event_id } = req.body;
@@ -222,7 +222,7 @@ router.post('/', async (req, res) => {
     if (pendingValid) {
       mac = pendingCoinMac;
     } else if (pendingCoinMac) {
-      // expired pending slot — clear it
+      // expired pending slot, clear it
       pendingCoinMac = null;
     }
 
@@ -248,7 +248,7 @@ router.post('/', async (req, res) => {
 
     if (pendingValid && mac === pendingCoinMac) {
       // Accumulate into the running total instead of crediting this coin on
-      // its own — renew the window so a customer dropping several coins a
+      // its own, renew the window so a customer dropping several coins a
       // few seconds apart doesn't run out of time mid-insertion, and
       // (re)schedule the finalize timer so the actual credit + session
       // creation/access grant only happens once, after the window falls
@@ -261,7 +261,7 @@ router.post('/', async (req, res) => {
 
       // Bug found live: nothing pushed a wake-up while coins were still
       // accumulating (sseService.notify() only ever fired once a session
-      // was actually created/topped-up, i.e. at finalize) — the portal's
+      // was actually created/topped-up, i.e. at finalize), the portal's
       // running total only moved on its 1.5s poll tick, so a customer
       // watching the modal saw their credit lag 1-3 seconds behind the
       // coin acceptor's own beep/LED. Notifying here lets the portal's
@@ -277,7 +277,7 @@ router.post('/', async (req, res) => {
       return res.json(ack);
     }
 
-    // No active pending window — e.g. a direct/manual coin POST that never
+    // No active pending window, e.g. a direct/manual coin POST that never
     // went through the portal's /pending handshake. Credit immediately,
     // same as this endpoint always did before the accumulate-then-finalize
     // change above.
@@ -315,11 +315,11 @@ router.post('/', async (req, res) => {
 
 // ===== DIRECT GPIO COINSLOT (Workstream 4) =====
 // Separate from the pendingCoinMac mechanism above, which is specific to
-// the ESP32 HTTP-relay flow — this is the busy-lock/rate-limited waiting-
+// the ESP32 HTTP-relay flow, this is the busy-lock/rate-limited waiting-
 // client registration for a coin acceptor wired directly into the box's
 // own GPIO header. See server/services/coinslotGpio.js.
 
-// POST /api/coin/gpio/register — portal calls this when Insert Coin opens
+// POST /api/coin/gpio/register, portal calls this when Insert Coin opens
 // in direct-GPIO mode.
 router.post('/gpio/register', (req, res) => {
   const { mac, is_premium } = req.body;
@@ -332,12 +332,12 @@ router.post('/gpio/register', (req, res) => {
     return res.status(409).json({ success: false, status, message: 'Coin slot is busy with another customer.' });
   }
   if (status === coinslotGpio.REGISTER_RATE_LIMITED) {
-    return res.status(429).json({ success: false, status, message: 'Too many attempts — please wait before trying again.' });
+    return res.status(429).json({ success: false, status, message: 'Too many attempts, please wait before trying again.' });
   }
   return res.json({ success: true, status, window_seconds: windowSeconds });
 });
 
-// POST /api/coin/gpio/cancel — portal calls this when the Insert Coin
+// POST /api/coin/gpio/cancel, portal calls this when the Insert Coin
 // modal is closed without paying.
 router.post('/gpio/cancel', (req, res) => {
   const { mac } = req.body;
@@ -349,7 +349,7 @@ router.post('/gpio/cancel', (req, res) => {
   return res.json({ success: true, cancelled });
 });
 
-// GET /api/coin/gpio/status/:mac — portal polls this to know whose coin
+// GET /api/coin/gpio/status/:mac, portal polls this to know whose coin
 // window is currently active.
 router.get('/gpio/status/:mac', (req, res) => {
   const mac = normalizeMacParam(req.params.mac);

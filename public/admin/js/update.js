@@ -116,7 +116,7 @@ async function installUpdate() {
       btn.innerHTML = '<i class="fas fa-download"></i> Install Update';
     }
   } catch(e) {
-    // Server restarted — this is expected
+    // Server restarted, this is expected
     status.style.background = 'var(--card-green-bg)';
     status.style.color = 'var(--card-green-text)';
     status.innerHTML = '<i class="fas fa-check-circle"></i> Update applied! Server restarted. Reloading in 10 seconds...';

@@ -6,7 +6,7 @@ const path = require('path');
 // OUTSIDE the SQLite database file, in the same separate data directory as
 // the DB itself (see server/config/database.js's DB_PATH). This matters
 // specifically because a MikroTik router's credentials have real resale
-// value here — if someone copies just the .db file (the easiest thing to
+// value here, if someone copies just the .db file (the easiest thing to
 // walk off with), the encrypted value in it is useless without also having
 // this key file from the original machine.
 const DATA_DIR = process.env.DB_PATH
@@ -44,7 +44,7 @@ function isEncrypted(value) {
 }
 
 // Accepts legacy plaintext values too (pre-migration installs), same
-// pattern as passwordHash.js's verifyPassword — returns the value unchanged
+// pattern as passwordHash.js's verifyPassword, returns the value unchanged
 // if it was never encrypted, so nothing breaks before the migration runs.
 function decryptSecret(stored) {
   if (!stored) return '';

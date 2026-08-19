@@ -20,12 +20,12 @@ const MAC_CACHE_TTL_MS = 10000; // 10 seconds
 // devices on the same Layer 2 segment as this server. Router mode disables
 // dnsmasq entirely, and a gated lane on its own separate bridge (e.g.
 // WiFi-Rental's VLAN) is a different broadcast domain this server has no L2
-// visibility into at all — local lookups could never find those clients,
+// visibility into at all, local lookups could never find those clients,
 // no matter how many times a customer retried. In router mode, ask the
 // MikroTik itself instead: as the actual gateway for every lane, its own
 // DHCP lease table always has the true IP-to-MAC mapping.
 async function getMacFromIp(ip) {
-  // Check cache first (Bug #33 — cache MAC resolution)
+  // Check cache first (Bug #33, cache MAC resolution)
   const cached = macResolutionCache.get(ip);
   if (cached && Date.now() - cached.time < MAC_CACHE_TTL_MS) {
     return cached.mac;
@@ -65,10 +65,10 @@ async function getMacFromIp(ip) {
   return mac;
 }
 
-// GET /api/portal/detect — detect client MAC from IP
+// GET /api/portal/detect, detect client MAC from IP
 router.get('/detect', async (req, res) => {
   // No reverse proxy sits in front of this server (setup/nginx.conf is an
-  // unused empty placeholder) — x-forwarded-for is fully client-suppliable
+  // unused empty placeholder), x-forwarded-for is fully client-suppliable
   // here, so trusting it let one device resolve (and act as) another
   // device's MAC address just by sending a spoofed header. The raw socket
   // address can't be set by the client.

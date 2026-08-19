@@ -1,18 +1,18 @@
 // ===== ACCESS POINTS PAGE =====
-// Discovery-first: real passive scan (ARP/DHCP) surfaces candidates for
-// approval, real ICMP ping drives reachability status. No vendor adapter
-// exists yet, so management/config features are honestly absent rather
-// than faked - see the empty states in the Network detail tab.
+// Manual entry today, real ICMP ping drives reachability status. No vendor
+// adapter exists yet, so management/config features are honestly absent
+// rather than faked - see the empty states in the Network detail tab.
+// StarkFi Lite units (OpenWrt-based APs running StarkFi's own firmware)
+// will register themselves here automatically once that firmware exists,
+// the same way Vendo coin-slot devices already do on the Devices page -
+// no manual scanning or IP guessing needed for those.
 let apAll = [];
 let apAllSites = [];
 let apEditingId = null;
 let apDetailId = null;
-let apCandidates = [];
-let apLastScannedAt = null;
 
 async function loadAccessPointsPage() {
   await loadSitesForAp();
-  await loadScanStatus();
   await loadApList();
 }
 
@@ -25,22 +25,13 @@ async function loadSitesForAp() {
   }
 }
 
-async function loadScanStatus() {
-  try {
-    const data = await apiCall('GET', '/api/admin/access-points/scan/status');
-    apLastScannedAt = (data.success && data.last_scanned_at) ? data.last_scanned_at : null;
-  } catch (e) {
-    apLastScannedAt = null;
-  }
-}
-
 async function loadApList() {
   const tbody = document.getElementById('apTable');
   if (!tbody) return;
   try {
     const data = await apiCall('GET', '/api/admin/access-points');
     if (!data.success) {
-      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--accent-red);padding:24px;">${data.message || 'Failed to load access points'}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--accent-red);padding:24px;">${data.message || 'Failed to load access points'}</td></tr>`;
       return;
     }
     apAll = data.accessPoints;
@@ -49,7 +40,7 @@ async function loadApList() {
     renderApTable();
   } catch (e) {
     console.error('Access points load error:', e);
-    tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:var(--accent-red);padding:24px;">Failed to load access points. Refresh to try again.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--accent-red);padding:24px;">Failed to load access points. Refresh to try again.</td></tr>`;
   }
 }
 
@@ -118,26 +109,13 @@ function renderApTable() {
   });
 
   if (!apAll.length) {
-    const alreadyScanned = !!apLastScannedAt;
-    tbody.innerHTML = alreadyScanned ? `
-      <tr><td colspan="9">
+    tbody.innerHTML = `
+      <tr><td colspan="8">
         <div class="empty-state">
           <i class="fas fa-wifi"></i>
-          <h3>No Access Points Found</h3>
-          <p>StarkFi scanned the network but did not identify any candidate devices.</p>
+          <h3>No Access Points Yet</h3>
+          <p>Add one manually, or connect a StarkFi Lite access point and it will register itself here.</p>
           <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px;">
-            <button class="btn btn-primary" onclick="scanForAps()"><i class="fas fa-satellite-dish"></i> Scan Again</button>
-            <button class="btn btn-secondary" onclick="openAddAp()"><i class="fas fa-plus"></i> Add AP Manually</button>
-          </div>
-        </div>
-      </td></tr>` : `
-      <tr><td colspan="9">
-        <div class="empty-state">
-          <i class="fas fa-wifi"></i>
-          <h3>No Access Points Discovered Yet</h3>
-          <p>StarkFi hasn't scanned this network for access points yet.</p>
-          <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:16px;">
-            <button class="btn btn-primary" onclick="scanForAps()"><i class="fas fa-satellite-dish"></i> Scan Network</button>
             <button class="btn btn-secondary" onclick="openAddAp()"><i class="fas fa-plus"></i> Add AP Manually</button>
           </div>
         </div>
@@ -148,7 +126,7 @@ function renderApTable() {
 
   if (!rows.length) {
     tbody.innerHTML = `
-      <tr><td colspan="9">
+      <tr><td colspan="8">
         <div class="empty-state">
           <i class="fas fa-filter-circle-xmark"></i>
           <h3>No access points match your filters.</h3>
@@ -166,7 +144,6 @@ function renderApTable() {
         <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(a.vendor || '')}${a.model ? ' · ' + escapeHtml(a.model) : ''}</div>
       </td>
       <td data-label="Status">${apStatusBadge(a.status)}</td>
-      <td data-label="IP Address" style="font-family:monospace;font-size:12px;">${escapeHtml(a.ip_address || '-')}</td>
       <td data-label="MAC Address" style="font-family:monospace;font-size:12px;">${escapeHtml(a.mac_address || '-')}</td>
       <td data-label="VLAN">${apVlanCell(a)}</td>
       <td data-label="Site">${escapeHtml(a.site_name || '-')}</td>
@@ -192,91 +169,6 @@ function clearApFilters() {
   document.getElementById('apVendorFilter').value = '';
   document.getElementById('apSiteFilter').value = '';
   renderApTable();
-}
-
-// ===== SCAN / DISCOVERY =====
-async function scanForAps() {
-  const btn = document.getElementById('scanApBtn');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
-  try {
-    const data = await apiCall('POST', '/api/admin/access-points/scan');
-    if (data.success) {
-      apCandidates = data.candidates;
-      apLastScannedAt = new Date().toISOString();
-      renderApCandidates();
-      if (apCandidates.length) {
-        showToast(`Found ${apCandidates.length} device(s) not yet registered.`, 'success');
-      } else {
-        showToast('Scan complete. No new devices found.', 'info');
-      }
-      renderApTable();
-    } else {
-      showToast(data.message || 'Scan failed.', 'error');
-    }
-  } catch (e) {
-    showToast('Scan failed.', 'error');
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-satellite-dish"></i> Scan Network';
-  }
-}
-
-function renderApCandidates() {
-  const card = document.getElementById('apCandidatesCard');
-  const list = document.getElementById('apCandidatesList');
-  if (!apCandidates.length) {
-    card.style.display = 'none';
-    return;
-  }
-  card.style.display = 'block';
-  list.innerHTML = apCandidates.map((c, i) => `
-    <div class="zf3-list-row" style="border-top:1px solid var(--border-color);padding:10px 0;">
-      <div class="zf3-list-left" style="flex-direction:column;align-items:flex-start;gap:2px;">
-        <div style="font-weight:700;">${escapeHtml(c.hostname || c.ip)}</div>
-        <div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escapeHtml(c.ip)} &middot; ${escapeHtml(c.mac)}</div>
-        <div style="font-size:11px;color:var(--text-muted);">
-          ${c.vendor ? `Vendor: ${escapeHtml(c.vendor)}` : 'Vendor: Unknown'}
-          ${c.vlan_id ? ` &middot; VLAN ${c.vlan_id} detected` : ''}
-          &middot; via ${escapeHtml(c.discovered_via)}
-        </div>
-        ${c.vendor_class ? `<div style="font-size:11px;color:var(--text-muted);">DHCP class: ${escapeHtml(c.vendor_class)}</div>` : ''}
-      </div>
-      <button class="btn btn-sm btn-primary" onclick="addCandidateAsAp(${i})"><i class="fas fa-plus"></i> Add as AP</button>
-    </div>
-  `).join('');
-}
-
-function dismissApCandidates() {
-  apCandidates = [];
-  document.getElementById('apCandidatesCard').style.display = 'none';
-}
-
-async function addCandidateAsAp(index) {
-  const c = apCandidates[index];
-  if (!c) return;
-  try {
-    const data = await apiCall('POST', '/api/admin/access-points', {
-      name: c.hostname || c.vendor || c.ip,
-      ip_address: c.ip,
-      mac_address: c.mac,
-      vendor: c.vendor || '',
-      hostname: c.hostname || '',
-      vlan_id: c.vlan_id,
-      vlan_evidence: c.vlan_evidence,
-      discovered_via: c.discovered_via,
-    });
-    if (data.success) {
-      showToast(`Added "${data.accessPoint.name}".`, 'success');
-      apCandidates.splice(index, 1);
-      renderApCandidates();
-      loadApList();
-    } else {
-      showToast(data.message || 'Unable to add this device.', 'error');
-    }
-  } catch (e) {
-    showToast('Unable to add this device.', 'error');
-  }
 }
 
 // ===== MANUAL ADD / EDIT =====

@@ -1,11 +1,11 @@
 // ===== MIKROTIK SERVICE =====
 // Handles MikroTik router control via the native binary API (RouterOS 6 and
-// 7 — see mikrotikApiClient.js for why the binary API instead of REST).
+// 7, see mikrotikApiClient.js for why the binary API instead of REST).
 // Used when network_mode = 'mikrotik'
 //
 // IMPORTANT: allowClient/blockClient use /ip/hotspot/ip-binding, NOT
 // /ip/hotspot/active. The "active" list only contains devices that have
-// already authenticated through Hotspot's own login page — you can't force
+// already authenticated through Hotspot's own login page, you can't force
 // an entry there for a device that hasn't logged in yet. ip-binding with
 // type=bypassed is the correct mechanism: it tells Hotspot "let this MAC
 // through without going through the login page at all," which is what a
@@ -13,7 +13,7 @@
 //
 // Command shape mirrors the CLI menu path ("/ip/hotspot/ip-binding/print"),
 // with parameters as "=key=value" words and query filters as "?key=value".
-// "remove"/"set" need the record's ".id" — always look it up first, same
+// "remove"/"set" need the record's ".id", always look it up first, same
 // pattern as the old REST GET-before-DELETE/PATCH.
 
 const db = require('../config/database');
@@ -37,8 +37,8 @@ const mikMac = (mac) => String(mac).toUpperCase();
 /**
  * Looks up the existing ip-binding record for a MAC, if any.
  * Returns the full record (including its .id), or null if genuinely not
- * found. A lookup failure (network error, timeout, router error) throws —
- * client.talk() rejects on those — rather than resolving as "not found",
+ * found. A lookup failure (network error, timeout, router error) throws,
+ * client.talk() rejects on those, rather than resolving as "not found",
  * so callers can't mistake a transient failure for "nothing exists yet"
  * (that mistake used to create duplicate ip-bindings under the old REST
  * client; the binary client's reject-on-failure behavior preserves the fix
@@ -68,7 +68,7 @@ async function isClientAllowed(mac) {
 }
 
 // Allow a client MAC address (bypass Hotspot login entirely via ip-binding).
-// Time enforcement stays with our own DB/cron (timerService) — the router
+// Time enforcement stays with our own DB/cron (timerService), the router
 // never tracks minutes itself, so this only needs the MAC, not a duration.
 async function allowClient(mac) {
   const config = getMikrotikConfig();
@@ -81,13 +81,13 @@ async function allowClient(mac) {
       const existing = await findIpBinding(client, mac);
 
       if (existing) {
-        // Already bound — just refresh the comment so we can see when it was renewed
+        // Already bound, just refresh the comment so we can see when it was renewed
         await client.talk(['/ip/hotspot/ip-binding/set', `=.id=${existing['.id']}`, `=comment=rj-piso-${Date.now()}`]);
         console.log(`✅ MikroTik refreshed existing binding: ${mac}`);
         return true;
       }
 
-      // No existing binding — create one
+      // No existing binding, create one
       await client.talk(['/ip/hotspot/ip-binding/add', `=mac-address=${mikMac(mac)}`, '=type=bypassed', `=comment=rj-piso-${Date.now()}`]);
       console.log(`✅ MikroTik allowed: ${mac}`);
       return true;
@@ -122,7 +122,7 @@ async function blockClient(mac) {
     });
     // Bug found on real hardware: this used to log success unconditionally,
     // even when findIpBinding() found nothing and there was genuinely
-    // nothing to remove — masking the MAC-case mismatch bug above entirely,
+    // nothing to remove, masking the MAC-case mismatch bug above entirely,
     // since every call "succeeded" whether or not it actually did anything.
     if (removedBinding) {
       console.log(`🚫 MikroTik blocked: ${mac}`);
@@ -420,7 +420,7 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
   }
 }
 
-// Remove a client's bandwidth queue (session ended) — mirrors
+// Remove a client's bandwidth queue (session ended), mirrors
 // networkService's removeClientBandwidth so both backends behave the same
 // way on session expiry.
 async function removeClientBandwidth(mac) {
@@ -436,17 +436,17 @@ async function removeClientBandwidth(mac) {
   }
 }
 
-// Checks whether MikroTik mode is currently active (vs nodogsplash) —
+// Checks whether MikroTik mode is currently active (vs nodogsplash),
 // call this from sessionService.js/timerService.js before branching logic
 function isMikrotikModeEnabled() {
   const s = db.prepare('SELECT value FROM settings WHERE key = ?').get('network_mode');
   return s && s.value === 'mikrotik';
 }
 
-// ROUTER_MODE_PLAN.md Stage 3 — live port discovery. Queries the router
+// ROUTER_MODE_PLAN.md Stage 3, live port discovery. Queries the router
 // itself for its actual physical ethernet ports rather than assuming a
 // fixed model/port-count, so the same code works on any MikroTik hardware
-// (ROUTER_MODE_PLAN.md §2/§7 — no hardcoded router-model list).
+// (ROUTER_MODE_PLAN.md §2/§7, no hardcoded router-model list).
 async function getRouterPorts() {
   const config = getMikrotikConfig();
   if (!config.ip) throw new Error('MikroTik IP not configured');
@@ -461,7 +461,7 @@ async function getRouterPorts() {
   });
 }
 
-// Live status card (ROUTER_MODE_PLAN.md §4.7) — read straight from the
+// Live status card (ROUTER_MODE_PLAN.md §4.7), read straight from the
 // router, not our own database, so it reflects what's actually true right
 // now rather than what we last told it to be.
 async function getLiveStatus() {
@@ -567,7 +567,7 @@ async function setPortalDnsName(hostname) {
   }
 }
 
-// "Test connection" button — just needs to prove login succeeds, doesn't
+// "Test connection" button, just needs to prove login succeeds, doesn't
 // need the full status payload.
 async function testConnection() {
   const config = getMikrotikConfig();
@@ -579,15 +579,15 @@ async function testConnection() {
 }
 
 // Bug found on real hardware: app.js/portal.js resolved a client's MAC from
-// its IP by reading this server's own local ARP table / dnsmasq.leases —
+// its IP by reading this server's own local ARP table / dnsmasq.leases,
 // both of which only ever have entries for devices on the same Layer 2
 // segment as this server. That's true for any lane sharing this server's
 // own bridge (e.g. PC-Rental), but a gated lane on its own separate bridge
 // (e.g. WiFi-Rental's VLAN) is a different broadcast domain entirely,
-// reachable only by routing through the MikroTik — this server has zero L2
+// reachable only by routing through the MikroTik, this server has zero L2
 // visibility into it, so local ARP lookups can never find those clients'
 // MACs, no matter how many times you retry. The router itself, as the
-// actual gateway for every lane, always knows the true IP-to-MAC mapping —
+// actual gateway for every lane, always knows the true IP-to-MAC mapping,
 // its own DHCP lease table is the reliable source of truth in router mode.
 async function getMacFromIp(ip) {
   const config = getMikrotikConfig();

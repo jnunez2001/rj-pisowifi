@@ -36,7 +36,7 @@ body {
   transition: width 0.2s ease, transform 0.3s ease;
 }
 
-/* Minimized/collapsed icon-rail state (Workstream 13) — the sidebar
+/* Minimized/collapsed icon-rail state (Workstream 13). The sidebar
    shrinks to icon-only width; labels, brand text, and admin-info hide,
    leaving just the icon column. Persisted via localStorage in app.js. */
 .sidebar.collapsed { width: var(--sidebar-collapsed-width); }
@@ -222,7 +222,7 @@ body {
   flex-shrink: 0;
 }
 
-/* Reboot/Shutdown — kept visually distinct (real danger colors) but on
+/* Reboot/Shutdown, kept visually distinct (real danger colors) but on
    the light sidebar now, not the old dark one. */
 .nav-item-danger { color: var(--accent-orange); }
 .nav-item-danger:nth-of-type(1) { color: var(--accent-orange); }
@@ -959,7 +959,7 @@ select.form-control { cursor: pointer; }
   /* Show hamburger */
   .menu-toggle { display: flex !important; }
 
-  /* Hide sidebar by default — the icon-rail collapse (Workstream 13) is a
+  /* Hide sidebar by default. The icon-rail collapse (Workstream 13) is a
      desktop-only affordance, mobile always uses this slide-over drawer
      instead, so a stale .collapsed class from a prior desktop session
      must not shrink it here. */
@@ -986,7 +986,7 @@ select.form-control { cursor: pointer; }
   /* Main content takes full width regardless of collapse state */
   .main-content, .admin-layout.sidebar-collapsed .main-content { margin-left: 0 !important; }
 
-  /* Flyout mega-menus become full-screen panels on mobile — a flyout
+  /* Flyout mega-menus become full-screen panels on mobile, since a flyout
      anchored "beside the sidebar" makes no sense on a phone-width
      screen. */
   .flyout-panel {

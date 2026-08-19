@@ -203,7 +203,7 @@ const MAC_CACHE_TTL = 10000; // 10 seconds for IP→MAC mapping (Bug #45)
 // own local `ip neigh`/dnsmasq.leases, which only has entries for devices
 // on the same Layer 2 segment as this server. That covers a lane sharing
 // this server's own bridge (e.g. PC-Rental) but not a gated lane on its own
-// separate bridge (e.g. WiFi-Rental's VLAN) — a different broadcast domain
+// separate bridge (e.g. WiFi-Rental's VLAN), a different broadcast domain
 // this server has no L2 visibility into, reachable only by routing through
 // the MikroTik. In router mode, ask the router itself instead: as the
 // actual gateway for every lane, its own DHCP lease table always has the
@@ -247,7 +247,7 @@ async function getMacFromIp(ip) {
 
 // ── Helper: check if IP is authenticated (cached) ────────────
 // Bug found on real hardware: the nftables set this checked
-// (`rj_piso allowed_macs`) is a standalone-mode-only concept — router mode
+// (`rj_piso allowed_macs`) is a standalone-mode-only concept, router mode
 // never creates it, so this always threw, was swallowed by the catch, and
 // silently reported every router-mode client as unauthenticated regardless
 // of real status. Router mode tracks authentication via MikroTik's own
@@ -286,11 +286,11 @@ async function isAuthenticated(ip) {
 
 function getClientIp(req) {
   // LAN captive-portal traffic (what this function is for) never passes
-  // through nginx — nftables DNATs it straight to this app (setup-network.sh)
+  // through nginx, nftables DNATs it straight to this app (setup-network.sh)
   // before any other process on the box sees it. Only WAN admin access goes
   // through nginx now (setup/nginx.conf). So for these LAN-only routes,
   // x-forwarded-for is still a client-suppliable header, not a trustworthy
-  // one — any device could spoof it to another device's IP and have this
+  // one, any device could spoof it to another device's IP and have this
   // resolve to that device's MAC via getMacFromIp() below. Use the raw
   // socket address, which the client cannot set.
   const raw = req.connection.remoteAddress ||
@@ -308,21 +308,21 @@ app.get('/', (req, res) => {
 // MikroTik fetch this page and use it as the Hotspot's own login.html,
 // replacing MikroTik's default built-in login screen. Bug this fixes:
 // without it, a newly-connected customer would see MikroTik's generic
-// login page first, not this app's portal — contradicting the explicit
+// login page first, not this app's portal, contradicting the explicit
 // design (customers should never see MikroTik's own login screen).
 //
 // Bug found on real hardware: this used to redirect to a relative
 // "/portal/" path, on the assumption the browser always loads this page
 // live from this app. That's wrong for how MikroTik's Hotspot actually
-// serves it — Configure's /tool fetch step downloads this page ONCE and
+// serves it, Configure's /tool fetch step downloads this page ONCE and
 // saves it as a static login.html on the router itself. A customer's phone
 // then loads that static copy directly from the router's own hotspot
 // address (e.g. 10.50.1.1), not from this app, so a relative "/portal/"
 // resolved to a page that doesn't exist on the router (endless spinner, no
 // error). Baking in an absolute URL fixes it. Building that URL from the
 // request's own Host header (rather than a hardcoded IP) keeps it correct
-// automatically: the Host header on THIS request — made by the router's
-// own /tool fetch — is exactly the address/port that fetch was told to
+// automatically: the Host header on THIS request, made by the router's
+// own /tool fetch, is exactly the address/port that fetch was told to
 // use, which is the one address the router already knows how to reach
 // this app at.
 app.get('/hotspot-login', (req, res) => {
@@ -440,7 +440,7 @@ const server = app.listen(PORT, () => {
   // before moving the box to a different router or ISP.
   hostNetworkService.startConnectivityWatchdog(db);
 
-  // Direct-GPIO coin acceptor listener (Workstream 4) — no-ops cleanly when
+  // Direct-GPIO coin acceptor listener (Workstream 4), no-ops cleanly when
   // not configured/enabled (currentConfig().enabled false) or when gpiomon
   // isn't installed, so this never blocks boot on boxes using the ESP32
   // relay path instead. Matches the "boot always succeeds, subsystem
@@ -460,7 +460,7 @@ const server = app.listen(PORT, () => {
     console.warn('[VendoDiscovery] Failed to start (non-fatal):', e.message);
   }
 
-  // Self-heal watchdog — periodic health check + narrow auto-repair for the
+  // Self-heal watchdog, periodic health check + narrow auto-repair for the
   // box's own network-access-control state (standalone/OpenWRT modes).
   // Never blocks boot; a failure here just means health checks aren't
   // running, not that vending stops working.
@@ -498,7 +498,7 @@ const server = app.listen(PORT, () => {
     console.warn('[Telemetry] Failed to start (non-fatal):', e.message);
   }
 
-  // Preflight dependency check — verifies nft/tc/gpio tools and basic
+  // Preflight dependency check, verifies nft/tc/gpio tools and basic
   // network readiness exist before the app is trusted to vend. Deliberately
   // non-blocking (matches this app's "boot always succeeds, subsystems
   // degrade gracefully" pattern) but fails LOUDLY in the console/log
@@ -511,7 +511,7 @@ const server = app.listen(PORT, () => {
     diagnostics.setLastBootReport(report);
     if (!report.overallOk) {
       console.warn('');
-      console.warn('⚠️  PREFLIGHT CHECK FAILED — this box is missing something it needs:');
+      console.warn('⚠️  PREFLIGHT CHECK FAILED, this box is missing something it needs:');
       report.results.filter((r) => !r.pass).forEach((r) => {
         console.warn(`   ✗ ${r.label}: ${r.detail}`);
       });
@@ -525,7 +525,7 @@ const server = app.listen(PORT, () => {
     console.warn('[Preflight] Check failed to run (non-fatal):', e.message);
   }
 
-  // Post-update health check + auto-rollback — only does anything if
+  // Post-update health check + auto-rollback, only does anything if
   // /install-update recorded a pending update on the previous boot (see
   // updateRollbackService.js). Closes the "new code boots but runs
   // incorrectly, not an outright crash" gap that systemd's Restart=always
@@ -536,7 +536,7 @@ const server = app.listen(PORT, () => {
     console.warn('[UpdateRollback] Post-update check failed to run (non-fatal):', e.message);
   }
 
-  // Scheduled nightly database backup (rotated, keeps last 7) — see
+  // Scheduled nightly database backup (rotated, keeps last 7), see
   // scheduledBackupService.js. Separate from the on-demand JSON export and
   // the pre-update snapshot, so an operator never has to remember to click
   // "Backup" themselves to avoid losing data to a corrupted DB or SD card.
@@ -557,7 +557,7 @@ const server = app.listen(PORT, () => {
     console.warn('[FinancialLog] Rotation failed to start (non-fatal):', e.message);
   }
 
-  // License check-in (see licenseService.js) — genuinely inert today, no
+  // License check-in (see licenseService.js), genuinely inert today, no
   // LICENSE_SERVER_URL is configured anywhere yet, so this never makes a
   // network call. Every 6 hours once a real server exists, comfortably
   // inside the 72h grace period even if one attempt is missed.

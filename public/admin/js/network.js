@@ -1060,7 +1060,7 @@ async function toggleMikrotikPassword() {
 
 // Bug fix: the DHCP reservation that keeps this server's address fixed on
 // the gated lane used to guess which of this machine's network connections
-// to use (first non-internal one Node reported) — on a machine with more
+// to use (first non-internal one reported), on a machine with more
 // than one connection (e.g. this project's own two-VM laptop setup), that
 // could reserve the wrong device's address. The admin now picks explicitly.
 async function loadLocalInterfaces(savedMac) {
@@ -1070,7 +1070,7 @@ async function loadLocalInterfaces(savedMac) {
     const data = await apiCall('GET', '/api/admin/router/local-interfaces');
     if (!data.success) throw new Error(data.message);
 
-    // Only show the picker when there's genuine ambiguity — one detected
+    // Only show the picker when there's genuine ambiguity. One detected
     // connection means there's nothing to choose, so stay out of the way.
     if (data.interfaces.length <= 1) {
       group.style.display = 'none';

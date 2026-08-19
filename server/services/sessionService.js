@@ -82,11 +82,11 @@ function getBurstConfig() {
 }
 
 // Bug: mac_address is looked up with a case-sensitive exact match, but
-// callers were inconsistent about casing — coin.js lowercased before
+// callers were inconsistent about casing, coin.js lowercased before
 // storing, while promo.js/session.js and the portal's own MAC
 // auto-detection (uppercase) did not. A session created via coin insert
 // (stored lowercase) would silently show as "no active session" the moment
-// the portal polled its status using the uppercase MAC it had detected —
+// the portal polled its status using the uppercase MAC it had detected,
 // paid, internet unlocked, but the customer's own UI never showing it.
 // Normalizing once here, centrally, means every caller gets consistent
 // behavior regardless of what case they pass in.
@@ -96,18 +96,18 @@ function normalizeMac(mac) {
 
 // Bug found live: two callers (coin credit and the portal's free-minutes
 // claim) each did their own "getSessionByMac, then create if nothing
-// found" — a plain check-then-act with an async gap in between
+// found", a plain check-then-act with an async gap in between
 // (createSession() awaits allowClient() before returning). A coin landing
 // at nearly the same moment as a free-minutes claim could have both
 // requests see "no session yet" and both call createSession(), producing
 // two separate session rows for the same physical device: the admin
 // panel counted it as two connected devices, and whichever row the
-// portal's own getSessionByMac() happened to resolve to (no ORDER BY —
+// portal's own getSessionByMac() happened to resolve to (no ORDER BY,
 // whichever SQLite returns first) silently orphaned the other, making
 // coins that landed in the losing row look like they were never
 // credited. Node is single-threaded and better-sqlite3 is synchronous,
 // so serializing same-mac callers through this in-memory queue closes
-// the gap entirely — no DB schema change needed.
+// the gap entirely, no DB schema change needed.
 const macLocks = new Map();
 function withMacLock(mac, fn) {
   const key = normalizeMac(mac);
@@ -119,7 +119,7 @@ function withMacLock(mac, fn) {
 
 // Shared "top up if a session exists, otherwise create one" used by every
 // caller that doesn't need free-claim's "refuse if one already exists"
-// business rule (coin credit, voucher redemption) — see creditCoinValue()
+// business rule (coin credit, voucher redemption), see creditCoinValue()
 // in coinCreditService.js. Free-claim (server/routes/session.js) keeps its
 // own check-then-refuse-or-create, just wrapped in withMacLock() too, so
 // both paths serialize against each other without free-claim silently
@@ -205,7 +205,7 @@ async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverr
   const voucherCode = generateVoucherCode();
   const now = Date.now();
 
-  // Use Math.floor for consistency (Bug #49 — floating point precision)
+  // Use Math.floor for consistency (Bug #49, floating point precision)
   const mins = Math.floor(parseFloat(minutes) || 0);
   const expMins = Math.floor(parseFloat(expirationMinutes) || mins);
 
@@ -252,7 +252,7 @@ async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverr
     console.error(`[Network] Failed to unlock ${mac}:`, e.message);
   }
 
-  // Bug: the portal only found out a coin landed by polling — this pushes
+  // Bug: the portal only found out a coin landed by polling, this pushes
   // an instant wake-up to any open portal tab for this MAC right now,
   // instead of it waiting on its next poll tick.
   sseService.notify(mac);
@@ -503,7 +503,7 @@ function getActiveSessions() {
 
 // Standalone mode's bandwidth shaping is bound to whichever interface a
 // client's IP was on when it was applied (see standaloneDriver.js's
-// checkRoam) — internet access itself already follows a customer across
+// checkRoam), internet access itself already follows a customer across
 // every AP/lane by design, but their speed cap doesn't unless something
 // re-applies it after a roam. Called periodically by watchdogService, only
 // meaningful in standalone/OpenWRT mode (checkRoam no-ops to

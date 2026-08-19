@@ -189,8 +189,8 @@ function renderPlansTable() {
   }
 
   tbody.innerHTML = rows.map(p => {
-    const durationLabel = p.duration_minutes ? formatDuration(p.duration_minutes) : '—';
-    const validityLabel = p.validity_minutes ? formatDuration(p.validity_minutes) : (p.duration_minutes ? `Valid for ${formatDuration(p.duration_minutes)}` : '—');
+    const durationLabel = p.duration_minutes ? formatDuration(p.duration_minutes) : '–';
+    const validityLabel = p.validity_minutes ? formatDuration(p.validity_minutes) : (p.duration_minutes ? `Valid for ${formatDuration(p.duration_minutes)}` : '–');
     const statusBadge = p.status === 'active'
       ? `<span class="badge badge-green"><span class="status-dot online"></span> Active</span>`
       : `<span class="badge badge-red">Inactive</span>`;

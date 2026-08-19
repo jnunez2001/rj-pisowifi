@@ -1,7 +1,7 @@
 // ===== OPENWRT DRIVER (SSH + nftables/tc) =====
-// Literal port of the APPROACH in Tarakifi's drivers/openwrt.py — SSH to
+// Literal port of the APPROACH in Tarakifi's drivers/openwrt.py, SSH to
 // the router, drive an nftables set for allow/block and HTB+ifb qdiscs for
-// bidirectional shaping — reimplemented in JS since Tarakifi's version uses
+// bidirectional shaping, reimplemented in JS since Tarakifi's version uses
 // Python's asyncssh. rj-pisowifi had no OpenWRT-as-external-router option
 // before this; the standalone driver's own nft/tc command shapes (same
 // commands, same CAKE-under-HTB structure) are reused here almost verbatim,
@@ -82,7 +82,7 @@ async function ping() {
 }
 
 // Uses one nftables set (rj_piso_allowed) on the router, same shape as the
-// standalone driver's own allowed_macs set — operator must create the base
+// standalone driver's own allowed_macs set, operator must create the base
 // table/set/chain once via router-setup.md-style one-time config (mirrors
 // the prerequisite Tarakifi documents for OpenWRT in its own router-setup
 // doc), same pattern MikroTik's setup wizard automates for RouterOS.
@@ -143,7 +143,7 @@ async function isClientAllowed(mac) {
 }
 
 // OpenWRT tc matches by dst_mac/src_mac directly (no DHCP-lease-to-IP
-// lookup needed like the standalone driver requires) — flower's MAC
+// lookup needed like the standalone driver requires), flower's MAC
 // matching is what the standalone driver's own comment warns is
 // inconsistently supported across kernel builds, but OpenWRT's own tc
 // build is known-consistent for this since it's the platform's default
@@ -174,7 +174,7 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
       await exec(ssh, `tc class replace dev ${config.lanInterface} parent 1: classid 1:${classId} htb rate ${download}mbit ceil ${ceilMbps}mbit`);
       await exec(ssh, `tc filter replace dev ${config.lanInterface} protocol ip parent 1:0 prio 1 flower dst_mac ${normalizedMac} classid 1:${classId}`);
       // Ingress (upload) shaping requires an ifb device mirrored from the LAN
-      // interface — assumed already set up as a one-time prerequisite
+      // interface, assumed already set up as a one-time prerequisite
       // (documented alongside the base nftables table/set setup), same as
       // Tarakifi's own OpenWRT driver assumes the operator pre-configures
       // ifb0 rather than provisioning it live over SSH on every call.
