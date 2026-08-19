@@ -142,8 +142,8 @@ function doLogout() {
 // initial load completes; a page that's slow to report ready (or errors
 // out) still gets released by the hard SPLASH_MAX_MS ceiling so a login
 // can never get stuck behind a permanently-visible splash.
-const SPLASH_MIN_MS = 1400;
-const SPLASH_MAX_MS = 6000;
+const SPLASH_MIN_MS = 700;
+const SPLASH_MAX_MS = 3000;
 let splashDashboardReady = false;
 let splashMinTimeElapsed = false;
 let splashResolved = false;

@@ -86,17 +86,17 @@ function selfRouterRowHtml() {
   if (!rtSelfRouter) return '';
   return `
     <tr style="cursor:pointer;" onclick="openSelfRouterDetail()">
-      <td>
+      <td data-label="Router">
         <div style="font-weight:700;color:var(--text-primary);"><i class="fas fa-star" style="color:var(--accent-blue);font-size:11px;margin-right:4px;"></i> StarkFi Router</div>
         <div style="font-size:11px;color:var(--text-muted);">This box's own gateway</div>
       </td>
-      <td>${routerStatusBadge('online')}</td>
-      <td><span class="badge badge-blue">Router</span></td>
-      <td>-</td>
-      <td style="font-family:monospace;font-size:12px;">localhost</td>
-      <td>${formatUptimeSeconds(rtSelfRouter.uptime_seconds)}</td>
-      <td>${rtSelfRouter.cpu_percent ?? '-'}% / ${rtSelfRouter.memory_percent ?? '-'}%</td>
-      <td><button class="btn btn-sm btn-secondary btn-icon" onclick="event.stopPropagation();openSelfRouterDetail();" title="View"><i class="fas fa-eye"></i></button></td>
+      <td data-label="Status">${routerStatusBadge('online')}</td>
+      <td data-label="Mode"><span class="badge badge-blue">Router</span></td>
+      <td data-label="Site">-</td>
+      <td data-label="Host" style="font-family:monospace;font-size:12px;">localhost</td>
+      <td data-label="Uptime">${formatUptimeSeconds(rtSelfRouter.uptime_seconds)}</td>
+      <td data-label="CPU / RAM">${rtSelfRouter.cpu_percent ?? '-'}% / ${rtSelfRouter.memory_percent ?? '-'}%</td>
+      <td class="table-stack-full"><button class="btn btn-sm btn-secondary btn-icon" onclick="event.stopPropagation();openSelfRouterDetail();" title="View"><i class="fas fa-eye"></i></button></td>
     </tr>`;
 }
 
@@ -154,18 +154,18 @@ function renderRoutersTable() {
 
   tbody.innerHTML = (showSelf ? selfRouterRowHtml() : '') + rows.map(r => `
     <tr style="cursor:pointer;" onclick="openRouterDetail(${r.id})">
-      <td>
+      <td data-label="Router">
         <div style="font-weight:700;color:var(--text-primary);">${escapeHtml(r.name)}</div>
         <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(r.manufacturer)}${r.model ? ' · ' + escapeHtml(r.model) : ''}</div>
       </td>
-      <td>${routerStatusBadge(r.status)}</td>
-      <td><span class="badge badge-blue">Controller</span></td>
-      <td>${escapeHtml(r.site_name || '-')}</td>
-      <td style="font-family:monospace;font-size:12px;">${escapeHtml(r.host || '-')}</td>
-      <td>${formatUptimeSeconds(r.uptime_seconds)}</td>
-      <td>${r.cpu_percent !== null && r.cpu_percent !== undefined ? r.cpu_percent + '%' : '-'} / ${r.memory_percent !== null && r.memory_percent !== undefined ? r.memory_percent + '%' : '-'}</td>
-      <td onclick="event.stopPropagation();">
-        <div style="display:flex;gap:6px;">
+      <td data-label="Status">${routerStatusBadge(r.status)}</td>
+      <td data-label="Mode"><span class="badge badge-blue">Controller</span></td>
+      <td data-label="Site">${escapeHtml(r.site_name || '-')}</td>
+      <td data-label="Host" style="font-family:monospace;font-size:12px;">${escapeHtml(r.host || '-')}</td>
+      <td data-label="Uptime">${formatUptimeSeconds(r.uptime_seconds)}</td>
+      <td data-label="CPU / RAM">${r.cpu_percent !== null && r.cpu_percent !== undefined ? r.cpu_percent + '%' : '-'} / ${r.memory_percent !== null && r.memory_percent !== undefined ? r.memory_percent + '%' : '-'}</td>
+      <td class="table-stack-full" onclick="event.stopPropagation();">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
           <button class="btn btn-sm btn-secondary btn-icon" onclick="openRouterDetail(${r.id})" title="View"><i class="fas fa-eye"></i></button>
           <button class="btn btn-sm btn-secondary btn-icon" onclick="openEditRouter(${r.id})" title="Edit"><i class="fas fa-pen"></i></button>
           <button class="btn btn-sm btn-danger btn-icon" onclick="deleteRouter(${r.id})" title="Remove"><i class="fas fa-trash"></i></button>
@@ -474,11 +474,11 @@ async function loadRouterInterfaces(id) {
     }
     tbody.innerHTML = data.interfaces.map(i => `
       <tr>
-        <td style="font-weight:600;">${escapeHtml(i.name)}</td>
-        <td>${escapeHtml(i.type || '-')}</td>
-        <td>${i.disabled ? '<span class="badge badge-red">Disabled</span>' : (i.online ? '<span class="badge badge-green"><span class="status-dot online"></span> Online</span>' : '<span class="badge badge-red">Offline</span>')}</td>
-        <td>${i.rx_bytes !== null ? formatBytes(i.rx_bytes) : '-'}</td>
-        <td>${i.tx_bytes !== null ? formatBytes(i.tx_bytes) : '-'}</td>
+        <td data-label="Interface" style="font-weight:600;">${escapeHtml(i.name)}</td>
+        <td data-label="Type">${escapeHtml(i.type || '-')}</td>
+        <td data-label="Status">${i.disabled ? '<span class="badge badge-red">Disabled</span>' : (i.online ? '<span class="badge badge-green"><span class="status-dot online"></span> Online</span>' : '<span class="badge badge-red">Offline</span>')}</td>
+        <td data-label="RX (since router boot)">${i.rx_bytes !== null ? formatBytes(i.rx_bytes) : '-'}</td>
+        <td data-label="TX (since router boot)">${i.tx_bytes !== null ? formatBytes(i.tx_bytes) : '-'}</td>
       </tr>
     `).join('');
   } catch (e) {

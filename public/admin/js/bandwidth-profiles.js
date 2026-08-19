@@ -37,11 +37,11 @@ function renderBandwidthProfilesTable() {
   }
   tbody.innerHTML = bwProfilesAll.map(p => `
     <tr>
-      <td style="font-weight:700;">${escapeHtml(p.name)}</td>
-      <td>${escapeHtml(String(p.download_mbps))} Mbps</td>
-      <td>${escapeHtml(String(p.upload_mbps))} Mbps</td>
-      <td>${p.burst_mbps ? escapeHtml(String(p.burst_mbps)) + ' Mbps' : '-'}</td>
-      <td style="text-align:right;">
+      <td data-label="Name" style="font-weight:700;">${escapeHtml(p.name)}</td>
+      <td data-label="Download">${escapeHtml(String(p.download_mbps))} Mbps</td>
+      <td data-label="Upload">${escapeHtml(String(p.upload_mbps))} Mbps</td>
+      <td data-label="Burst">${p.burst_mbps ? escapeHtml(String(p.burst_mbps)) + ' Mbps' : '-'}</td>
+      <td class="table-stack-full" style="text-align:right;">
         <button class="btn btn-sm btn-danger btn-icon" onclick="deleteBandwidthProfile(${p.id}, '${escapeHtml(p.name)}')" title="Delete"><i class="fas fa-trash"></i></button>
       </td>
     </tr>

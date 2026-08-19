@@ -220,21 +220,21 @@ async function loadPromos() {
       const badge = voucherStatusBadge(p.status);
       return `
         <tr>
-          <td>
+          <td data-label="Code">
             <span style="font-family:monospace;font-size:14px;font-weight:700;
                          color:var(--accent-red);letter-spacing:2px;">
               ${p.code}
             </span>
           </td>
-          <td><span class="badge badge-blue">${formatDuration(minutes)}</span></td>
-          <td><span class="badge badge-green">₱${p.price}</span></td>
-          <td>
+          <td data-label="Duration"><span class="badge badge-blue">${formatDuration(minutes)}</span></td>
+          <td data-label="Price"><span class="badge badge-green">₱${p.price}</span></td>
+          <td data-label="Status">
             <span class="badge ${badge.cls}">${badge.label}</span>
           </td>
-          <td style="font-family:monospace;font-size:12px;color:var(--text-muted);">
+          <td data-label="Used By" style="font-family:monospace;font-size:12px;color:var(--text-muted);">
             ${p.mac_address || '--'}
           </td>
-          <td>
+          <td class="table-stack-full">
             <button class="btn btn-sm btn-danger btn-icon"
                     onclick="deletePromo(${p.id}, '${p.code}')"
                     title="Delete">
@@ -414,18 +414,18 @@ async function loadVoucherGroups() {
 
     tbody.innerHTML = data.groups.map(g => `
       <tr>
-        <td>
+        <td data-label="Group / Name">
           <div style="font-weight:700;color:var(--text-primary);">${g.name}</div>
           <div style="font-size:11px;color:var(--text-muted);">${formatDuration(g.duration_minutes)} · ₱${g.price}</div>
         </td>
-        <td>${g.actual_count}</td>
-        <td style="color:var(--accent-orange);font-weight:600;">${g.unused_count || 0}</td>
-        <td style="color:var(--accent-green);font-weight:600;">${g.active_count || 0}</td>
-        <td style="color:var(--accent-blue);font-weight:600;">${g.used_count || 0}</td>
-        <td>${formatDuration(g.duration_minutes)}</td>
-        <td>₱${g.price}</td>
-        <td style="font-size:12px;color:var(--text-muted);">${new Date(g.created_at.replace(' ', 'T') + 'Z').toLocaleDateString()}</td>
-        <td>
+        <td data-label="Quantity">${g.actual_count}</td>
+        <td data-label="Unused" style="color:var(--accent-orange);font-weight:600;">${g.unused_count || 0}</td>
+        <td data-label="Active" style="color:var(--accent-green);font-weight:600;">${g.active_count || 0}</td>
+        <td data-label="Used" style="color:var(--accent-blue);font-weight:600;">${g.used_count || 0}</td>
+        <td data-label="Duration">${formatDuration(g.duration_minutes)}</td>
+        <td data-label="Price">₱${g.price}</td>
+        <td data-label="Created On" style="font-size:12px;color:var(--text-muted);">${new Date(g.created_at.replace(' ', 'T') + 'Z').toLocaleDateString()}</td>
+        <td class="table-stack-full">
           <div style="display:flex;gap:6px;">
             <button class="btn btn-sm btn-secondary btn-icon" onclick="viewVoucherGroup(${g.id})" title="View codes">
               <i class="fas fa-eye"></i>
@@ -564,9 +564,9 @@ async function viewVoucherGroup(id) {
       const badge = voucherStatusBadge(v.status);
       return `
         <tr>
-          <td style="font-family:monospace;font-weight:700;color:var(--accent-red);letter-spacing:1px;">${v.code}</td>
-          <td><span class="badge ${badge.cls}">${badge.label}</span></td>
-          <td style="font-family:monospace;font-size:12px;color:var(--text-muted);">${v.mac_address || '--'}</td>
+          <td data-label="Code" style="font-family:monospace;font-weight:700;color:var(--accent-red);letter-spacing:1px;">${v.code}</td>
+          <td data-label="Status"><span class="badge ${badge.cls}">${badge.label}</span></td>
+          <td data-label="Used By" style="font-family:monospace;font-size:12px;color:var(--text-muted);">${v.mac_address || '--'}</td>
         </tr>`;
     }).join('');
 

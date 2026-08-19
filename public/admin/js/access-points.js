@@ -161,18 +161,18 @@ function renderApTable() {
 
   tbody.innerHTML = rows.map(a => `
     <tr style="cursor:pointer;" onclick="openApDetail(${a.id})">
-      <td>
+      <td data-label="Access Point">
         <div style="font-weight:700;color:var(--text-primary);">${escapeHtml(a.name)}</div>
         <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(a.vendor || '')}${a.model ? ' · ' + escapeHtml(a.model) : ''}</div>
       </td>
-      <td>${apStatusBadge(a.status)}</td>
-      <td style="font-family:monospace;font-size:12px;">${escapeHtml(a.ip_address || '-')}</td>
-      <td style="font-family:monospace;font-size:12px;">${escapeHtml(a.mac_address || '-')}</td>
-      <td>${apVlanCell(a)}</td>
-      <td>${escapeHtml(a.site_name || '-')}</td>
-      <td>${apManagementBadge(a.management_state)}</td>
-      <td style="font-size:12px;">${a.last_seen_at ? new Date(a.last_seen_at.replace(' ', 'T') + 'Z').toLocaleString() : 'Never'}</td>
-      <td onclick="event.stopPropagation();">
+      <td data-label="Status">${apStatusBadge(a.status)}</td>
+      <td data-label="IP Address" style="font-family:monospace;font-size:12px;">${escapeHtml(a.ip_address || '-')}</td>
+      <td data-label="MAC Address" style="font-family:monospace;font-size:12px;">${escapeHtml(a.mac_address || '-')}</td>
+      <td data-label="VLAN">${apVlanCell(a)}</td>
+      <td data-label="Site">${escapeHtml(a.site_name || '-')}</td>
+      <td data-label="Management">${apManagementBadge(a.management_state)}</td>
+      <td data-label="Last Seen" style="font-size:12px;">${a.last_seen_at ? new Date(a.last_seen_at.replace(' ', 'T') + 'Z').toLocaleString() : 'Never'}</td>
+      <td class="table-stack-full" onclick="event.stopPropagation();">
         <div style="display:flex;gap:6px;">
           <button class="btn btn-sm btn-secondary btn-icon" onclick="pingAp(${a.id})" title="Ping"><i class="fas fa-satellite-dish"></i></button>
           <button class="btn btn-sm btn-secondary btn-icon" onclick="openApDetail(${a.id})" title="View"><i class="fas fa-eye"></i></button>

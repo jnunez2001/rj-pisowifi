@@ -159,15 +159,15 @@ function buildTransactionTable(transactions) {
 
     return `
       <tr>
-        <td>
+        <td data-label="Session ID">
           <span style="font-family:monospace;font-size:13px;color:var(--accent-red);font-weight:700;">
             ${t.voucher_code}
           </span>
         </td>
-        <td>${coinValue}</td>
-        <td style="font-weight:600;">${formatSalesMins(t.minutes_added)}</td>
-        <td>${typeBadge}</td>
-        <td style="font-size:13px;color:var(--text-muted);">
+        <td data-label="Amount">${coinValue}</td>
+        <td data-label="Time Added" style="font-weight:600;">${formatSalesMins(t.minutes_added)}</td>
+        <td data-label="Type">${typeBadge}</td>
+        <td data-label="Date & Time" style="font-size:13px;color:var(--text-muted);">
           ${new Date(t.created_at).toLocaleString()}
         </td>
       </tr>`;

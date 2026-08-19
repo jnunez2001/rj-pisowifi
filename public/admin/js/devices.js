@@ -216,29 +216,29 @@ async function loadDevices() {
 
       return `
         <tr${isCandidate ? ' style="background:var(--accent-yellow-light,#fff8e1);"' : ''}>
-          <td>
+          <td data-label="Name">
             <div style="font-weight:700;">${v.name}</div>
             ${isCandidate ? '<span class="badge badge-orange" style="margin-top:4px;">New - needs approval</span>' : ''}
           </td>
-          <td>
+          <td data-label="Role">
             <select class="form-control" style="width:auto;font-size:12px;padding:4px 8px;" onchange="changeVendoRole(${v.id}, this.value)" ${isCandidate ? 'disabled' : ''}>
               <option value="main" ${v.role === 'main' ? 'selected' : ''}>Main</option>
               <option value="sub" ${v.role === 'sub' ? 'selected' : ''}>Sub-vendo</option>
               <option value="standalone" ${(!v.role || v.role === 'standalone') ? 'selected' : ''}>Standalone</option>
             </select>
           </td>
-          <td style="font-family:monospace;font-size:12px;color:var(--text-muted);">
+          <td data-label="MAC Address" style="font-family:monospace;font-size:12px;color:var(--text-muted);">
             ${v.mac_address}
           </td>
-          <td>${ipLink}</td>
-          <td>
+          <td data-label="IP Address">${ipLink}</td>
+          <td data-label="Firmware">
             <span class="badge badge-blue">${v.firmware || '--'}</span>
           </td>
-          <td>${statusBadge}</td>
-          <td style="font-size:13px;color:var(--text-muted);">
+          <td data-label="Status">${statusBadge}</td>
+          <td data-label="Last Seen" style="font-size:13px;color:var(--text-muted);">
             ${timeAgo(v.last_seen)}
           </td>
-          <td style="text-align:right;">
+          <td class="table-stack-full" style="text-align:right;">
             ${isCandidate ? `
               <button class="btn btn-sm btn-primary" onclick="adoptVendoDevice(${v.id}, '${escapeHtml(v.name)}')">
                 <i class="fas fa-check"></i> Adopt

@@ -504,7 +504,7 @@
       <button class="modal-close" onclick="closeModal('mtVlanModal')"><i class="fas fa-times"></i></button>
     </div>
     <div class="table-wrapper">
-      <table>
+      <table class="table-stack">
         <thead><tr><th>Interface</th><th>VLAN ID</th><th>Parent</th><th>IP Address</th><th></th></tr></thead>
         <tbody id="mtVlanTableBody"><tr><td colspan="5" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
       </table>
@@ -543,7 +543,7 @@
       <button class="modal-close" onclick="closeModal('mtDhcpModal')"><i class="fas fa-times"></i></button>
     </div>
     <div class="table-wrapper">
-      <table>
+      <table class="table-stack">
         <thead><tr><th>Interface</th><th>Name</th><th>Network</th><th>Pool</th><th>Gateway</th><th></th></tr></thead>
         <tbody id="mtDhcpTableBody"><tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
       </table>
@@ -593,7 +593,7 @@
     </div>
     <div class="zf-row-hint" style="padding:0 0 10px;">Changing a role that removes the router's only WAN uplink requires confirmation and is automatically rolled back if the router becomes unreachable afterward.</div>
     <div class="table-wrapper">
-      <table>
+      <table class="table-stack">
         <thead><tr><th>Interface</th><th>MAC</th><th>Status</th><th>Role</th></tr></thead>
         <tbody id="mtRolesTableBody"><tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
       </table>
@@ -610,7 +610,7 @@
     </div>
     <div class="zf-row-hint" style="padding:0 0 10px;">Simple allow/block policies between zones (WAN/LAN/Guest), built from your port roles above &mdash; no raw firewall syntax needed.</div>
     <div class="table-wrapper">
-      <table>
+      <table class="table-stack">
         <thead><tr><th>From</th><th>To</th><th>Action</th><th></th></tr></thead>
         <tbody id="mtZonesTableBody"><tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
       </table>
@@ -655,7 +655,7 @@
       <button class="modal-close" onclick="closeModal('mtForwardsModal')"><i class="fas fa-times"></i></button>
     </div>
     <div class="table-wrapper">
-      <table>
+      <table class="table-stack">
         <thead><tr><th>Protocol</th><th>External</th><th>Internal</th><th></th></tr></thead>
         <tbody id="mtForwardsTableBody"><tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
       </table>
@@ -736,7 +736,7 @@
   <div class="zf-accordion-panel" id="leasesPanel">
     <div class="zf-modal-body-text">Useful for printers, cameras, or staff devices that need a fixed address instead of whatever the DHCP pool assigns.</div>
     <div class="table-wrapper">
-      <table>
+      <table class="table-stack">
         <thead>
           <tr>
             <th>MAC Address</th>
@@ -778,7 +778,7 @@
   <div class="zf-accordion-panel" id="portForwardPanel">
     <div class="zf-modal-body-text">Let a specific service on your LAN be reached from the internet.</div>
     <div class="table-wrapper">
-      <table>
+      <table class="table-stack">
         <thead>
           <tr>
             <th>Label</th>
@@ -916,7 +916,7 @@
       </button>
     </div>
     <div class="table-wrapper">
-      <table>
+      <table class="table-stack">
         <thead>
           <tr>
             <th>VLAN Interface</th>
@@ -950,7 +950,7 @@
   <div class="zf-accordion-panel" id="clientLabelsPanel">
     <div class="zf-modal-body-text">Give a MAC address a friendly name so it's easy to recognize elsewhere.</div>
     <div class="table-wrapper">
-      <table>
+      <table class="table-stack">
         <thead>
           <tr>
             <th>MAC Address</th>

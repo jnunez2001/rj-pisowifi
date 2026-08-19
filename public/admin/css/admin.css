@@ -1007,10 +1007,77 @@ select.form-control { cursor: pointer; }
   /* Modal */
   .modal { padding: 18px 14px; }
 
-  /* Table */
+  /* Table -> stacked cards. Any table opts in with .table-stack (set on
+     the <table> itself); tables that haven't been given data-label
+     attributes on their <td> cells keep the old horizontal-scroll
+     behavior instead of silently losing their column labels. */
+  .table-wrapper:has(table.table-stack) { overflow-x: visible; }
+  table.table-stack { min-width: 0; }
+  table.table-stack thead { display: none; }
+  table.table-stack, table.table-stack tbody, table.table-stack tr, table.table-stack td {
+    display: block;
+    width: 100%;
+  }
+  table.table-stack tr {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 4px 14px;
+    margin-bottom: 12px;
+  }
+  table.table-stack tr:hover { background: var(--bg-card); }
+  table.table-stack td {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-light);
+    text-align: right;
+    min-height: 44px;
+  }
+  table.table-stack td:last-child { border-bottom: none; }
+  table.table-stack td[data-label]::before {
+    content: attr(data-label);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    text-align: left;
+    flex-shrink: 0;
+  }
+  /* Cells with no label (checkboxes, action buttons) span full width
+     without the label/value split. */
+  table.table-stack td:not([data-label]) { justify-content: flex-end; }
+  table.table-stack td.table-stack-full {
+    display: block;
+    text-align: left;
+  }
+
+  /* Table (non-stacked fallback, still improved for touch/legibility) */
   table { min-width: 520px; }
   thead th { padding: 10px 12px; }
-  tbody td { padding: 10px 12px; }
+  tbody td { padding: 10px 12px; min-height: 44px; }
+
+  /* Touch targets: nav items, buttons, icon buttons get to ~44px tall */
+  .nav-item { padding: 13px 16px; min-height: 44px; }
+  .btn { min-height: 40px; padding: 10px 18px; }
+  .btn-sm { min-height: 36px; }
+  .btn-icon { min-width: 40px; min-height: 40px; }
+  .header-icon-btn { min-width: 40px; min-height: 40px; }
+  .modal-close { width: 36px; height: 36px; }
+
+  /* zf3 grids - reduce column counts instead of squeezing. !important
+     overrides inline grid-template-columns styles some pages set for
+     desktop (e.g. Live Sessions' 5-column stat row), which otherwise win
+     on specificity over this stylesheet rule. */
+  .zf3-stat-grid { grid-template-columns: 1fr 1fr !important; }
+  .zf3-devices-grid { grid-template-columns: 1fr 1fr !important; }
+  .zf3-actions-grid { grid-template-columns: 1fr 1fr !important; }
+  .zf3-wan-grid { grid-template-columns: 1fr !important; }
+  .zf3-header { flex-direction: column; align-items: stretch; }
+  .zf3-header-right { flex-wrap: wrap; }
 }
 
 /* Small phones */

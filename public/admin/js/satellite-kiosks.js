@@ -27,20 +27,20 @@ async function loadSatelliteKiosks() {
 
     tbody.innerHTML = data.kiosks.map(k => `
       <tr>
-        <td style="font-weight:600;">${escapeHtml(k.name)}</td>
-        <td>
+        <td data-label="Name" style="font-weight:600;">${escapeHtml(k.name)}</td>
+        <td data-label="Status">
           <span class="badge ${k.online ? 'badge-green' : 'badge-orange'}">
             <span class="status-dot ${k.online ? 'online' : ''}"></span>${k.online ? 'Online' : 'Offline'}
           </span>
         </td>
-        <td style="color:var(--text-muted);font-size:13px;">
+        <td data-label="Last Seen" style="color:var(--text-muted);font-size:13px;">
           ${k.last_seen ? new Date(k.last_seen + 'Z').toLocaleString() : 'Never'}
         </td>
-        <td>
+        <td data-label="Today's Revenue">
           <span class="badge badge-green">₱${k.today_revenue.toFixed(2)}</span>
           <span style="color:var(--text-muted);font-size:12px;">(${k.today_transactions})</span>
         </td>
-        <td style="text-align:right;">
+        <td class="table-stack-full" style="text-align:right;">
           <button class="btn btn-sm btn-secondary" onclick="openRenameKiosk(${k.id}, '${escapeHtml(k.name)}')" title="Rename">
             <i class="fas fa-pen"></i>
           </button>

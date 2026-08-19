@@ -188,10 +188,10 @@ async function hsLoadSalesStats() {
         : '';
       return `
         <tr>
-          <td><i class="fas ${cfg.icon}" style="margin-right:8px;color:${cfg.color};"></i>${cfg.label}${viewByKiosk}</td>
-          <td><span class="badge badge-green">₱${d.amount.toFixed(2)}</span></td>
-          <td>${d.count}</td>
-          <td>${d.amount > 0 ? pct.toFixed(1) + '%' : '—'}</td>
+          <td data-label="Source"><i class="fas ${cfg.icon}" style="margin-right:8px;color:${cfg.color};"></i>${cfg.label}${viewByKiosk}</td>
+          <td data-label="Amount"><span class="badge badge-green">₱${d.amount.toFixed(2)}</span></td>
+          <td data-label="Transactions">${d.count}</td>
+          <td data-label="% of Total">${d.amount > 0 ? pct.toFixed(1) + '%' : '—'}</td>
         </tr>`;
     }).join('');
 
@@ -297,19 +297,19 @@ async function hsLoadRecentTransactions() {
     };
     tbody.innerHTML = transactions.slice(0, 10).map(t => `
       <tr>
-        <td>
+        <td data-label="Session ID">
           <span style="font-family:monospace;font-size:13px;color:var(--accent-red);font-weight:700;">
             ${t.voucher_code}
           </span>
         </td>
-        <td>
+        <td data-label="Amount">
           <span class="badge badge-green">₱${t.coin_value}</span>
         </td>
-        <td>${hsFormatMins(t.minutes_added)}</td>
-        <td>
+        <td data-label="Time Added">${hsFormatMins(t.minutes_added)}</td>
+        <td data-label="Source">
           <span class="badge badge-blue">${sourceLabel(t)}</span>
         </td>
-        <td style="color:var(--text-muted);font-size:13px;">
+        <td data-label="Time" style="color:var(--text-muted);font-size:13px;">
           ${new Date(t.created_at).toLocaleTimeString()}
         </td>
       </tr>

@@ -61,11 +61,11 @@ async function loadMtVlans() {
     }
     tbody.innerHTML = data.vlans.map(v => `
       <tr>
-        <td>${escapeHtml(v.name || v.interface_name || '')}</td>
-        <td>${escapeHtml(String(v.vlan_id))}</td>
-        <td>${escapeHtml(v.parent_interface || v.interface || '')}</td>
-        <td>${escapeHtml(v.ip_address || '-')}</td>
-        <td style="text-align:right;">
+        <td data-label="Interface">${escapeHtml(v.name || v.interface_name || '')}</td>
+        <td data-label="VLAN ID">${escapeHtml(String(v.vlan_id))}</td>
+        <td data-label="Parent">${escapeHtml(v.parent_interface || v.interface || '')}</td>
+        <td data-label="IP Address">${escapeHtml(v.ip_address || '-')}</td>
+        <td class="table-stack-full" style="text-align:right;">
           <button class="btn btn-sm btn-danger" onclick="deleteMtVlan('${escapeHtml(v['.id'] || v.id)}')"><i class="fas fa-trash"></i></button>
         </td>
       </tr>
@@ -155,12 +155,12 @@ async function loadMtDhcp() {
     }
     tbody.innerHTML = data.servers.map(s => `
       <tr>
-        <td>${escapeHtml(s.interface || '')}</td>
-        <td>${escapeHtml(s.name || '')}</td>
-        <td>${escapeHtml(s.network || '')}</td>
-        <td>${escapeHtml(s.pool_range || s.pool || '')}</td>
-        <td>${escapeHtml(s.gateway || '')}</td>
-        <td style="text-align:right;">
+        <td data-label="Interface">${escapeHtml(s.interface || '')}</td>
+        <td data-label="Name">${escapeHtml(s.name || '')}</td>
+        <td data-label="Network">${escapeHtml(s.network || '')}</td>
+        <td data-label="Pool">${escapeHtml(s.pool_range || s.pool || '')}</td>
+        <td data-label="Gateway">${escapeHtml(s.gateway || '')}</td>
+        <td class="table-stack-full" style="text-align:right;">
           <button class="btn btn-sm btn-danger" onclick="deleteMtDhcp('${escapeHtml(s['.id'] || s.id)}')"><i class="fas fa-trash"></i></button>
         </td>
       </tr>
@@ -237,10 +237,10 @@ async function loadMtRoles() {
     }
     tbody.innerHTML = data.roles.map(r => `
       <tr>
-        <td>${escapeHtml(r.name)}</td>
-        <td style="font-family:monospace;font-size:12px;color:var(--text-muted);">${escapeHtml(r.mac || '-')}</td>
-        <td><span class="badge ${r.running ? 'badge-green' : 'badge-red'}">${r.running ? 'Up' : 'Down'}</span></td>
-        <td>
+        <td data-label="Interface">${escapeHtml(r.name)}</td>
+        <td data-label="MAC" style="font-family:monospace;font-size:12px;color:var(--text-muted);">${escapeHtml(r.mac || '-')}</td>
+        <td data-label="Status"><span class="badge ${r.running ? 'badge-green' : 'badge-red'}">${r.running ? 'Up' : 'Down'}</span></td>
+        <td data-label="Role">
           <select class="form-control" style="width:auto;font-size:12px;padding:4px 8px;" onchange="setMtRole('${escapeHtml(r.name)}', this.value, this)">
             <option value="unused" ${r.role === 'unused' ? 'selected' : ''}>Unused</option>
             <option value="wan" ${r.role === 'wan' ? 'selected' : ''}>WAN</option>
@@ -303,10 +303,10 @@ async function loadMtZones() {
     }
     tbody.innerHTML = data.policies.map(p => `
       <tr>
-        <td>${escapeHtml((p.from_zone || '').toUpperCase())}</td>
-        <td>${escapeHtml((p.to_zone || '').toUpperCase())}</td>
-        <td><span class="badge ${p.action === 'accept' ? 'badge-green' : 'badge-red'}">${escapeHtml(p.action)}</span></td>
-        <td style="text-align:right;">
+        <td data-label="From">${escapeHtml((p.from_zone || '').toUpperCase())}</td>
+        <td data-label="To">${escapeHtml((p.to_zone || '').toUpperCase())}</td>
+        <td data-label="Action"><span class="badge ${p.action === 'accept' ? 'badge-green' : 'badge-red'}">${escapeHtml(p.action)}</span></td>
+        <td class="table-stack-full" style="text-align:right;">
           <button class="btn btn-sm btn-danger" onclick="deleteMtZone('${escapeHtml(p['.id'] || p.id)}')"><i class="fas fa-trash"></i></button>
         </td>
       </tr>
@@ -372,10 +372,10 @@ async function loadMtForwards() {
     }
     tbody.innerHTML = data.forwards.map(f => `
       <tr>
-        <td>${escapeHtml((f.protocol || '').toUpperCase())}</td>
-        <td>${escapeHtml(String(f.external_port))}</td>
-        <td>${escapeHtml(f.internal_ip)}:${escapeHtml(String(f.internal_port))}</td>
-        <td style="text-align:right;">
+        <td data-label="Protocol">${escapeHtml((f.protocol || '').toUpperCase())}</td>
+        <td data-label="External">${escapeHtml(String(f.external_port))}</td>
+        <td data-label="Internal">${escapeHtml(f.internal_ip)}:${escapeHtml(String(f.internal_port))}</td>
+        <td class="table-stack-full" style="text-align:right;">
           <button class="btn btn-sm btn-danger" onclick="deleteMtForward('${escapeHtml(f['.id'] || f.id)}')"><i class="fas fa-trash"></i></button>
         </td>
       </tr>

@@ -12,6 +12,7 @@
 //    per the "backup/confirm before risky changes" reliability rule.
 
 const cron = require('node-cron');
+const os = require('os');
 const { execFile } = require('child_process');
 const db = require('../config/database');
 const networkService = require('./networkService');
@@ -22,7 +23,22 @@ const WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 const MIN_FREE_DISK_MB = 200;
 const MAX_EVENTS_KEPT = 500;
 
+// A full IP/NIC loss (e.g. a flaky USB-Ethernet adapter dropping its link)
+// takes this box offline for every customer, not just one session - it gets
+// its own, more cautious escalation ladder instead of the general
+// per-session auto-fix cap above: one bad check is treated as a transient
+// blip and ignored, two in a row triggers a lightweight interface reset,
+// and only if that doesn't bring the IP back does it escalate to a full
+// restart - capped hard, so a genuinely dead adapter gets flagged instead
+// of reboot-looping forever.
+const MAX_REBOOTS_PER_WINDOW = 1;
+const REBOOT_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
 let fixTimestamps = [];
+let rebootTimestamps = [];
+let lastKnownGoodInterfaces = new Set();
+let consecutiveIpMissing = 0;
+let ipRecoveryStage = 'none'; // 'none' | 'bounced'
 let lastResult = { at: null, status: 'unknown', issues: [] };
 
 function pruneFixTimestamps() {
@@ -81,6 +97,119 @@ async function repairActiveSessionAccess() {
   return repaired;
 }
 
+function getNonInternalIPv4Interfaces() {
+  const nets = os.networkInterfaces();
+  const found = [];
+  for (const [name, addrs] of Object.entries(nets)) {
+    for (const addr of addrs || []) {
+      if (addr.family === 'IPv4' && !addr.internal) {
+        found.push(name);
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+function canReboot() {
+  const cutoff = Date.now() - REBOOT_WINDOW_MS;
+  rebootTimestamps = rebootTimestamps.filter((t) => t > cutoff);
+  return rebootTimestamps.length < MAX_REBOOTS_PER_WINDOW;
+}
+
+function bounceInterface(name) {
+  return new Promise((resolve) => {
+    execFile('ip', ['link', 'set', name, 'down'], () => {
+      setTimeout(() => {
+        execFile('ip', ['link', 'set', name, 'up'], (err) => resolve(!err));
+      }, 1000);
+    });
+  });
+}
+
+async function checkNetworkReachability() {
+  const issues = [];
+  const live = getNonInternalIPv4Interfaces();
+
+  if (live.length > 0) {
+    lastKnownGoodInterfaces = new Set(live);
+    consecutiveIpMissing = 0;
+    ipRecoveryStage = 'none';
+    return issues;
+  }
+
+  consecutiveIpMissing += 1;
+
+  if (consecutiveIpMissing < 2) {
+    issues.push({
+      severity: 'warning',
+      code: 'ip_missing_transient',
+      message: 'No network IP address detected on this check. Waiting for a second consecutive miss before acting.',
+    });
+    return issues;
+  }
+
+  if (os.platform() !== 'linux') {
+    issues.push({
+      severity: 'critical',
+      code: 'ip_missing_no_auto_recovery',
+      message: 'No network IP address detected for multiple checks. Automatic recovery is only available on the deployed Linux platform, not this environment.',
+    });
+    return issues;
+  }
+
+  if (ipRecoveryStage === 'none') {
+    const targets = [...lastKnownGoodInterfaces];
+    if (targets.length === 0) {
+      ipRecoveryStage = 'bounced';
+      issues.push({
+        severity: 'critical',
+        code: 'ip_missing_no_known_interface',
+        message: 'No network IP address on any interface, and no previously-seen interface to reset. This likely needs a manual restart.',
+      });
+      return issues;
+    }
+
+    let anyBounced = false;
+    for (const name of targets) {
+      const ok = await bounceInterface(name);
+      if (ok) anyBounced = true;
+    }
+    ipRecoveryStage = 'bounced';
+    issues.push({
+      severity: 'critical',
+      code: anyBounced ? 'ip_missing_interface_bounced' : 'ip_missing_bounce_failed',
+      message: anyBounced
+        ? `No network IP address for multiple checks. Reset network interface(s) [${targets.join(', ')}] and rechecking.`
+        : `No network IP address, and resetting interface(s) [${targets.join(', ')}] failed (this account may lack permission). Will attempt a full restart next if it's still down.`,
+    });
+    return issues;
+  }
+
+  // Already reset the interface on a prior check and it's still down.
+  if (!canReboot()) {
+    issues.push({
+      severity: 'critical',
+      code: 'ip_missing_reboot_rate_limited',
+      message: 'Network is still down after an interface reset, and an automatic restart has already been used recently. Auto-recovery is paused - this needs a manual check, likely a failing network adapter.',
+    });
+    return issues;
+  }
+
+  issues.push({
+    severity: 'critical',
+    code: 'ip_missing_rebooting',
+    message: 'Network is still down after an interface reset. Restarting the system automatically to restore connectivity.',
+  });
+  rebootTimestamps.push(Date.now());
+  setTimeout(() => {
+    execFile('reboot', [], (err) => {
+      if (err) console.error('🛡️ [Watchdog] Reboot command failed (this account likely lacks permission to reboot):', err.message);
+    });
+  }, 2000);
+  return issues;
+}
+
 function checkDiskSpace() {
   return new Promise((resolve) => {
     execFile('df', ['-Pm', '.'], (err, stdout) => {
@@ -112,6 +241,8 @@ function persistResult(status, issues) {
 async function runHealthCheck() {
   const issues = [];
   const mode = getNetworkMode();
+
+  issues.push(...(await checkNetworkReachability()));
 
   // MikroTik/pfSense own their own access-control state on external
   // hardware — this box isn't the source of truth for it, so the

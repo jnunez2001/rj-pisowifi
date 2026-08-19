@@ -116,16 +116,16 @@ function renderDevicesTable() {
 
   tbody.innerHTML = pageRows.map((d) => `
     <tr style="cursor:pointer;" onclick="openDevDetail('${d.mac}')">
-      <td>
+      <td data-label="Device">
         <div style="font-weight:700;color:var(--text-primary);">${escapeHtml(d.name)}</div>
         <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(d.vendor || '')}${d.group_name ? ` &middot; ${escapeHtml(d.group_name)}` : ''}</div>
       </td>
-      <td>${escapeHtml(d.type)}</td>
-      <td>${devStatusBadge(d.status)}</td>
-      <td style="font-family:monospace;font-size:12px;">${escapeHtml(d.ip || '-')}</td>
-      <td style="font-family:monospace;font-size:12px;">${escapeHtml(d.mac)}</td>
-      <td>${d.vlan_id ? `VLAN ${d.vlan_id}` : '-'}</td>
-      <td>${devTrafficCell(d.traffic_bytes)}</td>
+      <td data-label="Type">${escapeHtml(d.type)}</td>
+      <td data-label="Status">${devStatusBadge(d.status)}</td>
+      <td data-label="IP Address" style="font-family:monospace;font-size:12px;">${escapeHtml(d.ip || '-')}</td>
+      <td data-label="MAC Address" style="font-family:monospace;font-size:12px;">${escapeHtml(d.mac)}</td>
+      <td data-label="VLAN">${d.vlan_id ? `VLAN ${d.vlan_id}` : '-'}</td>
+      <td data-label="Traffic">${devTrafficCell(d.traffic_bytes)}</td>
     </tr>
   `).join('');
   summary.textContent = `Showing ${pageRows.length} of ${rows.length} devices${rows.length !== devAll.length ? ` (${devAll.length} total)` : ''}`;

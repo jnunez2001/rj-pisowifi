@@ -193,28 +193,28 @@ function renderSessionsTable() {
     const isPaused = s.is_paused === 1;
     return `
       <tr>
-        <td><input type="checkbox" class="ls-row-check" data-voucher="${s.voucher_code}" onchange="toggleRowSelect('${s.voucher_code}', this.checked)" ${lsSelected.has(s.voucher_code) ? 'checked' : ''}></td>
-        <td>
+        <td class="table-stack-full"><input type="checkbox" class="ls-row-check" data-voucher="${s.voucher_code}" onchange="toggleRowSelect('${s.voucher_code}', this.checked)" ${lsSelected.has(s.voucher_code) ? 'checked' : ''}></td>
+        <td data-label="Session ID">
           <span style="font-family:monospace;font-size:13px;color:var(--text-primary);font-weight:700;">${s.voucher_code}</span>
           <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Start: ${parseSqlDate(s.created_at).toLocaleTimeString()}</div>
         </td>
-        <td style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${s.mac_address}</td>
-        <td style="font-size:13px;color:var(--text-secondary);">${s.ip_address || '--'}</td>
-        <td>
+        <td data-label="MAC Address" style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${s.mac_address}</td>
+        <td data-label="IP Address" style="font-size:13px;color:var(--text-secondary);">${s.ip_address || '--'}</td>
+        <td data-label="Plan">
           ${s.redeemed_code ? `<span style="font-size:13px;color:var(--text-primary);">Voucher</span><div style="font-size:11px;color:var(--text-muted);">${s.redeemed_code}</div>` : '<span style="font-size:13px;color:var(--text-primary);">Coin Session</span>'}
           <div style="font-size:11px;color:var(--text-muted);">Expires: ${parseSqlDate(s.hard_expires_at).toLocaleTimeString()}</div>
         </td>
-        <td style="font-size:13px;color:var(--text-secondary);">${formatElapsed(s.created_at)}</td>
-        <td>
+        <td data-label="Duration" style="font-size:13px;color:var(--text-secondary);">${formatElapsed(s.created_at)}</td>
+        <td data-label="Time Remaining">
           <span style="font-weight:700;color:${status === 'expiring' ? 'var(--accent-red)' : 'var(--text-primary)'};">${formatSessionTime(s.minutes_remaining)}</span>
         </td>
-        <td style="font-size:12px;color:var(--text-secondary);">
+        <td data-label="Rate Limit" style="font-size:12px;color:var(--text-secondary);">
           ${s.download_mbps ? `${s.download_mbps} Mbps ↓<br>${s.upload_mbps || s.download_mbps} Mbps ↑` : 'Global default'}
         </td>
-        <td style="font-size:12px;color:var(--text-secondary);">${renderDataUsageCell(s)}</td>
-        <td>${statusBadge[status]}</td>
-        <td>
-          <div style="display:flex;gap:6px;">
+        <td data-label="Data Used" style="font-size:12px;color:var(--text-secondary);">${renderDataUsageCell(s)}</td>
+        <td data-label="Status">${statusBadge[status]}</td>
+        <td class="table-stack-full">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button class="btn btn-sm btn-secondary btn-icon" onclick="openAddTime('${s.voucher_code}')" title="Add/Reduce Time"><i class="fas fa-clock"></i></button>
             ${isPaused
               ? `<button class="btn btn-sm btn-secondary btn-icon" onclick="adminResumeSession('${s.voucher_code}')" title="Resume"><i class="fas fa-play"></i></button>`

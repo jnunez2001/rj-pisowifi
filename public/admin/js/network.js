@@ -1332,18 +1332,18 @@ async function loadVlans() {
     }
     tbody.innerHTML = data.vlans.map(v => `
       <tr>
-        <td>${v.interface_name}</td>
-        <td>${v.vlan_id}</td>
-        <td>${v.base_interface}</td>
-        <td>${v.mode === 'wan' ? 'WAN' : 'LAN'}</td>
-        <td>${v.protocol.toUpperCase()}</td>
-        <td>${v.protocol === 'static' ? (v.static_ip || '') : (v.mode === 'lan' ? '10.0.0.1' : 'auto')}</td>
-        <td>
+        <td data-label="VLAN Interface">${v.interface_name}</td>
+        <td data-label="VLAN ID">${v.vlan_id}</td>
+        <td data-label="Base Interface">${v.base_interface}</td>
+        <td data-label="Mode">${v.mode === 'wan' ? 'WAN' : 'LAN'}</td>
+        <td data-label="Protocol">${v.protocol.toUpperCase()}</td>
+        <td data-label="IP Address">${v.protocol === 'static' ? (v.static_ip || '') : (v.mode === 'lan' ? '10.0.0.1' : 'auto')}</td>
+        <td data-label="Status">
           <span class="badge ${v.status === 'up' ? 'badge-green' : 'badge-red'}">
             <i class="fas fa-circle" style="font-size:8px;"></i> ${v.status}
           </span>
         </td>
-        <td style="text-align:right;">
+        <td class="table-stack-full" style="text-align:right;">
           <button class="btn btn-sm btn-danger" onclick="deleteVlan(${v.id}, '${v.interface_name}')">
             <i class="fas fa-trash"></i>
           </button>
@@ -1447,10 +1447,10 @@ async function loadStaticLeases() {
     }
     tbody.innerHTML = data.leases.map(l => `
       <tr>
-        <td>${escapeHtml(l.mac_address)}</td>
-        <td>${escapeHtml(l.ip_address)}</td>
-        <td>${escapeHtml(l.label || '')}</td>
-        <td style="text-align:right;">
+        <td data-label="MAC Address">${escapeHtml(l.mac_address)}</td>
+        <td data-label="IP Address">${escapeHtml(l.ip_address)}</td>
+        <td data-label="Label">${escapeHtml(l.label || '')}</td>
+        <td class="table-stack-full" style="text-align:right;">
           <button class="btn btn-sm btn-danger" onclick="deleteStaticLease(${l.id}, '${escapeHtml(l.mac_address)}')">
             <i class="fas fa-trash"></i>
           </button>
@@ -1512,16 +1512,16 @@ async function loadPortForwards() {
     }
     tbody.innerHTML = data.forwards.map(f => `
       <tr>
-        <td>${escapeHtml(f.label || '')}</td>
-        <td>${f.protocol.toUpperCase()}</td>
-        <td>${f.external_port}</td>
-        <td>${escapeHtml(f.internal_ip)}:${f.internal_port}</td>
-        <td>
+        <td data-label="Label">${escapeHtml(f.label || '')}</td>
+        <td data-label="Protocol">${f.protocol.toUpperCase()}</td>
+        <td data-label="External Port">${f.external_port}</td>
+        <td data-label="Internal IP : Port">${escapeHtml(f.internal_ip)}:${f.internal_port}</td>
+        <td data-label="Enabled">
           <label style="display:inline-flex;align-items:center;cursor:pointer;">
             <input type="checkbox" ${f.enabled ? 'checked' : ''} onchange="togglePortForward(${f.id})">
           </label>
         </td>
-        <td style="text-align:right;">
+        <td class="table-stack-full" style="text-align:right;">
           <button class="btn btn-sm btn-danger" onclick="deletePortForward(${f.id}, '${escapeHtml(f.label || (f.protocol + '/' + f.external_port))}')">
             <i class="fas fa-trash"></i>
           </button>
@@ -1602,9 +1602,9 @@ async function loadClientLabels() {
     }
     tbody.innerHTML = data.labels.map(l => `
       <tr>
-        <td>${escapeHtml(l.mac_address)}</td>
-        <td>${escapeHtml(l.label)}</td>
-        <td style="text-align:right;">
+        <td data-label="MAC Address">${escapeHtml(l.mac_address)}</td>
+        <td data-label="Name">${escapeHtml(l.label)}</td>
+        <td class="table-stack-full" style="text-align:right;">
           <button class="btn btn-sm btn-danger" onclick="deleteClientLabel('${escapeHtml(l.mac_address)}')">
             <i class="fas fa-trash"></i>
           </button>

@@ -82,13 +82,13 @@ function renderGuestsTable() {
     const isActive = r.status === 'active';
     return `
       <tr>
-        <td><span style="font-family:monospace;font-size:13px;font-weight:700;color:var(--text-primary);">${r.voucher_code}</span></td>
-        <td style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${r.mac_address}</td>
-        <td style="font-size:13px;color:var(--text-secondary);">${sourceLabel(r.source_type)}${r.coin_value ? ` · ₱${r.coin_value}` : ''}</td>
-        <td style="font-size:12px;color:var(--text-muted);">${parseSqlDate(r.created_at || r.started_at).toLocaleString()}</td>
-        <td style="font-size:13px;color:var(--text-secondary);">${isActive ? formatSessionTime(r.minutes_remaining) : formatMins(Math.round((r.duration_seconds || 0) / 60))}</td>
-        <td>${isActive ? '<span class="badge badge-green"><span class="status-dot online"></span>Active</span>' : '<span class="badge badge-orange">Ended</span>'}</td>
-        <td>${isActive ? `<button class="btn btn-sm btn-secondary" onclick="navigateTo('sessions')">View in Live Sessions</button>` : '--'}</td>
+        <td data-label="Session"><span style="font-family:monospace;font-size:13px;font-weight:700;color:var(--text-primary);">${r.voucher_code}</span></td>
+        <td data-label="MAC Address" style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${r.mac_address}</td>
+        <td data-label="Source" style="font-size:13px;color:var(--text-secondary);">${sourceLabel(r.source_type)}${r.coin_value ? ` · ₱${r.coin_value}` : ''}</td>
+        <td data-label="Started" style="font-size:12px;color:var(--text-muted);">${parseSqlDate(r.created_at || r.started_at).toLocaleString()}</td>
+        <td data-label="Duration" style="font-size:13px;color:var(--text-secondary);">${isActive ? formatSessionTime(r.minutes_remaining) : formatMins(Math.round((r.duration_seconds || 0) / 60))}</td>
+        <td data-label="Status">${isActive ? '<span class="badge badge-green"><span class="status-dot online"></span>Active</span>' : '<span class="badge badge-orange">Ended</span>'}</td>
+        <td data-label="Actions">${isActive ? `<button class="btn btn-sm btn-secondary" onclick="navigateTo('sessions')">View in Live Sessions</button>` : '--'}</td>
       </tr>`;
   }).join('');
 }
@@ -128,16 +128,16 @@ function renderDevicesTable() {
 
   tbody.innerHTML = rows.slice(0, 100).map((d) => `
     <tr>
-      <td>
+      <td data-label="Device">
         <span style="font-size:13px;font-weight:600;color:var(--text-primary);">${d.label || 'Unnamed device'}</span>
         ${d.trusted ? '<span class="badge badge-blue" style="margin-left:6px;">Trusted</span>' : ''}
       </td>
-      <td style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${d.mac_address}</td>
-      <td style="font-size:12px;color:var(--text-muted);">${parseSqlDate(d.first_seen).toLocaleDateString()}</td>
-      <td style="font-size:12px;color:var(--text-muted);">${parseSqlDate(d.last_seen).toLocaleString()}</td>
-      <td style="font-size:13px;color:var(--text-secondary);">${d.session_count}</td>
-      <td>${d.online ? '<span class="badge badge-green"><span class="status-dot online"></span>Online</span>' : '<span class="badge badge-orange">Offline</span>'}</td>
-      <td>
+      <td data-label="MAC Address" style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${d.mac_address}</td>
+      <td data-label="First Seen" style="font-size:12px;color:var(--text-muted);">${parseSqlDate(d.first_seen).toLocaleDateString()}</td>
+      <td data-label="Last Seen" style="font-size:12px;color:var(--text-muted);">${parseSqlDate(d.last_seen).toLocaleString()}</td>
+      <td data-label="Sessions" style="font-size:13px;color:var(--text-secondary);">${d.session_count}</td>
+      <td data-label="Status">${d.online ? '<span class="badge badge-green"><span class="status-dot online"></span>Online</span>' : '<span class="badge badge-orange">Offline</span>'}</td>
+      <td class="table-stack-full">
         <button class="btn btn-sm btn-secondary" onclick="renameDevice('${d.mac_address}', '${(d.label || '').replace(/'/g, "\\'")}')" title="Rename"><i class="fas fa-pen"></i></button>
       </td>
     </tr>

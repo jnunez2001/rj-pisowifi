@@ -196,29 +196,29 @@ function renderPlansTable() {
       : `<span class="badge badge-red">Inactive</span>`;
     return `
       <tr>
-        <td>
+        <td data-label="Plan Name">
           <div style="font-weight:700;color:var(--text-primary);">${escapeHtml(p.name)}</div>
           <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(p.description || '')}</div>
         </td>
-        <td>
+        <td data-label="Type">
           <div style="display:flex;flex-direction:column;align-items:flex-start;gap:5px;">
             <span class="badge" style="background:var(--bg-body);color:var(--text-secondary);border:1px solid var(--border-color);">${planTypeLabel(p.type)}</span>
             ${p.is_premium ? '<span class="badge" style="background:var(--bg-body);color:var(--text-secondary);border:1px solid var(--border-color);"><i class="fas fa-bolt"></i> Premium</span>' : ''}
           </div>
         </td>
-        <td style="font-weight:700;">₱${Number(p.price).toFixed(2)}</td>
-        <td>
+        <td data-label="Price" style="font-weight:700;">₱${Number(p.price).toFixed(2)}</td>
+        <td data-label="Duration / Validity">
           <div>${durationLabel}</div>
           <div style="font-size:11px;color:var(--text-muted);">${validityLabel}</div>
         </td>
-        <td>
+        <td data-label="Speed Limit">
           <div><i class="fas fa-arrow-down" style="font-size:10px;color:var(--text-muted);"></i> ${formatSpeed(p.download_mbps)}</div>
           <div><i class="fas fa-arrow-up" style="font-size:10px;color:var(--text-muted);"></i> ${formatSpeed(p.upload_mbps)}</div>
         </td>
-        <td>${formatDataLimit(p.data_limit_mb)}</td>
-        <td>${(p.used_today || 0).toLocaleString()} sessions</td>
-        <td>${statusBadge}</td>
-        <td style="position:sticky;right:0;background:var(--bg-card);">
+        <td data-label="Data Limit">${formatDataLimit(p.data_limit_mb)}</td>
+        <td data-label="Used Today">${(p.used_today || 0).toLocaleString()} sessions</td>
+        <td data-label="Status">${statusBadge}</td>
+        <td class="table-stack-full" style="position:sticky;right:0;background:var(--bg-card);">
           <div style="display:flex;gap:6px;">
             <button class="btn btn-sm btn-secondary btn-icon" onclick="viewPlan(${p.id})" title="View"><i class="fas fa-eye"></i></button>
             <button class="btn btn-sm btn-secondary btn-icon" onclick="editPlan(${p.id})" title="Edit"><i class="fas fa-pen"></i></button>

@@ -10,19 +10,19 @@ async function loadRates() {
 
     tbody.innerHTML = data.rates.map(r => `
       <tr>
-        <td>
+        <td data-label="Coin Value">
           <span style="font-family:monospace;font-size:16px;font-weight:700;color:var(--accent-red);">
             ₱${r.coin_value}
           </span>
         </td>
-        <td>
+        <td data-label="Access Time">
           <span class="badge badge-green">${formatRateTime(r.minutes)}</span>
         </td>
-        <td>
+        <td data-label="Expiration">
           <span class="badge badge-orange">${formatRateTime(r.expiration_minutes)}</span>
         </td>
-        <td style="color:var(--text-secondary);font-size:13px;">${r.label}</td>
-        <td>
+        <td data-label="Label" style="color:var(--text-secondary);font-size:13px;">${r.label}</td>
+        <td class="table-stack-full">
           <div style="display:flex;gap:6px;">
             <button class="btn btn-sm btn-secondary btn-icon"
                     onclick="editRate(${r.id}, ${r.coin_value}, ${r.minutes}, ${r.expiration_minutes}, '${r.label}')"
