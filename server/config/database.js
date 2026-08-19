@@ -1484,6 +1484,42 @@ try {
   console.error('⚠️ Voucher template seed failed:', e.message);
 }
 
+// Performance: none of the tables above had any index beyond their
+// implicit primary key, yet several of the busiest queries in the app
+// filter or sort by columns other than id - getActiveSessions() (runs on
+// every session/dashboard load and every timer tick) by mac_address and
+// by hard_expires_at+is_paused, voucher redemption by voucher_code,
+// Dashboard/Analytics/Vouchers revenue queries by transactions'
+// created_at/type/mac_address, and the History/Watchdog/Alerts pages by
+// their own date or checked_at columns. On a small dev database SQLite's
+// planner just table-scans those and nobody notices; on a real box after
+// months of sessions/transactions accumulating, the exact same queries
+// degenerate into full scans that get slower every day. CREATE INDEX IF
+// NOT EXISTS is purely additive (no schema/data risk, safe to run on
+// every boot) - this only teaches SQLite to use SEARCH instead of SCAN.
+try {
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sessions_mac_address ON sessions(mac_address);
+    CREATE INDEX IF NOT EXISTS idx_sessions_voucher_code ON sessions(voucher_code);
+    CREATE INDEX IF NOT EXISTS idx_sessions_expiry_paused ON sessions(hard_expires_at, is_paused);
+    CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+    CREATE INDEX IF NOT EXISTS idx_transactions_mac_address ON transactions(mac_address);
+    CREATE INDEX IF NOT EXISTS idx_session_history_ended_at ON session_history(ended_at);
+    CREATE INDEX IF NOT EXISTS idx_watchdog_events_checked_at ON watchdog_events(checked_at);
+    CREATE INDEX IF NOT EXISTS idx_alert_events_created_at ON alert_events(created_at);
+  `);
+  // Most of the revenue/reporting queries above filter on "date(created_at)
+  // >= / = date(...)" rather than the raw timestamp column (grouping by
+  // calendar day, not by exact instant), so a plain index on created_at
+  // wouldn't actually get used - SQLite can't apply a normal index to a
+  // column wrapped in a function. An expression index on date(created_at)
+  // matches the query shape those routes really use.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_transactions_date_created ON transactions(date(created_at))`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_session_history_date_ended ON session_history(date(ended_at))`);
+} catch (e) {
+  console.error('⚠️ Index creation failed:', e.message);
+}
+
 console.log('✅ Database initialized successfully');
 
 module.exports = db;

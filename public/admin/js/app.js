@@ -504,11 +504,7 @@ function stopSessionPolling() {
 
 async function updateSessionCount() {
   try {
-    const res = await fetch(`${API}/api/admin/sessions`, {
-      headers: { 'password': authToken }
-    });
-    if (res.status === 401) { handleAuthFailure(); return; }
-    const data = await res.json();
+    const data = await apiCall('GET', '/api/admin/sessions');
     if (data.success) {
       // Bug: this used to be `count` (includes paused sessions, whose
       // internet is blocked), shown next to the "Active Sessions" nav label.
@@ -560,9 +556,24 @@ function handleAuthFailure() {
 // "Too many attempts" block over and over from a tab nobody is looking at.
 // Short-circuiting here (the one shared place every poll goes through)
 // stops every caller at once instead of having to fix each interval.
+// Bug: on a normal login/page load, several independent widgets each call
+// the exact same GET endpoint (for example the sidebar's session-count
+// badge and the Dashboard's own "Active Sessions" card both hit
+// /api/admin/sessions within the same tick) - each one a fresh round trip
+// for data the other request would have delivered a moment later anyway.
+// Small in-flight cache: a second identical GET issued while the first is
+// still pending reuses that same pending promise instead of firing again.
+// Cleared as soon as it resolves, so it never serves stale data - this
+// only collapses truly-simultaneous duplicate requests, it isn't a TTL
+// cache. POST/PUT/DELETE always go straight through, never coalesced.
+const inFlightGets = new Map();
+
 async function apiCall(method, endpoint, body = null) {
   if (!authToken) {
     return { success: false, message: 'Not authenticated' };
+  }
+  if (method === 'GET' && !body && inFlightGets.has(endpoint)) {
+    return inFlightGets.get(endpoint);
   }
   const options = {
     method,
@@ -572,9 +583,16 @@ async function apiCall(method, endpoint, body = null) {
     }
   };
   if (body) options.body = JSON.stringify(body);
-  const res = await fetch(`${API}${endpoint}`, options);
-  if (res.status === 401) { handleAuthFailure(); }
-  return res.json();
+  const promise = (async () => {
+    const res = await fetch(`${API}${endpoint}`, options);
+    if (res.status === 401) { handleAuthFailure(); }
+    return res.json();
+  })();
+  if (method === 'GET' && !body) {
+    inFlightGets.set(endpoint, promise);
+    promise.finally(() => inFlightGets.delete(endpoint));
+  }
+  return promise;
 }
 
 // ===== DURATION FORMATTING =====
