@@ -618,12 +618,12 @@ tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--bg-hover); }
 
 /* ===== BADGES =====
-   Was a colored pill (background + border-radius) for every status/type
-   label across the app - per operator feedback, replaced with just a
-   colored word + icon, no pill shape, no background. Every .badge-* usage
-   site (Routers status, Vendo firmware version, Plans type/Premium,
-   Vouchers status, etc.) picks this up automatically since they only ever
-   set the modifier class, never their own background/border-radius. */
+   Was a colored pill (background + border-radius), then colored text -
+   per operator feedback, the text itself carries no color at all now
+   either: only the small status-dot/icon inside a badge is colored, the
+   word stays neutral. Applies to every badge everywhere (status, mode,
+   type, Premium, etc.) since they all share this one class instead of
+   each page styling its own. */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -631,12 +631,8 @@ tbody tr:hover { background: var(--bg-hover); }
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  color: var(--text-secondary);
 }
-
-.badge-green { color: var(--card-green-text); }
-.badge-red { color: var(--card-red-text); }
-.badge-blue { color: var(--card-blue-text); }
-.badge-orange { color: var(--card-orange-text); }
 
 /* ===== BUTTONS ===== */
 .btn {
@@ -1127,9 +1123,6 @@ body {
   --card-icon-bg: #ece4f2;
 }
 
-.badge-purple {
-  color: var(--accent-purple);
-}
 
 /* ===== ZF3 COMPONENT LIBRARY =====
    Reusable neutral SaaS components per the ZenFi Frontend Design Guide
