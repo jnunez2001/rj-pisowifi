@@ -58,8 +58,26 @@ function flasherTerminal() {
 }
 
 function checkFlasherSupport() {
-  const supported = 'serial' in navigator;
-  document.getElementById('flasherUnsupportedCard').style.display = supported ? 'none' : 'block';
+  // Web Serial needs a real USB port, so even on the rare Android/Chrome
+  // combination that technically has the API, flashing over a phone's
+  // USB port is not a realistic flow for this product. Guards a direct
+  // link/bookmark landing here on mobile even though the nav item itself
+  // is already hidden below the same width in admin.css.
+  const isMobileWidth = window.innerWidth < 768;
+  const hasWebSerial = 'serial' in navigator;
+  const supported = hasWebSerial && !isMobileWidth;
+
+  const unsupportedCard = document.getElementById('flasherUnsupportedCard');
+  const heading = document.getElementById('flasherUnsupportedHeading');
+  const detail = document.getElementById('flasherUnsupportedDetail');
+  if (isMobileWidth) {
+    heading.textContent = 'Use a Computer to Flash';
+    detail.textContent = 'USB firmware flashing needs a real USB port and a desktop browser. Open this page on a Windows, Mac, or Linux computer with Chrome or Edge instead.';
+  } else {
+    heading.textContent = 'Needs Chrome or Edge';
+    detail.textContent = 'This only works in Chrome or Microsoft Edge. Use Arduino IDE or esptool.py instead.';
+  }
+  unsupportedCard.style.display = supported ? 'none' : 'block';
   document.getElementById('flasherMainCard').style.display = supported ? 'block' : 'none';
   return supported;
 }

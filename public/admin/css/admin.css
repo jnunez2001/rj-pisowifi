@@ -1023,6 +1023,14 @@ select.form-control { cursor: pointer; }
   /* Show hamburger */
   .menu-toggle { display: flex !important; }
 
+  /* USB firmware flashing needs the Web Serial API plus a real USB port.
+     iOS Safari never supports it, and while Android Chrome technically
+     can over a USB-OTG cable, that is rare enough for this product's
+     actual use case that the entry point is just hidden here rather than
+     leaving an operator to discover it does not really work on their
+     phone. loadFirmwareFlasherPage() also guards direct navigation. */
+  .nav-item-desktop-only { display: none; }
+
   /* Hide sidebar by default. The icon-rail collapse (Workstream 13) is a
      desktop-only affordance, mobile always uses this slide-over drawer
      instead, so a stale .collapsed class from a prior desktop session
