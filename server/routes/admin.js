@@ -2111,6 +2111,21 @@ router.post('/spam-settings', adminAuth, (req, res) => {
     updateSetting('spam_max_attempts', spam_max_attempts);
     updateSetting('spam_block_minutes', spam_block_minutes);
     console.log('⚙️ Spam/bandwidth settings updated');
+
+    // A bandwidth-cap change only ever affected sessions created after
+    // this save, an already-connected client kept its old speed until it
+    // reconnected. Reapply to every currently active session now, so the
+    // change is felt immediately, not just by future sessions. Fired
+    // without awaiting it, this can touch many sessions over the network
+    // (MikroTik mode) and the settings save itself should not wait on that.
+    if (enable_bandwidth_cap !== undefined || bandwidth_cap_download_mbps !== undefined
+      || bandwidth_cap_upload_mbps !== undefined || enable_bandwidth_burst !== undefined
+      || bandwidth_burst_mbps !== undefined || bandwidth_burst_seconds !== undefined) {
+      require('../services/sessionService').reapplyDefaultBandwidthToActiveSessions()
+        .then((count) => { if (count) console.log(`📶 Reapplied bandwidth settings to ${count} active session(s)`); })
+        .catch((e) => console.error('Failed to reapply bandwidth to active sessions:', e.message));
+    }
+
     return res.json({ success: true, message: 'Settings updated successfully' });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });

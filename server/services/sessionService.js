@@ -509,6 +509,34 @@ function getActiveSessions() {
 // meaningful in standalone/OpenWRT mode (checkRoam no-ops to
 // `{changed:false}` everywhere else, so this is a safe no-op call in
 // MikroTik mode too, not just a guarded one).
+// The global bandwidth cap (Security page) only ever got baked into new
+// sessions going forward, an already-connected client kept whatever speed
+// it was given at session start until it reconnected, since nothing ever
+// called reapplyBandwidth() for the sessions already running when the
+// admin changed the setting. Called once right after a bandwidth-cap
+// settings save (see POST /api/admin/spam-settings) so the change is
+// felt immediately, not just by future sessions. Only touches sessions on
+// the plain default cap, never a session with its own override
+// (effectiveBandwidth() already returns null for those, same guard
+// reapplyBandwidth() itself uses).
+async function reapplyDefaultBandwidthToActiveSessions() {
+  const now = new Date().toISOString();
+  const active = db.prepare(`
+    SELECT mac_address FROM sessions WHERE hard_expires_at > ? AND is_paused = 0
+  `).all(now);
+
+  let updated = 0;
+  for (const session of active) {
+    try {
+      await reapplyBandwidth(session.mac_address);
+      updated++;
+    } catch (e) {
+      console.error(`[Network] Failed to reapply default bandwidth cap for ${session.mac_address}:`, e.message);
+    }
+  }
+  return updated;
+}
+
 async function repairRoamedSessions() {
   const now = new Date().toISOString();
   const active = db.prepare(`
@@ -565,5 +593,6 @@ module.exports = {
   isBandwidthCapEnabled,
   repairRoamedSessions,
   effectiveBandwidth,
-  reapplyBandwidth
+  reapplyBandwidth,
+  reapplyDefaultBandwidthToActiveSessions
 };

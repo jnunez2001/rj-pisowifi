@@ -20,7 +20,7 @@ async function loadBranding() {
     const settings = await apiCall('GET', '/api/admin/settings');
     if (settings.success) {
       document.getElementById('previewName').textContent =
-        (settings.settings.cafe_name || 'ZENFI').toUpperCase();
+        (settings.settings.cafe_name || 'STARKFI').toUpperCase();
       document.getElementById('previewTagline').textContent =
         settings.settings.banner_text || 'HIGH SPEED CONNECTION!';
     }
