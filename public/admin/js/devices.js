@@ -199,10 +199,10 @@ async function loadDevices() {
 
       const statusBadge = on
         ? `<span class="badge badge-green">
-             <i class="fas fa-circle" style="font-size:7px;margin-right:4px;"></i>Online
+             <i class="fas fa-circle" style="font-size:7px;margin-right:4px;color:var(--accent-green);"></i>Online
            </span>`
         : `<span class="badge badge-red">
-             <i class="fas fa-circle" style="font-size:7px;margin-right:4px;"></i>Offline
+             <i class="fas fa-circle" style="font-size:7px;margin-right:4px;color:var(--accent-red);"></i>Offline
            </span>`;
 
       const isCandidate = v.status === 'candidate';

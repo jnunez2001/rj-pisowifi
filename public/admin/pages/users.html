@@ -24,10 +24,7 @@
 <div id="usersAccountsPanel" style="display:none;">
   <div class="zf3-card" style="text-align:center;padding:48px 24px;">
     <i class="fas fa-user" style="font-size:22px;color:var(--text-muted);margin-bottom:12px;display:block;"></i>
-    <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:6px;">No account system yet</div>
-    <div style="font-size:13px;color:var(--text-muted);max-width:420px;margin:0 auto;">
-      StarkFi doesn't require an account for hotspot access - customers connect anonymously via coin, voucher, or free access (see the Guests tab). A registered-account layer (e.g. captive portal sign-in) isn't built yet.
-    </div>
+    <div style="font-size:15px;font-weight:600;color:var(--text-primary);margin-bottom:6px;">Coming soon</div>
   </div>
 </div>
 
@@ -52,6 +49,13 @@
   </div>
 
   <div class="zf3-card" style="padding:14px 20px;margin-bottom:16px;display:flex;flex-direction:row;gap:10px;flex-wrap:wrap;align-items:center;">
+    <label class="form-label" style="margin:0;font-size:13px;">Period</label>
+    <select id="guestsPeriodFilter" class="form-control" style="width:auto;" onchange="loadGuestsData()">
+      <option value="0" selected>Today</option>
+      <option value="1">Last 2 days</option>
+      <option value="7">Last 7 days</option>
+      <option value="30">Last 30 days</option>
+    </select>
     <input type="text" id="guestsSearch" placeholder="Search by session ID, MAC, or IP..." class="form-control" style="flex:1 1 0%;min-width:220px;width:auto;" oninput="renderGuestsTable()">
     <select id="guestsStatusFilter" class="form-control" style="width:auto;" onchange="renderGuestsTable()">
       <option value="">All Status</option>

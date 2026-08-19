@@ -31,7 +31,8 @@ function switchUsersTab(tab) {
 
 async function loadGuestsData() {
   try {
-    const data = await apiCall('GET', '/api/admin/users/guests?days=7');
+    const days = document.getElementById('guestsPeriodFilter')?.value ?? '0';
+    const data = await apiCall('GET', `/api/admin/users/guests?days=${days}`);
     if (!data.success) return;
     usersGuestsData = data;
     document.getElementById('usersGuestsCount').textContent = data.kpi.activeNow;

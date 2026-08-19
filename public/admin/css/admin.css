@@ -164,7 +164,7 @@ body {
   user-select: none;
 }
 
-.nav-section-title:hover { color: #fff; }
+.nav-section-title:hover { color: var(--text-sidebar); }
 
 .nav-section-title-static {
   cursor: default;

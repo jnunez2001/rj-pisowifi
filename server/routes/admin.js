@@ -767,7 +767,12 @@ router.get('/sales', adminAuth, (req, res) => {
 // scope note.
 router.get('/users/guests', adminAuth, (req, res) => {
   try {
-    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 90);
+    // days=0 means "today only" (date('now', '-0 days') = today's date) -
+    // the previous `parseInt(...) || 7` fallback treated an explicit 0 as
+    // falsy and silently widened it to 7, making "today only" impossible
+    // to request at all.
+    const parsedDays = parseInt(req.query.days, 10);
+    const days = Math.min(Math.max(Number.isFinite(parsedDays) ? parsedDays : 7, 0), 90);
 
     const active = db.prepare(`
       SELECT s.voucher_code, s.mac_address, s.ip_address, s.minutes_remaining,
