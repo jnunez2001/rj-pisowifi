@@ -283,6 +283,7 @@ function initNetworkChart() {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       animation: false,
       plugins: { legend: { display: true, labels: { color: textColor, boxWidth: 12 } } },
       scales: {
@@ -567,6 +568,7 @@ function initChart() {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
         tooltip: {

@@ -64,8 +64,8 @@
     <div class="zf3-card-head">
       <div class="zf3-card-title" style="text-transform:none;font-size:14px;">Bandwidth Usage</div>
     </div>
-    <div style="position:relative;">
-      <canvas id="networkChart" height="90"></canvas>
+    <div style="position:relative;flex:1;min-height:220px;">
+      <canvas id="networkChart"></canvas>
       <div id="networkChartEmpty" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-align:center;">
         <div style="font-size:13px;font-weight:600;color:var(--text-secondary);">No traffic yet</div>
         <div style="font-size:12px;color:var(--text-muted);">Bandwidth will appear here once a client connects.</div>
@@ -75,15 +75,17 @@
 
   <div class="zf3-card">
     <div class="zf3-card-title" style="margin-bottom:16px;">Internet / WAN Status</div>
-    <div id="wanStatusBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+    <div id="wanStatusBody" style="flex:1;display:flex;flex-direction:column;justify-content:center;"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
   </div>
 
   <div class="zf3-card">
     <div class="zf3-card-title" style="margin-bottom:14px;">Hotspot Overview</div>
-    <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-user-group" style="color:var(--text-muted);width:14px;"></i> <span>Active Hotspot Users</span></div><span class="zf3-list-value" id="hoActiveUsers">0</span></div>
-    <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-receipt" style="color:var(--text-muted);width:14px;"></i> <span>Today's Transactions</span></div><span class="zf3-list-value" id="hoTransactions">0</span></div>
-    <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-hourglass-half" style="color:var(--text-muted);width:14px;"></i> <span>Time Sold Today</span></div><span class="zf3-list-value" id="hoMinutes">0</span></div>
-    <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-clock" style="color:var(--text-muted);width:14px;"></i> <span>Server Uptime</span></div><span class="zf3-list-value" id="uptime">--</span></div>
+    <div style="flex:1;display:flex;flex-direction:column;justify-content:space-evenly;">
+      <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-user-group" style="color:var(--text-muted);width:14px;"></i> <span>Active Hotspot Users</span></div><span class="zf3-list-value" id="hoActiveUsers">0</span></div>
+      <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-receipt" style="color:var(--text-muted);width:14px;"></i> <span>Today's Transactions</span></div><span class="zf3-list-value" id="hoTransactions">0</span></div>
+      <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-hourglass-half" style="color:var(--text-muted);width:14px;"></i> <span>Time Sold Today</span></div><span class="zf3-list-value" id="hoMinutes">0</span></div>
+      <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-clock" style="color:var(--text-muted);width:14px;"></i> <span>Server Uptime</span></div><span class="zf3-list-value" id="uptime">--</span></div>
+    </div>
   </div>
 </div>
 
@@ -126,7 +128,9 @@
       <button class="btn btn-sm btn-secondary" onclick="setChartRange('monthly')" id="btnMonthly">Monthly</button>
     </div>
   </div>
-  <canvas id="revenueChart" height="120"></canvas>
+  <div style="position:relative;height:300px;">
+    <canvas id="revenueChart"></canvas>
+  </div>
 </div>
 
 <!-- RECENT ACTIVITY + QUICK ACTIONS -->

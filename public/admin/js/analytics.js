@@ -97,6 +97,7 @@ function renderRevenueSessionChart(series) {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       interaction: { mode: 'index', intersect: false },
       plugins: { legend: { position: 'top', labels: { color: textColor, boxWidth: 10, font: { size: 11 } } } },
       scales: {
@@ -124,7 +125,7 @@ function renderBreakdownChart(breakdown) {
       labels: breakdown.map((b) => b.label),
       datasets: [{ data: breakdown.map((b) => b.amount), backgroundColor: colors, borderWidth: 0 }],
     },
-    options: { responsive: true, cutout: '70%', plugins: { legend: { display: false } } },
+    options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { legend: { display: false } } },
   });
   if (legend) {
     legend.innerHTML = breakdown.map((b, i) => `
@@ -151,6 +152,7 @@ function renderHourChart(hours) {
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
         x: { grid: { display: false }, ticks: { color: textColor, font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },

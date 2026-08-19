@@ -24,10 +24,6 @@ async function loadFirmwareInfo() {
     document.getElementById('firmwareUploadedAt').textContent = data.uploaded_at ? timeAgo(data.uploaded_at) : '--';
 
     document.getElementById('firmwareAutoUpdateToggle').checked = !!data.auto_update;
-    const hint = document.getElementById('firmwareAutoUpdateHint');
-    hint.textContent = data.auto_update
-      ? ''
-      : 'Off - a push is staged only. Click Release Update below to send it to devices.';
 
     const statusEl = document.getElementById('firmwareReleaseStatus');
     const releaseBtn = document.getElementById('releaseFirmwareBtn');

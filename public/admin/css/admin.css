@@ -617,21 +617,26 @@ tbody td {
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: var(--bg-hover); }
 
-/* ===== BADGES ===== */
+/* ===== BADGES =====
+   Was a colored pill (background + border-radius) for every status/type
+   label across the app - per operator feedback, replaced with just a
+   colored word + icon, no pill shape, no background. Every .badge-* usage
+   site (Routers status, Vendo firmware version, Plans type/Premium,
+   Vouchers status, etc.) picks this up automatically since they only ever
+   set the modifier class, never their own background/border-radius. */
 .badge {
   display: inline-flex;
   align-items: center;
-  padding: 3px 10px;
-  border-radius: 20px;
+  gap: 5px;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
 }
 
-.badge-green { background: var(--card-green-bg); color: var(--card-green-text); }
-.badge-red { background: var(--card-red-bg); color: var(--card-red-text); }
-.badge-blue { background: var(--card-blue-bg); color: var(--card-blue-text); }
-.badge-orange { background: var(--card-orange-bg); color: var(--card-orange-text); }
+.badge-green { color: var(--card-green-text); }
+.badge-red { color: var(--card-red-text); }
+.badge-blue { color: var(--card-blue-text); }
+.badge-orange { color: var(--card-orange-text); }
 
 /* ===== BUTTONS ===== */
 .btn {
@@ -658,13 +663,16 @@ tbody tr:hover { background: var(--bg-hover); }
 
 .btn-primary:hover { background: var(--brand-teal-dark); }
 
+/* Neutral by default (matches .btn-secondary), same as every other icon
+   button in a row - the red only shows up as intent on hover, not as a
+   permanent colored/pill look sitting in every table row. */
 .btn-danger {
-  background: var(--card-red-bg);
-  color: var(--card-red-text);
-  border: 1px solid var(--accent-red);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
 }
 
-.btn-danger:hover { background: var(--accent-red); color: #fff; }
+.btn-danger:hover { border-color: var(--accent-red); color: var(--accent-red); }
 
 .btn-secondary {
   background: var(--bg-primary);
@@ -1120,7 +1128,6 @@ body {
 }
 
 .badge-purple {
-  background: #ece4f2;
   color: var(--accent-purple);
 }
 

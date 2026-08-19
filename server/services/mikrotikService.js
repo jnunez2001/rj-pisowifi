@@ -535,6 +535,20 @@ async function setPortalDnsName(hostname) {
       if (leaseRes.re.length === 0) return false;
       const ip = leaseRes.re[0].address;
 
+      // Bug found live: this created the static DNS record, but a LAN
+      // client's DNS query never reaches it unless the router's own DNS
+      // server actually answers LAN requests - that's a separate setting
+      // (allow-remote-requests) that used to only ever get enabled during
+      // a full Configure run. An admin who set a Portal Hostname without
+      // re-running Configure (reasonably - Configure touches the whole
+      // router, not something to risk for a DNS tweak) had a record that
+      // existed but was completely unreachable, with the UI's own text
+      // saying as much ("Applies on your next Configure run") instead of
+      // this just working the moment it's saved, same as everything else
+      // POST /settings applies live. This alone doesn't touch bridges,
+      // ports, NAT, or Hotspot - safe to apply standalone.
+      await client.talk(['/ip/dns/set', '=allow-remote-requests=yes', '=servers=8.8.8.8,1.1.1.1']);
+
       const existing = await client.talk(['/ip/dns/static/print', `?name=${hostname}`]);
       for (const row of existing.re) {
         await client.talk(['/ip/dns/static/remove', `=.id=${row['.id']}`]);
