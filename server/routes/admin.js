@@ -260,13 +260,39 @@ router.post('/login', (req, res) => {
 });
 
 // GET /api/admin/sessions
-router.get('/sessions', adminAuth, (req, res) => {
+router.get('/sessions', adminAuth, async (req, res) => {
   try {
     const sessions = getActiveSessions();
     const sessionsWithTime = sessions.map(s => ({
       ...s,
       minutes_remaining: Math.max(0, Math.floor((new Date(s.expires_at) - new Date()) / 60000))
     }));
+
+    // Data used per PISO WIFI session (paying customers only - not every
+    // device on the network, which is what Network Devices already shows).
+    // Same per-mode sources networkDevicesService.js already uses for its
+    // own traffic column - MikroTik reads the client's own simple queue,
+    // Router Mode reads its tc class. Best-effort: a session with no
+    // matching queue/class (most commonly a MikroTik Regular-tier session,
+    // which shares a single lane-wide PCQ queue instead of an individual
+    // one - see mikrotikService.js's setClientBandwidth) just gets null,
+    // never a fabricated number.
+    const mikrotikService = require('../services/mikrotikService');
+    const networkDevicesService = require('../services/networkDevicesService');
+    const { peekClassId } = require('../services/drivers/classIdAllocator');
+    const isMikrotik = mikrotikService.isMikrotikModeEnabled();
+    await Promise.all(sessionsWithTime.map(async (s) => {
+      if (s.is_paused === 1) { s.data_used_bytes = null; return; }
+      try {
+        const traffic = isMikrotik
+          ? await mikrotikService.getClientTraffic(s.mac_address)
+          : await networkDevicesService.getTcTraffic(peekClassId(s.mac_address));
+        s.data_used_bytes = traffic ? traffic.totalBytes : null;
+      } catch (e) {
+        s.data_used_bytes = null;
+      }
+    }));
+
     // Bug: `count` included paused sessions, but the dashboard/sidebar/
     // sessions-page all label this "Currently Connected"/"connected" —
     // a paused session has its internet blocked, so it isn't connected.

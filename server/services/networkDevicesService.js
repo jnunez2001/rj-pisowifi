@@ -230,4 +230,4 @@ async function unblockDevice(mac) {
   logDeviceEvent(normalizedMac, 'unblocked', 'Network access restored');
 }
 
-module.exports = { listDevices, summarize, listGroups, createGroup, deleteGroup, assignDeviceGroup, logDeviceEvent, getDeviceHistory, blockDevice, unblockDevice };
+module.exports = { listDevices, summarize, listGroups, createGroup, deleteGroup, assignDeviceGroup, logDeviceEvent, getDeviceHistory, blockDevice, unblockDevice, getTcTraffic };

@@ -1,11 +1,15 @@
 // ===== LIVE SESSIONS PAGE =====
 // Real data only: sessions table has mac_address/ip_address/
 // minutes_remaining/is_paused/hard_expires_at/created_at/redeemed_code/
-// download_mbps/upload_mbps - no AP association, no device name/type, no
-// per-session data-usage byte counters exist anywhere in this app, so
-// those columns from the original spec are not rendered here (see
-// sessions.html's own comments). "Duration" and "Time Remaining" are
-// live-computed client-side from real timestamps, not simulated.
+// download_mbps/upload_mbps - no AP association, no device name/type
+// exist anywhere in this app, so those columns from the original spec
+// are not rendered here (see sessions.html's own comments). "Duration"
+// and "Time Remaining" are live-computed client-side from real
+// timestamps, not simulated. Data Used (data_used_bytes, from GET
+// /api/admin/sessions) is per-PISO-WIFI-SESSION, not per-device like
+// Network Devices' own traffic column - best-effort per network mode,
+// null (rendered as "--") when there's genuinely no queue/class to read
+// from rather than a fabricated number (see admin.js's /sessions route).
 let selectedVoucher = null;
 let sessionsRefreshInterval = null;
 let lsAllSessions = [];
@@ -84,6 +88,14 @@ function formatElapsed(createdAt) {
   return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
 }
 
+function formatDataUsed(bytes) {
+  if (bytes === null || bytes === undefined) return '--';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 function renderKpis() {
   const active = lsAllSessions.filter((s) => s.is_paused !== 1);
   const paused = lsAllSessions.filter((s) => s.is_paused === 1);
@@ -138,11 +150,11 @@ function renderSessionsTable() {
   document.getElementById('lsDisconnectAllBtn').style.display = lsAllSessions.length > 0 ? 'inline-flex' : 'none';
 
   if (lsAllSessions.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><i class="fas fa-wifi" style="color:var(--text-muted)"></i><h3>No Active Sessions</h3><p>Your hotspot is ready for new connections.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><i class="fas fa-wifi" style="color:var(--text-muted)"></i><h3>No Active Sessions</h3><p>Your hotspot is ready for new connections.</p></div></td></tr>`;
     return;
   }
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" style="text-align:center;color:var(--text-muted);padding:24px;">No sessions found. <a href="#" onclick="clearSessionFilters();return false;" style="color:var(--brand-teal);">Clear filters</a></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;color:var(--text-muted);padding:24px;">No sessions found. <a href="#" onclick="clearSessionFilters();return false;" style="color:var(--brand-teal);">Clear filters</a></td></tr>`;
     return;
   }
 
@@ -171,6 +183,7 @@ function renderSessionsTable() {
         <td style="font-size:12px;color:var(--text-secondary);">
           ${s.download_mbps ? `${s.download_mbps} Mbps ↓<br>${s.upload_mbps || s.download_mbps} Mbps ↑` : 'Global default'}
         </td>
+        <td style="font-size:12px;color:var(--text-secondary);">${formatDataUsed(s.data_used_bytes)}</td>
         <td>${statusBadge[status]}</td>
         <td>
           <div style="display:flex;gap:6px;">
