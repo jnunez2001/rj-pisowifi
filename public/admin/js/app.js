@@ -596,6 +596,18 @@ function formatDurationShort(totalMinutes) {
   return remMins > 0 ? `${hours}h ${remMins}m` : `${hours}h`;
 }
 
+// A "today" stat can never legitimately span more than 24 hours, so
+// rolling it into "1d Xh" like formatDurationShort does is misleading,
+// it reads as if a full extra day was sold. Keeps counting hours
+// indefinitely instead (e.g. "34h 12m").
+function formatDurationHoursOnly(totalMinutes) {
+  const mins = Math.round(totalMinutes || 0);
+  if (mins < 60) return `${mins} min${mins === 1 ? '' : 's'}`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return remMins > 0 ? `${hours}h ${remMins}m` : `${hours}h`;
+}
+
 // ===== TOAST NOTIFICATION =====
 function showToast(message, type = 'success') {
   const existing = document.getElementById('toast');

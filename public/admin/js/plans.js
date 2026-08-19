@@ -202,8 +202,8 @@ function renderPlansTable() {
         </td>
         <td data-label="Type">
           <div style="display:flex;flex-direction:column;align-items:flex-start;gap:5px;">
-            <span class="badge" style="background:var(--bg-body);color:var(--text-secondary);border:1px solid var(--border-color);">${planTypeLabel(p.type)}</span>
-            ${p.is_premium ? '<span class="badge" style="background:var(--bg-body);color:var(--text-secondary);border:1px solid var(--border-color);"><i class="fas fa-bolt"></i> Premium</span>' : ''}
+            <span class="badge" style="background:var(--bg-card);color:var(--text-secondary);border:1px solid var(--border-color);padding:3px 8px;border-radius:6px;">${planTypeLabel(p.type)}</span>
+            ${p.is_premium ? '<span class="badge" style="background:var(--bg-card);color:var(--text-secondary);border:1px solid var(--border-color);padding:3px 8px;border-radius:6px;"><i class="fas fa-bolt" style="color:var(--accent-orange);"></i> Premium</span>' : ''}
           </div>
         </td>
         <td data-label="Price" style="font-weight:700;">₱${Number(p.price).toFixed(2)}</td>

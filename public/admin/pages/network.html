@@ -180,7 +180,7 @@
       <input type="text" id="staticDns" placeholder="8.8.8.8">
     </div>
   </div>
-  <div id="dhcpControllerWarning" class="zf-footnote" style="display:none;background:var(--card-orange-bg,rgba(255,152,0,.1));color:var(--accent-orange);border-radius:8px;margin:0 16px 14px;padding:10px 12px;">
+  <div id="dhcpControllerWarning" class="zf-footnote" style="display:none;background:var(--bg-card);border:1px solid var(--border-color);color:var(--accent-orange);border-radius:8px;margin:0 16px 14px;padding:10px 12px;">
     <i class="fas fa-triangle-exclamation"></i> Controller Mode boxes should use a Static IP outside your router's DHCP pool. On DHCP, this box can lose its own address and become unreachable if the router briefly goes offline, even without a reboot.
   </div>
   <button class="zf-btn-row" onclick="saveNetworkConfig()" id="saveNetworkBtn">Apply Network Settings</button>
@@ -834,7 +834,7 @@
         <i class="fas fa-times"></i>
       </button>
     </div>
-    <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
+    <div style="background:var(--info-callout-bg);border:1px solid var(--info-callout-border);color:var(--info-callout-text);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
       <i class="fas fa-info-circle"></i>
       Mark a port (or a VLAN lane on it) as <strong>Gated</strong> for paid customer access, <strong>Open</strong> for trusted free access, or <strong>WAN</strong> for your internet connection. Combine ports and lanes to share one subnet across more than one wire.
     </div>
@@ -906,7 +906,7 @@
     <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
   </div>
   <div class="zf-accordion-panel" id="vlanPanel">
-    <div style="background:#e3f2fd;border:1px solid var(--accent-blue);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
+    <div style="background:var(--info-callout-bg);border:1px solid var(--info-callout-border);color:var(--info-callout-text);border-radius:8px;padding:12px 14px;margin-bottom:16px;font-size:13px;">
       <i class="fas fa-info-circle"></i>
       Use this if your ISP requires a VLAN-tagged connection, or if you're sharing one cable between your internet connection and an access point's customer WiFi traffic. Changes take effect immediately after saving.
     </div>

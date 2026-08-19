@@ -34,6 +34,7 @@
   --accent-red: #dc2626;
   --accent-blue: #2563eb;
   --accent-orange: #d97706;
+  --accent-yellow: #a16207;
   --accent-purple: #7c3aed;
 
   --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
@@ -93,23 +94,28 @@
   --brand-teal-dark: #2563eb;
   --brand-teal-light: #17233a;
 
-  --accent-green: #22c55e;
-  --accent-red: #ef4444;
-  --accent-blue: #3b82f6;
-  --accent-orange: #f59e0b;
-  --accent-purple: #a78bfa;
+  /* Dark-solid, not neon: same hard ink tones as the light theme rather
+     than the brighter 500-level Tailwind shades a straight dark-mode
+     inversion would suggest. Still clears ~3.5-5.7:1 contrast against
+     this theme's card/page backgrounds. */
+  --accent-green: #16a34a;
+  --accent-red: #dc2626;
+  --accent-blue: #2563eb;
+  --accent-orange: #d97706;
+  --accent-yellow: #a16207;
+  --accent-purple: #7c3aed;
 
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
 
   --card-green-bg: #0f2419;
-  --card-green-text: #22c55e;
+  --card-green-text: #16a34a;
   --card-red-bg: #2a1416;
-  --card-red-text: #ef4444;
+  --card-red-text: #dc2626;
   --card-blue-bg: #14213a;
-  --card-blue-text: #3b82f6;
+  --card-blue-text: #2563eb;
   --card-orange-bg: #2a1f0c;
-  --card-orange-text: #f59e0b;
+  --card-orange-text: #d97706;
 
   --flyout-bg: #11161d;
   --flyout-border: #252d38;
