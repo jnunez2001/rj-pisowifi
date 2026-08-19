@@ -413,7 +413,18 @@ startTimer();
 // Omitting the host argument lets Node listen on both address families
 // (dual-stack '::', which also accepts IPv4 on virtually every real
 // deployment target for this project) instead of IPv4 only.
+const STARKFI_ASCII_BANNER = `                                                    ,,
+ .M"""bgd mm                   \`7MM      \`7MM"""YMM db
+,MI    "Y MM                     MM        MM    \`7
+\`MMb.   mmMMmm  ,6"Yb.  \`7Mb,od8 MM  ,MP'  MM   d \`7MM
+  \`YMMNq. MM   8)   MM    MM' "' MM ;Y     MM""MM   MM
+.     \`MM MM    ,pm9MM    MM     MM;Mm     MM   Y   MM
+Mb     dM MM   8M   MM    MM     MM \`Mb.   MM       MM
+P"Ybmmd"  \`Mbmo\`Moo9^Yo..JMML. .JMML. YA..JMML.   .JMML.`;
+
 const server = app.listen(PORT, () => {
+  console.log('');
+  console.log(STARKFI_ASCII_BANNER);
   console.log('');
   console.log('🚀 StarkFi Server Started!');
   console.log(`📡 Running on port ${PORT}`);

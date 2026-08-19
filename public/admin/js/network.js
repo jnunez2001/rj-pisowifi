@@ -877,27 +877,15 @@ async function loadNetworkModeSettings() {
     document.getElementById('mikrotikSsl').checked = s.mikrotik_ssl === '1';
     document.getElementById('mikrotikFields').style.display = mode === 'mikrotik' ? 'block' : 'none';
 
-    // Free tier is Router-Mode-only - Controller Mode (MikroTik/OpenWRT) is
-    // a Premium feature. Hide the entry point to newly select it (same
-    // "bury, don't break" pattern as OpenWRT being hidden for the beta) -
-    // an existing install already in mikrotik mode keeps working
-    // untouched, this only prevents a free-tier account from switching
-    // INTO it. Locks the vendor chip (where the mode is actually chosen)
-    // rather than the outer "Controller Mode" toggle button, since that
-    // button now only reveals the picker.
-    const tier = s.account_tier || 'free';
+    // Premium gate on Controller Mode (MikroTik/OpenWRT) removed for now,
+    // not needed while this is being tested directly - re-add the
+    // tier !== 'premium' lock here if this needs to ship gated again.
     const mikrotikChip = document.getElementById('vendorMikrotikChip');
     if (mikrotikChip) {
       const chipIcon = '<img src="/assets/starkfi/routers/devices/mikrotik-style-router.svg" alt="" width="20" height="10" style="vertical-align:-1px;margin-right:6px;">';
-      if (tier !== 'premium' && mode !== 'mikrotik') {
-        mikrotikChip.disabled = true;
-        mikrotikChip.title = 'MikroTik controller mode is a Premium feature';
-        mikrotikChip.innerHTML = `${chipIcon}MikroTik <i class="fas fa-lock" style="margin-left:4px;font-size:11px;"></i>`;
-      } else {
-        mikrotikChip.disabled = false;
-        mikrotikChip.title = '';
-        mikrotikChip.innerHTML = `${chipIcon}MikroTik`;
-      }
+      mikrotikChip.disabled = false;
+      mikrotikChip.title = '';
+      mikrotikChip.innerHTML = `${chipIcon}MikroTik`;
     }
     document.getElementById('openwrtHost').value = s.openwrt_host || '';
     document.getElementById('openwrtPort').value = s.openwrt_port || '22';

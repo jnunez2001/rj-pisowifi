@@ -22,6 +22,15 @@ import { ESPLoader, Transport } from './vendor/esptool-js/bundle.js';
 
 const FIRMWARE_ASSETS_BASE = 'assets/firmware/';
 
+const STARKFI_ASCII_BANNER = `                                                    ,,
+ .M"""bgd mm                   \`7MM      \`7MM"""YMM db
+,MI    "Y MM                     MM        MM    \`7
+\`MMb.   mmMMmm  ,6"Yb.  \`7Mb,od8 MM  ,MP'  MM   d \`7MM
+  \`YMMNq. MM   8)   MM    MM' "' MM ;Y     MM""MM   MM
+.     \`MM MM    ,pm9MM    MM     MM;Mm     MM   Y   MM
+Mb     dM MM   8M   MM    MM     MM \`Mb.   MM       MM
+P"Ybmmd"  \`Mbmo\`Moo9^Yo..JMML. .JMML. YA..JMML.   .JMML.`;
+
 let flasherManifest = null;
 let flasherPort = null;
 let flasherTransport = null;
@@ -62,11 +71,30 @@ async function loadFirmwareFlasherPage() {
   document.getElementById('flasherFileInfo').textContent = '';
   document.getElementById('flasherFlashBtn').disabled = true;
 
+  const logEl = document.getElementById('flasherLog');
+  if (logEl) {
+    logEl.textContent = STARKFI_ASCII_BANNER + '\n\n';
+  }
+
   try {
     flasherManifest = await fetch(FIRMWARE_ASSETS_BASE + 'manifest.json?t=' + Date.now(), { cache: 'no-store' }).then((r) => r.json());
   } catch (e) {
     flasherManifest = null;
   }
+
+  flasherLog('HOW TO FLASH A VENDO');
+  flasherLog('1. Plug the ESP8266/ESP32 board into this computer over USB.');
+  flasherLog('2. Click "Connect" above and pick the device from the browser prompt.');
+  flasherLog('3. The right firmware for the detected chip loads automatically.');
+  flasherLog('4. Click "Flash Firmware" and wait for it to finish. Do not unplug the device while it is flashing.');
+  if (flasherManifest) {
+    const versions = Object.entries(flasherManifest)
+      .map(([name, entry]) => `${name} ${entry.version}`)
+      .join(', ');
+    if (versions) flasherLog(`Bundled firmware: ${versions}`);
+  }
+  flasherLog('');
+  flasherLog('Waiting for device connection...');
 
   const fileInput = document.getElementById('flasherFile');
   fileInput.onchange = async () => {
@@ -184,8 +212,10 @@ async function flasherFlash() {
     });
     flasherLog('Flashed. Resetting...');
     await flasherEsploader.after('hard_reset');
-    flasherLog('Done. Device is rebooting.');
-    showToast('Firmware flashed!', 'success');
+    flasherLog('');
+    flasherLog('Done! The device is rebooting with the new firmware.');
+    flasherLog('You can unplug it now and set it up as usual (WiFi credentials, coin slot wiring, etc.).');
+    showToast('Firmware flashed! You can unplug the device now.', 'success');
     btn.innerHTML = '<i class="fas fa-check"></i> Flashed!';
   } catch (e) {
     flasherLog('Flash failed: ' + (e.message || e));
