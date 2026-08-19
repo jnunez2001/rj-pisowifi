@@ -136,6 +136,11 @@ function renderKpis() {
 // Downloading/Uploading KPI cards silently showed 0 Mbps always. Polls the
 // same real endpoint dashboard.js's pollNetworkStats() uses instead of
 // depending on another page's DOM.
+// Note this is the WHOLE gated interface's live throughput (this app's
+// own MikroTik API polling, DHCP/ARP/management chatter, anything else on
+// that wire), not a sum of tracked sessions' traffic - can show a nonzero
+// number even with 0 active sessions, which is real and expected, not a
+// bug (see the card's own "Whole gated port, not just sessions" subtext).
 async function loadBandwidthKpis() {
   try {
     const data = await apiCall('GET', '/api/admin/network-stats');
