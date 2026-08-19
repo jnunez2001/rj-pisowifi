@@ -4,7 +4,7 @@
 // AND operation-mode-appropriate AND actually implemented by this adapter.
 // e.g. an AX12 can support "router mode VPN server" in its firmware, but
 // that's meaningless (and must show as unavailable) while it's running in
-// AP mode as a ZenFi-managed access point.
+// AP mode as a StarkFi-managed access point.
 
 const MONITORING_KEYS = ['device_status', 'clients', 'wireless', 'health', 'traffic'];
 const MANAGEMENT_KEYS = ['ssid', 'password', 'channel', 'channel_width', 'tx_power', 'restart'];

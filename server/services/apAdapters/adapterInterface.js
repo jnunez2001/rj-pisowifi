@@ -1,5 +1,5 @@
 // ===== AP ADAPTER INTERFACE =====
-// Per AP_INTEGRATION_ARCHITECTURE.md section 4/32: ZenFi Core must never
+// Per AP_INTEGRATION_ARCHITECTURE.md section 4/32: StarkFi Core must never
 // contain vendor-specific API calls directly - every AP integration goes
 // through this normalized contract, the same discipline server/services/
 // drivers/driverInterface.js already uses for router drivers (allow/block/

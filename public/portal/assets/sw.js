@@ -5,7 +5,7 @@
 // plain-HTTP page (insecure context), so there's no separate check needed
 // here for that.
 self.addEventListener('push', (event) => {
-  let data = { title: 'ZenFi WiFi', body: 'You have a new notification.' };
+  let data = { title: 'StarkFi WiFi', body: 'You have a new notification.' };
   try {
     if (event.data) data = event.data.json();
   } catch (e) {}
@@ -15,7 +15,7 @@ self.addEventListener('push', (event) => {
       body: data.body,
       icon: '/portal/assets/img/logo-icon.png',
       badge: '/portal/assets/img/logo-icon.png',
-      tag: 'zenfi-session', // replaces any earlier notification instead of stacking
+      tag: 'starkfi-session', // replaces any earlier notification instead of stacking
       renotify: true
     })
   );

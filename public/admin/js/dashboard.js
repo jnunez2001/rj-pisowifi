@@ -40,6 +40,14 @@ async function loadDashboard() {
   // gate it is gone from the page; setDashboardMode(true) still does the
   // real init/polling work, just unconditionally.
   setDashboardMode(true);
+
+  // Tells app.js's post-login splash the dashboard's first real load is
+  // done, so it can fade out instead of just guessing a fixed delay - a
+  // slow box gets a splash that waits for it, a fast one doesn't sit on
+  // a splash longer than it has to. Guarded since loadDashboard() also
+  // runs on plain in-session navigation (Sidebar > Dashboard), not just
+  // right after login, where no splash is showing.
+  if (typeof dashboardReady === 'function') dashboardReady();
 }
 
 // "Top Spenders (Today)" - mockup's "Top Users (By Data Usage)" slot.

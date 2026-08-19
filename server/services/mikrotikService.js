@@ -958,7 +958,7 @@ async function setInterfaceRole(interfaceName, role) {
 // from the role manager above, same shape the dev-handoff specs describe
 // (a simple ALLOW/DENY builder, not raw RouterOS rule syntax). Every rule
 // this creates is tagged with a distinct comment prefix so it's always
-// identifiable as ZenFi-managed and never confused with (or silently
+// identifiable as StarkFi-managed and never confused with (or silently
 // overwritten alongside) rules an operator configured by hand in WinBox.
 
 class MikrotikZonePolicyConflictError extends Error {
@@ -968,7 +968,7 @@ class MikrotikZonePolicyConflictError extends Error {
   }
 }
 
-const ZONE_POLICY_COMMENT_PREFIX = 'zenfi-zone-policy:';
+const ZONE_POLICY_COMMENT_PREFIX = 'starkfi-zone-policy:';
 
 function zonePolicyComment(fromZone, toZone) {
   return `${ZONE_POLICY_COMMENT_PREFIX}${fromZone}->${toZone}`;
@@ -1059,7 +1059,7 @@ class MikrotikPortForwardConflictError extends Error {
   }
 }
 
-const PORT_FORWARD_COMMENT_PREFIX = 'zenfi-port-forward:';
+const PORT_FORWARD_COMMENT_PREFIX = 'starkfi-port-forward:';
 
 async function listPortForwards() {
   const config = getMikrotikConfig();

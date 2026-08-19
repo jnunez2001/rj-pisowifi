@@ -1,6 +1,6 @@
 // ===== COMING SOON PLACEHOLDER =====
 // Renders an honest "not built yet" state for tabs that exist in the nav
-// (so the full ZenFi roadmap is visible) but have no backend behind them
+// (so the full StarkFi roadmap is visible) but have no backend behind them
 // yet. No fake data, no dead buttons — just the page title, what it will
 // do once built, and which roadmap workstream it belongs to.
 function renderComingSoon(container, { icon = 'fa-hourglass-half', title, description, workstream }) {
@@ -23,7 +23,7 @@ const COMING_SOON_PAGES = {
   'wallet': {
     icon: 'fa-wallet',
     title: 'Wallet Overview',
-    description: 'Accept online payments (GCash, Maya, and more via Xendit) alongside coins and vouchers. Balance and withdrawal go through the central ZenFi platform, which takes a 5% + ₱23 fee per withdrawal. Combined balance across every business line you run.',
+    description: 'Accept online payments (GCash, Maya, and more via Xendit) alongside coins and vouchers. Balance and withdrawal go through the central StarkFi platform, which takes a 5% + ₱23 fee per withdrawal. Combined balance across every business line you run.',
     workstream: 'Workstream 5'
   },
   'wallet-hotspot': {

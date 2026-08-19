@@ -161,7 +161,7 @@ async function getWireless(session) {
   return { band2g: band('2g'), band5g: band('5g') };
 }
 
-// Section 13: normalize vendor units into ZenFi units - rxrate/txrate
+// Section 13: normalize vendor units into StarkFi units - rxrate/txrate
 // arrive as the vendor's own scaled integer (720600 -> 720.6 Mbps per the
 // doc's own example), never exposed raw to the frontend.
 function normalizeClient(raw) {

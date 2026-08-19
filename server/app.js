@@ -93,10 +93,10 @@ app.use(['/admin', '/api/admin'], (req, res, next) => {
 // are always same-origin (no CORS headers required at all for those).
 // The only thing wide-open CORS was doing was letting a page on any OTHER
 // site make credentialed requests against this API from a victim's
-// browser. ZENFI_ALLOWED_ORIGINS is available as an escape hatch for a
+// browser. STARKFI_ALLOWED_ORIGINS is available as an escape hatch for a
 // genuine future cross-origin integration (e.g. zentry-hub calling a
 // box's API directly), comma-separated, empty/unset by default.
-const allowedOrigins = (process.env.ZENFI_ALLOWED_ORIGINS || '')
+const allowedOrigins = (process.env.STARKFI_ALLOWED_ORIGINS || '')
   .split(',')
   .map((o) => o.trim())
   .filter(Boolean);
@@ -397,7 +397,7 @@ app.use('/api/portal', portalRoute);
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    name: 'ZenFi Server',
+    name: 'StarkFi Server',
     time: new Date().toISOString()
   });
 });
@@ -415,7 +415,7 @@ startTimer();
 // deployment target for this project) instead of IPv4 only.
 const server = app.listen(PORT, () => {
   console.log('');
-  console.log('🚀 ZenFi Server Started!');
+  console.log('🚀 StarkFi Server Started!');
   console.log(`📡 Running on port ${PORT}`);
   console.log(`🌐 Admin: http://localhost:${PORT}/admin`);
   console.log(`📱 Portal: http://localhost:${PORT}/portal`);

@@ -10,7 +10,7 @@
 // licenseService.js: events/errors are written to the local outbox tables
 // (telemetry_outbox, error_reports) immediately and unconditionally
 // (once enabled), then synced out in a background batch on a timer.
-// TELEMETRY_SYNC_URL is unset until zenfi-platform exists (same pattern
+// TELEMETRY_SYNC_URL is unset until starkfi-platform exists (same pattern
 // as LICENSE_SERVER_URL) - sync() no-ops until it's configured, and rows
 // just accumulate locally with zero functional impact in the meantime.
 
@@ -20,7 +20,7 @@ const cron = require('node-cron');
 const db = require('../config/database');
 const { getDeviceIdentity } = require('./deviceIdentity');
 
-// Unset by design until zenfi-platform's ingest endpoint exists.
+// Unset by design until starkfi-platform's ingest endpoint exists.
 const TELEMETRY_SYNC_URL = process.env.TELEMETRY_SYNC_URL || null;
 
 const SYNC_BATCH_SIZE = 50;

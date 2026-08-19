@@ -2885,7 +2885,7 @@ router.delete('/vendos/:id', adminAuth, async (req, res) => {
       }
     }
 
-    require('../services/networkDevicesService').logDeviceEvent(vendo.mac_address, 'vendo_removed', `"${vendo.name}" removed from ZenFi`);
+    require('../services/networkDevicesService').logDeviceEvent(vendo.mac_address, 'vendo_removed', `"${vendo.name}" removed from StarkFi`);
     console.log(`🗑️  Vendo removed: ${vendo.mac_address} (${vendo.name})`);
     return res.json({ success: true, message: 'Device removed' });
   } catch (err) {
@@ -3358,7 +3358,7 @@ let pending2faSecret = null;
 // anything yet.
 router.post('/2fa/setup', adminAuth, (req, res) => {
   pending2faSecret = totpService.generateSecret();
-  const otpauthUrl = totpService.buildOtpAuthUrl(pending2faSecret, 'admin', 'ZenFi');
+  const otpauthUrl = totpService.buildOtpAuthUrl(pending2faSecret, 'admin', 'StarkFi');
   res.json({ success: true, secret: pending2faSecret, otpauth_url: otpauthUrl });
 });
 
@@ -3888,7 +3888,7 @@ router.get('/network/mikrotik/capabilities', adminAuth, async (req, res) => {
 // above, but executes over the RouterOS API instead of local `ip link`,
 // via mikrotikService.js's listVlans/createVlan/deleteVlan. Router Mode
 // previously had no VLAN configuration surface at all - an operator had
-// to set VLANs up by hand in WinBox before ZenFi could do anything with
+// to set VLANs up by hand in WinBox before StarkFi could do anything with
 // them.
 
 const mikrotikVlanSchema = z.object({
@@ -4126,7 +4126,7 @@ router.post('/network/mikrotik/firewall-zones', adminAuth, validateBody(mikrotik
   try {
     const { canUse } = require('../services/entitlementService');
     if (!canUse('firewall_zones')) {
-      return res.status(403).json({ success: false, message: 'Custom firewall zone policies are a Pro feature. ZenFi is currently using the recommended secure firewall configuration.' });
+      return res.status(403).json({ success: false, message: 'Custom firewall zone policies are a Pro feature. StarkFi is currently using the recommended secure firewall configuration.' });
     }
     const mikrotikService = require('../services/mikrotikService');
     if (!mikrotikService.isMikrotikModeEnabled()) {
@@ -4567,7 +4567,7 @@ router.get('/diagnostics/run', adminAuth, (req, res) => {
 router.get('/support-bundle', adminAuth, (req, res) => {
   try {
     const bundle = require('../services/supportBundleService').buildBundle();
-    const filename = `zenfi-support-bundle-${Date.now()}.txt`;
+    const filename = `starkfi-support-bundle-${Date.now()}.txt`;
     res.setHeader('Content-Type', 'text/plain');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(bundle);
@@ -5292,7 +5292,7 @@ router.post('/router/provision/apply', adminAuth, async (req, res) => {
 });
 
 // ===== ROUTERS (fleet registry) =====
-// Real, separate MikroTik devices ZenFi connects to and monitors, distinct
+// Real, separate MikroTik devices StarkFi connects to and monitors, distinct
 // from this box's own single mikrotik_host/user/pass settings (Network
 // page). Only 'mikrotik' has a working adapter (mikrotikApiClient.js) -
 // other manufacturers are accepted as a label but test-connection returns
@@ -5332,7 +5332,7 @@ function routerRowToJson(row) {
 // 'standalone', this box's existing, already-functional network engine
 // (nftables/tc via hostNetworkService.js, DHCP/DNS/NAT/firewall/hotspot -
 // all real, pre-existing capability, not new) is genuinely acting as the
-// router - so "ZenFi Router" in the Routers module must surface real data
+// router - so "StarkFi Router" in the Routers module must surface real data
 // from that engine (WAN health, live bandwidth, CPU/uptime) instead of
 // being a disconnected label with a fake row and a doomed MikroTik-API
 // test-connection, which is what it was before this fix. When
@@ -5388,7 +5388,7 @@ router.get('/routers/self', adminAuth, async (req, res) => {
 // ===== ACCESS POINTS (v1: manual registry + real reachability monitoring) =====
 // Deliberately scoped down (per explicit product decision): no discovery
 // scan, no vendor adapters, no SSID/radio/VLAN management. An admin adds
-// an AP by hand (name/IP/MAC/vendor/model/site) and ZenFi can genuinely
+// an AP by hand (name/IP/MAC/vendor/model/site) and StarkFi can genuinely
 // ping it to know if it's reachable - status/last_seen/last_latency are
 // never written except by that real check, so an AP nobody has pinged
 // yet honestly stays 'unknown' rather than defaulting to a fake "online".
@@ -5622,7 +5622,7 @@ router.post('/access-points/:id/adopt', adminAuth, async (req, res) => {
     console.log(`📶 Access point #${req.params.id} adopted via ${adapter_type} adapter`);
     return res.json({ success: true, ...result });
   } catch (err) {
-    // 401 is reserved sitewide for "your ZenFi admin session expired" (see
+    // 401 is reserved sitewide for "your StarkFi admin session expired" (see
     // apiCall()'s handleAuthFailure() in app.js, which force-logs-out on
     // any 401) - a wrong password for the *AP device itself* is a
     // different failure and must not trigger that, so it's 400 here.

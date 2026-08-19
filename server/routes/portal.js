@@ -108,7 +108,7 @@ router.get('/rates', (req, res) => {
 
     return res.json({
       success: true,
-      cafe_name: getSetting('cafe_name', 'ZenFi'),
+      cafe_name: getSetting('cafe_name', 'StarkFi'),
       banner_text: getSetting('banner_text', 'HIGH SPEED CONNECTION!'),
       logo_url: getSetting('logo_url', null),
       banner_url: getSetting('banner_url', null),

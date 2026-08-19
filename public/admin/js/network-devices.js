@@ -85,7 +85,7 @@ function renderDevicesTable() {
         <div class="empty-state">
           <i class="fas fa-diagram-project"></i>
           <h3>No Network Devices Found</h3>
-          <p>ZenFi has not detected any network devices yet.</p>
+          <p>StarkFi has not detected any network devices yet.</p>
         </div>
       </td></tr>`;
     summary.textContent = 'Showing 0 of 0 devices';
@@ -287,7 +287,7 @@ function exportDevicesCsv() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `zenfi-network-devices-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `starkfi-network-devices-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }

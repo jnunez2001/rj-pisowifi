@@ -1,13 +1,13 @@
 // ===== LICENSE SERVICE (box-side grace-period gate) =====
 // Box-side half of Workstream 5/11's licensing architecture. Periodically
-// checks in with a central licensing server (zenfi-platform, not built
+// checks in with a central licensing server (starkfi-platform, not built
 // yet) using this box's own device identity (deviceIdentity.js), and
 // tracks how long it's been since the last SUCCESSFUL check-in.
 //
 // Deliberately grace-period based, not an instant kill switch: this app's
 // actual market (small PisoWiFi operators, often on unreliable rural
 // internet) needs vending to keep working through a connectivity blip -
-// see zenfiCloudClient.js's own design note ("a box must never depend on
+// see starkfiCloudClient.js's own design note ("a box must never depend on
 // cloud connectivity to keep vending"). A box that's been unreachable
 // LONGER than the grace period is the only case that ever degrades, and
 // "degrade" is deliberately left as a hook for the caller to decide what
@@ -16,7 +16,7 @@
 // service-layer one.
 //
 // IMPORTANT - current state is intentionally a no-op: LICENSE_SERVER_URL
-// is unset until zenfi-platform actually exists, so checkIn() below never
+// is unset until starkfi-platform actually exists, so checkIn() below never
 // makes a network call and getLicenseStatus() always reports 'unlicensed'
 // (meaning "no license system active," NOT "invalid license" - nothing is
 // blocked). Wiring a real server URL in later is the ONLY change needed to
@@ -65,7 +65,7 @@ function saveStatus() {
 // Attempts a check-in against the central server. No-ops immediately (and
 // harmlessly) if LICENSE_SERVER_URL isn't configured - see file header.
 // Never throws; a failed check-in is recorded, not fatal, exactly the same
-// "log it, don't break vending" discipline as zenfiCloudClient.js's own
+// "log it, don't break vending" discipline as starkfiCloudClient.js's own
 // planned design.
 async function checkIn() {
   loadStatus();

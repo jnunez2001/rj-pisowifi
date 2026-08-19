@@ -176,7 +176,7 @@ function exportVouchersCsv() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `zenfi-vouchers-${new Date().toISOString().split('T')[0]}.csv`;
+  a.download = `starkfi-vouchers-${new Date().toISOString().split('T')[0]}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }

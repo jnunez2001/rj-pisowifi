@@ -12,7 +12,7 @@
 // left out here rather than faked with a client-side-only check. A local
 // check can always be patched by whoever has root on the box, obfuscated
 // or not - real enforcement is a server-side concern for later
-// (zenfi-platform, Workstream 5/11), not something this file pretends to
+// (starkfi-platform, Workstream 5/11), not something this file pretends to
 // solve alone.
 //
 // Kept deliberately lightweight: a hash, not Tarakifi's own heavier
@@ -78,7 +78,7 @@ function generateDeviceId() {
   const material = source || crypto.randomBytes(16).toString('hex');
   const hash = crypto.createHash('sha256').update(material).digest('hex').slice(0, 16).toUpperCase();
   return {
-    id: `ZENFI-${hash}`,
+    id: `STARKFI-${hash}`,
     // Recorded honestly - a random-fallback ID means this box's identity
     // isn't tied to anything physical (e.g. a VM with no readable serial
     // and no real NIC), worth knowing later if this ID ever needs

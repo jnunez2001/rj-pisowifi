@@ -87,7 +87,7 @@ function selfRouterRowHtml() {
   return `
     <tr style="cursor:pointer;" onclick="openSelfRouterDetail()">
       <td>
-        <div style="font-weight:700;color:var(--text-primary);"><i class="fas fa-star" style="color:var(--accent-blue);font-size:11px;margin-right:4px;"></i> ZenFi Router</div>
+        <div style="font-weight:700;color:var(--text-primary);"><i class="fas fa-star" style="color:var(--accent-blue);font-size:11px;margin-right:4px;"></i> StarkFi Router</div>
         <div style="font-size:11px;color:var(--text-muted);">This box's own gateway</div>
       </td>
       <td>${routerStatusBadge('online')}</td>
@@ -112,7 +112,7 @@ function renderRoutersTable() {
   const showSelf = rtSelfRouter
     && (!modeFilter || modeFilter === 'router')
     && (!statusFilter || statusFilter === 'online')
-    && (!search || 'zenfi router'.includes(search));
+    && (!search || 'starkfi router'.includes(search));
 
   let rows = rtAllRouters.filter(r => {
     if (modeFilter === 'router') return false;
@@ -131,7 +131,7 @@ function renderRoutersTable() {
         <div class="empty-state">
           <i class="fas fa-router"></i>
           <h3>No Routers Yet</h3>
-          <p>Use ZenFi as your router, or connect an existing MikroTik router.</p>
+          <p>Use StarkFi as your router, or connect an existing MikroTik router.</p>
           <button class="btn btn-primary" onclick="openAddRouter()"><i class="fas fa-plus"></i> Add Router</button>
         </div>
       </td></tr>`;
@@ -206,7 +206,7 @@ function resetRouterForm() {
 }
 
 // New router: show the "how do you want to run your network?" picker
-// first (ZenFi Router vs Existing Router), matching the product's actual
+// first (StarkFi Router vs Existing Router), matching the product's actual
 // recommended path. Editing an existing fleet entry always means an
 // external Controller-mode device, so it skips straight to the connect
 // form.
@@ -226,20 +226,20 @@ function showControllerConnectForm() {
 
 // Real action, not a label: flips this box's own network_mode setting to
 // 'standalone' - the same setting the existing Network page's Router Mode
-// switch uses - so ZenFi genuinely becomes the gateway (WAN/DHCP/DNS/NAT/
+// switch uses - so StarkFi genuinely becomes the gateway (WAN/DHCP/DNS/NAT/
 // firewall/hotspot, all real, pre-existing engine). Does not create a
-// fleet row; the ZenFi Router entry in the table comes from
+// fleet row; the StarkFi Router entry in the table comes from
 // /api/admin/routers/self reading this same setting back.
 async function useZenfiAsRouter() {
   if (rtSelfRouter) {
-    showToast('ZenFi is already running as your router.', 'info');
+    showToast('StarkFi is already running as your router.', 'info');
     closeModal('routerModal');
     return;
   }
   try {
     const data = await apiCall('POST', '/api/admin/settings', { network_mode: 'standalone' });
     if (data.success) {
-      showToast('ZenFi is now your router.', 'success');
+      showToast('StarkFi is now your router.', 'success');
       closeModal('routerModal');
       loadRoutersPage();
     } else {

@@ -135,9 +135,53 @@ function doLogout() {
   document.getElementById('loginPassword').value = '';
 }
 
+// Splash shows for at least SPLASH_MIN_MS, but never leaves the admin
+// staring at a half-rendered layout either - it waits for whichever is
+// later: the minimum time, or navigateTo('dashboard')'s own data fetch
+// actually finishing. dashboardReady() is called by dashboard.js once its
+// initial load completes; a page that's slow to report ready (or errors
+// out) still gets released by the hard SPLASH_MAX_MS ceiling so a login
+// can never get stuck behind a permanently-visible splash.
+const SPLASH_MIN_MS = 1400;
+const SPLASH_MAX_MS = 6000;
+let splashDashboardReady = false;
+let splashMinTimeElapsed = false;
+let splashResolved = false;
+
+function hideSplash() {
+  if (splashResolved) return;
+  splashResolved = true;
+  const splash = document.getElementById('loginSplash');
+  if (!splash) return;
+  splash.style.opacity = '0';
+  setTimeout(() => { splash.style.display = 'none'; }, 400);
+}
+
+function maybeHideSplash() {
+  if (splashDashboardReady && splashMinTimeElapsed) hideSplash();
+}
+
+// Called by dashboard.js once its first load of real data completes.
+function dashboardReady() {
+  splashDashboardReady = true;
+  maybeHideSplash();
+}
+
 function showAdmin() {
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('adminLayout').style.display = 'flex';
+
+  splashDashboardReady = false;
+  splashMinTimeElapsed = false;
+  splashResolved = false;
+  const splash = document.getElementById('loginSplash');
+  if (splash) {
+    splash.style.display = 'flex';
+    splash.style.opacity = '1';
+  }
+  setTimeout(() => { splashMinTimeElapsed = true; maybeHideSplash(); }, SPLASH_MIN_MS);
+  setTimeout(hideSplash, SPLASH_MAX_MS);
+
   navigateTo('dashboard');
   startSessionPolling();
   if (typeof refreshRouterFlyoutVisibility === 'function') refreshRouterFlyoutVisibility();

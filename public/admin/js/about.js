@@ -138,7 +138,7 @@ async function downloadSupportBundle() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `zenfi-support-bundle-${Date.now()}.txt`;
+    a.download = `starkfi-support-bundle-${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
     showToast('Support bundle downloaded!');

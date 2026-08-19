@@ -206,10 +206,10 @@
   <input type="radio" name="networkMode" id="modeOpenwrt" value="openwrt" onchange="onNetworkModeChange()" style="display:none;">
   <div id="networkModeSwitch" class="zf-segmented">
     <button type="button" id="modeStandaloneCard" onclick="setNetworkMode('standalone')">
-      <img src="/assets/zenfi/routers/icons/router.svg" alt="" width="18" height="18" style="vertical-align:-4px;margin-right:6px;"> Router Mode
+      <img src="/assets/starkfi/routers/icons/router.svg" alt="" width="18" height="18" style="vertical-align:-4px;margin-right:6px;"> Router Mode
     </button>
     <button type="button" id="modeControllerCard" onclick="toggleControllerVendorPicker()">
-      <img src="/assets/zenfi/routers/icons/gateway-server.svg" alt="" width="18" height="18" style="vertical-align:-4px;margin-right:6px;"> Controller Mode
+      <img src="/assets/starkfi/routers/icons/gateway-server.svg" alt="" width="18" height="18" style="vertical-align:-4px;margin-right:6px;"> Controller Mode
     </button>
   </div>
   <!-- Vendor picker for Controller Mode - only MikroTik actually has a
@@ -223,16 +223,16 @@
        same reason it was buried before this rename. -->
   <div id="controllerVendorPicker" class="zf-row" style="display:none;flex-wrap:wrap;gap:8px;padding:10px 16px 14px;border-top:1px solid var(--border-color);">
     <button type="button" class="zf-vendor-chip" id="vendorMikrotikChip" onclick="setNetworkMode('mikrotik')">
-      <img src="/assets/zenfi/routers/devices/mikrotik-style-router.svg" alt="" width="20" height="10" style="vertical-align:-1px;margin-right:6px;"> MikroTik
+      <img src="/assets/starkfi/routers/devices/mikrotik-style-router.svg" alt="" width="20" height="10" style="vertical-align:-1px;margin-right:6px;"> MikroTik
     </button>
     <button type="button" class="zf-vendor-chip" disabled title="Coming soon - no Ubiquiti driver yet">
-      <img src="/assets/zenfi/routers/devices/access-point.svg" alt="" width="16" height="16" style="vertical-align:-3px;margin-right:6px;opacity:.7;"> Ubiquiti
+      <img src="/assets/starkfi/routers/devices/access-point.svg" alt="" width="16" height="16" style="vertical-align:-3px;margin-right:6px;opacity:.7;"> Ubiquiti
     </button>
     <button type="button" class="zf-vendor-chip" disabled title="Coming soon - no TP-Link driver yet">
-      <img src="/assets/zenfi/routers/devices/tp-link-style-gateway.svg" alt="" width="20" height="12" style="vertical-align:-2px;margin-right:6px;opacity:.7;"> TP-Link
+      <img src="/assets/starkfi/routers/devices/tp-link-style-gateway.svg" alt="" width="20" height="12" style="vertical-align:-2px;margin-right:6px;opacity:.7;"> TP-Link
     </button>
     <button type="button" class="zf-vendor-chip" disabled title="Not yet verified against real OpenWRT hardware">
-      <img src="/assets/zenfi/routers/icons/router.svg" alt="" width="16" height="16" style="vertical-align:-3px;margin-right:6px;opacity:.7;"> OpenWRT
+      <img src="/assets/starkfi/routers/icons/router.svg" alt="" width="16" height="16" style="vertical-align:-3px;margin-right:6px;opacity:.7;"> OpenWRT
     </button>
   </div>
 </div>

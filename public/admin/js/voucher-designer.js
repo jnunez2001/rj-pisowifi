@@ -28,7 +28,7 @@ const VT_FIELD_DEFAULTS = {
   price: { content: '₱10', fontSize: 14, fontWeight: '600' },
   duration: { content: '30 Minutes', fontSize: 14, fontWeight: '600' },
   plan_name: { content: 'Standard', fontSize: 14, fontWeight: '600' },
-  ssid: { content: 'ZenFi WiFi', fontSize: 12, fontWeight: '600' },
+  ssid: { content: 'StarkFi WiFi', fontSize: 12, fontWeight: '600' },
 };
 
 async function vtLoadGallery() {

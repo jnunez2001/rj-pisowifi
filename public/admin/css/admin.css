@@ -1125,7 +1125,7 @@ body {
 
 
 /* ===== ZF3 COMPONENT LIBRARY =====
-   Reusable neutral SaaS components per the ZenFi Frontend Design Guide
+   Reusable neutral SaaS components per the StarkFi Frontend Design Guide
    (2026-08-12) - built for the Dashboard rebuild, promoted here so
    System Health/Logs/Alerts and any future page share one definition
    instead of copy-pasting a local <style> block per page. */
@@ -1203,3 +1203,23 @@ table.zf3-table td:last-child, table.zf3-table th:last-child { text-align:right;
 .zf3-tab.active { color:var(--brand-teal-dark); border-bottom-color:var(--brand-teal); }
 .zf3-tab-count { background:var(--bg-primary); border:1px solid var(--border-color); border-radius:10px; padding:1px 8px; font-size:11px; }
 .zf3-tab.active .zf3-tab-count { background:var(--brand-teal-light); color:var(--brand-teal-dark); border-color:transparent; }
+
+/* ===== POST-LOGIN SPLASH ===== */
+@keyframes splashLogoPulse {
+  0%, 100% { transform: scale(1); filter: brightness(1) drop-shadow(0 0 0 rgba(255,255,255,0)); }
+  50% { transform: scale(1.06); filter: brightness(1.15) drop-shadow(0 0 24px rgba(255,255,255,0.35)); }
+}
+.splash-logo { animation: splashLogoPulse 1.6s ease-in-out infinite; }
+
+.splash-dots { display: flex; gap: 8px; }
+.splash-dots span {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: rgba(255,255,255,0.85);
+  animation: splashDotBounce 1.2s ease-in-out infinite;
+}
+.splash-dots span:nth-child(2) { animation-delay: 0.15s; }
+.splash-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes splashDotBounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
+  40% { transform: translateY(-8px); opacity: 1; }
+}

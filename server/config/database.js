@@ -148,11 +148,11 @@ db.exec(`
   );
 
   -- Fleet registry for the Routers module - a real, separate MikroTik
-  -- device ZenFi connects to over the MikroTik API client
+  -- device StarkFi connects to over the MikroTik API client
   -- (mikrotikApiClient.js), distinct from this box's own single
   -- mikrotik_host/mikrotik_user/mikrotik_pass settings (Network page,
   -- Controller Mode) which remain untouched. A registered router here is
-  -- something ZenFi monitors/manages in addition to, not instead of,
+  -- something StarkFi monitors/manages in addition to, not instead of,
   -- whatever this box itself is doing. Password is encrypted at rest via
   -- secretCrypto.js, same as mikrotik_pass.
   CREATE TABLE IF NOT EXISTS routers (
@@ -919,7 +919,7 @@ if (settingCount.count === 0) {
   const insertSetting = db.prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?)'
   );
-  insertSetting.run('cafe_name', 'ZenFi');
+  insertSetting.run('cafe_name', 'StarkFi');
   insertSetting.run('admin_password', hashPassword('admin123'));
   insertSetting.run('admin_username', 'admin');
   // Fresh installs start with the default password — force a change before
@@ -1103,6 +1103,15 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   if (!db.prepare("SELECT key FROM settings WHERE key = 'vendo_firmware_released'").get()) {
     const hadVersion = !!db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value;
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('vendo_firmware_released', hadVersion ? '1' : '0');
+  }
+
+  // Rebrand: ZenFi -> StarkFi. Only touches an install that still has the
+  // exact old default value untouched - an operator who already customized
+  // their own site name/tagline keeps it exactly as they set it, this
+  // never overwrites a real customization.
+  const cafeNameRow = db.prepare("SELECT value FROM settings WHERE key = 'cafe_name'").get();
+  if (cafeNameRow && cafeNameRow.value === 'ZenFi') {
+    db.prepare("UPDATE settings SET value = 'StarkFi' WHERE key = 'cafe_name'").run();
   }
 }
 
@@ -1323,7 +1332,7 @@ try {
 }
 
 // ===== MULTI-TENANT DATA MODEL (Organization -> Site) =====
-// Foundation layer for ZenFi_Navigation_and_System_Specification.md's nav
+// Foundation layer for StarkFi_Navigation_and_System_Specification.md's nav
 // shell (site switcher) and Controller Mode's device adoption flow - see
 // this project's multi-tenant decision notes. Schema/data-model only, no
 // auth enforcement or nav/UI wiring here (that's later, separate work).
@@ -1433,7 +1442,7 @@ try {
   console.error('⚠️ Multi-tenant data model migration failed:', e.message);
 }
 
-// Seed exactly one real system template ("ZenFi Standard") - not the
+// Seed exactly one real system template ("StarkFi Standard") - not the
 // full 8-template gallery a complete Voucher Designer would eventually
 // ship, since designing 7 more fully-styled layouts by hand here would
 // be inventing content, not building the feature. An operator can
@@ -1442,7 +1451,7 @@ try {
   const hasSystemTemplate = db.prepare("SELECT id FROM voucher_templates WHERE is_system = 1 LIMIT 1").get();
   if (!hasSystemTemplate) {
     const standardElements = [
-      { id: 'el1', type: 'text', field: null, x: 0.15, y: 0.12, w: 3.2, h: 0.35, fontSize: 20, fontWeight: '700', color: '#0c8f6d', align: 'left', content: 'ZenFi WiFi' },
+      { id: 'el1', type: 'text', field: null, x: 0.15, y: 0.12, w: 3.2, h: 0.35, fontSize: 20, fontWeight: '700', color: '#0c8f6d', align: 'left', content: 'StarkFi WiFi' },
       { id: 'el2', type: 'voucher_code', field: 'voucher.code', x: 0.15, y: 0.55, w: 2.0, h: 0.4, fontSize: 22, fontWeight: '900', color: '#111827', align: 'left', content: 'SAMPLE-CODE' },
       { id: 'el3', type: 'price', field: 'voucher.price', x: 0.15, y: 1.0, w: 1.0, h: 0.3, fontSize: 14, fontWeight: '600', color: '#374151', align: 'left', content: '₱10' },
       { id: 'el4', type: 'duration', field: 'voucher.duration', x: 1.2, y: 1.0, w: 1.2, h: 0.3, fontSize: 14, fontWeight: '600', color: '#374151', align: 'left', content: '30 Minutes' },
@@ -1452,8 +1461,8 @@ try {
     db.prepare(`
       INSERT INTO voucher_templates (name, description, width_in, height_in, background_color, elements_json, is_system)
       VALUES (?, ?, ?, ?, ?, ?, 1)
-    `).run('ZenFi Standard', 'Clean general-purpose voucher with a QR code.', 3.5, 2, '#ffffff', JSON.stringify(standardElements));
-    console.log('🎫 Seeded default "ZenFi Standard" voucher template');
+    `).run('StarkFi Standard', 'Clean general-purpose voucher with a QR code.', 3.5, 2, '#ffffff', JSON.stringify(standardElements));
+    console.log('🎫 Seeded default "StarkFi Standard" voucher template');
   }
 } catch (e) {
   console.error('⚠️ Voucher template seed failed:', e.message);

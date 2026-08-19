@@ -888,7 +888,7 @@ async function loadNetworkModeSettings() {
     const tier = s.account_tier || 'free';
     const mikrotikChip = document.getElementById('vendorMikrotikChip');
     if (mikrotikChip) {
-      const chipIcon = '<img src="/assets/zenfi/routers/devices/mikrotik-style-router.svg" alt="" width="20" height="10" style="vertical-align:-1px;margin-right:6px;">';
+      const chipIcon = '<img src="/assets/starkfi/routers/devices/mikrotik-style-router.svg" alt="" width="20" height="10" style="vertical-align:-1px;margin-right:6px;">';
       if (tier !== 'premium' && mode !== 'mikrotik') {
         mikrotikChip.disabled = true;
         mikrotikChip.title = 'MikroTik controller mode is a Premium feature';

@@ -1,14 +1,14 @@
 // ===== VENDO ZERO-CONFIG DISCOVERY =====
 // Lets an ESP32/ESP8266 Vendo find this box's address without anyone typing
-// it in manually (spec: "Do not require manual ZenFi IP entry for normal
+// it in manually (spec: "Do not require manual StarkFi IP entry for normal
 // adoption"). Implemented as a plain UDP broadcast/reply instead of real
 // mDNS - the spec explicitly allows "Local UDP discovery fallback" as an
 // alternative, and this avoids adding an mDNS dependency (with its own
-// native-binding/platform risk) for a first version. A real _zenfi-
+// native-binding/platform risk) for a first version. A real _starkfi-
 // vendo._tcp.local mDNS responder can be added later without changing this
 // protocol's request/response shape.
 //
-// Protocol: a Vendo broadcasts the single-line request "ZENFI_DISCOVER_V1"
+// Protocol: a Vendo broadcasts the single-line request "STARKFI_DISCOVER_V1"
 // to this port; this box replies (unicast, straight back to the sender) with
 // a JSON payload containing only non-sensitive information, matching the
 // spec's "Discovery must NOT establish trust by itself" - no keys, no
@@ -23,7 +23,7 @@
 
 const dgram = require('dgram');
 const DISCOVERY_PORT = 6970;
-const REQUEST_MESSAGE = 'ZENFI_DISCOVER_V1';
+const REQUEST_MESSAGE = 'STARKFI_DISCOVER_V1';
 const PROTOCOL_VERSION = '1.0';
 
 let socket = null;
@@ -58,7 +58,7 @@ function startVendoDiscovery() {
 
       const reply = JSON.stringify({
         server_id: identity.id,
-        name: 'ZenFi',
+        name: 'StarkFi',
         protocol_version: PROTOCOL_VERSION,
         address,
         port: process.env.PORT || 3000,

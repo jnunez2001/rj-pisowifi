@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ZenFi - Admin</title>
+  <title>StarkFi - Admin</title>
   <link rel="icon" type="image/png" href="img/logo-icon.png">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="css/themes.css">
@@ -21,7 +21,30 @@
   display: flex; align-items: center; justify-content: center;
   background: var(--bg-primary);
 ">
-  <img src="img/loading.gif" alt="Loading ZenFi..." style="width: 120px; height: 120px; border-radius: 24px;">
+  <img src="img/loading.gif" alt="Loading StarkFi..." style="width: 120px; height: 120px; border-radius: 24px;">
+</div>
+
+<!-- POST-LOGIN SPLASH - shown every time a login succeeds (doLogin() ->
+     showAdmin()), not just on first page boot. Masks the dashboard's own
+     data fetches loading in behind it instead of the admin seeing a bare
+     layout pop in piece by piece. app.js fades this out itself once the
+     minimum display time has passed AND the dashboard's initial load has
+     actually finished - whichever is later. -->
+<div id="loginSplash" style="
+  position: fixed; inset: 0; z-index: 9998;
+  display: none; align-items: center; justify-content: center;
+  flex-direction: column; gap: 20px;
+  background: #0c8f6d;
+  opacity: 1; transition: opacity 0.4s ease;
+">
+  <!-- Fixed teal, not var(--brand-teal) - the admin theme overrides that
+       to blue (see themes.css), but the logo art itself is baked onto a
+       teal square background, so tying this to the theme variable would
+       clash instead of blend. -->
+  <img src="img/logo-icon.png" alt="StarkFi" class="splash-logo" style="width: 110px; height: 110px; border-radius: 26px;">
+  <div class="splash-dots">
+    <span></span><span></span><span></span>
+  </div>
 </div>
 
 <!-- LOGIN SCREEN -->
@@ -43,7 +66,7 @@
       box-shadow: var(--shadow-md);
       text-align: center;
     ">
-      <img src="img/logo-icon.png" alt="ZenFi" style="
+      <img src="img/logo-icon.png" alt="StarkFi" style="
         width: 60px; height: 60px;
         border-radius: 16px;
         margin: 0 auto 16px;
@@ -57,7 +80,7 @@
         color: var(--text-primary);
         letter-spacing: 0.3px;
         margin-bottom: 4px;
-      ">ZenFi</h2>
+      ">StarkFi</h2>
 
       <p style="
         font-size: 13px;
@@ -139,10 +162,10 @@
       </button>
       <div class="brand-logo">
         <div class="brand-icon">
-          <img src="img/logo-icon.png" alt="ZenFi">
+          <img src="img/logo-icon.png" alt="StarkFi">
         </div>
         <div class="brand-text">
-          <div class="brand-name">ZenFi</div>
+          <div class="brand-name">StarkFi</div>
           <div class="brand-sub">ADMIN PANEL</div>
         </div>
       </div>

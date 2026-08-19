@@ -54,7 +54,7 @@ function getSanitizedSettings() {
 
 function buildBundle() {
   const isLinux = process.platform === 'linux';
-  let report = `ZenFi Support Bundle\nGenerated: ${new Date().toISOString()}\nPlatform: ${process.platform}\n`;
+  let report = `StarkFi Support Bundle\nGenerated: ${new Date().toISOString()}\nPlatform: ${process.platform}\n`;
 
   try {
     const diagnostics = require('./systemDiagnosticsService').runChecks();
