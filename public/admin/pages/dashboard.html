@@ -53,7 +53,7 @@
       <i class="fas fa-gauge-high zf3-stat-icon"></i>
     </div>
     <div class="zf3-stat-value"><span id="currentDownload">0</span> Mbps</div>
-    <div class="zf3-stat-trend"><i class="fas fa-arrow-down"></i> Down &nbsp; <i class="fas fa-arrow-up"></i> <span id="currentUpload">0</span> Mbps Up</div>
+    <div class="zf3-stat-trend"><i class="fas fa-arrow-down"></i> Down &nbsp; <i class="fas fa-arrow-up"></i> <span id="currentUpload">0</span> Mbps Up · whole gated port</div>
   </div>
 </div>
 
@@ -62,7 +62,10 @@
 
   <div class="zf3-card">
     <div class="zf3-card-head">
-      <div class="zf3-card-title" style="text-transform:none;font-size:14px;">Bandwidth Usage</div>
+      <div>
+        <div class="zf3-card-title" style="text-transform:none;font-size:14px;">Bandwidth Usage</div>
+        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Whole gated port's live throughput, not just tracked sessions</div>
+      </div>
     </div>
     <div style="position:relative;flex:1;min-height:220px;">
       <canvas id="networkChart"></canvas>
