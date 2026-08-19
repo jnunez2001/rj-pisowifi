@@ -256,7 +256,7 @@ async function addOrUpdateQueue(client, words) {
 // is set to the sustained cap itself, so a client bursts freely from an
 // idle/light-use starting point (a page load, a short speed test) but
 // settles back to the honest cap the moment they're actually using it.
-async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst = null) {
+async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst = null, trackDataUsage = false) {
   const config = getMikrotikConfig();
   if (!config.ip) return false;
 
@@ -297,7 +297,11 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
   // rather than silently leaving default-rate customers uncapped.
   const defaultDownload = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_download_mbps'").get()?.value || '0', 10);
   const defaultUpload = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_upload_mbps'").get()?.value || '0', 10);
-  const isPlainDefaultCap = !burstMbps && download === defaultDownload && upload === defaultUpload;
+  // A session tracking data usage against a cap (Plans > Data type) needs
+  // a real per-client queue to read bytes back from, even if its speed
+  // happens to match the plain default - the shared PCQ queue below can't
+  // attribute bytes to one specific client.
+  const isPlainDefaultCap = !trackDataUsage && !burstMbps && download === defaultDownload && upload === defaultUpload;
 
   try {
     return await withMikrotik(config, async (client) => {

@@ -268,29 +268,39 @@ router.get('/sessions', adminAuth, async (req, res) => {
       minutes_remaining: Math.max(0, Math.floor((new Date(s.expires_at) - new Date()) / 60000))
     }));
 
-    // Data used per PISO WIFI session (paying customers only - not every
-    // device on the network, which is what Network Devices already shows).
-    // Same per-mode sources networkDevicesService.js already uses for its
-    // own traffic column - MikroTik reads the client's own simple queue,
-    // Router Mode reads its tc class. Best-effort: a session with no
-    // matching queue/class (most commonly a MikroTik Regular-tier session,
-    // which shares a single lane-wide PCQ queue instead of an individual
-    // one - see mikrotikService.js's setClientBandwidth) just gets null,
-    // never a fabricated number.
+    // Live traffic snapshot per PISO WIFI session (paying customers only -
+    // not every device on the network, which is what Network Devices
+    // already shows). Same per-mode sources networkDevicesService.js
+    // already uses for its own traffic column - MikroTik reads the
+    // client's own simple queue, Router Mode reads its tc class.
+    // Best-effort: a session with no matching queue/class (most commonly a
+    // MikroTik Regular-tier session, which shares a single lane-wide PCQ
+    // queue instead of an individual one - see mikrotikService.js's
+    // setClientBandwidth) just gets null, never a fabricated number.
+    // Separate from data_used_bytes below (a DB column, already present on
+    // every `s` from getActiveSessions()) - that's the accurate persisted
+    // running total timerService.js's 30s tick maintains for data-capped
+    // sessions specifically; this is just "what does the queue/class say
+    // right now," useful as a general activity indicator for any session.
     const mikrotikService = require('../services/mikrotikService');
     const networkDevicesService = require('../services/networkDevicesService');
     const { peekClassId } = require('../services/drivers/classIdAllocator');
     const isMikrotik = mikrotikService.isMikrotikModeEnabled();
     await Promise.all(sessionsWithTime.map(async (s) => {
-      if (s.is_paused === 1) { s.data_used_bytes = null; return; }
-      try {
-        const traffic = isMikrotik
-          ? await mikrotikService.getClientTraffic(s.mac_address)
-          : await networkDevicesService.getTcTraffic(peekClassId(s.mac_address));
-        s.data_used_bytes = traffic ? traffic.totalBytes : null;
-      } catch (e) {
-        s.data_used_bytes = null;
+      if (s.is_paused === 1) { s.live_traffic_bytes = null; } else {
+        try {
+          const traffic = isMikrotik
+            ? await mikrotikService.getClientTraffic(s.mac_address)
+            : await networkDevicesService.getTcTraffic(peekClassId(s.mac_address));
+          s.live_traffic_bytes = traffic ? traffic.totalBytes : null;
+        } catch (e) {
+          s.live_traffic_bytes = null;
+        }
       }
+      // Only meaningful for a Data-type plan (data_limit_mb set at credit
+      // time) - null for every other session, same as data_used_bytes
+      // itself only ever being tracked when there's a cap to track against.
+      s.data_remaining_bytes = s.data_limit_mb ? Math.max(0, s.data_limit_mb * 1024 * 1024 - (s.data_used_bytes || 0)) : null;
     }));
 
     // Bug: `count` included paused sessions, but the dashboard/sidebar/
@@ -1410,18 +1420,19 @@ function syncPlanCoinVendoRate(planId) {
     label: plan.name,
     download_mbps: plan.is_premium ? (plan.download_mbps || null) : null,
     upload_mbps: plan.is_premium ? (plan.upload_mbps || plan.download_mbps || null) : null,
+    data_limit_mb: plan.data_limit_mb || null,
   };
 
   if (existing) {
     db.prepare(`
-      UPDATE rates SET coin_value = ?, minutes = ?, expiration_minutes = ?, label = ?, download_mbps = ?, upload_mbps = ?
+      UPDATE rates SET coin_value = ?, minutes = ?, expiration_minutes = ?, label = ?, download_mbps = ?, upload_mbps = ?, data_limit_mb = ?
       WHERE id = ?
-    `).run(fields.coin_value, fields.minutes, fields.expiration_minutes, fields.label, fields.download_mbps, fields.upload_mbps, existing.id);
+    `).run(fields.coin_value, fields.minutes, fields.expiration_minutes, fields.label, fields.download_mbps, fields.upload_mbps, fields.data_limit_mb, existing.id);
   } else {
     db.prepare(`
-      INSERT INTO rates (coin_value, minutes, expiration_minutes, label, download_mbps, upload_mbps, plan_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(fields.coin_value, fields.minutes, fields.expiration_minutes, fields.label, fields.download_mbps, fields.upload_mbps, planId);
+      INSERT INTO rates (coin_value, minutes, expiration_minutes, label, download_mbps, upload_mbps, data_limit_mb, plan_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(fields.coin_value, fields.minutes, fields.expiration_minutes, fields.label, fields.download_mbps, fields.upload_mbps, fields.data_limit_mb, planId);
   }
 }
 

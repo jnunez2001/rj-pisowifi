@@ -93,6 +93,17 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
   }
   if (bandwidthOverride) bandwidthOverride.minutes = premiumMinutes;
 
+  // Data-plan cap (Plans > Data type, synced onto its linked rate by
+  // admin.js's syncPlanCoinVendoRate). Takes the first matched tier that
+  // actually has one - a mixed insert crossing multiple Data tiers is an
+  // edge case not worth a combining rule for, unlike bandwidthOverride's
+  // "higher speed wins" (there's no equally obvious rule for combining two
+  // different data caps).
+  let dataLimitMb = null;
+  for (const { rate } of matchedRates) {
+    if (rate.data_limit_mb) { dataLimitMb = rate.data_limit_mb; break; }
+  }
+
   // Bug found live: this used to do its own getSessionByMac() check then
   // pick createSession() or addTimeToSession() — a plain check-then-act
   // with an async gap (createSession() awaits allowClient() before
@@ -105,7 +116,7 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
   // creditOrCreateSession() serializes same-mac callers through an
   // in-memory lock so this check-then-act is atomic against every other
   // caller of it (and against free-claim, which locks on the same mac).
-  const { session, created } = await creditOrCreateSession(mac, ip || '', totalMinutes, totalExpirationMinutes, bandwidthOverride);
+  const { session, created } = await creditOrCreateSession(mac, ip || '', totalMinutes, totalExpirationMinutes, bandwidthOverride, dataLimitMb);
 
   db.prepare(`
     INSERT INTO transactions

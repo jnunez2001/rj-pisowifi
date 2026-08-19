@@ -96,6 +96,29 @@ function formatDataUsed(bytes) {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+// Data-type Plan sessions (data_limit_mb set at credit time) get a real
+// used/remaining readout against their cap, tracked in the DB
+// (data_used_bytes - see timerService.js's 30s tick) rather than a live
+// queue/class query, since that's the only value that survives MikroTik's
+// per-tick queue recreation. Every other session just shows the live
+// traffic snapshot (live_traffic_bytes) as a general activity indicator -
+// informational only, no cap to measure it against.
+function renderDataUsageCell(s) {
+  if (s.data_limit_mb) {
+    const limitBytes = s.data_limit_mb * 1024 * 1024;
+    const used = s.data_used_bytes || 0;
+    const pct = Math.min(100, Math.round((used / limitBytes) * 100));
+    return `
+      <div>${formatDataUsed(used)} / ${formatDataUsed(limitBytes)}</div>
+      <div style="background:var(--border-color);border-radius:4px;height:4px;margin:4px 0;overflow:hidden;">
+        <div style="background:${pct >= 90 ? 'var(--accent-red)' : 'var(--brand-teal)'};height:100%;width:${pct}%;"></div>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);">${formatDataUsed(s.data_remaining_bytes)} left</div>
+    `;
+  }
+  return formatDataUsed(s.live_traffic_bytes);
+}
+
 function renderKpis() {
   const active = lsAllSessions.filter((s) => s.is_paused !== 1);
   const paused = lsAllSessions.filter((s) => s.is_paused === 1);
@@ -183,7 +206,7 @@ function renderSessionsTable() {
         <td style="font-size:12px;color:var(--text-secondary);">
           ${s.download_mbps ? `${s.download_mbps} Mbps ↓<br>${s.upload_mbps || s.download_mbps} Mbps ↑` : 'Global default'}
         </td>
-        <td style="font-size:12px;color:var(--text-secondary);">${formatDataUsed(s.data_used_bytes)}</td>
+        <td style="font-size:12px;color:var(--text-secondary);">${renderDataUsageCell(s)}</td>
         <td>${statusBadge[status]}</td>
         <td>
           <div style="display:flex;gap:6px;">

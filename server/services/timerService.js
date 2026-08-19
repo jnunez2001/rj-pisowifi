@@ -233,6 +233,10 @@ async function startTimer() {
       // bandwidth override (Create Voucher's optional Mbps fields) instead
       // of always re-asserting the global cap over it.
       const burstConfig = getBurstConfig();
+      const mikrotikService = require('./mikrotikService');
+      const networkDevicesService = require('./networkDevicesService');
+      const { peekClassId } = require('./drivers/classIdAllocator');
+      const isMikrotik = mikrotikService.isMikrotikModeEnabled();
 
       for (const session of activeSessions) {
         const remaining = (
@@ -240,6 +244,37 @@ async function startTimer() {
         ) / 60000;
 
         if (remaining > 0) {
+          // Data-plan usage tracking, sampled BEFORE the bandwidth reassert
+          // below - MikroTik's per-client queue gets deleted and recreated
+          // on every reassert (see mikrotikService.js's setClientBandwidth),
+          // resetting its byte counter, so the value read right now is the
+          // real delta for this ~30s window. Router Mode's tc class persists
+          // in place instead, so its counter is already a true running
+          // total - overwrite rather than accumulate there.
+          if (session.data_limit_mb) {
+            try {
+              const traffic = isMikrotik
+                ? await mikrotikService.getClientTraffic(session.mac_address)
+                : await networkDevicesService.getTcTraffic(peekClassId(session.mac_address));
+              if (traffic) {
+                const newUsedBytes = isMikrotik
+                  ? session.data_used_bytes + traffic.totalBytes
+                  : traffic.totalBytes;
+                db.prepare('UPDATE sessions SET data_used_bytes = ? WHERE voucher_code = ?').run(newUsedBytes, session.voucher_code);
+                session.data_used_bytes = newUsedBytes;
+
+                const limitBytes = session.data_limit_mb * 1024 * 1024;
+                if (newUsedBytes >= limitBytes) {
+                  console.log(`📊 Data limit reached: ${session.voucher_code} (${session.mac_address}) used ${(newUsedBytes / 1024 / 1024).toFixed(1)}MB of ${session.data_limit_mb}MB`);
+                  await expireSession(session.voucher_code);
+                  continue; // session is gone - nothing left to reassert below
+                }
+              }
+            } catch (e) {
+              console.error(`Failed to track data usage for ${session.mac_address}:`, e.message);
+            }
+          }
+
           db.prepare(`
             UPDATE sessions
             SET minutes_remaining = ?
@@ -249,11 +284,11 @@ async function startTimer() {
           try {
             await allowClient(session.mac_address);
             if (session.download_mbps) {
-              await setClientBandwidth(session.mac_address, session.download_mbps, session.upload_mbps || session.download_mbps, burstConfig);
+              await setClientBandwidth(session.mac_address, session.download_mbps, session.upload_mbps || session.download_mbps, burstConfig, !!session.data_limit_mb);
             } else if (isBandwidthCapEnabled) {
               const maxMbps = getSetting('bandwidth_cap_download_mbps', 5);
               const maxUploadMbps = getSetting('bandwidth_cap_upload_mbps', 5);
-              await setClientBandwidth(session.mac_address, maxMbps, maxUploadMbps, burstConfig);
+              await setClientBandwidth(session.mac_address, maxMbps, maxUploadMbps, burstConfig, !!session.data_limit_mb);
             }
           } catch (e) {
             console.error(`Failed to re-assert access for ${session.mac_address}:`, e.message);

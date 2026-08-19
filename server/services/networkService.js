@@ -60,7 +60,12 @@ function isClientAllowed(mac) {
   return getActiveDriver().isClientAllowed(normalizedMac);
 }
 
-function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst = null) {
+// trackDataUsage forces an individual per-client queue even when the rate
+// matches the plain default (mikrotikService.js's shared-PCQ shortcut
+// otherwise skips creating one) - needed so a Data-plan session's usage
+// can actually be read back per client. Standalone/OpenWRT drivers ignore
+// the extra argument (their tc class is already always per-client).
+function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst = null, trackDataUsage = false) {
   let normalizedMac;
   try {
     normalizedMac = normalizeMac(mac);
@@ -68,7 +73,7 @@ function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst 
     console.error('[Network] Invalid MAC during shaping:', error.message);
     return Promise.resolve();
   }
-  return getActiveDriver().setClientBandwidth(normalizedMac, downloadMbps, uploadMbps, burst);
+  return getActiveDriver().setClientBandwidth(normalizedMac, downloadMbps, uploadMbps, burst, trackDataUsage);
 }
 
 function removeClientBandwidth(mac) {

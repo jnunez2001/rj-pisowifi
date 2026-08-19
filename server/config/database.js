@@ -740,6 +740,16 @@ try {
   // already applied
 }
 
+// Mirrors a linked Plan's data_limit_mb onto the rates row itself (see
+// admin.js's syncPlanCoinVendoRate) so coinCreditService.js can pick it up
+// at credit time without a join back to plans. NULL = no data cap (every
+// existing rate/plan before this feature existed).
+try {
+  db.exec('ALTER TABLE rates ADD COLUMN data_limit_mb INTEGER');
+} catch (e) {
+  // already applied
+}
+
 // Explicit Premium flag for plans created before this column existed -
 // separate from whether download_mbps happens to be set, since a plan's
 // own speed cap and "is this the Premium tier" are two different
@@ -774,6 +784,28 @@ try {
 // at all.
 try {
   db.exec('ALTER TABLE sessions ADD COLUMN premium_download_mbps REAL');
+} catch (e) {
+  // already applied
+}
+
+// Data-plan tracking. data_limit_mb is copied onto the session at credit
+// time (from the matched rate/plan) so a later change to the plan doesn't
+// retroactively change an in-progress session's cap. data_used_bytes is a
+// running total this app maintains itself (timerService.js's 30s tick) -
+// router-side counters (MikroTik queue bytes, tc class bytes) aren't
+// trustworthy as a standalone source of truth across a session's whole
+// lifetime: MikroTik's per-client queue gets deleted and recreated on
+// every reassert tick (resetting its counter), so only a DELTA sampled
+// each tick is meaningful there, while standalone's tc class persists
+// in place and reports a true running total - the two need different
+// accumulation logic, but both feed into this one column.
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN data_limit_mb INTEGER');
+} catch (e) {
+  // already applied
+}
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN data_used_bytes INTEGER NOT NULL DEFAULT 0');
 } catch (e) {
   // already applied
 }

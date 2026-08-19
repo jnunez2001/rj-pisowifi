@@ -124,14 +124,14 @@ function withMacLock(mac, fn) {
 // own check-then-refuse-or-create, just wrapped in withMacLock() too, so
 // both paths serialize against each other without free-claim silently
 // topping up a session it's supposed to reject.
-async function creditOrCreateSession(mac, ip, minutes, expirationMinutes, bandwidthOverride = null) {
+async function creditOrCreateSession(mac, ip, minutes, expirationMinutes, bandwidthOverride = null, dataLimitMb = null) {
   return withMacLock(mac, async () => {
     const existing = getSessionByMac(mac);
     if (existing) {
-      const updated = await addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverride);
+      const updated = await addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverride, dataLimitMb);
       return { session: updated, created: false };
     }
-    const created = await createSession(mac, ip, minutes, expirationMinutes, bandwidthOverride);
+    const created = await createSession(mac, ip, minutes, expirationMinutes, bandwidthOverride, dataLimitMb);
     return { session: created, created: true };
   });
 }
@@ -147,9 +147,9 @@ async function reapplyBandwidth(mac) {
   const bw = effectiveBandwidth(session);
   try {
     if (bw) {
-      await setClientBandwidth(mac, bw.download, bw.upload, getBurstConfig());
+      await setClientBandwidth(mac, bw.download, bw.upload, getBurstConfig(), !!session.data_limit_mb);
     } else if (isBandwidthCapEnabled()) {
-      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
+      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig(), !!session.data_limit_mb);
     } else {
       await removeClientBandwidth(mac);
     }
@@ -200,7 +200,7 @@ function effectiveBandwidth(session) {
 // from a Premium coin rate (coinCreditService.js) - `minutes` is
 // specifically the premium-tier duration, not the total credited this
 // call, so premium_expires_at reflects only what was actually paid for.
-async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverride = null) {
+async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverride = null, dataLimitMb = null) {
   mac = normalizeMac(mac);
   const voucherCode = generateVoucherCode();
   const now = Date.now();
@@ -228,9 +228,9 @@ async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverr
   db.prepare(`
     INSERT INTO sessions
     (voucher_code, mac_address, ip_address, minutes_remaining,
-     expires_at, hard_expires_at, premium_download_mbps, premium_upload_mbps, premium_expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(voucherCode, mac, ip, mins, expiresAt, hardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt);
+     expires_at, hard_expires_at, premium_download_mbps, premium_upload_mbps, premium_expires_at, data_limit_mb)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(voucherCode, mac, ip, mins, expiresAt, hardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, dataLimitMb || null);
 
   const session = db.prepare('SELECT * FROM sessions WHERE voucher_code = ?').get(voucherCode);
   const bw = effectiveBandwidth(session);
@@ -240,10 +240,10 @@ async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverr
     await allowClient(mac);
     console.log(`[Network] Internet unlocked for ${mac}`);
     if (bw) {
-      await setClientBandwidth(mac, bw.download, bw.upload, getBurstConfig());
+      await setClientBandwidth(mac, bw.download, bw.upload, getBurstConfig(), !!dataLimitMb);
       console.log(`[Network] ${bandwidthOverride ? 'Premium' : 'Voucher'} bandwidth applied to ${mac}: ${bw.download}Mbps down / ${bw.upload}Mbps up`);
     } else if (isBandwidthCapEnabled()) {
-      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
+      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig(), !!dataLimitMb);
       console.log(`[Network] Bandwidth cap applied to ${mac}: ${getMaxMbps()}Mbps down / ${getMaxUploadMbps()}Mbps up`);
     } else {
       console.log(`[Network] Bandwidth cap disabled - allowing full speed for ${mac}`);
@@ -266,10 +266,16 @@ async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverr
 // on its own schedule) rather than reapplying it - the actual "still
 // active?" decision happens once, in effectiveBandwidth(), from whatever
 // premium_expires_at already says.
-async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverride = null) {
+async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverride = null, dataLimitMb = null) {
   mac = normalizeMac(mac);
   const session = getSessionByMac(mac);
   if (!session) return null;
+
+  // Only adopts a new cap if the session didn't already have one - a plain
+  // top-up on an already-capped session shouldn't reset how much data
+  // they've already used against a DIFFERENT (possibly larger) limit, and
+  // a top-up with no cap of its own shouldn't retroactively impose one.
+  const newDataLimitMb = session.data_limit_mb || dataLimitMb || null;
 
   const now = Date.now();
   const newMinutes = session.minutes_remaining + minutes;
@@ -309,9 +315,10 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
         push_2min_sent = 0,
         premium_download_mbps = ?,
         premium_upload_mbps = ?,
-        premium_expires_at = ?
+        premium_expires_at = ?,
+        data_limit_mb = ?
     WHERE mac_address = ?
-  `).run(newMinutes, newExpiresAt, newHardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, mac);
+  `).run(newMinutes, newExpiresAt, newHardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, newDataLimitMb, mac);
 
   const updated = db.prepare('SELECT * FROM sessions WHERE mac_address = ?').get(mac);
   const bw = effectiveBandwidth(updated);
@@ -324,9 +331,9 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
     // fields, set on the session at redemption time) the moment a
     // customer added more time to an existing session.
     if (bw) {
-      await setClientBandwidth(mac, bw.download, bw.upload, getBurstConfig());
+      await setClientBandwidth(mac, bw.download, bw.upload, getBurstConfig(), !!newDataLimitMb);
     } else if (isBandwidthCapEnabled()) {
-      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
+      await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig(), !!newDataLimitMb);
     }
   } catch(e) {}
 
@@ -397,10 +404,10 @@ async function resumeSession(voucherCode) {
     // Same voucher-override bug as addTimeToSession() above.
     if (session.download_mbps) {
       const upMbps = session.upload_mbps || session.download_mbps;
-      await setClientBandwidth(session.mac_address, session.download_mbps, upMbps, getBurstConfig());
+      await setClientBandwidth(session.mac_address, session.download_mbps, upMbps, getBurstConfig(), !!session.data_limit_mb);
       console.log(`[Network] Voucher bandwidth reapplied to ${session.mac_address}: ${session.download_mbps}Mbps down / ${upMbps}Mbps up`);
     } else if (isBandwidthCapEnabled()) {
-      await setClientBandwidth(session.mac_address, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
+      await setClientBandwidth(session.mac_address, getMaxMbps(), getMaxUploadMbps(), getBurstConfig(), !!session.data_limit_mb);
       console.log(`[Network] Bandwidth cap reapplied to ${session.mac_address}: ${getMaxMbps()}Mbps down / ${getMaxUploadMbps()}Mbps up`);
     } else {
       console.log(`[Network] Bandwidth cap disabled - allowing full speed for ${session.mac_address}`);
@@ -527,9 +534,9 @@ async function repairRoamedSessions() {
 
       if (session.download_mbps) {
         const upMbps = session.upload_mbps || session.download_mbps;
-        await setClientBandwidth(session.mac_address, session.download_mbps, upMbps, getBurstConfig());
+        await setClientBandwidth(session.mac_address, session.download_mbps, upMbps, getBurstConfig(), !!session.data_limit_mb);
       } else if (isBandwidthCapEnabled()) {
-        await setClientBandwidth(session.mac_address, getMaxMbps(), getMaxUploadMbps(), getBurstConfig());
+        await setClientBandwidth(session.mac_address, getMaxMbps(), getMaxUploadMbps(), getBurstConfig(), !!session.data_limit_mb);
       }
       // else: bandwidth cap disabled - no shaping to reapply, removing the
       // old class was the whole fix.
