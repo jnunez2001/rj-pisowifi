@@ -40,6 +40,10 @@ let lastKnownGoodInterfaces = new Set();
 let consecutiveIpMissing = 0;
 let ipRecoveryStage = 'none'; // 'none' | 'bounced'
 let lastResult = { at: null, status: 'unknown', issues: [] };
+let lastIssueCodes = new Set();
+let lastOnlineVendoMacs = new Set();
+let hasSweptVendoConnectivityOnce = false;
+const VENDO_ONLINE_WINDOW_MS = 3 * 60 * 1000; // matches devices.js's isOnline() 3-minute window
 
 function pruneFixTimestamps() {
   const cutoff = Date.now() - WINDOW_MS;
@@ -236,6 +240,66 @@ function persistResult(status, issues) {
   } catch (e) {
     console.error('🛡️ [Watchdog] Failed to persist health check result:', e.message);
   }
+
+  // Edge-triggered alert log: only log a NEW issue code appearing, or a
+  // previously-present one clearing - never every 2-minute recurrence of
+  // an already-known ongoing issue (that would spam the bell with the
+  // same low-disk-space warning forever).
+  try {
+    const { logAlertEvent } = require('./alertEventService');
+    const currentCodes = new Set(issues.map((i) => i.code));
+
+    for (const issue of issues) {
+      if (!lastIssueCodes.has(issue.code)) {
+        logAlertEvent(issue.severity, issue.code, 'Self-heal check found an issue', issue.message);
+      }
+    }
+    for (const oldCode of lastIssueCodes) {
+      if (!currentCodes.has(oldCode)) {
+        logAlertEvent('info', 'issue_resolved', 'Previous issue cleared', `"${oldCode}" is no longer present on the latest check.`);
+      }
+    }
+    lastIssueCodes = currentCodes;
+  } catch (e) {
+    console.error('🛡️ [Watchdog] Failed to log alert event transition:', e.message);
+  }
+}
+
+// Vendo online/offline is derived (last_seen recency), not a stored
+// status - the Devices page already computes it this way client-side
+// (public/admin/js/devices.js's isOnline(), same 3-minute window). This
+// sweep runs on the same 2-minute cadence as the rest of the health check
+// and only logs an actual flip from online to offline or back, not every
+// tick, by comparing against the online set from the previous run.
+function checkVendoConnectivity() {
+  try {
+    const { logAlertEvent } = require('./alertEventService');
+    const rows = db.prepare("SELECT mac_address, name, last_seen FROM vendos WHERE status = 'adopted'").all();
+    const now = Date.now();
+    const currentOnline = new Set();
+    for (const v of rows) {
+      const seenAt = v.last_seen ? new Date(v.last_seen + 'Z').getTime() : NaN;
+      if (Number.isFinite(seenAt) && (now - seenAt) < VENDO_ONLINE_WINDOW_MS) {
+        currentOnline.add(v.mac_address);
+      }
+    }
+
+    if (hasSweptVendoConnectivityOnce) {
+      for (const v of rows) {
+        const wasOnline = lastOnlineVendoMacs.has(v.mac_address);
+        const isOnline = currentOnline.has(v.mac_address);
+        if (isOnline && !wasOnline) {
+          logAlertEvent('info', 'vendo_connected', `"${v.name || v.mac_address}" connected`, `MAC ${v.mac_address}`);
+        } else if (!isOnline && wasOnline) {
+          logAlertEvent('warning', 'vendo_disconnected', `"${v.name || v.mac_address}" disconnected`, `MAC ${v.mac_address} has not checked in for over 3 minutes.`);
+        }
+      }
+    }
+    hasSweptVendoConnectivityOnce = true;
+    lastOnlineVendoMacs = currentOnline;
+  } catch (e) {
+    console.error('🛡️ [Watchdog] Vendo connectivity sweep failed:', e.message);
+  }
 }
 
 async function runHealthCheck() {
@@ -281,6 +345,8 @@ async function runHealthCheck() {
       }
     }
   }
+
+  checkVendoConnectivity();
 
   const freeMb = await checkDiskSpace();
   if (freeMb !== null && freeMb < MIN_FREE_DISK_MB) {

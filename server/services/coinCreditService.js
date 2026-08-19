@@ -11,6 +11,27 @@
 
 const db = require('../config/database');
 const { logFinancialEvent } = require('./financialLogService');
+const { logAlertEvent } = require('./alertEventService');
+
+// Burst-detection for the coin-credit path, alert log only (not a
+// blocking/rejection mechanism). Chosen threshold traces to a real bug
+// class this codebase has already hit once: a relay-arm firmware fault
+// that fired repeated phantom "coin inserted" pulses in a short window
+// (see bugslog.md). More than 5 credited coins from the same MAC inside
+// 60 seconds is unusual for genuine manual coin insertion and would have
+// surfaced that class of problem instead of it going unnoticed.
+const SUSPICIOUS_COIN_WINDOW_MS = 60 * 1000;
+const SUSPICIOUS_COIN_THRESHOLD = 5;
+const recentCoinTimestampsByMac = new Map();
+
+function recordAndCheckCoinBurst(mac) {
+  const now = Date.now();
+  const cutoff = now - SUSPICIOUS_COIN_WINDOW_MS;
+  const existing = (recentCoinTimestampsByMac.get(mac) || []).filter((t) => t > cutoff);
+  existing.push(now);
+  recentCoinTimestampsByMac.set(mac, existing);
+  return existing.length;
+}
 
 class NoMatchingRateError extends Error {
   constructor(coinValue) {
@@ -124,6 +145,13 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
     VALUES (?, ?, ?, 'coin', ?, ?)
   `).run(session.voucher_code, coinValue, totalMinutes, kioskId, mac);
   logFinancialEvent({ voucher_code: session.voucher_code, coin_value: coinValue, minutes_added: totalMinutes, type: 'coin', mac });
+
+  logAlertEvent('info', 'coin_inserted', `₱${coinValue} credited`, `MAC ${mac} - ${matchLog}`);
+
+  const burstCount = recordAndCheckCoinBurst(mac);
+  if (burstCount > SUSPICIOUS_COIN_THRESHOLD) {
+    logAlertEvent('warning', 'suspicious_coin_activity', 'Unusual coin activity detected', `${mac} has had ${burstCount} coin credits in the last minute - worth checking the coin mechanism for a stuck relay/phantom pulses.`);
+  }
 
   console.log(created
     ? `🆕 New session: ${session.voucher_code} for ${mac}`

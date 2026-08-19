@@ -277,10 +277,6 @@
             <span class="nav-icon"><i class="fas fa-scroll"></i></span>
             Logs
           </div>
-          <div class="nav-item" onclick="navigateTo('alerts')">
-            <span class="nav-icon"><i class="fas fa-bell"></i></span>
-            Alerts
-          </div>
           <div class="nav-item" onclick="navigateTo('update')">
             <span class="nav-icon"><i class="fas fa-arrows-rotate"></i></span>
             Updates
@@ -337,6 +333,18 @@
         <button class="header-icon-btn" onclick="refreshCurrentPage()" title="Refresh">
           <i class="fas fa-rotate-right"></i>
         </button>
+        <div class="notif-bell-wrap">
+          <button class="header-icon-btn" onclick="toggleNotifDropdown(event)" title="Alerts" id="notifBellBtn">
+            <i class="fas fa-bell"></i>
+            <span class="notif-dot" id="notifDot" style="display:none;"></span>
+          </button>
+          <div class="notif-dropdown" id="notifDropdown" style="display:none;">
+            <div class="notif-dropdown-header">Alerts</div>
+            <div class="notif-dropdown-body" id="notifDropdownBody">
+              <div class="loading"><i class="fas fa-spinner fa-spin"></i></div>
+            </div>
+          </div>
+        </div>
         <button class="theme-toggle" onclick="toggleTheme()" id="themeBtn">
             <i class="fas fa-moon"></i> <span class="theme-label">Dark Mode</span>
         </button>
@@ -425,6 +433,6 @@
 <script src="js/about.js"></script>
 <script src="js/system-health.js"></script>
 <script src="js/logs.js"></script>
-<script src="js/alerts.js"></script>
+<script src="js/notifications.js"></script>
 </body>
 </html>

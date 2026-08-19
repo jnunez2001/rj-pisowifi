@@ -307,6 +307,22 @@ db.exec(`
     checked_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Persisted event/alert log, backing the notification bell. Distinct
+  -- from watchdog_events (which re-saves the FULL current issue list every
+  -- 2 minutes, no concept of new-vs-ongoing) - this table only gets a row
+  -- when something actually happens: a real state transition (a watchdog
+  -- issue newly appearing/clearing, a vendo connecting/disconnecting), or
+  -- a one-off occurrence (a coin credited, a new candidate device seen).
+  -- See server/services/alertEventService.js.
+  CREATE TABLE IF NOT EXISTS alert_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    severity TEXT NOT NULL, -- 'critical' | 'warning' | 'info'
+    code TEXT NOT NULL,
+    title TEXT NOT NULL,
+    detail TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- A secondary coin acceptor relayed back to this box over WiFi via an
   -- ESP32/ESP8266 board ("Satellite Kiosk", as opposed to this box's own
   -- directly-wired "Main Kiosk"). device_key is a pairing secret the
@@ -1387,7 +1403,7 @@ db.exec(`
 const SITE_SCOPED_TABLES = [
   'sessions', 'transactions', 'promo_vouchers', 'voucher_groups', 'rates',
   'session_history', 'free_claims', 'vlans', 'vendos', 'trusted_devices',
-  'watchdog_events', 'satellite_kiosks', 'tc_class_allocations',
+  'watchdog_events', 'alert_events', 'satellite_kiosks', 'tc_class_allocations',
   'router_ports', 'static_leases', 'port_forwards', 'client_labels',
   'network_config_versions', 'bandwidth_profiles',
 ];

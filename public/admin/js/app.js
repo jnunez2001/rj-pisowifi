@@ -187,6 +187,7 @@ function showAdmin() {
   if (typeof refreshRouterFlyoutVisibility === 'function') refreshRouterFlyoutVisibility();
   checkDiskSpaceBanner();
   loadVenueType();
+  if (typeof startNotifPolling === 'function') startNotifPolling();
 }
 
 // Sets window.currentVenueType once per login, read by flyoutNav.js to
@@ -267,7 +268,6 @@ const pageTitles = {
   'sms-email-gateway': 'SMS / Email Gateway',
   'system-health': 'System Health',
   logs: 'Logs',
-  alerts: 'Alerts',
   sales: 'Sales Report',
   sessions: 'Active Sessions',
   vouchers: 'Vouchers',
@@ -417,7 +417,6 @@ async function navigateTo(page) {
       about: () => typeof loadAbout === 'function' && loadAbout(),
       'system-health': () => typeof loadSystemHealth === 'function' && loadSystemHealth(),
       logs: () => typeof loadLogsPage === 'function' && loadLogsPage(),
-      alerts: () => typeof loadAlertsPage === 'function' && loadAlertsPage(),
     };
 
     if (scripts[page]) scripts[page]();

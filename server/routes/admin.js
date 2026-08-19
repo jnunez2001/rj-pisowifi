@@ -2646,6 +2646,7 @@ router.post('/vendo/register', (req, res) => {
         INSERT INTO vendos (mac_address, name, ip_address, firmware, device_secret, last_seen, status)
         VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'candidate')
       `).run(mac, name, ip || '', version || '', issuedSecret);
+      require('../services/alertEventService').logAlertEvent('info', 'vendo_candidate_detected', `New device "${name}" detected`, `MAC ${mac} is broadcasting but not yet approved - see Devices to adopt or ignore it.`);
     }
 
     // No auth on this route (see note above) means anyone on the LAN could
@@ -4647,15 +4648,38 @@ router.get('/logs', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/alerts — real, derived alerts, not a stored table of its
-// own. Sources: watchdog self-heal failures (recent, unresolved-looking
-// ones), WAN health score (wanHealthService.js, already built), and disk
-// space (systemDiagnosticsService.js's getDiskSpace(), already backs the
-// low-disk-space banner elsewhere in the admin UI). No alert here is
-// synthetic - each one traces to a real check that already runs.
+// GET /api/admin/alerts — merges two sources, both real:
+//  - live-recomputed checks (watchdog self-heal, WAN health score, disk
+//    space) - same as before, nothing here is persisted per-alert
+//  - the persisted alert_events log (server/services/alertEventService.js),
+//    which is where individual occurrences/transitions (a coin credited, a
+//    device connecting, a watchdog issue's edge) actually get a stable id
+//    and back the notification bell's history.
+// No alert here is synthetic - each one traces to a real check or a real
+// event that already happened.
 router.get('/alerts', adminAuth, async (req, res) => {
   try {
     const alerts = [];
+
+    try {
+      const { getRecentAlertEvents } = require('../services/alertEventService');
+      getRecentAlertEvents(30).forEach((e) => {
+        alerts.push({
+          id: `event-${e.id}`,
+          severity: e.severity,
+          code: e.code,
+          title: e.title,
+          detail: e.detail || '',
+          // SQLite's CURRENT_TIMESTAMP has no timezone marker (stored as
+          // UTC but looks local) - without forcing it, the client's
+          // `new Date(...)` parses it as local time, throwing off both
+          // the displayed time and the "unseen since last visit" check
+          // by the browser's UTC offset (silently wrong for any operator
+          // outside UTC, which is this app's whole actual market).
+          time: e.created_at.replace(' ', 'T') + 'Z',
+        });
+      });
+    } catch (e) {}
 
     const recentWatchdog = db.prepare(
       "SELECT status, issues_json, checked_at FROM watchdog_events WHERE status != 'ok' ORDER BY checked_at DESC LIMIT 5"
@@ -4673,7 +4697,7 @@ router.get('/alerts', adminAuth, async (req, res) => {
         severity: hasCritical ? 'critical' : 'warning',
         title: 'Self-heal check found an issue',
         detail: issues.map((i) => i.message || i).join(', ') || 'See Logs for details.',
-        time: r.checked_at,
+        time: r.checked_at.replace(' ', 'T') + 'Z',
       });
     });
 
