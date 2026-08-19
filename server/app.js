@@ -345,13 +345,13 @@ app.get('/hotspot-login', (req, res) => {
 app.get('/generate_204', async (req, res) => {
   const ip = getClientIp(req);
   if (await isAuthenticated(ip)) return res.status(204).send();
-  res.redirect('http://10.0.0.1:3000/portal/');
+  res.redirect(`${req.protocol}://${req.get('host')}/portal/`);
 });
 
 app.get('/gen_204', async (req, res) => {
   const ip = getClientIp(req);
   if (await isAuthenticated(ip)) return res.status(204).send();
-  res.redirect('http://10.0.0.1:3000/portal/');
+  res.redirect(`${req.protocol}://${req.get('host')}/portal/`);
 });
 
 app.get('/hotspot-detect.html', async (req, res) => {
@@ -359,7 +359,7 @@ app.get('/hotspot-detect.html', async (req, res) => {
   if (await isAuthenticated(ip)) {
     return res.send('<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>');
   }
-  res.redirect('http://10.0.0.1:3000/portal/');
+  res.redirect(`${req.protocol}://${req.get('host')}/portal/`);
 });
 
 app.get('/library/test/success.html', async (req, res) => {
@@ -367,23 +367,23 @@ app.get('/library/test/success.html', async (req, res) => {
   if (await isAuthenticated(ip)) {
     return res.send('<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>');
   }
-  res.redirect('http://10.0.0.1:3000/portal/');
+  res.redirect(`${req.protocol}://${req.get('host')}/portal/`);
 });
 
 app.get('/ncsi.txt', async (req, res) => {
   const ip = getClientIp(req);
   if (await isAuthenticated(ip)) return res.send('Microsoft NCSI');
-  res.redirect('http://10.0.0.1:3000/portal/');
+  res.redirect(`${req.protocol}://${req.get('host')}/portal/`);
 });
 
 app.get('/connecttest.txt', async (req, res) => {
   const ip = getClientIp(req);
   if (await isAuthenticated(ip)) return res.send('Microsoft Connect Test');
-  res.redirect('http://10.0.0.1:3000/portal/');
+  res.redirect(`${req.protocol}://${req.get('host')}/portal/`);
 });
 
 app.get('/redirect', (req, res) => {
-  res.redirect('http://10.0.0.1:3000/portal/');
+  res.redirect(`${req.protocol}://${req.get('host')}/portal/`);
 });
 
 // ── API Routes ────────────────────────────────────────────────
