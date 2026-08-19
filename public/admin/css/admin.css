@@ -424,6 +424,65 @@ body {
 .notif-item-detail { color: var(--text-secondary); font-size: 12px; margin-top: 2px; }
 .notif-item-time { color: var(--text-muted); font-size: 11px; margin-top: 4px; }
 
+/* ===== ALERT BUBBLE (speech-bubble callout, anchored to the bell) =====
+   For a fresh alert landing while the dropdown is closed - not the
+   bottom-of-screen toast used elsewhere for save confirmations etc.
+   Same card look as .notif-dropdown (border/shadow/radius) plus a small
+   CSS-triangle tail pointing up at the bell it came from. */
+.notif-alert-bubble {
+  position: absolute;
+  top: calc(100% + 14px);
+  right: -6px;
+  width: 260px;
+  max-width: calc(100vw - 32px);
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  z-index: 250;
+  padding: 12px 14px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 13px;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.notif-alert-bubble.show { opacity: 1; transform: translateY(0); }
+.notif-alert-bubble.fade-out { opacity: 0; transform: translateY(-4px); }
+.notif-alert-bubble::before,
+.notif-alert-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  right: 18px;
+  border: 7px solid transparent;
+  border-bottom-color: var(--border-color);
+}
+.notif-alert-bubble::after {
+  border-width: 6px;
+  right: 19px;
+  border-bottom-color: var(--bg-card);
+  margin-bottom: -1px;
+}
+.notif-alert-bubble-title { font-weight: 700; color: var(--text-primary); }
+.notif-alert-bubble-preview { color: var(--text-secondary); font-size: 12px; margin-top: 2px; }
+
+@media (max-width: 480px) {
+  /* Anchored absolute-to-wrap overflows a narrow viewport since the bell
+     sits close to the screen edge - pin to the viewport itself instead,
+     keeping the tail visually near the bell via a fixed right offset. */
+  .notif-alert-bubble {
+    position: fixed;
+    top: 56px;
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+  .notif-alert-bubble::before, .notif-alert-bubble::after { right: 24px; }
+}
+
 @media (max-width: 768px) {
   .notif-dropdown {
     position: fixed;
@@ -771,7 +830,9 @@ select.form-control { cursor: pointer; }
   gap: 16px;
 }
 
-/* ===== ALERTS ===== */
+/* ===== ALERTS =====
+   Neutral card background and border, same as .notice below - only the
+   icon/text carries semantic color, never a colored fill behind it. */
 .alert {
   padding: 12px 16px;
   border-radius: 10px;
@@ -781,12 +842,14 @@ select.form-control { cursor: pointer; }
   display: flex;
   align-items: center;
   gap: 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
 }
 
-.alert-success { background: var(--card-green-bg); color: var(--card-green-text); }
-.alert-error { background: var(--card-red-bg); color: var(--card-red-text); }
-.alert-warning { background: var(--card-orange-bg); color: var(--card-orange-text); }
-.alert-info { background: var(--card-blue-bg); color: var(--card-blue-text); }
+.alert-success { color: var(--card-green-text); }
+.alert-error, .alert-danger { color: var(--card-red-text); }
+.alert-warning { color: var(--card-orange-text); }
+.alert-info { color: var(--card-blue-text); }
 
 /* ===== NOTICE (accent-border, solid color, no pastel fill) =====
    For new error/warning/info banners going forward - a neutral card with

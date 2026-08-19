@@ -260,6 +260,32 @@ function initSidebarCollapse() {
   }
 }
 
+// ===== NAV SECTION COLLAPSE (per-section, Network only for now) =====
+// The whole-sidebar collapse above is separate from this: operators asked
+// specifically for the Network group (Routers/Access Points/Vendo Devices/
+// Firmware Flasher/Network Devices/WAN-ISP) to fold away since it's the
+// longest, most cluttered group. Other sections keep their static titles
+// unless a similar request comes in for them.
+function navSectionKey(name) { return `rj_nav_section_collapsed_${name}`; }
+
+function toggleNavSection(name) {
+  const section = document.querySelector(`.nav-section[data-nav-section="${name}"]`);
+  if (!section) return;
+  const collapsed = section.classList.toggle('collapsed');
+  localStorage.setItem(navSectionKey(name), collapsed ? '1' : '0');
+}
+
+function initNavSectionCollapse() {
+  document.querySelectorAll('.nav-section-title-collapsible').forEach(title => {
+    const section = title.closest('.nav-section');
+    const name = section && section.dataset.navSection;
+    if (!name) return;
+    if (localStorage.getItem(navSectionKey(name)) === '1') {
+      section.classList.add('collapsed');
+    }
+  });
+}
+
 // ===== NAVIGATION =====
 const pageTitles = {
   dashboard: 'Overview',
@@ -704,6 +730,7 @@ function initFieldHelp() {
 // ===== INIT =====
 function init() {
   initSidebarCollapse();
+  initNavSectionCollapse();
   makeClickableDivsKeyboardAccessible(document);
 
   // Load saved theme

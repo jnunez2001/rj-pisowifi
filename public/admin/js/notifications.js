@@ -54,6 +54,40 @@ function renderNotifDropdown() {
   }).join('');
 }
 
+// Comic-style speech bubble anchored to the bell, for a freshly-arrived
+// alert - distinct from the generic bottom showToast() used for save
+// confirmations etc elsewhere in the app. Short preview only (title plus
+// a few words), auto-fades on its own.
+function showAlertBubble(alert) {
+  const wrap = document.querySelector('.notif-bell-wrap');
+  if (!wrap) return;
+  const existing = wrap.querySelector('.notif-alert-bubble');
+  if (existing) existing.remove();
+
+  const meta = NOTIF_SEVERITY_ICON[alert.severity] || NOTIF_SEVERITY_ICON.info;
+  const preview = alert.detail
+    ? (alert.detail.length > 60 ? alert.detail.slice(0, 60) + '...' : alert.detail)
+    : '';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'notif-alert-bubble';
+  bubble.innerHTML = `
+    <i class="fas ${meta.icon}" style="color:${meta.color};margin-top:2px;"></i>
+    <div style="min-width:0;">
+      <div class="notif-alert-bubble-title">${alert.title}</div>
+      ${preview ? `<div class="notif-alert-bubble-preview">${preview}</div>` : ''}
+    </div>`;
+  wrap.appendChild(bubble);
+
+  requestAnimationFrame(() => bubble.classList.add('show'));
+
+  setTimeout(() => {
+    bubble.classList.add('fade-out');
+    bubble.classList.remove('show');
+    setTimeout(() => bubble.remove(), 250);
+  }, 4000);
+}
+
 function updateNotifDot() {
   const dot = document.getElementById('notifDot');
   if (!dot) return;
@@ -74,10 +108,7 @@ async function fetchNotifAlerts() {
     // it would otherwise toast the entire history on every login).
     if (previousNewest) {
       const newOnes = notifAlertsCache.filter((a) => new Date(a.time).getTime() > previousNewest);
-      newOnes.forEach((a) => {
-        const type = a.severity === 'critical' ? 'error' : a.severity === 'warning' ? 'warning' : 'info';
-        showToast(`${a.title}${a.detail ? ' - ' + a.detail : ''}`, type);
-      });
+      newOnes.forEach((a) => showAlertBubble(a));
     }
 
     if (notifAlertsCache.length) {

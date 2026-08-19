@@ -56,7 +56,7 @@ function devStatusBadge(status) {
 // human-readable total; anything without an active shaped session has no
 // traffic source at all and shows an honest em dash, never a fabricated 0.
 function devTrafficCell(bytes) {
-  if (bytes === null || bytes === undefined) return '<span style="color:var(--text-muted);">&mdash;</span>';
+  if (bytes === null || bytes === undefined) return '<span style="color:var(--text-muted);">-</span>';
   const mb = bytes / (1024 * 1024);
   return mb >= 1 ? `${mb.toFixed(1)} MB` : `${(bytes / 1024).toFixed(1)} KB`;
 }

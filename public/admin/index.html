@@ -219,7 +219,10 @@
       </div>
 
       <div class="nav-section" data-nav-section="network">
-        <div class="nav-section-title nav-section-title-static"><span>Network</span></div>
+        <div class="nav-section-title nav-section-title-collapsible" onclick="toggleNavSection('network')">
+          <span>Network</span>
+          <i class="fas fa-chevron-down nav-section-chevron"></i>
+        </div>
         <div class="nav-section-items">
           <div class="nav-item" onclick="navigateTo('routers')">
             <span class="nav-icon"><i class="fas fa-server"></i></span>
