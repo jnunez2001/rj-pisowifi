@@ -21,7 +21,7 @@ DB="${DB_PATH:-/var/lib/rj-pisowifi/database/rjpisowifi.db}"
 GATEWAY_IP="10.0.0.1"
 
 # Cross-checked against an OpenWrt/rockchip reference build's
-# etc/init.d/packet_steering — it spreads each interface's RX packet
+# etc/init.d/packet_steering, it spreads each interface's RX packet
 # processing (RPS) across every CPU core instead of leaving it pinned to
 # whichever core handles that NIC's interrupt. On a multi-core board doing
 # NAT + nftables + tc shaping (Orange Pi 3B class hardware), that single
@@ -458,7 +458,7 @@ echo "nodogsplash chains cleaned" >> $LOG
 # Bug #75: this whole block (static gateway IP + NAT + dnsmasq as DHCP
 # server) used to run unconditionally, even in "mikrotik"/external-router
 # mode. There, the MikroTik is already the network's router and DHCP
-# server — running our own dnsmasq on the same LAN put two DHCP servers
+# server, running our own dnsmasq on the same LAN put two DHCP servers
 # answering the same clients' DISCOVERs, which is exactly what "stuck on
 # Obtaining IP Address" looks like (conflicting offers/NAKs). Only stand up
 # our own IP/NAT/DHCP when we're actually the router (standalone mode); in
@@ -490,7 +490,7 @@ echo "Multi-lane mode: $MULTI_LANE_MODE" >> $LOG
 
 if [ "$NETWORK_MODE" = "standalone" ] && [ "$MULTI_LANE_MODE" = "1" ]; then
   # ═══════════════════════════════════════════════════════════════
-  # MULTI-LANE ENGINE — Network > Ports and Roles (Standalone), any
+  # MULTI-LANE ENGINE, Network > Ports and Roles (Standalone), any
   # number of gated/open lanes, VLAN sub-interfaces and/or Linux bridges
   # for lanes spanning more than one physical port/VLAN.
   # ═══════════════════════════════════════════════════════════════
@@ -774,7 +774,7 @@ NFTEOF
 
 elif [ "$NETWORK_MODE" = "standalone" ]; then
   # ═══════════════════════════════════════════════════════════════
-  # LEGACY SINGLE-LANE PATH — no gated/open router_ports rows configured
+  # LEGACY SINGLE-LANE PATH, no gated/open router_ports rows configured
   # yet, so behave exactly as before (one fixed 10.0.0.0/24 LAN on LAN_VIF).
   # Existing installs that have never touched Ports and Roles keep working
   # unchanged, no migration required.
@@ -810,7 +810,7 @@ elif [ "$NETWORK_MODE" = "standalone" ]; then
   # Bug: WAN admin access used to be a straight port 80 -> 3000 redirect
   # here, meaning the admin panel (default password, no TLS) was reachable
   # in plaintext from the internet. nginx now owns ports 80/443 directly on
-  # all interfaces (setup/nginx.conf, installed by install.sh) — 80 redirects
+  # all interfaces (setup/nginx.conf, installed by install.sh), 80 redirects
   # to 443, which terminates TLS and proxies to 127.0.0.1:3000. No PREROUTING
   # redirect needed for WAN anymore; removing this rule doesn't affect the
   # LAN captive portal, which reaches this app through the separate nftables
@@ -830,13 +830,13 @@ elif [ "$NETWORK_MODE" = "standalone" ]; then
   #    still remembers its old IP and sends a DHCPREQUEST for it, not a fresh
   #    DISCOVER. Without this flag, dnsmasq doesn't know it's the sole
   #    authority on the network, so its RFC-correct response to a lease it
-  #    doesn't recognize is to silently ignore the request — the client sits
+  #    doesn't recognize is to silently ignore the request, the client sits
   #    waiting through its own timeout (often 30-60+ seconds) before falling
   #    back to a full DISCOVER. With the flag, dnsmasq immediately NAKs it
   #    instead, and the client restarts DHCP right away.
   # 2. The pool (10.10-10.200, 191 addresses) with a 12h lease is sized for a
   #    small, mostly-static home network, not a walk-up coin-op location with
-  #    many short, transient visits — leases can pile up faster than they
+  #    many short, transient visits, leases can pile up faster than they
   #    expire and exhaust the pool mid-day, well before any single lease's
   #    12h is up. Widened the range and cut the lease time so departed
   #    customers' addresses free up much sooner.
@@ -949,7 +949,7 @@ NFTEOF
   echo "tc ingress qdisc configured on $LAN_VIF" >> $LOG
 
 else
-  # mikrotik mode: the router owns DHCP/NAT — make sure our own dnsmasq
+  # mikrotik mode: the router owns DHCP/NAT, make sure our own dnsmasq
   # isn't still running from a prior standalone setup and fighting it.
   rm -f /etc/dnsmasq.d/rj-pisowifi.conf
   systemctl stop dnsmasq >> $LOG 2>&1 || true
@@ -999,7 +999,7 @@ ISSUE_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$APP_DIR/pa
 [ -z "$ISSUE_VERSION" ] && ISSUE_VERSION="unknown"
 {
     echo ""
-    # Same branding as the post-login MOTD (/etc/update-motd.d/00-zenfi),
+    # Same branding as the post-login MOTD (/etc/update-motd.d/00-starkfi),
     # but shown here in /etc/issue too - agetty prints this the instant boot
     # finishes, before anyone has typed a username, matching how a real
     # network appliance (e.g. RouterOS) shows its own branding immediately
@@ -1008,15 +1008,18 @@ ISSUE_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$APP_DIR/pa
     # branding appears, not the security boundary.
     printf '\033[36m'
     cat << 'ISSUELOGO'
-█████ █████ █   █ █████ ███    ████  █   █
-   █  █     ██  █ █      █     █   █ █   █
-  █   ████  █ █ █ ████   █     ████  █████
- █    █     █  ██ █      █     █     █   █
-█████ █████ █   █ █     ███    █     █   █
+                                                    ,,
+ .M"""bgd mm                   `7MM      `7MM"""YMM db
+,MI    "Y MM                     MM        MM    `7
+`MMb.   mmMMmm  ,6"Yb.  `7Mb,od8 MM  ,MP'  MM   d `7MM
+  `YMMNq. MM   8)   MM    MM' "' MM ;Y     MM""MM   MM
+.     `MM MM    ,pm9MM    MM     MM;Mm     MM   Y   MM
+Mb     dM MM   8M   MM    MM     MM `Mb.   MM       MM
+P"Ybmmd"  `Mbmo`Moo9^Yo..JMML. .JMML. YA..JMML.   .JMML.
 ISSUELOGO
     printf '\033[0m'
     echo ""
-    echo "Zentry Systems - ZenFi Hotspot Server $ISSUE_VERSION"
+    echo "Zentry Systems - StarkFi Hotspot Server $ISSUE_VERSION"
     echo "Copyright (c) $(date +%Y) Zentry Systems. All rights reserved."
     echo "-----------------------------------------------"
     FOUND_IP=0
@@ -1069,7 +1072,7 @@ echo "Login prompt branded (zentry login)" >> $LOG
 if [ -d /etc/update-motd.d ]; then
     chmod -x /etc/update-motd.d/* 2>/dev/null || true
 fi
-cat > /etc/update-motd.d/00-zenfi << 'MOTDEOF'
+cat > /etc/update-motd.d/00-starkfi << 'MOTDEOF'
 #!/bin/bash
 IDENTITY_FILE="/var/lib/rj-pisowifi/.device-identity"
 APP_DIR="/home/rjcyberzone/rj-pisowifi"
@@ -1080,15 +1083,18 @@ VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$APP_DIR/package.
 echo ""
 printf '\033[36m'
 cat << 'LOGO'
-█████ █████ █   █ █████ ███    ████  █   █
-   █  █     ██  █ █      █     █   █ █   █
-  █   ████  █ █ █ ████   █     ████  █████
- █    █     █  ██ █      █     █     █   █
-█████ █████ █   █ █     ███    █     █   █
+                                                    ,,
+ .M"""bgd mm                   `7MM      `7MM"""YMM db
+,MI    "Y MM                     MM        MM    `7
+`MMb.   mmMMmm  ,6"Yb.  `7Mb,od8 MM  ,MP'  MM   d `7MM
+  `YMMNq. MM   8)   MM    MM' "' MM ;Y     MM""MM   MM
+.     `MM MM    ,pm9MM    MM     MM;Mm     MM   Y   MM
+Mb     dM MM   8M   MM    MM     MM `Mb.   MM       MM
+P"Ybmmd"  `Mbmo`Moo9^Yo..JMML. .JMML. YA..JMML.   .JMML.
 LOGO
 printf '\033[0m'
 echo ""
-echo "  Zentry Systems - ZenFi Hotspot Server $VERSION"
+echo "  Zentry Systems - StarkFi Hotspot Server $VERSION"
 echo "  Device ID: $DEVICE_ID"
 echo "  -----------------------------------------------"
 FOUND=0
@@ -1110,7 +1116,7 @@ else
 fi
 echo ""
 MOTDEOF
-chmod +x /etc/update-motd.d/00-zenfi
-echo "Console MOTD updated (/etc/update-motd.d/00-zenfi)" >> $LOG
+chmod +x /etc/update-motd.d/00-starkfi
+echo "Console MOTD updated (/etc/update-motd.d/00-starkfi)" >> $LOG
 
 echo "=== Setup complete ===" >> $LOG

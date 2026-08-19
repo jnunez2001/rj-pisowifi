@@ -3,8 +3,8 @@
 A polished SVG asset pack based on the approved Routers module visual direction.
 
 Folders:
-- icons/ — UI icons used by the Routers module
-- devices/ — router, gateway, AP, switch, server, and client illustrations
+- icons/: UI icons used by the Routers module
+- devices/: router, gateway, AP, switch, server, and client illustrations
 
 Recommended frontend location:
 `/public/assets/zenfi/routers/`

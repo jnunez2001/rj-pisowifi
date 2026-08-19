@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================
-# R&J PisoWifi — One-Shot Installer
+# R&J PisoWifi: One-Shot Installer
 # Fresh Ubuntu 22.04 only
 # Usage: sudo bash setup/install.sh
 # =============================================
@@ -111,12 +111,12 @@ echo "DNS configured" | tee -a $LOG
 # ─── 6. SYSTEM CONFIG ────────────────────────────────────────
 echo "[5/8] System configuration..." | tee -a $LOG
 
-# Quiet boot — a real network appliance (MikroTik, any consumer router)
+# Quiet boot, a real network appliance (MikroTik, any consumer router)
 # never shows raw Linux service-startup spam ("[ OK ] Started Docker
 # Application Container Engine", cloud-init module timing, etc.) on its own
 # console. That noise undermines the "stable, professional appliance" feel
 # this box's own branded banner (see setup-network.sh's /etc/issue and
-# /etc/update-motd.d/00-zenfi) is otherwise going for. Suppressing kernel
+# /etc/update-motd.d/00-starkfi) is otherwise going for. Suppressing kernel
 # and systemd status output leaves just this box's own branding and the
 # login prompt, matching that. Safe to skip if grub isn't present (some
 # cloud/VM images boot without it).
@@ -150,7 +150,7 @@ systemctl disable nftables >> $LOG 2>&1 || true
 systemctl disable nodogsplash >> $LOG 2>&1 || true
 systemctl stop nodogsplash >> $LOG 2>&1 || true
 
-# Remove UFW completely — we use nftables directly
+# Remove UFW completely, we use nftables directly
 apt purge ufw -y >> $LOG 2>&1 || true
 
 # Bug: iptables-persistent auto-loads /etc/iptables/rules.v[46] at every boot,
@@ -189,7 +189,7 @@ mkdir -p $APP_DIR/public/uploads
 chown -R $USER:$USER $APP_DIR
 
 # Data storage lives outside $APP_DIR on purpose (Bug: DB used to sit inside
-# the app's own repo tree — an OS reflash or a careless `git clean` in the
+# the app's own repo tree, an OS reflash or a careless `git clean` in the
 # app dir could take live customer/session data with it). One-time migration
 # below moves an existing DB from the old in-repo location if this is a
 # re-run of install.sh on a box that predates this change; safe/idempotent
@@ -356,7 +356,7 @@ echo "Services installed" | tee -a $LOG
 echo "Configuring nginx TLS front door..." | tee -a $LOG
 
 mkdir -p /etc/rj-pisowifi/tls
-# Self-signed — there's no public domain for this box. Still strictly
+# Self-signed, there's no public domain for this box. Still strictly
 # better than the plaintext admin access this replaces (see setup-network.sh
 # comment on the removed WAN port80->3000 redirect). Only generated once;
 # re-running install.sh doesn't churn the cert or invalidate a browser's
@@ -437,7 +437,7 @@ echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/hostnamectl set-hostname *" \
 echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart avahi-daemon" \
   >> /etc/sudoers.d/rj-pisowifi
 
-# avahi mDNS — rjcyberzone.local
+# avahi mDNS: rjcyberzone.local
 cat > /etc/avahi/services/rjcyberzone.service << EOF
 <?xml version="1.0" standalone='no'?>
 <!DOCTYPE service-group SYSTEM "avahi-service.dtd">

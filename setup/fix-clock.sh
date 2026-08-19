@@ -1,6 +1,6 @@
 #!/bin/bash
 # Cross-checked against an OpenWrt/rockchip reference build's
-# etc/init.d/sysfixtime — cheap ARM boards (Orange Pi 3B class hardware)
+# etc/init.d/sysfixtime, cheap ARM boards (Orange Pi 3B class hardware)
 # often have no battery-backed RTC, so a cold boot after full power loss
 # can start with the system clock stuck at whatever the kernel's built-in
 # default is (often epoch, or a build date years in the past), before
@@ -8,12 +8,12 @@
 #
 # Session/promo expires_at comparisons (sessionService.js, timerService.js)
 # and nginx's TLS cert validity window all trust the system clock directly
-# with no defense against this — a session could look already-expired (or
+# with no defense against this, a session could look already-expired (or
 # never-expiring) and nginx could reject its own cert as "not yet valid" in
 # that window. This forces the clock forward to a sane floor (the newest
 # mtime among this app's own files, which is always chronologically after
 # any real clock-reset scenario) before either service starts. It's a
-# floor, not a fix — real time still comes from NTP once the network is up.
+# floor, not a fix, real time still comes from NTP once the network is up.
 LOG="/var/log/rj-fix-clock.log"
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 

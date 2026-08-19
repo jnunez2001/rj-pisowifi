@@ -1,9 +1,9 @@
 #!/bin/bash
 # Cross-checked against an OpenWrt/rockchip reference build's
-# etc/init.d/cpufreq — it explicitly pins a governor per CPU policy rather
+# etc/init.d/cpufreq, it explicitly pins a governor per CPU policy rather
 # than trusting whatever the board's default image ships with. Some SBC
 # images default to a powersave-biased governor that clocks down during
-# idle gaps, adding latency spikes back under load — bad for a dedicated
+# idle gaps, adding latency spikes back under load, bad for a dedicated
 # router appliance doing NAT + nftables + tc shaping continuously, where
 # consistent throughput matters more than saving a few mW. sysfs resets to
 # the kernel/image default on every boot, so this needs to run at every
