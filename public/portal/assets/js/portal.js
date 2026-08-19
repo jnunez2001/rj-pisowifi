@@ -263,6 +263,25 @@ async function enableNotifications() {
   }
 }
 
+// Escapes the OS's restricted captive-portal webview (Android's captive
+// portal login activity, iOS's Captive Network Assistant) into the
+// customer's real browser, so the portal URL lands in normal history/tabs
+// they can return to later without hunting for a hostname or waiting on a
+// push notification. window.open() reliably hands off to the real browser
+// on Android in most cases; iOS's CNA is deliberately hardened against
+// exactly this kind of escape and may just ignore it, no way to force it
+// from here, that's a platform restriction, not something fixable in this
+// app. Falls back to a plain alert with the URL if the popup is blocked,
+// so the customer at least sees an address to remember, rather than
+// nothing happening with no explanation.
+function continueInBrowser() {
+  const url = location.href;
+  const win = window.open(url, '_blank');
+  if (!win) {
+    alert(`Open this address in your browser to return anytime:\n\n${url}`);
+  }
+}
+
 function playSound(type) {
   if (!soundEnabled) return;
   try {
