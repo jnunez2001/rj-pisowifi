@@ -2060,7 +2060,7 @@ router.get('/router/password', adminAuth, (req, res) => {
 });
 
 // POST /api/admin/settings
-router.post('/settings', adminAuth, (req, res) => {
+router.post('/settings', adminAuth, async (req, res) => {
   try {
     const updates = req.body;
 
@@ -2132,16 +2132,28 @@ router.post('/settings', adminAuth, (req, res) => {
     // changed - but portal_hostname needs the same re-apply when changed
     // on its own too. Router mode has no local dnsmasq to update; ask the
     // router directly for a static DNS record instead.
+    // Bug found live: setPortalDnsName()'s result was never checked here -
+    // a failure (no server_lan_mac configured, MikroTik unreachable, etc.)
+    // still returned the same "Settings updated" success response, an
+    // operator setting a hostname had no way to tell it silently didn't
+    // apply on the router until a customer reported the address not
+    // working days later.
+    let portalHostnameWarning = null;
     if ('portal_hostname' in updates) {
       const mode = db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
       if (mode === 'mikrotik') {
-        require('../services/mikrotikService').setPortalDnsName(updates.portal_hostname);
+        if (updates.portal_hostname) {
+          const applied = await require('../services/mikrotikService').setPortalDnsName(updates.portal_hostname);
+          if (!applied) {
+            portalHostnameWarning = 'Portal hostname was saved, but could not be applied on the router (check the LAN Connection MAC is set correctly and the router is reachable). Customers may not be able to reach it by name yet.';
+          }
+        }
       } else {
         applyNetworkSetup();
       }
     }
 
-    return res.json({ success: true, message: 'Settings updated' });
+    return res.json({ success: true, message: 'Settings updated', warning: portalHostnameWarning });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
   }

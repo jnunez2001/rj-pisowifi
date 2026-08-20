@@ -16,6 +16,7 @@
 // "remove"/"set" need the record's ".id", always look it up first, same
 // pattern as the old REST GET-before-DELETE/PATCH.
 
+const os = require('os');
 const db = require('../config/database');
 const { withMikrotik } = require('./mikrotikApiClient');
 const { getMikrotikConfig } = require('./mikrotikConfigHelper');
@@ -532,22 +533,46 @@ async function getInterfaceTraffic(interfaceNames) {
 // equivalent of setup-network.sh's dnsmasq address= line - the router owns
 // DNS in this mode (our own dnsmasq is disabled), so this server can't
 // answer that hostname itself. Adds/updates a static DNS record on the
-// router resolving it to THIS server's own current DHCP lease address (via
-// server_lan_mac, the same setting Ports and Roles auto-provisioning
-// already relies on to know which device on the router IS this server).
-// Best-effort: silently no-ops if server_lan_mac isn't set or has no
-// current lease yet, same as this file's other bandwidth/queue calls that
-// depend on a lease existing.
+// router resolving it to THIS server's own current LAN IP (via
+// getOwnLanIp() below). Best-effort: silently no-ops if server_lan_mac
+// isn't set or doesn't match any live local interface.
+
+// Finds this server's own current LAN IPv4 address by matching
+// server_lan_mac (the same setting the admin already picked on the
+// Connection card) against os.networkInterfaces() directly.
+//
+// Bug found live: this used to ask the ROUTER for it instead, via a
+// /ip/dhcp-server/lease/print lookup keyed on this box's MAC, then took
+// leaseRes.re[0].address on faith. A router that had rebooted uncleanly a
+// few times (real, saw it in the router's own log) can accumulate more
+// than one lease row for the same MAC as it renegotiates, and RouterOS's
+// print order isn't "most recent first" - re[0] could easily be a stale
+// row from a previous lease, pointing the DNS record at an address this
+// box hadn't answered on in days. That's indirection this server never
+// needed: it always knows its own current IP directly, with zero risk of
+// ever reading someone else's (or an old) answer.
+function getOwnLanIp() {
+  const ownMac = db.prepare("SELECT value FROM settings WHERE key = 'server_lan_mac'").get()?.value;
+  if (!ownMac) return null;
+  const target = String(ownMac).toLowerCase();
+  const nets = os.networkInterfaces();
+  for (const ifaceList of Object.values(nets)) {
+    for (const iface of ifaceList) {
+      if (iface.family === 'IPv4' && !iface.internal && String(iface.mac || '').toLowerCase() === target) {
+        return iface.address;
+      }
+    }
+  }
+  return null;
+}
+
 async function setPortalDnsName(hostname) {
   const config = getMikrotikConfig();
   if (!config.ip || !hostname) return false;
-  const ownMac = db.prepare("SELECT value FROM settings WHERE key = 'server_lan_mac'").get()?.value;
-  if (!ownMac) return false;
+  const ip = getOwnLanIp();
+  if (!ip) return false;
   try {
     return await withMikrotik(config, async (client) => {
-      const leaseRes = await client.talk(['/ip/dhcp-server/lease/print', `?mac-address=${mikMac(ownMac)}`]);
-      if (leaseRes.re.length === 0) return false;
-      const ip = leaseRes.re[0].address;
 
       // Bug found live: this created the static DNS record, but a LAN
       // client's DNS query never reaches it unless the router's own DNS

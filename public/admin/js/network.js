@@ -258,7 +258,11 @@ async function savePortalHostname() {
       // (MikroTik: pushes one DNS static record; Router Mode: regenerates
       // dnsmasq's address= line) - neither path needs a full Configure
       // re-run, so don't tell the operator to run one.
-      showToast(hostname ? 'Portal address saved and applied.' : 'Portal address cleared.');
+      if (data.warning) {
+        showToast(data.warning, 'error');
+      } else {
+        showToast(hostname ? 'Portal address saved and applied.' : 'Portal address cleared.');
+      }
     } else {
       showToast(data.message || 'Failed to save.', 'error');
     }
