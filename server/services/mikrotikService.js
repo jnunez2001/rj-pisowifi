@@ -400,13 +400,23 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
         `=burst-time=${burstSeconds}s/${burstSeconds}s`,
       ] : [];
 
+      // Bug found live (matches place-before's own history above): a child
+      // queue's =parent= alone isn't enough for RouterOS to accept it on
+      // every call. The first /add succeeds fine, but the periodic re-apply
+      // (this session's own bandwidth reasserted every 30s by timerService)
+      // hits addOrUpdateQueue's "already have such name" -> /queue/simple/set
+      // fallback every time after that, and that update call was failing
+      // with "missing =target=" on every single tick - real router log
+      // evidence, not a guess. Setting an explicit =target= on the child too
+      // (redundant with =parent= on a fresh /add, but required for /set to
+      // have an identifier RouterOS actually accepts) fixes both paths.
       await addOrUpdateQueue(client, [
-        '/queue/simple/add', `=name=${baseName}-udp`, `=parent=${baseName}`,
+        '/queue/simple/add', `=name=${baseName}-udp`, `=parent=${baseName}`, `=target=${ip}/32`,
         '=packet-marks=rj-game-priority', `=max-limit=${upload}M/${download}M`, '=priority=1/1',
         ...childBurstWords,
       ]);
       await addOrUpdateQueue(client, [
-        '/queue/simple/add', `=name=${baseName}-other`, `=parent=${baseName}`,
+        '/queue/simple/add', `=name=${baseName}-other`, `=parent=${baseName}`, `=target=${ip}/32`,
         `=max-limit=${upload}M/${download}M`, '=priority=8/8',
         ...childBurstWords,
       ]);
