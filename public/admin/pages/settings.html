@@ -199,6 +199,11 @@
       <small style="color:var(--text-muted);">Auto-resume after this many minutes while paused.</small>
     </div>
     <div class="form-group">
+      <label class="form-label">Max Pauses Per Session</label>
+      <input type="number" id="maxPauses" class="form-control" placeholder="0" min="0" max="100">
+      <small style="color:var(--text-muted);">How many times a customer can pause the same session. 0 = unlimited. The portal shows customers how many pauses they have left.</small>
+    </div>
+    <div class="form-group">
       <label class="form-label">Grace Period After Expiry (minutes)</label>
       <input type="number" id="gracePeriodMinutes" class="form-control" placeholder="0" min="0" max="60">
       <small style="color:var(--text-muted);">Extra time before disconnecting after session ends.</small>

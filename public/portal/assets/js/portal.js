@@ -746,6 +746,24 @@ function updateSpeedIndicator(session) {
   el.style.display = 'block';
 }
 
+// Shows how many pauses are left when the operator has set a limit
+// (settings.max_pauses > 0, server/routes/session.js's pausesRemaining()).
+// pauses_remaining is null when there's no limit configured, hides the
+// hint entirely rather than showing a confusing "unlimited" label.
+function updatePausesRemainingHint(session) {
+  const hint = document.getElementById('pausesRemainingHint');
+  if (!hint) return;
+  if (session.pauses_remaining === null || session.pauses_remaining === undefined) {
+    hint.style.display = 'none';
+    return;
+  }
+  const n = session.pauses_remaining;
+  hint.textContent = n > 0
+    ? `${n} pause${n === 1 ? '' : 's'} left for this session`
+    : 'No pauses left for this session';
+  hint.style.display = 'block';
+}
+
 function updateUI(session) {
   const prev = currentSession;
   currentSession = session;
@@ -861,6 +879,7 @@ function updateUI(session) {
     if (pauseBtn) {
       pauseBtn.style.display = portalSettings.allow_pause === '1' ? 'block' : 'none';
     }
+    updatePausesRemainingHint(session);
 
     document.getElementById('sectionDisconnected').style.display = 'none';
     document.getElementById('sectionConnected').style.display = 'block';
@@ -1101,7 +1120,7 @@ async function pauseSession() {
     });
     const data = await res.json();
     if (data.success) checkSession();
-    else alert(data.message);
+    else showToast(data.message || 'Could not pause session.', 'error');
   } catch(e) {}
 }
 

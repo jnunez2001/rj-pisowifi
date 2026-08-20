@@ -10,6 +10,16 @@ const {
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
 const { logFinancialEvent } = require('../services/financialLogService');
 const sseService = require('../services/sseService');
+const db = require('../config/database');
+
+// 0 = unlimited (settings.max_pauses, see database.js's migration comment).
+// null means unlimited too, so the portal can tell "no cap" apart from
+// "0 left" without a magic number.
+function pausesRemaining(session) {
+  const maxPauses = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'max_pauses'").get()?.value || '0', 10) || 0;
+  if (maxPauses <= 0) return null;
+  return Math.max(0, maxPauses - (session.pause_count || 0));
+}
 
 // This server has no reverse proxy in front of it (confirmed: setup/nginx.conf
 // is an unused empty placeholder, nothing sets up nginx), clients hit Express
@@ -118,7 +128,8 @@ router.get('/mac/:mac', async (req, res) => {
       is_paused: session.is_paused === 1,
       expires_at: session.expires_at,
       hard_expires_at: session.hard_expires_at,
-      created_at: session.created_at
+      created_at: session.created_at,
+      pauses_remaining: pausesRemaining(session)
     });
 
   } catch (err) {
@@ -152,7 +163,8 @@ router.get('/voucher/:code', (req, res) => {
       minutes_remaining: remaining,
       is_paused: session.is_paused === 1,
       expires_at: session.expires_at,
-      hard_expires_at: session.hard_expires_at
+      hard_expires_at: session.hard_expires_at,
+      pauses_remaining: pausesRemaining(session)
     });
 
   } catch (err) {
@@ -173,6 +185,14 @@ router.post('/pause', sessionActionRateLimit, async (req, res) => {
     }
 
     const session = await pauseSession(voucher_code);
+    if (session === 'limit_reached') {
+      clearAttempts(req._rateLimitId);
+      return res.status(403).json({
+        success: false,
+        reason: 'limit_reached',
+        message: 'You have used up all your pauses for this session.'
+      });
+    }
     if (!session) {
       recordAttempt(req._rateLimitId);
       return res.status(404).json({

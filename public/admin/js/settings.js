@@ -62,6 +62,7 @@ async function loadSettings() {
     // Session Settings
     setToggle('allowPause', 'allowPauseLabel', s.allow_pause === '1');
     document.getElementById('maxPauseMinutes').value = s.max_pause_minutes || 30;
+    document.getElementById('maxPauses').value = s.max_pauses || 0;
     document.getElementById('gracePeriodMinutes').value = s.grace_period_minutes || 0;
 
     // Coin Slot Settings
@@ -144,6 +145,7 @@ async function saveSessionSettings() {
     const data = await apiCall('POST', '/api/admin/settings', {
       allow_pause: document.getElementById('allowPause').checked ? '1' : '0',
       max_pause_minutes: document.getElementById('maxPauseMinutes').value,
+      max_pauses: document.getElementById('maxPauses').value,
       grace_period_minutes: document.getElementById('gracePeriodMinutes').value,
     });
     if (data.success) showToast('Session settings saved!');

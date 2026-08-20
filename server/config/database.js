@@ -990,6 +990,7 @@ if (settingCount.count === 0) {
   // Session settings
   insertSetting.run('allow_pause', '1');
   insertSetting.run('max_pause_minutes', '30');
+  insertSetting.run('max_pauses', '0');
   insertSetting.run('grace_period_minutes', '0');
 
   // Coin slot settings
@@ -1136,6 +1137,10 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // always-auto behavior - mark it released so this migration doesn't
   // retroactively "unrelease" firmware devices may have already fetched.
   upsertIfMissing('vendo_firmware_auto_update', '1');
+  // How many times a customer can pause/resume the SAME session before
+  // the Pause button stops working for it. 0 = unlimited, matches this
+  // file's existing "0 = unlimited" convention elsewhere.
+  upsertIfMissing('max_pauses', '0');
   if (!db.prepare("SELECT key FROM settings WHERE key = 'vendo_firmware_released'").get()) {
     const hadVersion = !!db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value;
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('vendo_firmware_released', hadVersion ? '1' : '0');
@@ -1265,6 +1270,19 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
 // so a customer who tops up before running out can get warned again later.
 try {
   db.exec('ALTER TABLE sessions ADD COLUMN push_2min_sent INTEGER DEFAULT 0');
+} catch (e) {
+  // already applied
+}
+
+// Real request: an operator wants a cap on how many times a customer can
+// pause/resume the same session, and the portal to show how many pauses
+// they have left, not just an unlimited pause button. Counted per session
+// (resets to 0 on a brand new session, same as every other per-session
+// counter here), incremented in sessionService.js's pauseSession(). 0 in
+// the max_pauses setting means unlimited, matching this file's existing
+// "0 = unlimited" convention (see coinslot_gpio_max_empty_opens).
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN pause_count INTEGER DEFAULT 0');
 } catch (e) {
   // already applied
 }

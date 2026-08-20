@@ -283,8 +283,21 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
   const newExpiresAt = new Date(
     now + newMinutes * 60 * 1000
   ).toISOString();
+
+  // Bug found live: this used to be JUST now + this top-up's own
+  // expirationMinutes, ignoring the session's EXISTING hard_expires_at
+  // entirely. A customer who bought a long-expiration rate, then later
+  // topped up with a coin combo matching a shorter-expiration rate (a
+  // completely normal thing to do, rate tiers aren't required to be
+  // inserted in any particular order), had their hard expiry silently
+  // PULLED IN to the new, shorter window, cutting time off a purchase
+  // they'd already made and had every right to keep. Taking the later of
+  // the two means a top-up can only ever extend how long the session stays
+  // resumable, never shrink it.
+  const topUpHardExpiresAtMs = now + expirationMinutes * 60 * 1000;
+  const existingHardExpiresAtMs = session.hard_expires_at ? new Date(session.hard_expires_at).getTime() : 0;
   const newHardExpiresAt = new Date(
-    now + expirationMinutes * 60 * 1000
+    Math.max(topUpHardExpiresAtMs, existingHardExpiresAtMs)
   ).toISOString();
 
   let premiumDownload = session.premium_download_mbps;
@@ -342,9 +355,20 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
   return updated;
 }
 
+// Real request: an operator wants a cap on how many times the same
+// session can be paused, and the portal to show the customer how many
+// pauses they have left rather than an unlimited button. Returns the
+// literal string 'limit_reached' (distinct from null, which already
+// means "no session"/"already paused") so the route can tell the two
+// apart and answer with the right message.
 async function pauseSession(voucherCode) {
   const session = getSessionByVoucher(voucherCode);
   if (!session || session.is_paused === 1) return null;
+
+  const maxPauses = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'max_pauses'").get()?.value || '0', 10) || 0;
+  if (maxPauses > 0 && (session.pause_count || 0) >= maxPauses) {
+    return 'limit_reached';
+  }
 
   const now = new Date().toISOString();
   const remaining = Math.floor(
@@ -355,7 +379,8 @@ async function pauseSession(voucherCode) {
     UPDATE sessions
     SET is_paused = 1,
         paused_at = ?,
-        minutes_remaining = ?
+        minutes_remaining = ?,
+        pause_count = pause_count + 1
     WHERE voucher_code = ?
   `).run(now, Math.max(0, remaining), voucherCode);
 
