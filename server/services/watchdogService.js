@@ -6,13 +6,20 @@
 //    automatically, capped, so a burst of repairs can't mask a real
 //    hardware problem behind an endless retry loop.
 //  - anything bigger (the firewall table itself missing) is never
-//    auto-rebuilt from here. That ruleset lives in setup-network.sh and
-//    depends on interface/lane detection this service has no business
-//    replicating unattended. It's surfaced as a critical alert instead,
-//    per the "backup/confirm before risky changes" reliability rule.
+//    auto-rebuilt from here on a hunch. The one deliberate exception is
+//    the IP-recovery ladder below: a total loss of network connectivity
+//    takes the box offline for every customer, so as a capped, ordered
+//    escalation (bounce interface, THEN re-run setup-network.sh, THEN
+//    reboot only as a last resort) it's allowed to re-apply the same
+//    setup-network.sh every normal boot already runs - never triggered
+//    speculatively, only after two consecutive "no IP at all" checks.
+//    Anything not on that specific ladder is still surfaced as a
+//    critical alert instead of touched automatically, per the "backup/
+//    confirm before risky changes" reliability rule.
 
 const cron = require('node-cron');
 const os = require('os');
+const path = require('path');
 const { execFile } = require('child_process');
 const db = require('../config/database');
 const networkService = require('./networkService');
@@ -38,7 +45,7 @@ let fixTimestamps = [];
 let rebootTimestamps = [];
 let lastKnownGoodInterfaces = new Set();
 let consecutiveIpMissing = 0;
-let ipRecoveryStage = 'none'; // 'none' | 'bounced'
+let ipRecoveryStage = 'none'; // 'none' | 'bounced' | 'script_reapplied'
 let lastResult = { at: null, status: 'unknown', issues: [] };
 let lastIssueCodes = new Set();
 let lastOnlineVendoMacs = new Set();
@@ -131,6 +138,35 @@ function bounceInterface(name) {
   });
 }
 
+// Real gap found live: this box's interfaces have their OS-level network
+// management (NetworkManager/systemd-networkd) explicitly turned OFF by
+// setup-network.sh (disable_os_network_management) - setup-network.sh
+// itself is the only thing that ever calls dhclient or assigns a static
+// IP on them. bounceInterface() above just toggles link state up/down;
+// with nothing managing the interface, that alone does nothing to
+// actually request a new lease or reapply a configured static IP, a real
+// case where the bounce silently accomplished nothing and the ladder
+// escalated straight to a full reboot as the only remaining option.
+//
+// Re-running setup-network.sh is strictly LESS disruptive than that
+// reboot it used to jump to - it already knows how to bring an interface
+// back up correctly (the operator's configured static IP if one exists,
+// otherwise DHCP), it's what re-applies on every normal boot anyway, and
+// it's idempotent (safe to run again on an already-correct box). This
+// doesn't reopen the "never auto-rebuild the firewall table" rule in this
+// file's own header - it's inserted as a step BEFORE reboot in the same
+// capped ladder, not a new unconditional trigger, and setup-network.sh is
+// the same script every reboot already runs regardless.
+function reapplyNetworkSetup() {
+  return new Promise((resolve) => {
+    const scriptPath = path.join(__dirname, '../../setup/setup-network.sh');
+    execFile('sudo', ['bash', scriptPath], { timeout: 20000 }, (err) => {
+      if (err) console.error('🛡️ [Watchdog] setup-network.sh re-apply failed:', err.message);
+      resolve(!err);
+    });
+  });
+}
+
 async function checkNetworkReachability() {
   const issues = [];
   const live = getNonInternalIPv4Interfaces();
@@ -185,12 +221,30 @@ async function checkNetworkReachability() {
       code: anyBounced ? 'ip_missing_interface_bounced' : 'ip_missing_bounce_failed',
       message: anyBounced
         ? `No network IP address for multiple checks. Reset network interface(s) [${targets.join(', ')}] and rechecking.`
-        : `No network IP address, and resetting interface(s) [${targets.join(', ')}] failed (this account may lack permission). Will attempt a full restart next if it's still down.`,
+        : `No network IP address, and resetting interface(s) [${targets.join(', ')}] failed (this account may lack permission). Will re-apply network setup next if it's still down.`,
     });
     return issues;
   }
 
-  // Already reset the interface on a prior check and it's still down.
+  // Bounced the interface on a prior check and it's still down - a bare
+  // link toggle doesn't request a new DHCP lease or reapply a configured
+  // static IP on its own (see reapplyNetworkSetup's own comment above),
+  // so try that properly before escalating any further.
+  if (ipRecoveryStage === 'bounced') {
+    ipRecoveryStage = 'script_reapplied';
+    const ok = await reapplyNetworkSetup();
+    issues.push({
+      severity: 'critical',
+      code: ok ? 'ip_missing_network_reapplied' : 'ip_missing_reapply_failed',
+      message: ok
+        ? 'No network IP address after an interface reset. Re-applied network setup (requests a fresh DHCP lease, or your configured static IP) and rechecking.'
+        : 'No network IP address, and re-applying network setup failed. Will attempt a full restart next if it\'s still down.',
+    });
+    return issues;
+  }
+
+  // Already reset the interface AND re-applied network setup on prior
+  // checks, and it's still down.
   if (!canReboot()) {
     issues.push({
       severity: 'critical',
