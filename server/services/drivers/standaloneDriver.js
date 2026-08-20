@@ -17,12 +17,13 @@ const { getClassId, peekClassId, releaseClassId } = require('./classIdAllocator'
 // to leases file for every connected client - same source app.js/
 // portal.js already read for the reverse (IP-to-MAC) direction.
 function getIpFromMac(mac) {
+  const target = String(mac || '').toLowerCase();
   try {
     const leases = fs.readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
     // Format: timestamp MAC IP hostname client-id
     for (const line of leases.trim().split('\n')) {
       const parts = line.split(' ');
-      if (parts[1] && parts[1].toLowerCase() === mac) return parts[2] || null;
+      if (parts[1] && parts[1].toLowerCase() === target) return parts[2] || null;
     }
   } catch (e) {}
   return null;
@@ -383,6 +384,7 @@ module.exports = defineDriver('standalone', {
   removeClientBandwidth,
   listActiveClients,
   getMacFromIp,
+  getIpFromMac,
   checkRoam,
   // Not part of the RouterDriver contract - exposed for diagnostics/testing
   // of the classId allocator (client-capacity audit fix).

@@ -58,9 +58,23 @@ async function finalizePendingCoins(mac) {
   }
 
   const total = pendingTotal;
-  const ip = pendingIp;
   const kioskId = pendingKioskId;
   const isPremium = pendingIsPremium;
+
+  // pendingIp only ever held whatever the coin-relay device (ESP32) self-
+  // reported as its OWN WiFi IP, not the paying customer's - a physical
+  // coin slot is shared across many different customers over time and has
+  // no way to know whose phone is inserting a coin from its own network
+  // layer. Real bug this caused: the session's stored ip_address ended up
+  // identical to the vendo device's own IP, confusing for the operator (a
+  // customer's Live Sessions row showing the coin slot's address) and
+  // making standaloneDriver.js's roam detection (which compares a
+  // session's stored IP against its current live one) see a permanent
+  // false "roamed" state since the phone's real IP could never match.
+  // Looked up here by the customer's own MAC instead, falling back to the
+  // old self-reported value only if that lookup can't resolve (e.g. the
+  // lease isn't visible yet), so this never regresses to storing nothing.
+  const ip = (await require('../services/networkService').getIpFromMac(mac)) || pendingIp;
 
   // Clear the window before crediting, not after. A coin that happens to
   // land while creditCoinValue() is mid-flight should start a fresh
@@ -280,10 +294,13 @@ router.post('/', async (req, res) => {
     // No active pending window, e.g. a direct/manual coin POST that never
     // went through the portal's /pending handshake. Credit immediately,
     // same as this endpoint always did before the accumulate-then-finalize
-    // change above.
+    // change above. Same real-IP lookup as finalizePendingCoins() above,
+    // req.body's own ip is the relay device's, not necessarily the
+    // customer's.
     let result;
     try {
-      result = await creditCoinValue(mac, coin_value, ip, kioskId);
+      const realIp = (await require('../services/networkService').getIpFromMac(mac)) || ip;
+      result = await creditCoinValue(mac, coin_value, realIp, kioskId);
     } catch (err) {
       if (err instanceof NoMatchingRateError) {
         const attempt = recordAttempt(mac);

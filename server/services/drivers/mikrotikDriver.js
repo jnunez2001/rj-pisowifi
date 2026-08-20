@@ -25,4 +25,5 @@ module.exports = defineDriver('mikrotik', {
   setClientBandwidth: mikrotikService.setClientBandwidth,
   removeClientBandwidth: mikrotikService.removeClientBandwidth,
   getMacFromIp: mikrotikService.getMacFromIp,
+  getIpFromMac: mikrotikService.getIpFromMac,
 });

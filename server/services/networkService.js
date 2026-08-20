@@ -91,6 +91,16 @@ function getMacFromIp(ip) {
   return getActiveDriver().getMacFromIp(ip);
 }
 
+function getIpFromMac(mac) {
+  let normalizedMac;
+  try {
+    normalizedMac = normalizeMac(mac);
+  } catch (error) {
+    return Promise.resolve(null);
+  }
+  return getActiveDriver().getIpFromMac(normalizedMac);
+}
+
 function listActiveClients() {
   return getActiveDriver().listActiveClients();
 }
@@ -116,6 +126,7 @@ module.exports = {
   setClientBandwidth,
   removeClientBandwidth,
   getMacFromIp,
+  getIpFromMac,
   listActiveClients,
   ping,
   checkRoam,

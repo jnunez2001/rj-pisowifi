@@ -604,6 +604,29 @@ async function getMacFromIp(ip) {
   }
 }
 
+// Reverse of getMacFromIp, same DHCP lease table, the other direction.
+// Needed for the coin-crediting path: the ESP32 relaying a coin insert only
+// knows its OWN WiFi IP, never the paying customer's, a shared coin slot
+// serves many different customers over time and has no way to know who's
+// currently inserting a coin from its own network layer. The real IP for
+// the session being credited has to be looked up server-side by the
+// customer's MAC instead of trusted from the relay device's request body.
+async function getIpFromMac(mac) {
+  const config = getMikrotikConfig();
+  if (!config.ip) return null;
+  const target = String(mac || '').toLowerCase();
+  try {
+    return await withMikrotik(config, async (client) => {
+      const res = await client.talk(['/ip/dhcp-server/lease/print', `?mac-address=${mikMac(target)}`]);
+      const lease = res.re[0];
+      return lease && lease.address ? lease.address : null;
+    });
+  } catch (err) {
+    console.error('MikroTik getIpFromMac error:', err.message);
+    return null;
+  }
+}
+
 // ===== VLAN MANAGER (network power parity with Standalone mode) =====
 // Standalone mode already lets an operator create/list/delete VLANs
 // locally (server/routes/admin.js's /network/vlans endpoints, backed by
@@ -1255,6 +1278,7 @@ module.exports = {
   setPortalDnsName,
   testConnection,
   getMacFromIp,
+  getIpFromMac,
   listVlans,
   createVlan,
   deleteVlan,

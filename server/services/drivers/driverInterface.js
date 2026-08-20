@@ -25,6 +25,7 @@
 // clear_bandwidth default-no-op pattern for drivers without QoS support):
 //   listActiveClients()  -> Promise<Array<{mac, ip, hostname}>>
 //   getMacFromIp(ip)     -> Promise<string|null>
+//   getIpFromMac(mac)    -> Promise<string|null>
 //   checkRoam(mac)       -> Promise<{changed: boolean, oldIp, newIp}>
 //     Only meaningful for drivers whose bandwidth shaping is bound to a
 //     specific interface/IP at apply-time (standalone's tc/HTB) rather than
@@ -46,6 +47,9 @@ const OPTIONAL_DEFAULTS = {
     return [];
   },
   async getMacFromIp() {
+    return null;
+  },
+  async getIpFromMac() {
     return null;
   },
   async checkRoam() {
