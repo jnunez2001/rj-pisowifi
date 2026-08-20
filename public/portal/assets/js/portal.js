@@ -725,6 +725,27 @@ function applyPortalSettings() {
 }
 
 // ===== UI UPDATE =====
+// Shows a live "Premium X mins left, then Standard speed" indicator
+// while a Premium boost is active. The server already handles the actual
+// revert automatically the moment premium_expires_at passes (see
+// sessionService.js's effectiveBandwidth - Premium only wins while it
+// hasn't expired yet), there's no manual "downgrade" action needed or
+// possible. This is purely so the customer isn't left guessing why their
+// speed changed later in the session with no warning.
+function updateSpeedIndicator(session) {
+  const el = document.getElementById('speedIndicator');
+  if (!el) return;
+  const premiumActive = session.premium_expires_at &&
+    new Date(session.premium_expires_at).getTime() > Date.now();
+  if (!premiumActive) {
+    el.style.display = 'none';
+    return;
+  }
+  const minsLeft = Math.max(0, Math.ceil((new Date(session.premium_expires_at).getTime() - Date.now()) / 60000));
+  el.innerHTML = `<i class="fas fa-bolt"></i>&nbsp; PREMIUM SPEED &middot; ${minsLeft}m left, then back to Standard`;
+  el.style.display = 'block';
+}
+
 function updateUI(session) {
   const prev = currentSession;
   currentSession = session;
@@ -750,6 +771,7 @@ function updateUI(session) {
     sessionDisplay.textContent = '--';
     document.getElementById('creditsDisplay').textContent = '₱0';
     expiryWarning.style.display = 'none';
+    document.getElementById('speedIndicator').style.display = 'none';
     document.getElementById('sectionDisconnected').style.display = 'block';
     document.getElementById('sectionConnected').style.display = 'none';
     document.getElementById('sectionPaused').style.display = 'none';
@@ -787,6 +809,7 @@ function updateUI(session) {
     document.getElementById('sectionDisconnected').style.display = 'none';
     document.getElementById('sectionConnected').style.display = 'none';
     document.getElementById('sectionPaused').style.display = 'block';
+    document.getElementById('speedIndicator').style.display = 'none';
 
   } else {
     // Connected with real time on the clock - clear any flash from a prior
@@ -832,6 +855,7 @@ function updateUI(session) {
     expiryDisplay.textContent = formatExpiry(session.hard_expires_at);
     sessionDisplay.textContent = session.voucher_code.replace('RJ-','');
     if (welcomeMsg) welcomeMsg.style.display = 'none';
+    updateSpeedIndicator(session);
 
     const pauseBtn = document.getElementById('pauseBtn');
     if (pauseBtn) {

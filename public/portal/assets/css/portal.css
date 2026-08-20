@@ -719,6 +719,17 @@ body {
 .coin-modal-premium .timer-arc { stroke: #d4af37; }
 .coin-modal-premium .timer-track { stroke: #f5e6b8; }
 
+/* Live countdown shown in the TIME REMAINING box while a Premium speed
+   boost is active (portal.js's updateSpeedIndicator) - the revert to
+   Standard speed happens automatically server-side, this just tells the
+   customer it's coming instead of their speed changing with no warning. */
+#speedIndicator {
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #b8860b;
+}
+
 /* Shown once, only when tapping PREMIUM with a Regular session already
    running (portal.js's handleInsertCoin) - clarifies that Premium stacks
    a temporary speed boost on top instead of replacing existing time. */
