@@ -12,13 +12,13 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(SETUP_BTN, INPUT_PULLUP);
 
-  // Safe defaults — relay OFF using correct logic level for this board
+  // Safe defaults, relay OFF using correct logic level for this board
   digitalWrite(RELAY_PIN, RELAY_OFF_STATE);
   digitalWrite(LED_PIN, LOW);
 
   // Init SPIFFS
   if (!SPIFFS.begin(true)) {
-    Serial.println("SPIFFS failed — using fallback HTML");
+    Serial.println("SPIFFS failed, using fallback HTML");
   }
 
   // Load saved config
@@ -27,14 +27,14 @@ void setup() {
   // Check setup button held at boot
   delay(100);
   if (digitalRead(SETUP_BTN) == LOW) {
-    Serial.println("Setup button held — entering setup mode");
+    Serial.println("Setup button held, entering setup mode");
     startSetupMode();
     return;
   }
 
-  // No config — enter setup mode
+  // No config, enter setup mode
   if (config.wifi_ssid.isEmpty() || config.server_ip.isEmpty()) {
-    Serial.println("No config — entering setup mode");
+    Serial.println("No config, entering setup mode");
     startSetupMode();
     return;
   }
@@ -61,7 +61,7 @@ void loop() {
         btnPressStart = millis();
         btnHeld = true;
       } else if (millis() - btnPressStart >= SETUP_HOLD_MS) {
-        Serial.println("Setup button held — entering setup mode");
+        Serial.println("Setup button held, entering setup mode");
         startSetupMode();
       }
     } else {

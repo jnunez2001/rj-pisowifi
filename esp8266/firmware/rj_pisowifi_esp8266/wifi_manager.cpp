@@ -204,7 +204,7 @@ void checkWiFiReconnect() {
       return;
     }
 
-    Serial.println("WiFi lost — reconnecting...");
+    Serial.println("WiFi lost, reconnecting...");
     lcdPrint(2, "WiFi lost...");
     lcdPrint(3, "Reconnecting...");
     connectWiFi();

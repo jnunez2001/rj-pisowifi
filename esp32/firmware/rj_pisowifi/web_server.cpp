@@ -7,12 +7,12 @@
 // normal mode after the device has joined the live customer WiFi network.
 // That meant /save, /reset, /reboot, /scan, /, and /config were reachable,
 // completely unauthenticated, by ANY paying customer on that same network
-// for as long as the vendo has been running — any of them could factory-
+// for as long as the vendo has been running, any of them could factory-
 // reset the vendo, overwrite its WiFi/server config (bricking it until
 // someone walks over and holds the setup button), or just repeatedly
 // reboot it, taking the entire coin-payment mechanism down. /config also
 // returned the WiFi password in plaintext to anyone who asked.
-// These endpoints are provisioning-only — nothing on the normal-mode
+// These endpoints are provisioning-only, nothing on the normal-mode
 // customer network legitimately needs them, so they're rejected once the
 // device has left setup mode.
 bool rejectUnlessSetupMode() {
@@ -21,12 +21,12 @@ bool rejectUnlessSetupMode() {
   return false;
 }
 
-// Bug: /relay/on and /relay/off had no restriction at all — any device on
+// Bug: /relay/on and /relay/off had no restriction at all, any device on
 // the customer WiFi could toggle the coin acceptor relay directly (deny
 // paying customers their coin window, or interfere with the mechanism).
 // The backend server is the only legitimate caller (it proxies the
-// portal's "Insert Coin" button here) and its IP is already known —
-// config.server_ip — so only requests from that IP are allowed.
+// portal's "Insert Coin" button here) and its IP is already known,
+// config.server_ip, so only requests from that IP are allowed.
 bool rejectUnlessFromServer() {
   if (config.server_ip.isEmpty() || server.client().remoteIP().toString() == config.server_ip) return true;
   server.send(403, "application/json", "{\"success\":false,\"message\":\"Forbidden\"}");
@@ -473,11 +473,11 @@ String getFallbackHTML() {
     <div class="card-title">Device Info</div>
     <div class="info-row">
       <span class="info-label">MAC Address</span>
-      <span class="info-value" id="infoMac">—</span>
+      <span class="info-value" id="infoMac">-</span>
     </div>
     <div class="info-row">
       <span class="info-label">Firmware</span>
-      <span class="info-value" id="infoFw">—</span>
+      <span class="info-value" id="infoFw">-</span>
     </div>
     <div class="info-row">
       <span class="info-label">Mode</span>
@@ -621,7 +621,7 @@ String getFallbackHTML() {
         showToast('Found ' + networks.length + ' networks');
       } catch(e) {
         showToast('Scan failed', false);
-        sel.innerHTML = '<option value="">Scan failed — try again</option><option value="__manual__">Type manually...</option>';
+        sel.innerHTML = '<option value="">Scan failed, try again</option><option value="__manual__">Type manually...</option>';
       }
     }
 

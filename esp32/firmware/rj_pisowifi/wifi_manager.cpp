@@ -88,7 +88,7 @@ void checkWiFiReconnect() {
     // for whatever coin is already mid-drop at the exact moment
     // connectivity dies, but it stops every coin after that.
     if (relayActive) {
-      Serial.println("WiFi down while relay armed — closing coin gate for safety");
+      Serial.println("WiFi down while relay armed, closing coin gate for safety");
       deactivateRelay();
     }
 
@@ -109,7 +109,7 @@ void checkWiFiReconnect() {
       return;
     }
 
-    Serial.println("WiFi lost — reconnecting...");
+    Serial.println("WiFi lost, reconnecting...");
     lcdPrint(2, "WiFi lost...");
     lcdPrint(3, "Reconnecting...");
     connectWiFi();

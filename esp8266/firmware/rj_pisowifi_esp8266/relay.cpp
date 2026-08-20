@@ -22,7 +22,7 @@ void deactivateRelay() {
 
 void checkRelayTimeout() {
   if (relayActive && millis() - relayActivatedAt >= RELAY_TIMEOUT_MS) {
-    Serial.println("Relay timeout — deactivating");
+    Serial.println("Relay timeout, deactivating");
     deactivateRelay();
   }
 }

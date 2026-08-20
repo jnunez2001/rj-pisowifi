@@ -5,7 +5,7 @@
 #include <ESP8266WebServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.13"
+#define FIRMWARE_VERSION "v1.0.14"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
@@ -128,6 +128,25 @@
 // Insert Coin, so widening this has no real downside for genuine coins.
 #define COIN_ARM_GUARD_MS 500
 
+// Real report: other PisoWiFi systems running the exact same coin
+// acceptor hardware don't see this problem, which points at our own
+// detection being too primitive rather than the hardware being at fault.
+// The fix above only ever widened a timing guess. This is the actual
+// structural fix: instead of counting a single FALLING edge as "a coin"
+// (which can't tell a real pulse apart from any brief electrical blip
+// that happens to dip the line low), the ISR now watches for the pin to
+// come back HIGH again and measures how long it stayed low. A genuine
+// coin pulse has a real, predictable shape, the acceptor's own manual
+// documents a configurable signal width of 20/50/100ms. A relay
+// transient or contact-bounce spike doesn't produce a clean pulse in
+// that range, it's either far shorter (a glitch) or doesn't return HIGH
+// in any bounded time at all. Range set generously around the
+// acceptor's full configurable range so no genuine setting gets
+// rejected, while still rejecting shapes that don't look like a coin at
+// all.
+#define COIN_PULSE_MIN_MS 8
+#define COIN_PULSE_MAX_MS 300
+
 // How often to ask the server whether newer firmware is available
 // (ota.cpp). Every boot already tells the server this device's current
 // FIRMWARE_VERSION via registerVendo(), so this only needs to catch a
@@ -175,6 +194,8 @@ extern volatile bool coinSlotActive;
 extern volatile int coinPulseCount;
 extern volatile unsigned long lastPulseTime;
 extern volatile unsigned long relayArmedAt;
+extern volatile unsigned long pulseStartTime;
+extern volatile bool pulseInProgress;
 extern bool processingCoin;
 extern bool btnHeld;
 extern unsigned long btnPressStart;

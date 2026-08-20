@@ -7,6 +7,12 @@
 // ESP8266 equivalent for "briefly make this shared-variable access atomic
 // against the ISR" is the plain global noInterrupts()/interrupts() pair.
 
+// Fires on both edges now (attachInterrupt(..., CHANGE) in the .ino),
+// not just FALLING. A falling edge only marks the start of a candidate
+// pulse, nothing is counted yet - counting happens on the matching
+// rising edge, and only if the measured low-time actually looks like a
+// real coin pulse (see COIN_PULSE_MIN_MS/MAX_MS above), not just any dip
+// on the line.
 void IRAM_ATTR onCoinPulse() {
   if (!coinSlotActive) return;
 
@@ -17,6 +23,29 @@ void IRAM_ATTR onCoinPulse() {
   // lastPulseTime is usually stale (last coin/session, seconds or minutes
   // ago) at the exact moment the relay arms.
   if (now - relayArmedAt < COIN_ARM_GUARD_MS) return;
+
+  bool pinLow = (digitalRead(COIN_PIN) == LOW);
+
+  if (pinLow) {
+    // Falling edge: candidate pulse starting. Overwrites any previous
+    // in-progress candidate rather than accumulating state, a pulse that
+    // never returned HIGH (or returned HIGH so fast it was two rapid
+    // edges the ISR only caught the second of) isn't a real coin either
+    // way, and this keeps the state machine self-correcting instead of
+    // ever getting stuck "waiting" on a rising edge that isn't coming.
+    pulseStartTime = now;
+    pulseInProgress = true;
+    return;
+  }
+
+  // Rising edge with no matching start recorded (e.g. the very first
+  // interrupt this window happened to be a rise, or coinSlotActive only
+  // just turned on mid-pulse) - nothing to measure, ignore it.
+  if (!pulseInProgress) return;
+  pulseInProgress = false;
+
+  unsigned long width = now - pulseStartTime;
+  if (width < COIN_PULSE_MIN_MS || width > COIN_PULSE_MAX_MS) return;
   if (now - lastPulseTime < COIN_DEBOUNCE_MS) return;
 
   noInterrupts();
@@ -26,11 +55,11 @@ void IRAM_ATTR onCoinPulse() {
 }
 
 // Bug: a coin has already physically dropped and been counted by the time
-// this runs — if the POST fails for a network reason (timeout, WiFi
+// this runs, if the POST fails for a network reason (timeout, WiFi
 // hiccup, server briefly restarting), the customer's money was taken and
 // nothing was ever credited, with no way to recover short of complaining
 // to staff. Retries only on a clear network-level failure (HTTPClient
-// returns a negative code for those — connection refused, timeout, DNS
+// returns a negative code for those, connection refused, timeout, DNS
 // failure), never on a real response from the server (a positive HTTP
 // status, even a rejection like 400/429), since retrying an ambiguous
 // case where the server's reply was merely lost in transit risks

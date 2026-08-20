@@ -10,17 +10,17 @@ void setup() {
   pinMode(COIN_PIN, INPUT_PULLUP);
   pinMode(RELAY_PIN, OUTPUT);
   pinMode(SETUP_BTN, INPUT_PULLUP);
-  // LED_PIN is reserved only (see config.h) — no LED on this board, so it
+  // LED_PIN is reserved only (see config.h), no LED on this board, so it
   // is never configured as an output or driven.
 
-  // Safe defaults — relay OFF using correct logic level for this board
+  // Safe defaults, relay OFF using correct logic level for this board
   digitalWrite(RELAY_PIN, RELAY_OFF_STATE);
 
-  // Init LittleFS (ESP8266's standard filesystem — the ESP32 version uses
+  // Init LittleFS (ESP8266's standard filesystem, the ESP32 version uses
   // SPIFFS, but LittleFS is what config.cpp's flat-file config storage and
   // web_server.cpp's optional custom setup page both rely on here)
   if (!LittleFS.begin()) {
-    Serial.println("LittleFS mount failed — formatting...");
+    Serial.println("LittleFS mount failed, formatting...");
     LittleFS.format();
     LittleFS.begin();
   }
@@ -31,14 +31,14 @@ void setup() {
   // Check setup button held at boot
   delay(100);
   if (digitalRead(SETUP_BTN) == LOW) {
-    Serial.println("Setup button held — entering setup mode");
+    Serial.println("Setup button held, entering setup mode");
     startSetupMode();
     return;
   }
 
-  // No config — enter setup mode
+  // No config, enter setup mode
   if (config.wifi_ssid.isEmpty() || config.server_ip.isEmpty()) {
-    Serial.println("No config — entering setup mode");
+    Serial.println("No config, entering setup mode");
     startSetupMode();
     return;
   }
@@ -58,7 +58,9 @@ void setup() {
       }
     }
     registerVendo();
-    attachInterrupt(digitalPinToInterrupt(COIN_PIN), onCoinPulse, FALLING);
+    // CHANGE, not FALLING - onCoinPulse() now measures actual pulse width
+    // (both edges) instead of just counting falling edges, see coin.cpp.
+    attachInterrupt(digitalPinToInterrupt(COIN_PIN), onCoinPulse, CHANGE);
     setupWebServer();
     server.begin();
     Serial.println("Ready!");
@@ -91,7 +93,7 @@ void loop() {
         btnPressStart = millis();
         btnHeld = true;
       } else if (millis() - btnPressStart >= SETUP_HOLD_MS) {
-        Serial.println("Setup button held — entering setup mode");
+        Serial.println("Setup button held, entering setup mode");
         startSetupMode();
       }
     } else {

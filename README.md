@@ -1,6 +1,6 @@
 # R&J PisoWifi
 
-Coin-operated internet access management system — WiFi rental and PC rental, with support for both a self-contained standalone mode and external-router-integrated mode.
+Coin-operated internet access management system, WiFi rental and PC rental, with support for both a self-contained standalone mode and external-router-integrated mode.
 
 ## Tech Stack
 

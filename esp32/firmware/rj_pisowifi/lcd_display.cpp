@@ -1,6 +1,6 @@
 #include "config.h"
 
-// LCD removed — no hardware connected
+// LCD removed, no hardware connected
 // Using Serial output only for debugging
 
 void lcdPrint(int row, String text) {

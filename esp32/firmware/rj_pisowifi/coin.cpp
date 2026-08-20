@@ -27,11 +27,11 @@ void IRAM_ATTR onCoinPulse() {
 }
 
 // Bug: a coin has already physically dropped and been counted by the time
-// this runs — if the POST fails for a network reason (timeout, WiFi
+// this runs, if the POST fails for a network reason (timeout, WiFi
 // hiccup, server briefly restarting), the customer's money was taken and
 // nothing was ever credited, with no way to recover short of complaining
 // to staff. Retries only on a clear network-level failure (HTTPClient
-// returns a negative code for those — connection refused, timeout, DNS
+// returns a negative code for those, connection refused, timeout, DNS
 // failure), never on a real response from the server (a positive HTTP
 // status, even a rejection like 400/429), since retrying an ambiguous
 // case where the server's reply was merely lost in transit risks
