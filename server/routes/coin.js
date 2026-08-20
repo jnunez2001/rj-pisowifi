@@ -133,6 +133,22 @@ router.post('/pending', (req, res) => {
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
+  const normalizedMac = mac.toLowerCase();
+
+  // Single physical coin acceptor: only one customer can actually be
+  // dropping coins at a time. Without this, a second customer opening
+  // Insert Coin while the first one's window was still live silently
+  // overwrote pendingCoinMac out from under them, whatever coin the first
+  // customer then inserted got attributed to the SECOND customer's MAC
+  // instead, real money crediting the wrong person's session with no
+  // error either side. Mirrors the busy-lock the direct-GPIO path
+  // (coinslotGpio.js's registerWaitingClient) already has.
+  const otherWindowActive = pendingCoinMac && pendingCoinMac !== normalizedMac &&
+    (Date.now() - pendingSetAt < PENDING_TIMEOUT_MS);
+  if (otherWindowActive) {
+    return res.status(409).json({ success: false, status: 'busy', message: 'Coin slot is busy with another customer.' });
+  }
+
   if (pendingFinalizeTimer) clearTimeout(pendingFinalizeTimer);
   pendingCoinMac = mac.toLowerCase();
   pendingSetAt = Date.now();

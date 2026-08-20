@@ -101,7 +101,13 @@ function startCoinTimer() {
     updateCoinTimerUI();
     if (coinTimeLeft <= 0) {
       clearInterval(coinTimerInterval);
-      closeCoinModal();
+      // Same fix as the X/Connect button below (finishInsertingCoins):
+      // this used to call closeCoinModal() directly, which never
+      // finalizes. Any coins already inserted then sat in the server's
+      // pending window for up to PENDING_TIMEOUT_MS (40s) after the modal
+      // had already vanished, a real gap the customer felt as "coins went
+      // in but nothing happened for a while."
+      finishInsertingCoins();
     }
   }, 1000);
 }
@@ -453,16 +459,24 @@ async function deactivateVendoRelay() {
   } catch(e) {}
 }
 
+// Returns true if the coin slot is busy with another customer (single
+// physical acceptor - see server/routes/coin.js's POST /pending busy-lock
+// comment), so callers can bail out of the Insert Coin flow instead of
+// silently proceeding as if a window was actually registered.
 async function registerPendingCoin() {
   pendingRegistered = false;
   const mac = getMac();
-  if (!mac) return;
+  if (!mac) return false;
   try {
-    await fetch(`${SERVER}/api/coin/pending`, {
+    const res = await fetch(`${SERVER}/api/coin/pending`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mac, is_premium: insertingPremium })
     });
+    if (res.status === 409) {
+      console.log('Coin slot busy with another customer');
+      return true;
+    }
     // Only now is it safe to trust GET /api/coin/pending/:mac. Before
     // this resolves, a read could still return a leftover total from
     // whatever pending window existed before this one.
@@ -471,6 +485,7 @@ async function registerPendingCoin() {
   } catch(e) {
     console.log('Failed to register pending coin');
   }
+  return false;
 }
 
 // Main Kiosk (direct-GPIO) registration - safe to always call alongside
@@ -483,18 +498,22 @@ async function registerPendingCoin() {
 // session-status poll already reacts to minutes_remaining increasing
 // (see checkSession's coinModalOpen branch), so no separate GPIO polling
 // loop is needed here.
+// Returns true if the GPIO coin window is busy with another customer, same
+// contract as registerPendingCoin() above.
 async function registerPendingGpioCoin() {
   const mac = getMac();
-  if (!mac) return;
+  if (!mac) return false;
   try {
-    await fetch(`${SERVER}/api/coin/gpio/register`, {
+    const res = await fetch(`${SERVER}/api/coin/gpio/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mac, is_premium: insertingPremium })
     });
+    if (res.status === 409) return true;
   } catch(e) {
     console.log('Failed to register GPIO coin window');
   }
+  return false;
 }
 
 async function cancelPendingGpioCoin() {
@@ -518,12 +537,25 @@ async function cancelPendingGpioCoin() {
 // list.
 let insertingPremium = false;
 
-function handleInsertCoin(isPremium) {
+async function handleInsertCoin(isPremium) {
   if (isBlocked) return;
   playSound('insert');
   insertedTotal = 0;
   pendingRegistered = false;
   insertingPremium = !!isPremium;
+
+  // Only one customer can physically drop coins at a time. Both requests
+  // are fired together (the ESP32-relay and direct-GPIO paths are mutually
+  // exclusive per install, the server no-ops whichever mode isn't active),
+  // so either one coming back busy means the kiosk is genuinely occupied.
+  const [espBusy, gpioBusy] = await Promise.all([
+    registerPendingCoin(),
+    registerPendingGpioCoin()
+  ]);
+  if (espBusy || gpioBusy) {
+    showToast('Another customer is using the coin slot right now. Please wait a moment and try again.', 'error');
+    return;
+  }
 
   const modal = document.getElementById('coinModal');
   modal.classList.toggle('coin-modal-premium', insertingPremium);
@@ -535,8 +567,6 @@ function handleInsertCoin(isPremium) {
 
   modal.classList.add('show');
   startCoinTimer();
-  registerPendingCoin();
-  registerPendingGpioCoin();
   startPendingPoll();
   activateVendoRelay();
 }

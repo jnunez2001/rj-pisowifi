@@ -286,6 +286,32 @@ router.get('/sessions', adminAuth, async (req, res) => {
     const networkDevicesService = require('../services/networkDevicesService');
     const { peekClassId } = require('../services/drivers/classIdAllocator');
     const isMikrotik = mikrotikService.isMikrotikModeEnabled();
+
+    // Real-time "is this device actually here right now" signal, same
+    // discovered_via-based ARP presence check Network Devices already uses
+    // (see networkDevicesService.listDevices, "online" comment there) -
+    // reused rather than reimplemented so the two pages never disagree on
+    // what "online" means. A session's minutes_remaining/is_paused only
+    // reflect paid time, not real network presence: a customer who walked
+    // away (or a MAC-duplicated device that never actually associated)
+    // still has time left and used to show "Active" indefinitely with no
+    // way to tell the operator's books apart from a genuinely connected
+    // customer. This never cancels the session or its paid time, only
+    // changes what the Status badge shows.
+    let onlineByMac = new Map();
+    try {
+      const devices = await networkDevicesService.listDevices();
+      onlineByMac = new Map(devices.map((d) => [d.mac, d.status === 'online']));
+    } catch (e) {
+      // Best-effort: if the device scan fails for any reason, fall back to
+      // showing every session as online rather than wrongly flagging paid
+      // customers as disconnected.
+    }
+    sessionsWithTime.forEach((s) => {
+      const mac = String(s.mac_address || '').toLowerCase();
+      s.online = onlineByMac.has(mac) ? onlineByMac.get(mac) : true;
+    });
+
     await Promise.all(sessionsWithTime.map(async (s) => {
       if (s.is_paused === 1) { s.live_traffic_bytes = null; } else {
         try {

@@ -152,6 +152,11 @@ async function loadBandwidthKpis() {
 
 function sessionStatus(s) {
   if (s.is_paused === 1) return 'paused';
+  // Paid time remaining doesn't mean the device is actually here right
+  // now (walked away, or a MAC-duplicated device that never really
+  // connected) - s.online comes from the same real ARP-presence check
+  // Network Devices uses, not from minutes_remaining/is_paused.
+  if (s.online === false) return 'away';
   if (s.minutes_remaining < 5) return 'expiring';
   return 'active';
 }
@@ -186,7 +191,12 @@ function renderSessionsTable() {
     return;
   }
 
-  const statusBadge = { active: '<span class="badge badge-green"><span class="status-dot online"></span>Active</span>', expiring: '<span class="badge badge-orange">Expiring Soon</span>', paused: '<span class="badge badge-orange"><i class="fas fa-pause"></i> Paused</span>' };
+  const statusBadge = {
+    active: '<span class="badge badge-green"><span class="status-dot online"></span>Active</span>',
+    expiring: '<span class="badge badge-orange">Expiring Soon</span>',
+    paused: '<span class="badge badge-orange"><i class="fas fa-pause"></i> Paused</span>',
+    away: '<span class="badge badge-gray" title="Paid time remaining, but not currently connected"><span class="status-dot offline"></span>Away</span>'
+  };
 
   tbody.innerHTML = rows.map((s) => {
     const status = sessionStatus(s);
