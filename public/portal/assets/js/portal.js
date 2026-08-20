@@ -593,10 +593,10 @@ async function handleInsertCoin(mode) {
     new Date(currentSession.premium_expires_at).getTime() > Date.now();
   if (stackNotice) {
     if (mode === 'convert') {
-      stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This permanently switches your speed to Premium for the rest of your session. Your remaining time will be replaced with the Premium rate\'s own time, not added on top.';
+      stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This permanently switches your speed to Premium for the rest of your session. Your remaining time converts to its Premium-speed equivalent (a bit less, since Premium time costs more per minute) and the new coin\'s time is added on top.';
       stackNotice.style.display = 'block';
     } else if (mode === 'convert_down') {
-      stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This switches your speed back to Regular for the rest of your session. Your remaining time will be replaced with the Regular rate\'s own time, not added on top.';
+      stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This switches your speed back to Regular for the rest of your session. Your remaining time converts to its Regular-speed equivalent (a bit more, since Regular time costs less per minute) and the new coin\'s time is added on top.';
       stackNotice.style.display = 'block';
     } else if (mode === 'premium' && hasRegularSessionRunning && !alreadyHasPremium) {
       stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This adds temporary high-speed time on top of your current session, it does not replace your regular minutes.';
@@ -755,18 +755,62 @@ function applyPortalSettings() {
 // hasn't expired yet), there's no manual "downgrade" action needed or
 // possible. This is purely so the customer isn't left guessing why their
 // speed changed later in the session with no warning.
+let speedIndicatorInterval = null;
+
+function stopSpeedIndicatorTicker() {
+  if (speedIndicatorInterval) {
+    clearInterval(speedIndicatorInterval);
+    speedIndicatorInterval = null;
+  }
+}
+
+// Renders the gold bar's label + fill width for the CURRENT instant.
+// Called on every fresh session poll AND every second by the ticker below,
+// the ticker is what actually makes the bar visibly drain in real time
+// between poll cycles rather than only jumping every ~8s.
+function renderSpeedIndicatorFrame(expiresAtMs, startedAtMs) {
+  const el = document.getElementById('speedIndicator');
+  const label = document.getElementById('speedIndicatorLabel');
+  const fill = document.getElementById('speedIndicatorFill');
+  if (!el || !label || !fill) return;
+
+  const now = Date.now();
+  const msLeft = Math.max(0, expiresAtMs - now);
+  if (msLeft <= 0) {
+    stopSpeedIndicatorTicker();
+    el.style.display = 'none';
+    return;
+  }
+
+  const minsLeft = Math.max(0, Math.ceil(msLeft / 60000));
+  label.innerHTML = `<i class="fas fa-bolt"></i>&nbsp; PREMIUM SPEED &middot; ${minsLeft}m left, then back to Standard`;
+
+  // startedAtMs can be missing on an older session row from before this
+  // column existed - falls back to a flat 100% fill (still shows the
+  // countdown text correctly, just without a meaningful drain animation)
+  // rather than dividing by zero or guessing a start point.
+  const totalMs = startedAtMs && expiresAtMs > startedAtMs ? expiresAtMs - startedAtMs : null;
+  const pct = totalMs ? Math.max(0, Math.min(100, (msLeft / totalMs) * 100)) : 100;
+  fill.style.width = pct + '%';
+  el.style.display = 'block';
+}
+
 function updateSpeedIndicator(session) {
   const el = document.getElementById('speedIndicator');
   if (!el) return;
+  stopSpeedIndicatorTicker();
+
   const premiumActive = session.premium_expires_at &&
     new Date(session.premium_expires_at).getTime() > Date.now();
   if (!premiumActive) {
     el.style.display = 'none';
     return;
   }
-  const minsLeft = Math.max(0, Math.ceil((new Date(session.premium_expires_at).getTime() - Date.now()) / 60000));
-  el.innerHTML = `<i class="fas fa-bolt"></i>&nbsp; PREMIUM SPEED &middot; ${minsLeft}m left, then back to Standard`;
-  el.style.display = 'block';
+
+  const expiresAtMs = new Date(session.premium_expires_at).getTime();
+  const startedAtMs = session.premium_started_at ? new Date(session.premium_started_at).getTime() : null;
+  renderSpeedIndicatorFrame(expiresAtMs, startedAtMs);
+  speedIndicatorInterval = setInterval(() => renderSpeedIndicatorFrame(expiresAtMs, startedAtMs), 1000);
 }
 
 // Shows how many pauses are left when the operator has set a limit
@@ -812,6 +856,7 @@ function updateUI(session) {
     sessionDisplay.textContent = '--';
     document.getElementById('creditsDisplay').textContent = '₱0';
     expiryWarning.style.display = 'none';
+    stopSpeedIndicatorTicker();
     document.getElementById('speedIndicator').style.display = 'none';
     document.getElementById('sectionDisconnected').style.display = 'block';
     document.getElementById('sectionConnected').style.display = 'none';
@@ -850,6 +895,7 @@ function updateUI(session) {
     document.getElementById('sectionDisconnected').style.display = 'none';
     document.getElementById('sectionConnected').style.display = 'none';
     document.getElementById('sectionPaused').style.display = 'block';
+    stopSpeedIndicatorTicker();
     document.getElementById('speedIndicator').style.display = 'none';
 
   } else {

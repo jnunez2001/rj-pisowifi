@@ -130,7 +130,16 @@ router.get('/mac/:mac', async (req, res) => {
       hard_expires_at: session.hard_expires_at,
       created_at: session.created_at,
       pauses_remaining: pausesRemaining(session),
-      converted_to_premium: session.converted_to_premium === 1
+      converted_to_premium: session.converted_to_premium === 1,
+      // Bug found live: these were never actually included in this
+      // response at all, the portal's gold Boost countdown (both the
+      // text and the new progress bar) reads currentSession.
+      // premium_expires_at/premium_started_at client-side, and was
+      // silently always reading undefined, never actually showing.
+      premium_expires_at: session.premium_expires_at,
+      premium_started_at: session.premium_started_at,
+      premium_download_mbps: session.premium_download_mbps,
+      premium_upload_mbps: session.premium_upload_mbps
     });
 
   } catch (err) {
@@ -166,7 +175,11 @@ router.get('/voucher/:code', (req, res) => {
       expires_at: session.expires_at,
       hard_expires_at: session.hard_expires_at,
       pauses_remaining: pausesRemaining(session),
-      converted_to_premium: session.converted_to_premium === 1
+      converted_to_premium: session.converted_to_premium === 1,
+      premium_expires_at: session.premium_expires_at,
+      premium_started_at: session.premium_started_at,
+      premium_download_mbps: session.premium_download_mbps,
+      premium_upload_mbps: session.premium_upload_mbps
     });
 
   } catch (err) {

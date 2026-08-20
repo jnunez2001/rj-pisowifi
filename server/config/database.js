@@ -1309,6 +1309,20 @@ try {
   // already applied
 }
 
+// When a Boost purchase's temporary window most recently (re)started, so
+// the portal's gold countdown bar can show real elapsed-vs-total progress
+// (percentage = time left / total window) instead of just a bare minutes
+// countdown. Reset to "now" every time addTimeToSession() applies a NEW
+// bandwidthOverride (a fresh Boost purchase, whether the first one or a
+// top-up buying more Boost time), same moment premium_expires_at itself
+// gets recalculated, so the bar always reflects the CURRENT purchase's
+// own window, not a stale one from an earlier Boost that's since expired.
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN premium_started_at TEXT');
+} catch (e) {
+  // already applied
+}
+
 try {
   // Default 1 (isolated) matches the safe default a gated/guest lane
   // should have; an existing install's rows all backfill to this same

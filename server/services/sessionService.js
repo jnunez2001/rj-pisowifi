@@ -224,13 +224,14 @@ async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverr
   const premiumExpiresAt = bandwidthOverride
     ? new Date(now + Math.floor(bandwidthOverride.minutes || 0) * 60 * 1000).toISOString()
     : null;
+  const premiumStartedAt = bandwidthOverride ? new Date(now).toISOString() : null;
 
   db.prepare(`
     INSERT INTO sessions
     (voucher_code, mac_address, ip_address, minutes_remaining,
-     expires_at, hard_expires_at, premium_download_mbps, premium_upload_mbps, premium_expires_at, data_limit_mb)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(voucherCode, mac, ip, mins, expiresAt, hardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, dataLimitMb || null);
+     expires_at, hard_expires_at, premium_download_mbps, premium_upload_mbps, premium_expires_at, premium_started_at, data_limit_mb)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(voucherCode, mac, ip, mins, expiresAt, hardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, premiumStartedAt, dataLimitMb || null);
 
   const session = db.prepare('SELECT * FROM sessions WHERE voucher_code = ?').get(voucherCode);
   const bw = effectiveBandwidth(session);
@@ -303,6 +304,7 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
   let premiumDownload = session.premium_download_mbps;
   let premiumUpload = session.premium_upload_mbps;
   let premiumExpiresAt = session.premium_expires_at;
+  let premiumStartedAt = session.premium_started_at;
 
   if (bandwidthOverride) {
     // Stacks with time still remaining on an existing Premium purchase
@@ -315,6 +317,12 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
     premiumDownload = bandwidthOverride.download_mbps;
     premiumUpload = bandwidthOverride.upload_mbps || bandwidthOverride.download_mbps;
     premiumExpiresAt = new Date(extendFromMs + Math.floor(bandwidthOverride.minutes || 0) * 60 * 1000).toISOString();
+    // Portal's gold countdown bar needs a real start point to compute
+    // elapsed-vs-total progress from, not just the end time. Reset on
+    // every fresh Boost purchase, same moment premiumExpiresAt itself
+    // gets recalculated, so the bar always reflects THIS purchase's own
+    // window.
+    premiumStartedAt = new Date(now).toISOString();
   }
 
   // push_2min_sent reset to 0: a customer topping up before running out
@@ -329,9 +337,10 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
         premium_download_mbps = ?,
         premium_upload_mbps = ?,
         premium_expires_at = ?,
+        premium_started_at = ?,
         data_limit_mb = ?
     WHERE mac_address = ?
-  `).run(newMinutes, newExpiresAt, newHardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, newDataLimitMb, mac);
+  `).run(newMinutes, newExpiresAt, newHardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, premiumStartedAt, newDataLimitMb, mac);
 
   const updated = db.prepare('SELECT * FROM sessions WHERE mac_address = ?').get(mac);
   const bw = effectiveBandwidth(updated);
@@ -357,20 +366,36 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
 
 // "Convert" mode Premium purchase (portal's CONVERT button, distinct from
 // "Boost" which is addTimeToSession's bandwidthOverride stacking path).
-// Real request: instead of a temporary speed boost layered on top of
-// existing time, Convert SETS minutes_remaining to the matched Premium
-// rate's own minutes (not added to whatever was left) and makes the
-// Premium speed permanent for the rest of the session (session.download_mbps,
-// same permanent field a voucher's own override uses - not
-// premium_expires_at, which is specifically for the temporary Boost path
-// and would make this silently revert like Boost does, defeating the
-// entire point of Convert). Only valid on an existing session - there's
-// nothing to "convert," this doesn't create one.
-async function convertToPremiumSession(mac, minutes, expirationMinutes, bandwidthOverride, dataLimitMb = null) {
+//
+// Bug found live: this used to SET minutes_remaining to just the matched
+// Premium rate's own minutes, discarding whatever Regular time the
+// customer already had left entirely - a customer with 40 real, paid-for
+// minutes remaining who converted lost every one of them the instant they
+// did, replaced outright instead of converted. The existing time needs to
+// carry over, scaled by conversionRatio (coinCreditService.js's
+// convertCoinValue computes this from the matched Premium rate's own
+// minutes vs. the Regular rate sharing its exact coin value, i.e. "how
+// much less time the same money buys at Premium speed"), not thrown away.
+// conversionRatio itself is pure rate-config math, safe to compute before
+// this lock; multiplying it against minutes_remaining happens in here,
+// against a FRESH read of the session taken after acquiring the lock, so
+// a top-up landing in the same instant can never get silently overwritten
+// by a ratio calculated against stale data.
+//
+// Speed itself still goes permanent for the rest of the session
+// (session.download_mbps, same permanent field a voucher's own override
+// uses - not premium_expires_at, which is specifically for the temporary
+// Boost path and would make this silently revert like Boost does,
+// defeating the entire point of Convert). Only valid on an existing
+// session - there's nothing to "convert," this doesn't create one.
+async function convertToPremiumSession(mac, newPremiumMinutes, conversionRatio, expirationMinutes, bandwidthOverride, dataLimitMb = null) {
   return withMacLock(mac, async () => {
     mac = normalizeMac(mac);
     const session = getSessionByMac(mac);
     if (!session) return null;
+
+    const carriedOverMinutes = Math.round((session.minutes_remaining || 0) * conversionRatio);
+    const minutes = carriedOverMinutes + newPremiumMinutes;
 
     const newDataLimitMb = session.data_limit_mb || dataLimitMb || null;
     const now = Date.now();
@@ -423,11 +448,19 @@ async function convertToPremiumSession(mac, minutes, expirationMinutes, bandwidt
 // Convert-to-Premium, in reverse: minutes_remaining becomes whatever the
 // matched Regular rate grants, speed drops back to no override (global
 // cap or nothing), permanently, for the rest of the session.
-async function convertToRegularSession(mac, minutes, expirationMinutes, dataLimitMb = null) {
+async function convertToRegularSession(mac, newRegularMinutes, conversionRatio, expirationMinutes, dataLimitMb = null) {
   return withMacLock(mac, async () => {
     mac = normalizeMac(mac);
     const session = getSessionByMac(mac);
     if (!session) return null;
+
+    // Same carry-over fix as convertToPremiumSession above, mirrored: the
+    // customer's remaining Premium minutes convert to Regular-equivalent
+    // minutes (scaled by conversionRatio, computed in
+    // coinCreditService.js's convertToRegularValue) rather than being
+    // discarded outright.
+    const carriedOverMinutes = Math.round((session.minutes_remaining || 0) * conversionRatio);
+    const minutes = carriedOverMinutes + newRegularMinutes;
 
     const newDataLimitMb = session.data_limit_mb || dataLimitMb || null;
     const now = Date.now();

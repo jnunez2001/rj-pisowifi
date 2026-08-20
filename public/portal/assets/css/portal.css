@@ -724,10 +724,30 @@ body {
    Standard speed happens automatically server-side, this just tells the
    customer it's coming instead of their speed changing with no warning. */
 #speedIndicator {
-  margin-top: 6px;
+  margin-top: 10px;
+}
+
+#speedIndicatorLabel {
   font-size: 12px;
   font-weight: 700;
   color: #b8860b;
+  margin-bottom: 4px;
+}
+
+#speedIndicatorTrack {
+  width: 100%;
+  height: 6px;
+  border-radius: 4px;
+  background: #f5e6b8;
+  overflow: hidden;
+}
+
+#speedIndicatorFill {
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, #d4af37, #b8860b);
+  width: 100%;
+  transition: width 1s linear;
 }
 
 /* Shown once, only when tapping PREMIUM with a Regular session already

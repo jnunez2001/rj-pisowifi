@@ -177,14 +177,16 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
 
 // "Convert" mode (the portal's CONVERT button, distinct from PREMIUM/
 // "Boost" above): instead of stacking a temporary speed override on top
-// of existing time, this SETS the session's minutes to the matched
-// Premium rate's own minutes and makes that speed permanent for the rest
-// of the session, no reverting to Standard later. Only matches Premium
-// rates (never falls back to Regular ones) since converting to a Regular
-// rate wouldn't mean anything. Requires an existing session; there's
-// nothing to convert otherwise (checked here, not left to
-// convertToPremiumSession() to fail on, so this gives a real error
-// instead of a generic 500).
+// of existing time, this converts the session's existing Regular minutes
+// into their Premium-speed equivalent (scaled by conversionRatio below,
+// never just discarded - see convertToPremiumSession's own header for the
+// bug this fixes) and ADDS the newly-inserted coin's own Premium minutes
+// on top, then makes Premium speed permanent for the rest of the
+// session, no reverting to Standard later. Only matches Premium rates
+// (never falls back to Regular ones) since converting to a Regular rate
+// wouldn't mean anything. Requires an existing session; there's nothing
+// to convert otherwise (checked here, not left to convertToPremiumSession()
+// to fail on, so this gives a real error instead of a generic 500).
 async function convertCoinValue(mac, coinValue, ip = '', kioskId = null) {
   const { getRates } = require('./voucherService');
   const { getSessionByMac, convertToPremiumSession } = require('./sessionService');
@@ -193,9 +195,11 @@ async function convertCoinValue(mac, coinValue, ip = '', kioskId = null) {
     throw new Error('No active session to convert. Insert coins normally first.');
   }
 
-  const premiumRates = getRates()
+  const allRates = getRates();
+  const premiumRates = allRates
     .filter((r) => !!r.download_mbps)
     .sort((a, b) => b.coin_value - a.coin_value);
+  const regularRates = allRates.filter((r) => !r.download_mbps);
 
   let remaining = coinValue;
   const matchedRates = [];
@@ -229,7 +233,18 @@ async function convertCoinValue(mac, coinValue, ip = '', kioskId = null) {
     .map(({ rate, times }) => `₱${rate.coin_value}x${times}`)
     .join(' + ');
 
-  const session = await convertToPremiumSession(mac, totalMinutes, totalExpirationMinutes, bandwidthOverride, dataLimitMb);
+  // Conversion ratio: the highest-value matched Premium tier (matchedRates
+  // is sorted by coin_value descending, so [0] is it - same "primary
+  // tier" convention already used elsewhere for a mixed insert) against
+  // the Regular rate sharing its EXACT coin value, i.e. how much less
+  // time the same money buys at Premium speed. No matching Regular rate
+  // configured at that price point falls back to 1 (no scaling) rather
+  // than guessing, existing time just carries over 1:1 in that case.
+  const primaryRate = matchedRates[0].rate;
+  const matchingRegular = regularRates.find((r) => r.coin_value === primaryRate.coin_value);
+  const conversionRatio = matchingRegular ? primaryRate.minutes / matchingRegular.minutes : 1;
+
+  const session = await convertToPremiumSession(mac, totalMinutes, conversionRatio, totalExpirationMinutes, bandwidthOverride, dataLimitMb);
   if (!session) {
     throw new Error('No active session to convert. Insert coins normally first.');
   }
@@ -287,9 +302,11 @@ async function convertToRegularValue(mac, coinValue, ip = '', kioskId = null) {
     throw new Error('This session was not converted to Premium, there is nothing to convert back.');
   }
 
-  const regularRates = getRates()
+  const allRates = getRates();
+  const regularRates = allRates
     .filter((r) => !r.download_mbps)
     .sort((a, b) => b.coin_value - a.coin_value);
+  const premiumRates = allRates.filter((r) => !!r.download_mbps);
 
   let remaining = coinValue;
   const matchedRates = [];
@@ -319,7 +336,14 @@ async function convertToRegularValue(mac, coinValue, ip = '', kioskId = null) {
     .map(({ rate, times }) => `₱${rate.coin_value}x${times}`)
     .join(' + ');
 
-  const updated = await convertToRegularSession(mac, totalMinutes, totalExpirationMinutes, dataLimitMb);
+  // Inverse of convertCoinValue's ratio above: the customer's remaining
+  // Premium minutes convert down to Regular-equivalent minutes using the
+  // Regular rate sharing the matched tier's exact coin value.
+  const primaryRate = matchedRates[0].rate;
+  const matchingPremium = premiumRates.find((r) => r.coin_value === primaryRate.coin_value);
+  const conversionRatio = matchingPremium ? primaryRate.minutes / matchingPremium.minutes : 1;
+
+  const updated = await convertToRegularSession(mac, totalMinutes, conversionRatio, totalExpirationMinutes, dataLimitMb);
   if (!updated) {
     throw new Error('No active session to convert. Insert coins normally first.');
   }
