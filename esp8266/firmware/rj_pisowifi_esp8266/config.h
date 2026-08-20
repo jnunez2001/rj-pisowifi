@@ -5,7 +5,7 @@
 #include <ESP8266WebServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.12"
+#define FIRMWARE_VERSION "v1.0.13"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
@@ -117,7 +117,16 @@
 // itself (relay.cpp's activateRelay() sets relayArmedAt), independent of
 // inter-pulse spacing, so the arming transient is rejected the same way
 // every time instead of only when a previous pulse happened to be recent.
-#define COIN_ARM_GUARD_MS 200
+// Widened from 200ms after a real report of a consistent "1 extra peso"
+// on a newer coin acceptor's own hardware, with a pattern that pointed
+// back to this exact guard: the discrepancy showed up once per Insert
+// Coin window regardless of how many coins were actually inserted (a
+// per-arm-event signature, not per-coin bounce, which would scale with
+// coin count instead). Different acceptor hardware can have a longer
+// switching transient than the original 200ms accounted for. A customer
+// physically cannot drop a coin within the first half-second of tapping
+// Insert Coin, so widening this has no real downside for genuine coins.
+#define COIN_ARM_GUARD_MS 500
 
 // How often to ask the server whether newer firmware is available
 // (ota.cpp). Every boot already tells the server this device's current
