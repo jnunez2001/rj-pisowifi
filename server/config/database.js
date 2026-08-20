@@ -323,6 +323,26 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Cash reconciliation: an operator's own physical coin count for a
+  -- period, compared against what the system logged as credited over that
+  -- same window (transactions.coin_value). A mismatch here isn't
+  -- necessarily theft, it can just as easily be an electrical glitch
+  -- crediting a bit of extra free time, but without a record to compare
+  -- against, either way looks like an unexplained gap when counting coins
+  -- against the books. system_amount is captured at save time, not
+  -- recomputed later, so an old reconciliation stays a true snapshot even
+  -- if transactions data is later pruned by dataRetentionService.js.
+  CREATE TABLE IF NOT EXISTS cash_reconciliations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_start DATETIME NOT NULL,
+    period_end DATETIME NOT NULL,
+    physical_amount REAL NOT NULL,
+    system_amount REAL NOT NULL,
+    difference REAL NOT NULL,
+    notes TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- A secondary coin acceptor relayed back to this box over WiFi via an
   -- ESP32/ESP8266 board ("Satellite Kiosk", as opposed to this box's own
   -- directly-wired "Main Kiosk"). device_key is a pairing secret the
@@ -1405,7 +1425,7 @@ const SITE_SCOPED_TABLES = [
   'session_history', 'free_claims', 'vlans', 'vendos', 'trusted_devices',
   'watchdog_events', 'alert_events', 'satellite_kiosks', 'tc_class_allocations',
   'router_ports', 'static_leases', 'port_forwards', 'client_labels',
-  'network_config_versions', 'bandwidth_profiles',
+  'network_config_versions', 'bandwidth_profiles', 'cash_reconciliations',
 ];
 
 try {

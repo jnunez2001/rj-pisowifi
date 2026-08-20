@@ -44,6 +44,9 @@ async function loadSales() {
     // Transaction table
     buildTransactionTable(data.recent_transactions || []);
 
+    initReconciliationDefaults();
+    loadReconciliationHistory();
+
   } catch(e) {
     console.error('Sales error:', e);
   }
@@ -212,5 +215,119 @@ async function exportTransactionsCsv() {
     showToast(`Exported ${data.transactions.length} transactions!`, 'success');
   } catch (e) {
     showToast('Export error.', 'error');
+  }
+}
+
+// ===== CASH RECONCILIATION =====
+// Compares an operator's own physical coin count for a period against
+// what the system logged as credited (transactions.coin_value, type
+// 'coin' only, real cash never came from a voucher/promo/free session)
+// over that same window. Doesn't try to explain a mismatch on its own,
+// just gives the operator a real number and a saved record to point back
+// to instead of an unexplained gap when counting coins against the books.
+
+function toLocalDatetimeInputValue(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function initReconciliationDefaults() {
+  const startEl = document.getElementById('reconPeriodStart');
+  const endEl = document.getElementById('reconPeriodEnd');
+  if (!startEl || !endEl || startEl.value || endEl.value) return;
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+  startEl.value = toLocalDatetimeInputValue(startOfDay);
+  endEl.value = toLocalDatetimeInputValue(now);
+}
+
+async function submitCashReconciliation() {
+  const periodStartLocal = document.getElementById('reconPeriodStart').value;
+  const periodEndLocal = document.getElementById('reconPeriodEnd').value;
+  const physicalAmount = document.getElementById('reconPhysicalAmount').value;
+  const notes = document.getElementById('reconNotes').value;
+
+  if (!periodStartLocal || !periodEndLocal) {
+    showToast('Pick a period start and end.', 'error');
+    return;
+  }
+  if (physicalAmount === '' || isNaN(parseFloat(physicalAmount))) {
+    showToast('Enter how many pesos you physically counted.', 'error');
+    return;
+  }
+
+  // datetime-local inputs have no timezone info, sent as local wall-clock
+  // time, matches how created_at is stored (SQLite CURRENT_TIMESTAMP, no
+  // zone marker) so a plain string comparison on the server lines up with
+  // what the operator actually meant by the period they picked.
+  const periodStart = periodStartLocal.replace('T', ' ') + ':00';
+  const periodEnd = periodEndLocal.replace('T', ' ') + ':59';
+
+  try {
+    const data = await apiCall('POST', '/api/admin/cash-reconciliation', {
+      period_start: periodStart,
+      period_end: periodEnd,
+      physical_amount: parseFloat(physicalAmount),
+      notes,
+    });
+    if (!data.success) {
+      showToast(data.message || 'Could not save reconciliation.', 'error');
+      return;
+    }
+    renderReconciliationResult(data.record);
+    document.getElementById('reconNotes').value = '';
+    loadReconciliationHistory();
+    showToast('Reconciliation saved.', 'success');
+  } catch (e) {
+    showToast('Could not save reconciliation.', 'error');
+  }
+}
+
+function renderReconciliationResult(record) {
+  const wrap = document.getElementById('reconResult');
+  if (!wrap) return;
+  wrap.style.display = 'block';
+  document.getElementById('reconSystemAmount').textContent = `₱${Number(record.system_amount).toFixed(2)}`;
+  document.getElementById('reconPhysicalDisplay').textContent = `₱${Number(record.physical_amount).toFixed(2)}`;
+
+  const diff = Number(record.difference);
+  const diffEl = document.getElementById('reconDifference');
+  diffEl.textContent = `${diff > 0 ? '+' : ''}₱${diff.toFixed(2)}`;
+  diffEl.style.color = diff === 0 ? 'var(--accent-green)' : (diff > 0 ? 'var(--accent-blue)' : 'var(--accent-red)');
+
+  const msgEl = document.getElementById('reconMessage');
+  if (diff === 0) {
+    msgEl.textContent = 'Matches exactly. No discrepancy for this period.';
+  } else if (diff > 0) {
+    msgEl.textContent = `You counted ₱${diff.toFixed(2)} more than the system logged. Could be a coin the system missed, or simply more cash than transactions on file.`;
+  } else {
+    msgEl.textContent = `The system logged ₱${Math.abs(diff).toFixed(2)} more than you counted. Worth checking this period's coin-inserted log entries (bell icon, or Logs page) against what's actually in the box.`;
+  }
+}
+
+async function loadReconciliationHistory() {
+  const tbody = document.getElementById('reconHistoryTable');
+  if (!tbody) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/cash-reconciliation?limit=20');
+    if (!data.success || !data.records || data.records.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">No reconciliations saved yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = data.records.map((r) => {
+      const diff = Number(r.difference);
+      const diffColor = diff === 0 ? 'var(--accent-green)' : (diff > 0 ? 'var(--accent-blue)' : 'var(--accent-red)');
+      return `
+        <tr>
+          <td data-label="Period" style="font-size:12px;">${r.period_start.slice(0, 16)} to ${r.period_end.slice(0, 16)}</td>
+          <td data-label="System Logged">₱${Number(r.system_amount).toFixed(2)}</td>
+          <td data-label="Physical Count">₱${Number(r.physical_amount).toFixed(2)}</td>
+          <td data-label="Difference" style="color:${diffColor};font-weight:700;">${diff > 0 ? '+' : ''}₱${diff.toFixed(2)}</td>
+          <td data-label="Notes" style="font-size:12px;color:var(--text-secondary);">${escapeSalesHtml(r.notes || '-')}</td>
+          <td data-label="Saved" style="font-size:12px;color:var(--text-muted);">${r.created_at}</td>
+        </tr>`;
+    }).join('');
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">Could not load reconciliation history.</td></tr>';
   }
 }

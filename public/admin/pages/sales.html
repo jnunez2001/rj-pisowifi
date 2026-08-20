@@ -94,3 +94,73 @@
     </table>
   </div>
 </div>
+
+<!-- CASH RECONCILIATION -->
+<div class="card" style="margin-top:16px;">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Cash Reconciliation</div>
+      <div class="card-subtitle">Compare the coins you actually counted against what the system logged for the same period</div>
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="form-group">
+      <label class="form-label">Period Start</label>
+      <input type="datetime-local" id="reconPeriodStart" class="form-control">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Period End</label>
+      <input type="datetime-local" id="reconPeriodEnd" class="form-control">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Physical Coins Counted (₱)</label>
+      <input type="number" id="reconPhysicalAmount" class="form-control" min="0" step="0.01" placeholder="e.g. 250">
+    </div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Notes (optional)</label>
+    <input type="text" id="reconNotes" class="form-control" placeholder="e.g. End of day count, Aug 20">
+  </div>
+  <button class="btn btn-primary" onclick="submitCashReconciliation()">
+    <i class="fas fa-calculator"></i> Compare & Save
+  </button>
+
+  <div id="reconResult" style="display:none;margin-top:16px;padding:14px 16px;border-radius:10px;border:1px solid var(--border-color);background:var(--bg-card);">
+    <div style="display:flex;gap:24px;flex-wrap:wrap;">
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);font-weight:600;">System Logged</div>
+        <div style="font-size:20px;font-weight:700;color:var(--text-primary);" id="reconSystemAmount">₱0</div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);font-weight:600;">You Counted</div>
+        <div style="font-size:20px;font-weight:700;color:var(--text-primary);" id="reconPhysicalDisplay">₱0</div>
+      </div>
+      <div>
+        <div style="font-size:11px;color:var(--text-muted);font-weight:600;">Difference</div>
+        <div style="font-size:20px;font-weight:700;" id="reconDifference">₱0</div>
+      </div>
+    </div>
+    <div style="font-size:13px;color:var(--text-secondary);margin-top:8px;" id="reconMessage"></div>
+  </div>
+
+  <div style="margin-top:20px;">
+    <div class="card-title" style="margin-bottom:10px;">Recent Reconciliations</div>
+    <div class="table-wrapper">
+      <table class="table-stack">
+        <thead>
+          <tr>
+            <th>Period</th>
+            <th>System Logged</th>
+            <th>Physical Count</th>
+            <th>Difference</th>
+            <th>Notes</th>
+            <th>Saved</th>
+          </tr>
+        </thead>
+        <tbody id="reconHistoryTable">
+          <tr><td colspan="6"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

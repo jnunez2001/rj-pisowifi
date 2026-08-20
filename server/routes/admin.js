@@ -751,6 +751,63 @@ router.get('/sales', adminAuth, (req, res) => {
   }
 });
 
+// POST /api/admin/cash-reconciliation, an operator's own physical coin
+// count for a period, checked against what the system logged as credited
+// over that same window. Only 'coin' transactions count toward the
+// system side, physical cash in the box only ever came from real coin
+// insertions, a voucher/promo/free session never put money in the box.
+// system_amount is captured now and stored, not recomputed on later
+// reads, so a saved reconciliation stays a true historical snapshot.
+router.post('/cash-reconciliation', adminAuth, (req, res) => {
+  try {
+    const { period_start, period_end, physical_amount, notes } = req.body;
+
+    if (!period_start || !period_end) {
+      return res.status(400).json({ success: false, message: 'period_start and period_end are required' });
+    }
+    const physical = parseFloat(physical_amount);
+    if (!Number.isFinite(physical) || physical < 0) {
+      return res.status(400).json({ success: false, message: 'A valid physical_amount is required' });
+    }
+
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(coin_value), 0) as total, COUNT(*) as count
+      FROM transactions
+      WHERE type = 'coin' AND created_at >= ? AND created_at <= ?
+    `).get(period_start, period_end);
+
+    const systemAmount = row.total || 0;
+    const difference = Math.round((physical - systemAmount) * 100) / 100;
+
+    const result = db.prepare(`
+      INSERT INTO cash_reconciliations (period_start, period_end, physical_amount, system_amount, difference, notes)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(period_start, period_end, physical, systemAmount, difference, (notes || '').trim() || null);
+
+    const record = db.prepare('SELECT * FROM cash_reconciliations WHERE id = ?').get(result.lastInsertRowid);
+    return res.json({ success: true, record: { ...record, transaction_count: row.count } });
+  } catch (err) {
+    console.error('Cash reconciliation error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/cash-reconciliation?limit=20, recent reconciliation
+// history so a mismatch has a record to point back to instead of only
+// existing in whatever the operator remembers from that day.
+router.get('/cash-reconciliation', adminAuth, (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const records = db.prepare(`
+      SELECT * FROM cash_reconciliations ORDER BY created_at DESC LIMIT ?
+    `).all(limit);
+    return res.json({ success: true, records });
+  } catch (err) {
+    console.error('Cash reconciliation list error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/analytics/summary?days=7, the Analytics page's single
 // aggregation endpoint (one round trip, matching the design guide's
 // ===== USERS: GUESTS =====
