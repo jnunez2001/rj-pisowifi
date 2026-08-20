@@ -394,6 +394,7 @@ async function convertToPremiumSession(mac, minutes, expirationMinutes, bandwidt
           premium_download_mbps = NULL,
           premium_upload_mbps = NULL,
           premium_expires_at = NULL,
+          converted_to_premium = 1,
           data_limit_mb = ?
       WHERE mac_address = ?
     `).run(minutes, newExpiresAt, newHardExpiresAt, bandwidthOverride.download_mbps,
@@ -404,6 +405,63 @@ async function convertToPremiumSession(mac, minutes, expirationMinutes, bandwidt
     try {
       await allowClient(mac);
       await setClientBandwidth(mac, updated.download_mbps, updated.upload_mbps || updated.download_mbps, getBurstConfig(), !!newDataLimitMb);
+    } catch (e) {}
+
+    sseService.notify(mac);
+    return updated;
+  });
+}
+
+// Reverse of convertToPremiumSession() above - only offered when the
+// operator has turned it on (settings.allow_premium_to_regular_convert)
+// AND the session's elevated speed actually came from a Convert action
+// (converted_to_premium = 1), never from a voucher's own permanent
+// override, which was never a Premium purchase to "downgrade" from.
+// That eligibility check lives in coinCreditService.js's
+// convertToRegularValue(), this function just performs the switch once
+// it's already been approved. Same "SET, not add" time mechanic as
+// Convert-to-Premium, in reverse: minutes_remaining becomes whatever the
+// matched Regular rate grants, speed drops back to no override (global
+// cap or nothing), permanently, for the rest of the session.
+async function convertToRegularSession(mac, minutes, expirationMinutes, dataLimitMb = null) {
+  return withMacLock(mac, async () => {
+    mac = normalizeMac(mac);
+    const session = getSessionByMac(mac);
+    if (!session) return null;
+
+    const newDataLimitMb = session.data_limit_mb || dataLimitMb || null;
+    const now = Date.now();
+    const newExpiresAt = new Date(now + minutes * 60 * 1000).toISOString();
+
+    const convertHardExpiresAtMs = now + expirationMinutes * 60 * 1000;
+    const existingHardExpiresAtMs = session.hard_expires_at ? new Date(session.hard_expires_at).getTime() : 0;
+    const newHardExpiresAt = new Date(Math.max(convertHardExpiresAtMs, existingHardExpiresAtMs)).toISOString();
+
+    db.prepare(`
+      UPDATE sessions
+      SET minutes_remaining = ?,
+          expires_at = ?,
+          hard_expires_at = ?,
+          push_2min_sent = 0,
+          download_mbps = NULL,
+          upload_mbps = NULL,
+          premium_download_mbps = NULL,
+          premium_upload_mbps = NULL,
+          premium_expires_at = NULL,
+          converted_to_premium = 0,
+          data_limit_mb = ?
+      WHERE mac_address = ?
+    `).run(minutes, newExpiresAt, newHardExpiresAt, newDataLimitMb, mac);
+
+    const updated = db.prepare('SELECT * FROM sessions WHERE mac_address = ?').get(mac);
+
+    try {
+      await allowClient(mac);
+      if (isBandwidthCapEnabled()) {
+        await setClientBandwidth(mac, getMaxMbps(), getMaxUploadMbps(), getBurstConfig(), !!newDataLimitMb);
+      } else {
+        await removeClientBandwidth(mac);
+      }
     } catch (e) {}
 
     sseService.notify(mac);
@@ -665,6 +723,7 @@ module.exports = {
   createSession,
   addTimeToSession,
   convertToPremiumSession,
+  convertToRegularSession,
   creditOrCreateSession,
   withMacLock,
   pauseSession,

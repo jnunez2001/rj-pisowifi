@@ -262,4 +262,94 @@ async function convertCoinValue(mac, coinValue, ip = '', kioskId = null) {
   };
 }
 
-module.exports = { creditCoinValue, convertCoinValue, NoMatchingRateError };
+// Reverse of convertCoinValue() above: switches a CONVERTED session
+// (converted_to_premium = 1, i.e. its current permanent speed came from
+// Convert, never from a voucher's own override) back down to a Regular
+// rate. Off by default (settings.allow_premium_to_regular_convert) since
+// an operator selling Premium as a one-way upgrade shouldn't have to
+// notice and disable a downgrade path they never intended to offer.
+// Matches against Regular rates only, minutes gets SET to the matched
+// rate's own value, same "SET not add" mechanic as the Premium direction.
+async function convertToRegularValue(mac, coinValue, ip = '', kioskId = null) {
+  const { getRates } = require('./voucherService');
+  const { getSessionByMac, convertToRegularSession } = require('./sessionService');
+
+  const allowed = db.prepare("SELECT value FROM settings WHERE key = 'allow_premium_to_regular_convert'").get()?.value === '1';
+  if (!allowed) {
+    throw new Error('Converting back to a Regular rate is not available here.');
+  }
+
+  const session = getSessionByMac(mac);
+  if (!session) {
+    throw new Error('No active session to convert. Insert coins normally first.');
+  }
+  if (!session.converted_to_premium) {
+    throw new Error('This session was not converted to Premium, there is nothing to convert back.');
+  }
+
+  const regularRates = getRates()
+    .filter((r) => !r.download_mbps)
+    .sort((a, b) => b.coin_value - a.coin_value);
+
+  let remaining = coinValue;
+  const matchedRates = [];
+  for (const rate of regularRates) {
+    if (remaining <= 0) break;
+    if (rate.coin_value <= remaining) {
+      const times = Math.floor(remaining / rate.coin_value);
+      matchedRates.push({ rate, times });
+      remaining -= rate.coin_value * times;
+    }
+  }
+
+  if (matchedRates.length === 0 || remaining === coinValue) {
+    throw new NoMatchingRateError(coinValue);
+  }
+
+  let totalMinutes = 0;
+  let totalExpirationMinutes = 0;
+  let dataLimitMb = null;
+  for (const { rate, times } of matchedRates) {
+    totalMinutes += rate.minutes * times;
+    totalExpirationMinutes += rate.expiration_minutes * times;
+    if (!dataLimitMb && rate.data_limit_mb) dataLimitMb = rate.data_limit_mb;
+  }
+
+  const matchLog = matchedRates
+    .map(({ rate, times }) => `₱${rate.coin_value}x${times}`)
+    .join(' + ');
+
+  const updated = await convertToRegularSession(mac, totalMinutes, totalExpirationMinutes, dataLimitMb);
+  if (!updated) {
+    throw new Error('No active session to convert. Insert coins normally first.');
+  }
+
+  db.prepare(`
+    INSERT INTO transactions
+    (voucher_code, coin_value, minutes_added, type, kiosk_id, mac_address)
+    VALUES (?, ?, ?, 'coin', ?, ?)
+  `).run(updated.voucher_code, coinValue, totalMinutes, kioskId, mac);
+  logFinancialEvent({ voucher_code: updated.voucher_code, coin_value: coinValue, minutes_added: totalMinutes, type: 'coin', mac });
+  logAlertEvent('info', 'coin_inserted', `₱${coinValue} converted back to Regular`, `MAC ${mac} - ${matchLog}`);
+
+  console.log(`⬇️ Converted back to Regular: ${updated.voucher_code} now ${totalMinutes} mins`);
+
+  return {
+    success: true,
+    action: 'converted_to_regular',
+    voucher_code: updated.voucher_code,
+    minutes_added: totalMinutes,
+    minutes_remaining: updated.minutes_remaining,
+    expires_at: updated.expires_at,
+    hard_expires_at: updated.hard_expires_at,
+    matched_as: matchLog,
+    premium: false,
+    premium_download_mbps: null,
+    premium_upload_mbps: null,
+    premium_expires_at: null,
+    download_mbps: updated.download_mbps,
+    upload_mbps: updated.upload_mbps
+  };
+}
+
+module.exports = { creditCoinValue, convertCoinValue, convertToRegularValue, NoMatchingRateError };

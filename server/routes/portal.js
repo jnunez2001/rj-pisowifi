@@ -123,7 +123,8 @@ router.get('/rates', (req, res) => {
       rates,
       vendo_ip: getSetting('vendo_ip', ''),
       vapid_public_key: getSetting('vapid_public_key', ''),
-      portal_hostname: getSetting('portal_hostname', '')
+      portal_hostname: getSetting('portal_hostname', ''),
+      allow_premium_to_regular_convert: getSetting('allow_premium_to_regular_convert', '0')
     });
 
   } catch (err) {

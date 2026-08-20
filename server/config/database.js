@@ -992,6 +992,7 @@ if (settingCount.count === 0) {
   insertSetting.run('max_pause_minutes', '30');
   insertSetting.run('max_pauses', '0');
   insertSetting.run('grace_period_minutes', '0');
+  insertSetting.run('allow_premium_to_regular_convert', '0');
 
   // Coin slot settings
   insertSetting.run('coin_wait_ms', '1500');
@@ -1141,6 +1142,12 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // the Pause button stops working for it. 0 = unlimited, matches this
   // file's existing "0 = unlimited" convention elsewhere.
   upsertIfMissing('max_pauses', '0');
+  // Whether a customer who used CONVERT to permanently switch to Premium
+  // speed can later convert back down to a Regular rate (same "minutes
+  // SET to the matched rate's own value" mechanic, in reverse). Off by
+  // default - an operator selling Premium as a one-way upgrade shouldn't
+  // have to opt out of a downgrade path they never intended to offer.
+  upsertIfMissing('allow_premium_to_regular_convert', '0');
   if (!db.prepare("SELECT key FROM settings WHERE key = 'vendo_firmware_released'").get()) {
     const hadVersion = !!db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value;
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('vendo_firmware_released', hadVersion ? '1' : '0');
@@ -1283,6 +1290,21 @@ try {
 // "0 = unlimited" convention (see coinslot_gpio_max_empty_opens).
 try {
   db.exec('ALTER TABLE sessions ADD COLUMN pause_count INTEGER DEFAULT 0');
+} catch (e) {
+  // already applied
+}
+
+// Distinguishes "this session's current permanent speed came from a
+// CONVERT action" from "this session has a voucher's own permanent
+// bandwidth override" - both use the same download_mbps/upload_mbps
+// columns, but only the former should ever be eligible for the
+// Convert-back-to-Regular flow (coinCreditService.js's
+// convertToRegularValue). Without a dedicated flag, that flow would have
+// no reliable way to tell the two apart and could offer "convert back to
+// Regular" on a session whose elevated speed actually came from a
+// voucher, not a Premium purchase - a downgrade that was never paid for.
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN converted_to_premium INTEGER DEFAULT 0');
 } catch (e) {
   // already applied
 }

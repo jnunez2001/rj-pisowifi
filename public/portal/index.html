@@ -143,6 +143,12 @@
       <button class="btn btn-premium" id="convertBtnConnected" onclick="handleInsertCoin('convert')" style="display:none;" title="Permanently switch your speed to Premium for the rest of your session">
         <i class="fas fa-arrow-up-right-dots"></i>&nbsp; CONVERT TO PREMIUM
       </button>
+      <!-- Only shown when the operator has enabled it (Settings > Allow
+           Premium-to-Regular Convert) AND this session's speed actually
+           came from CONVERT TO PREMIUM, not a voucher's own override. -->
+      <button class="btn btn-outline" id="convertDownBtnConnected" onclick="handleInsertCoin('convert_down')" style="display:none;" title="Switch your speed back to Regular for the rest of your session">
+        <i class="fas fa-arrow-down"></i>&nbsp; CONVERT TO REGULAR
+      </button>
       <div class="btn-grid">
         <button class="btn btn-pause" id="pauseBtn" onclick="pauseSession()">
           <i class="fas fa-pause"></i>&nbsp; PAUSE

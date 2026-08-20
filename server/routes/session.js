@@ -129,7 +129,8 @@ router.get('/mac/:mac', async (req, res) => {
       expires_at: session.expires_at,
       hard_expires_at: session.hard_expires_at,
       created_at: session.created_at,
-      pauses_remaining: pausesRemaining(session)
+      pauses_remaining: pausesRemaining(session),
+      converted_to_premium: session.converted_to_premium === 1
     });
 
   } catch (err) {
@@ -164,7 +165,8 @@ router.get('/voucher/:code', (req, res) => {
       is_paused: session.is_paused === 1,
       expires_at: session.expires_at,
       hard_expires_at: session.hard_expires_at,
-      pauses_remaining: pausesRemaining(session)
+      pauses_remaining: pausesRemaining(session),
+      converted_to_premium: session.converted_to_premium === 1
     });
 
   } catch (err) {

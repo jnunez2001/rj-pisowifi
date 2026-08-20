@@ -62,7 +62,8 @@ let portalSettings = {
   max_pause_minutes: '30',
   grace_period_minutes: '0',
   payment_methods: 'both',
-  portal_hostname: ''
+  portal_hostname: '',
+  allow_premium_to_regular_convert: '0'
 };
 
 // ===== COIN MODAL TIMER =====
@@ -566,13 +567,15 @@ async function handleInsertCoin(mode) {
   }
 
   const modal = document.getElementById('coinModal');
-  modal.classList.toggle('coin-modal-premium', mode !== 'regular');
+  modal.classList.toggle('coin-modal-premium', mode === 'premium' || mode === 'convert');
   const title = document.getElementById('coinModalTitle');
   title.innerHTML = mode === 'convert'
     ? '<i class="fas fa-bolt"></i>&nbsp; INSERT COIN (CONVERT TO PREMIUM)'
-    : mode === 'premium'
-      ? '<i class="fas fa-bolt"></i>&nbsp; INSERT COIN (PREMIUM BOOST)'
-      : '<i class="fas fa-coins"></i>&nbsp; INSERT COIN';
+    : mode === 'convert_down'
+      ? '<i class="fas fa-arrow-down"></i>&nbsp; INSERT COIN (CONVERT TO REGULAR)'
+      : mode === 'premium'
+        ? '<i class="fas fa-bolt"></i>&nbsp; INSERT COIN (PREMIUM BOOST)'
+        : '<i class="fas fa-coins"></i>&nbsp; INSERT COIN';
   renderCoinRatesList();
 
   // Boost stays available even with a Regular session already running
@@ -591,6 +594,9 @@ async function handleInsertCoin(mode) {
   if (stackNotice) {
     if (mode === 'convert') {
       stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This permanently switches your speed to Premium for the rest of your session. Your remaining time will be replaced with the Premium rate\'s own time, not added on top.';
+      stackNotice.style.display = 'block';
+    } else if (mode === 'convert_down') {
+      stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This switches your speed back to Regular for the rest of your session. Your remaining time will be replaced with the Regular rate\'s own time, not added on top.';
       stackNotice.style.display = 'block';
     } else if (mode === 'premium' && hasRegularSessionRunning && !alreadyHasPremium) {
       stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This adds temporary high-speed time on top of your current session, it does not replace your regular minutes.';
@@ -982,6 +988,7 @@ async function loadSettings() {
     portalSettings.payment_methods = data.payment_methods || 'both';
     portalSettings.vapid_public_key = data.vapid_public_key || '';
     portalSettings.portal_hostname = data.portal_hostname || '';
+    portalSettings.allow_premium_to_regular_convert = data.allow_premium_to_regular_convert || '0';
     applyPortalSettings();
     updateNotificationsButton();
 
@@ -1083,6 +1090,16 @@ function updateConvertButton() {
     btn.style.display = hasPremium ? 'block' : 'none';
     btn.disabled = !eligible;
   });
+
+  // Convert-back-to-Regular only shows when the operator has explicitly
+  // turned it on AND this specific session's elevated speed actually came
+  // from Convert (converted_to_premium), never a voucher's own override.
+  const downBtn = document.getElementById('convertDownBtnConnected');
+  if (downBtn) {
+    const show = portalSettings.allow_premium_to_regular_convert === '1' &&
+      currentSession && currentSession.converted_to_premium && standardRates.length > 0;
+    downBtn.style.display = show ? 'block' : 'none';
+  }
 }
 
 function setRatesTab(tab) {
@@ -1097,7 +1114,7 @@ function setRatesTab(tab) {
 // to what they're about to do, not the full mixed list. Convert matches
 // against Premium rates too (same coin values), same list as Boost.
 function renderCoinRatesList() {
-  const list = insertingMode !== 'regular' ? premiumRates : standardRates;
+  const list = (insertingMode === 'premium' || insertingMode === 'convert') ? premiumRates : standardRates;
   document.getElementById('coinRatesList').innerHTML = list.map(renderRateItem).join('');
 }
 

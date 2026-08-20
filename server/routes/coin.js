@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
-const { creditCoinValue, convertCoinValue, NoMatchingRateError } = require('../services/coinCreditService');
+const { creditCoinValue, convertCoinValue, convertToRegularValue, NoMatchingRateError } = require('../services/coinCreditService');
 const { resolveDeviceKey } = require('../services/satelliteKioskService');
 const sseService = require('../services/sseService');
 
@@ -90,9 +90,10 @@ async function finalizePendingCoins(mac) {
   pendingFinalizeTimer = null;
 
   try {
-    const result = mode === 'convert'
-      ? await convertCoinValue(mac, total, ip, kioskId)
-      : await creditCoinValue(mac, total, ip, kioskId, mode === 'premium');
+    let result;
+    if (mode === 'convert') result = await convertCoinValue(mac, total, ip, kioskId);
+    else if (mode === 'convert_down') result = await convertToRegularValue(mac, total, ip, kioskId);
+    else result = await creditCoinValue(mac, total, ip, kioskId, mode === 'premium');
     console.log(`✅ Pending window closed for ${mac}: credited ₱${total} (${result.matched_as})`);
     return { success: true, result };
   } catch (err) {
@@ -107,7 +108,7 @@ async function finalizePendingCoins(mac) {
       console.error(`⚠️ Pending window for ${mac} closed with ₱${total} matching no rate tier, not credited.`);
       return { success: false, reason: 'no_matching_rate', total, attempt };
     }
-    if (mode === 'convert') {
+    if (mode === 'convert' || mode === 'convert_down') {
       console.error(`⚠️ Convert failed for ${mac}: ${err.message}`);
       return { success: false, reason: 'convert_failed', message: err.message, total };
     }
@@ -144,7 +145,8 @@ router.post('/pending', (req, res) => {
   // mode is the current contract ('regular'|'premium'|'convert');
   // is_premium is kept working for older portal.js builds still sending
   // the plain boolean, mapped onto the same 'premium' mode.
-  const resolvedMode = mode === 'convert' ? 'convert' : (mode === 'premium' || is_premium) ? 'premium' : 'regular';
+  const resolvedMode = (mode === 'convert' || mode === 'convert_down') ? mode
+    : (mode === 'premium' || is_premium) ? 'premium' : 'regular';
   const normalizedMac = mac.toLowerCase();
 
   // Single physical coin acceptor: only one customer can actually be
