@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
-const { creditCoinValue, NoMatchingRateError } = require('../services/coinCreditService');
+const { creditCoinValue, convertCoinValue, NoMatchingRateError } = require('../services/coinCreditService');
 const { resolveDeviceKey } = require('../services/satelliteKioskService');
 const sseService = require('../services/sseService');
 
@@ -24,12 +24,14 @@ let pendingTotal = 0;
 let pendingIp = '';
 let pendingKioskId = null;
 let pendingFinalizeTimer = null;
-// Which button the customer tapped on the portal (normal vs the gold
-// PREMIUM button) - set once when the window opens (POST /pending) and
-// used at finalize to match against the Premium rate rather than the
-// regular one sharing the same coin_value, since coin denominations no
-// longer disambiguate Premium from regular on their own.
-let pendingIsPremium = false;
+// Which button the customer tapped on the portal - 'regular', 'premium'
+// (the gold "Boost" button, temporary speed stack) or 'convert' (permanent
+// speed switch, sets minutes to the matched Premium rate's own value
+// instead of adding to what's left - see coinCreditService.js's
+// convertCoinValue). Set once when the window opens (POST /pending) and
+// used at finalize to match against the right rate/crediting path, since
+// coin denominations alone don't disambiguate any of these three.
+let pendingMode = 'regular';
 const PENDING_TIMEOUT_MS = 40000; // must match/slightly exceed portal's 30s coin timer
 
 // Bug found live: crediting each coin the instant it was detected meant a
@@ -59,7 +61,7 @@ async function finalizePendingCoins(mac) {
 
   const total = pendingTotal;
   const kioskId = pendingKioskId;
-  const isPremium = pendingIsPremium;
+  const mode = pendingMode;
 
   // pendingIp only ever held whatever the coin-relay device (ESP32) self-
   // reported as its OWN WiFi IP, not the paying customer's - a physical
@@ -83,12 +85,14 @@ async function finalizePendingCoins(mac) {
   pendingTotal = 0;
   pendingIp = '';
   pendingKioskId = null;
-  pendingIsPremium = false;
+  pendingMode = 'regular';
   if (pendingFinalizeTimer) clearTimeout(pendingFinalizeTimer);
   pendingFinalizeTimer = null;
 
   try {
-    const result = await creditCoinValue(mac, total, ip, kioskId, isPremium);
+    const result = mode === 'convert'
+      ? await convertCoinValue(mac, total, ip, kioskId)
+      : await creditCoinValue(mac, total, ip, kioskId, mode === 'premium');
     console.log(`✅ Pending window closed for ${mac}: credited ₱${total} (${result.matched_as})`);
     return { success: true, result };
   } catch (err) {
@@ -102,6 +106,10 @@ async function finalizePendingCoins(mac) {
       const attempt = recordAttempt(mac);
       console.error(`⚠️ Pending window for ${mac} closed with ₱${total} matching no rate tier, not credited.`);
       return { success: false, reason: 'no_matching_rate', total, attempt };
+    }
+    if (mode === 'convert') {
+      console.error(`⚠️ Convert failed for ${mac}: ${err.message}`);
+      return { success: false, reason: 'convert_failed', message: err.message, total };
     }
     console.error('Finalize pending coin error:', err);
     return { success: false, reason: 'server_error' };
@@ -129,10 +137,14 @@ function pruneCoinEventCache() {
 
 // POST /api/coin/pending, portal calls this right when INSERT COIN modal opens
 router.post('/pending', (req, res) => {
-  const { mac, is_premium } = req.body;
+  const { mac, is_premium, mode } = req.body;
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
+  // mode is the current contract ('regular'|'premium'|'convert');
+  // is_premium is kept working for older portal.js builds still sending
+  // the plain boolean, mapped onto the same 'premium' mode.
+  const resolvedMode = mode === 'convert' ? 'convert' : (mode === 'premium' || is_premium) ? 'premium' : 'regular';
   const normalizedMac = mac.toLowerCase();
 
   // Single physical coin acceptor: only one customer can actually be
@@ -155,9 +167,9 @@ router.post('/pending', (req, res) => {
   pendingTotal = 0;
   pendingIp = '';
   pendingKioskId = null;
-  pendingIsPremium = !!is_premium;
+  pendingMode = resolvedMode;
   pendingFinalizeTimer = null;
-  console.log(`⏳ Pending coin registered for ${pendingCoinMac}${pendingIsPremium ? ' (Premium)' : ''}`);
+  console.log(`⏳ Pending coin registered for ${pendingCoinMac} (${pendingMode})`);
   return res.json({ success: true });
 });
 

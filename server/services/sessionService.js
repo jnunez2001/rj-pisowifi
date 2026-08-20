@@ -355,6 +355,62 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
   return updated;
 }
 
+// "Convert" mode Premium purchase (portal's CONVERT button, distinct from
+// "Boost" which is addTimeToSession's bandwidthOverride stacking path).
+// Real request: instead of a temporary speed boost layered on top of
+// existing time, Convert SETS minutes_remaining to the matched Premium
+// rate's own minutes (not added to whatever was left) and makes the
+// Premium speed permanent for the rest of the session (session.download_mbps,
+// same permanent field a voucher's own override uses - not
+// premium_expires_at, which is specifically for the temporary Boost path
+// and would make this silently revert like Boost does, defeating the
+// entire point of Convert). Only valid on an existing session - there's
+// nothing to "convert," this doesn't create one.
+async function convertToPremiumSession(mac, minutes, expirationMinutes, bandwidthOverride, dataLimitMb = null) {
+  return withMacLock(mac, async () => {
+    mac = normalizeMac(mac);
+    const session = getSessionByMac(mac);
+    if (!session) return null;
+
+    const newDataLimitMb = session.data_limit_mb || dataLimitMb || null;
+    const now = Date.now();
+    const newExpiresAt = new Date(now + minutes * 60 * 1000).toISOString();
+
+    // Same "never shrink an already-locked-in expiry" invariant as
+    // addTimeToSession - Convert changes the TIME BUCKET and SPEED, but
+    // shouldn't be able to pull in how long the session stays resumable.
+    const convertHardExpiresAtMs = now + expirationMinutes * 60 * 1000;
+    const existingHardExpiresAtMs = session.hard_expires_at ? new Date(session.hard_expires_at).getTime() : 0;
+    const newHardExpiresAt = new Date(Math.max(convertHardExpiresAtMs, existingHardExpiresAtMs)).toISOString();
+
+    db.prepare(`
+      UPDATE sessions
+      SET minutes_remaining = ?,
+          expires_at = ?,
+          hard_expires_at = ?,
+          push_2min_sent = 0,
+          download_mbps = ?,
+          upload_mbps = ?,
+          premium_download_mbps = NULL,
+          premium_upload_mbps = NULL,
+          premium_expires_at = NULL,
+          data_limit_mb = ?
+      WHERE mac_address = ?
+    `).run(minutes, newExpiresAt, newHardExpiresAt, bandwidthOverride.download_mbps,
+           bandwidthOverride.upload_mbps || bandwidthOverride.download_mbps, newDataLimitMb, mac);
+
+    const updated = db.prepare('SELECT * FROM sessions WHERE mac_address = ?').get(mac);
+
+    try {
+      await allowClient(mac);
+      await setClientBandwidth(mac, updated.download_mbps, updated.upload_mbps || updated.download_mbps, getBurstConfig(), !!newDataLimitMb);
+    } catch (e) {}
+
+    sseService.notify(mac);
+    return updated;
+  });
+}
+
 // Real request: an operator wants a cap on how many times the same
 // session can be paused, and the portal to show the customer how many
 // pauses they have left rather than an unlimited button. Returns the
@@ -608,6 +664,7 @@ module.exports = {
   getSessionByVoucher,
   createSession,
   addTimeToSession,
+  convertToPremiumSession,
   creditOrCreateSession,
   withMacLock,
   pauseSession,

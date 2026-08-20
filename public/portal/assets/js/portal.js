@@ -471,7 +471,7 @@ async function registerPendingCoin() {
     const res = await fetch(`${SERVER}/api/coin/pending`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mac, is_premium: insertingPremium })
+      body: JSON.stringify({ mac, mode: insertingMode })
     });
     if (res.status === 409) {
       console.log('Coin slot busy with another customer');
@@ -504,10 +504,15 @@ async function registerPendingGpioCoin() {
   const mac = getMac();
   if (!mac) return false;
   try {
+    // Direct-GPIO coin credit doesn't support Convert mode yet (only the
+    // ESP32-relay path does, see coin.js's pendingMode) - a Convert tap
+    // still registers the GPIO window as Premium so a box wired for
+    // direct GPIO doesn't just silently ignore the coin, it credits as a
+    // normal Boost instead of failing outright.
     const res = await fetch(`${SERVER}/api/coin/gpio/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mac, is_premium: insertingPremium })
+      body: JSON.stringify({ mac, is_premium: insertingMode !== 'regular' })
     });
     if (res.status === 409) return true;
   } catch(e) {
@@ -528,21 +533,24 @@ async function cancelPendingGpioCoin() {
   } catch(e) {}
 }
 
-// `isPremium` - which button the customer tapped (normal INSERT COIN vs
-// the gold PREMIUM button). Doesn't change what the coin acceptor
-// physically does - the server still decides what a coin buys purely
-// from its value (coinCreditService.js) - this only decides what the
-// modal SHOWS, so a customer heading for premium sees the premium price
-// list (and knows which coin to actually drop) instead of the full mixed
-// list.
-let insertingPremium = false;
+// Which button the customer tapped: 'regular' (normal INSERT COIN),
+// 'premium' (the gold BOOST button - temporary speed stack on top of
+// existing time, reverts automatically), or 'convert' (permanent speed
+// switch, sets minutes to the matched Premium rate's own value instead of
+// adding to what's left - see coinCreditService.js's convertCoinValue).
+// Doesn't change what the coin acceptor physically does - the server
+// still decides what a coin buys purely from its value - this only
+// decides what the modal SHOWS and which crediting path the coin lands
+// on once inserted.
+let insertingMode = 'regular';
 
-async function handleInsertCoin(isPremium) {
+async function handleInsertCoin(mode) {
   if (isBlocked) return;
+  if (mode === 'convert' && !convertEligible()) return; // button should already be disabled/hidden
   playSound('insert');
   insertedTotal = 0;
   pendingRegistered = false;
-  insertingPremium = !!isPremium;
+  insertingMode = mode;
 
   // Only one customer can physically drop coins at a time. Both requests
   // are fired together (the ESP32-relay and direct-GPIO paths are mutually
@@ -558,27 +566,33 @@ async function handleInsertCoin(isPremium) {
   }
 
   const modal = document.getElementById('coinModal');
-  modal.classList.toggle('coin-modal-premium', insertingPremium);
+  modal.classList.toggle('coin-modal-premium', mode !== 'regular');
   const title = document.getElementById('coinModalTitle');
-  title.innerHTML = insertingPremium
-    ? '<i class="fas fa-bolt"></i>&nbsp; INSERT COIN (PREMIUM)'
-    : '<i class="fas fa-coins"></i>&nbsp; INSERT COIN';
+  title.innerHTML = mode === 'convert'
+    ? '<i class="fas fa-bolt"></i>&nbsp; INSERT COIN (CONVERT TO PREMIUM)'
+    : mode === 'premium'
+      ? '<i class="fas fa-bolt"></i>&nbsp; INSERT COIN (PREMIUM BOOST)'
+      : '<i class="fas fa-coins"></i>&nbsp; INSERT COIN';
   renderCoinRatesList();
 
-  // Premium stays available even with a Regular session already running
+  // Boost stays available even with a Regular session already running
   // (it's a real, deliberate upsell - the server already supports buying
   // it mid-session, see coinCreditService.js's premium/regular stacking
-  // comment), but a customer who already has time running and hasn't
-  // dealt with Premium before could easily assume it REPLACES their
-  // current session rather than adding a temporary speed boost on top of
-  // it. Only show this the first time they hit Premium while a Regular
-  // session is active, not on every single coin.
+  // comment), but a customer who hasn't dealt with it before could easily
+  // assume it REPLACES their current session rather than adding a
+  // temporary speed boost on top of it. Convert gets its own distinct
+  // notice since its actual effect (permanent speed, minutes SET to the
+  // Premium rate's own value, not added) is different enough from both
+  // Regular and Boost that it needs explaining every time, not just once.
   const stackNotice = document.getElementById('coinModalStackNotice');
   const hasRegularSessionRunning = currentSession && currentSession.minutes_remaining > 0;
   const alreadyHasPremium = currentSession && currentSession.premium_expires_at &&
     new Date(currentSession.premium_expires_at).getTime() > Date.now();
   if (stackNotice) {
-    if (insertingPremium && hasRegularSessionRunning && !alreadyHasPremium) {
+    if (mode === 'convert') {
+      stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This permanently switches your speed to Premium for the rest of your session. Your remaining time will be replaced with the Premium rate\'s own time, not added on top.';
+      stackNotice.style.display = 'block';
+    } else if (mode === 'premium' && hasRegularSessionRunning && !alreadyHasPremium) {
       stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This adds temporary high-speed time on top of your current session, it does not replace your regular minutes.';
       stackNotice.style.display = 'block';
     } else {
@@ -619,6 +633,9 @@ async function finishInsertingCoins() {
     } else if (data.reason === 'no_matching_rate') {
       showToast(data.message || 'That amount doesn\'t match a rate yet.', 'error');
       return; // leave the modal open so they can insert more
+    } else if (data.reason === 'convert_failed') {
+      showToast(data.message || 'Could not convert to Premium. Your coins are still safe, please try again.', 'error');
+      return; // leave the modal open, same as no_matching_rate above
     }
     // Any other failure (including no_pending_coins) still falls through
     // to closeCoinModal() below. The coins, if any, are still safely
@@ -880,6 +897,7 @@ function updateUI(session) {
       pauseBtn.style.display = portalSettings.allow_pause === '1' ? 'block' : 'none';
     }
     updatePausesRemainingHint(session);
+    updateConvertButton();
 
     document.getElementById('sectionDisconnected').style.display = 'none';
     document.getElementById('sectionConnected').style.display = 'block';
@@ -1049,6 +1067,22 @@ function buildRatesUI(rates) {
 
   document.getElementById('ratesList').innerHTML = standardRates.map(renderRateItem).join('');
   renderCoinRatesList();
+  updateConvertButton();
+}
+
+// Convert button visibility depends on both whether any Premium rates
+// exist AND the live remaining-time eligibility check (convertEligible),
+// so this needs re-running on every session update, not just once when
+// rates first load (buildRatesUI already calls it once for that reason).
+function updateConvertButton() {
+  const hasPremium = premiumRates.length > 0;
+  const eligible = hasPremium && convertEligible();
+  ['convertBtn', 'convertBtnConnected'].forEach(id => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.style.display = hasPremium ? 'block' : 'none';
+    btn.disabled = !eligible;
+  });
 }
 
 function setRatesTab(tab) {
@@ -1059,11 +1093,27 @@ function setRatesTab(tab) {
 }
 
 // Insert Coin modal's own list matches whichever button the customer
-// tapped to get here (insertingPremium) - shows exactly the rates
-// relevant to what they're about to do, not the full mixed list.
+// tapped to get here (insertingMode) - shows exactly the rates relevant
+// to what they're about to do, not the full mixed list. Convert matches
+// against Premium rates too (same coin values), same list as Boost.
 function renderCoinRatesList() {
-  const list = insertingPremium ? premiumRates : standardRates;
+  const list = insertingMode !== 'regular' ? premiumRates : standardRates;
   document.getElementById('coinRatesList').innerHTML = list.map(renderRateItem).join('');
+}
+
+// Convert only makes sense with enough remaining time that switching
+// speed is worth it - converting when there's almost nothing left would
+// mean losing time rather than gaining anything (see coinCreditService.js's
+// convertCoinValue - minutes gets SET to the matched rate's own value, not
+// added). Gated on the operator's own configured Premium rates rather than
+// a separate setting: needs at least as much time remaining as the
+// cheapest Premium rate grants, otherwise there's no rate that could
+// possibly leave them with more time than they already have.
+function convertEligible() {
+  if (!currentSession || !(currentSession.minutes_remaining > 0)) return false;
+  if (!premiumRates.length) return false;
+  const minPremiumMinutes = Math.min(...premiumRates.map(r => r.minutes));
+  return currentSession.minutes_remaining >= minPremiumMinutes;
 }
 
 // ===== MODALS =====

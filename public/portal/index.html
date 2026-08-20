@@ -90,19 +90,22 @@
     </div>
 
     <!-- EXPIRY WARNING -->
-    <div class="expiry-warning" id="expiryWarning" onclick="handleInsertCoin()" style="cursor:pointer;">
+    <div class="expiry-warning" id="expiryWarning" onclick="handleInsertCoin('regular')" style="cursor:pointer;">
       <i class="fas fa-exclamation-triangle"></i>&nbsp; Time almost up, tap to add more
     </div>
 
     <!-- DISCONNECTED -->
     <div id="sectionDisconnected">
       <div id="welcomeMsg" style="text-align:center;padding:10px 0 14px;font-size:15px;font-weight:600;display:none;"></div>
-      <button class="btn btn-insert" id="insertBtn" onclick="handleInsertCoin(false)">
+      <button class="btn btn-insert" id="insertBtn" onclick="handleInsertCoin('regular')">
         <span class="coin-spin">🪙</span>&nbsp; INSERT COIN
       </button>
-      <button class="btn btn-premium" id="premiumBtn" onclick="handleInsertCoin(true)" style="display:none;">
+      <button class="btn btn-premium" id="premiumBtn" onclick="handleInsertCoin('premium')" style="display:none;">
         <i class="fas fa-bolt"></i>&nbsp; PREMIUM (HIGH SPEED)
       </button>
+      <!-- Convert only applies to an EXISTING session's remaining time
+           (see convertCoinValue) - nothing to convert before one exists,
+           so no Convert button here, only in sectionConnected below. -->
       <button class="btn btn-free" id="freeClaimBtn" onclick="claimFreeMinutes()" style="display:none;">
         <i class="fas fa-gift"></i>&nbsp; CLAIM FREE 5 MINS
       </button>
@@ -131,11 +134,14 @@
     <!-- CONNECTED -->
     <div id="sectionConnected" style="display:none">
       <div id="portalHostnameHint" style="display:none;text-align:center;font-size:13px;color:var(--text-muted, #888);margin-bottom:12px;"></div>
-      <button class="btn btn-insert" id="insertBtnConnected" onclick="handleInsertCoin(false)">
+      <button class="btn btn-insert" id="insertBtnConnected" onclick="handleInsertCoin('regular')">
         <span class="coin-spin">🪙</span>&nbsp; INSERT COIN TO ADD TIME
       </button>
-      <button class="btn btn-premium" id="premiumBtnConnected" onclick="handleInsertCoin(true)" style="display:none;">
-        <i class="fas fa-bolt"></i>&nbsp; PREMIUM (HIGH SPEED)
+      <button class="btn btn-premium" id="premiumBtnConnected" onclick="handleInsertCoin('premium')" style="display:none;">
+        <i class="fas fa-bolt"></i>&nbsp; BOOST (TEMPORARY HIGH SPEED)
+      </button>
+      <button class="btn btn-premium" id="convertBtnConnected" onclick="handleInsertCoin('convert')" style="display:none;" title="Permanently switch your speed to Premium for the rest of your session">
+        <i class="fas fa-arrow-up-right-dots"></i>&nbsp; CONVERT TO PREMIUM
       </button>
       <div class="btn-grid">
         <button class="btn btn-pause" id="pauseBtn" onclick="pauseSession()">

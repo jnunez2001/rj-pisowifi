@@ -175,4 +175,91 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
   return result;
 }
 
-module.exports = { creditCoinValue, NoMatchingRateError };
+// "Convert" mode (the portal's CONVERT button, distinct from PREMIUM/
+// "Boost" above): instead of stacking a temporary speed override on top
+// of existing time, this SETS the session's minutes to the matched
+// Premium rate's own minutes and makes that speed permanent for the rest
+// of the session, no reverting to Standard later. Only matches Premium
+// rates (never falls back to Regular ones) since converting to a Regular
+// rate wouldn't mean anything. Requires an existing session; there's
+// nothing to convert otherwise (checked here, not left to
+// convertToPremiumSession() to fail on, so this gives a real error
+// instead of a generic 500).
+async function convertCoinValue(mac, coinValue, ip = '', kioskId = null) {
+  const { getRates } = require('./voucherService');
+  const { getSessionByMac, convertToPremiumSession } = require('./sessionService');
+
+  if (!getSessionByMac(mac)) {
+    throw new Error('No active session to convert. Insert coins normally first.');
+  }
+
+  const premiumRates = getRates()
+    .filter((r) => !!r.download_mbps)
+    .sort((a, b) => b.coin_value - a.coin_value);
+
+  let remaining = coinValue;
+  const matchedRates = [];
+  for (const rate of premiumRates) {
+    if (remaining <= 0) break;
+    if (rate.coin_value <= remaining) {
+      const times = Math.floor(remaining / rate.coin_value);
+      matchedRates.push({ rate, times });
+      remaining -= rate.coin_value * times;
+    }
+  }
+
+  if (matchedRates.length === 0 || remaining === coinValue) {
+    throw new NoMatchingRateError(coinValue);
+  }
+
+  let totalMinutes = 0;
+  let totalExpirationMinutes = 0;
+  let bandwidthOverride = null;
+  let dataLimitMb = null;
+  for (const { rate, times } of matchedRates) {
+    totalMinutes += rate.minutes * times;
+    totalExpirationMinutes += rate.expiration_minutes * times;
+    if (!bandwidthOverride || rate.download_mbps > bandwidthOverride.download_mbps) {
+      bandwidthOverride = { download_mbps: rate.download_mbps, upload_mbps: rate.upload_mbps };
+    }
+    if (!dataLimitMb && rate.data_limit_mb) dataLimitMb = rate.data_limit_mb;
+  }
+
+  const matchLog = matchedRates
+    .map(({ rate, times }) => `₱${rate.coin_value}x${times}`)
+    .join(' + ');
+
+  const session = await convertToPremiumSession(mac, totalMinutes, totalExpirationMinutes, bandwidthOverride, dataLimitMb);
+  if (!session) {
+    throw new Error('No active session to convert. Insert coins normally first.');
+  }
+
+  db.prepare(`
+    INSERT INTO transactions
+    (voucher_code, coin_value, minutes_added, type, kiosk_id, mac_address)
+    VALUES (?, ?, ?, 'coin', ?, ?)
+  `).run(session.voucher_code, coinValue, totalMinutes, kioskId, mac);
+  logFinancialEvent({ voucher_code: session.voucher_code, coin_value: coinValue, minutes_added: totalMinutes, type: 'coin', mac });
+  logAlertEvent('info', 'coin_inserted', `₱${coinValue} converted to Premium`, `MAC ${mac} - ${matchLog}`);
+
+  console.log(`⚡ Converted to Premium: ${session.voucher_code} now ${totalMinutes} mins at ${bandwidthOverride.download_mbps}Mbps permanently`);
+
+  return {
+    success: true,
+    action: 'converted_to_premium',
+    voucher_code: session.voucher_code,
+    minutes_added: totalMinutes,
+    minutes_remaining: session.minutes_remaining,
+    expires_at: session.expires_at,
+    hard_expires_at: session.hard_expires_at,
+    matched_as: matchLog,
+    premium: true,
+    premium_download_mbps: null,
+    premium_upload_mbps: null,
+    premium_expires_at: null,
+    download_mbps: session.download_mbps,
+    upload_mbps: session.upload_mbps
+  };
+}
+
+module.exports = { creditCoinValue, convertCoinValue, NoMatchingRateError };
