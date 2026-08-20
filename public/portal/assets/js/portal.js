@@ -565,6 +565,27 @@ async function handleInsertCoin(isPremium) {
     : '<i class="fas fa-coins"></i>&nbsp; INSERT COIN';
   renderCoinRatesList();
 
+  // Premium stays available even with a Regular session already running
+  // (it's a real, deliberate upsell - the server already supports buying
+  // it mid-session, see coinCreditService.js's premium/regular stacking
+  // comment), but a customer who already has time running and hasn't
+  // dealt with Premium before could easily assume it REPLACES their
+  // current session rather than adding a temporary speed boost on top of
+  // it. Only show this the first time they hit Premium while a Regular
+  // session is active, not on every single coin.
+  const stackNotice = document.getElementById('coinModalStackNotice');
+  const hasRegularSessionRunning = currentSession && currentSession.minutes_remaining > 0;
+  const alreadyHasPremium = currentSession && currentSession.premium_expires_at &&
+    new Date(currentSession.premium_expires_at).getTime() > Date.now();
+  if (stackNotice) {
+    if (insertingPremium && hasRegularSessionRunning && !alreadyHasPremium) {
+      stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This adds temporary high-speed time on top of your current session, it does not replace your regular minutes.';
+      stackNotice.style.display = 'block';
+    } else {
+      stackNotice.style.display = 'none';
+    }
+  }
+
   modal.classList.add('show');
   startCoinTimer();
   startPendingPoll();
