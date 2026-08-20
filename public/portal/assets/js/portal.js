@@ -854,7 +854,6 @@ function updateUI(session) {
     voucherBox.style.display = 'none';
     expiryDisplay.textContent = '--';
     sessionDisplay.textContent = '--';
-    document.getElementById('creditsDisplay').textContent = '₱0';
     expiryWarning.style.display = 'none';
     stopSpeedIndicatorTicker();
     document.getElementById('speedIndicator').style.display = 'none';
