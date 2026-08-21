@@ -335,6 +335,25 @@ if [ -n "$WAN_VLAN_ID" ] && [ "$WAN_VLAN_BASE" = "$WAN_IF" ]; then
     fi
 fi
 
+# Bug found live: an untagged WAN (no WAN VLAN configured - the common
+# case for Controller Mode with a separate LAN VLAN, see the single-NIC
+# WAN_IF fix above) had NO bring-up of its own anywhere in this script.
+# The tagged branch above only fires when WAN_VLAN_ID is set;
+# disable_os_network_management() earlier only tells the OS to leave the
+# interface alone, it never brings the link up or requests an address
+# itself. Left this way, the interface's IP was pure accident - whatever
+# the OS happened to assign before OS management got disabled, or
+# whatever a manual `dhclient` intervention left behind - never something
+# this script durably restored on its own, on any given boot. That's the
+# real root cause behind this box's own admin-reachable address going
+# missing repeatedly, not any one specific incident.
+if [ "$WAN_VIF" = "$WAN_IF" ] && [ -n "$WAN_IF" ] && [ "$NETWORK_MODE" = "mikrotik" ]; then
+    ip link set $WAN_IF up
+    pkill -f "dhclient.*$WAN_IF" 2>/dev/null || true
+    dhclient -nw $WAN_IF >> $LOG 2>&1 || true
+    echo "WAN (untagged, $WAN_IF): requesting DHCP" >> $LOG
+fi
+
 # Bug: a LAN-mode VLAN (admin panel > Network > VLAN Management) only ever
 # got created when network_mode=standalone, as part of that mode's own full
 # network stack setup below. In mikrotik/router mode, the row sat in the
