@@ -135,6 +135,26 @@ if [ -n "$WAN_VLAN_BASE" ] && [ -z "$WAN_IF" ]; then
     WAN_IF="$WAN_VLAN_BASE"
 fi
 
+# Bug found live: a real feedback loop, root cause of "WAN and LAN keep
+# swapping every run" on a single-NIC Controller Mode box with a LAN VLAN
+# configured. The LAN VLAN static-IP branch further down sets the
+# system's default route THROUGH that LAN VLAN interface (its only path
+# to the MikroTik/internet - see "ip route replace default via
+# $LAN_STATIC_GATEWAY dev $LAN_VIF" below). The auto-detect fallback
+# right after this used to just ask "whichever interface currently holds
+# the default route" with no other signal - which, after the FIRST run
+# correctly set that route on the LAN VLAN interface, made every
+# SUBSEQUENT run see that same route and conclude the LAN VLAN interface
+# must actually be WAN, flipping their identities back and forth forever.
+# When a LAN VLAN is configured on a single-NIC Controller Mode box, its
+# base physical interface unambiguously IS the WAN identity here (the
+# LAN VLAN is a tagged sub-interface riding on top of it, never the WAN
+# interface itself) - settle it directly instead of trusting a live
+# routing table state this very script is what keeps mutating.
+if [ -z "$WAN_IF" ] && [ "$NETWORK_MODE" = "mikrotik" ] && [ -n "$LAN_VLAN_BASE" ]; then
+    WAN_IF="$LAN_VLAN_BASE"
+fi
+
 # Auto-detect fallback
 if [ -z "$WAN_IF" ]; then
     WAN_IF=$(ip route show default 2>/dev/null | awk '/default/ {print $5}' | head -1)
