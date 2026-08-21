@@ -730,15 +730,43 @@ body {
 #speedIndicatorLabel {
   font-size: 12px;
   font-weight: 700;
-  color: #b8860b;
+  color: var(--tier-c3, #1f9e46);
   margin-bottom: 4px;
+  transition: color 0.6s ease;
+}
+
+/* Urgency color scale, driven by a tier class portal.js toggles on
+   #speedIndicator (the outer container, so both the label above and the
+   fill/track below can read the same variables) based on % of the Boost
+   window remaining (see renderSpeedIndicatorFrame) - green while there's
+   plenty of time left, yellow in the middle stretch, red once it's about
+   yellow in the middle stretch, red once it's about to run out. Every
+   other rule below (shimmer, glow, spark colors) reads these variables
+   instead of a hardcoded color, so the whole effect re-themes together. */
+.speed-tier-green {
+  --tier-c1: #6fe08a;
+  --tier-c2: #34c759;
+  --tier-c3: #1f9e46;
+  --tier-glow: #7cf29a;
+}
+.speed-tier-yellow {
+  --tier-c1: #ffe066;
+  --tier-c2: #f4c430;
+  --tier-c3: #d49a00;
+  --tier-glow: #ffe680;
+}
+.speed-tier-red {
+  --tier-c1: #ff8a80;
+  --tier-c2: #ff5252;
+  --tier-c3: #d32f2f;
+  --tier-glow: #ff9e95;
 }
 
 #speedIndicatorTrack {
   width: 100%;
   height: 10px;
   border-radius: 6px;
-  background: #f5e6b8;
+  background: #eef1ef;
   box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.15);
   /* visible, not hidden: the spark particles and comet tail at the fill's
      leading edge (below) need to escape the track's box to read as
@@ -750,12 +778,12 @@ body {
 #speedIndicatorFill {
   height: 100%;
   border-radius: 6px;
-  background: linear-gradient(90deg, #f4c430, #d4af37 40%, #b8860b);
+  background: linear-gradient(90deg, var(--tier-c1, #6fe08a), var(--tier-c2, #34c759) 40%, var(--tier-c3, #1f9e46));
   background-size: 200% 100%;
   width: 100%;
-  transition: width 1s linear;
+  transition: width 1s linear, background 0.6s ease;
   position: relative;
-  box-shadow: 0 0 8px 1px rgba(212, 175, 55, 0.7);
+  box-shadow: 0 0 8px 1px color-mix(in srgb, var(--tier-c2, #34c759) 70%, transparent);
   /* Shimmer sweeping across the whole fill, on top of the tip's own
      stronger pulse below - the earlier version only animated the tip
      itself, the rest of the bar sat completely flat/dead in between. */
@@ -780,12 +808,12 @@ body {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: radial-gradient(circle, #fffdf3 0%, #fff1b8 35%, #ffd54f 70%, transparent 100%);
+  background: radial-gradient(circle, #ffffff 0%, var(--tier-glow, #7cf29a) 35%, var(--tier-c2, #34c759) 70%, transparent 100%);
   transform: translate(50%, -50%);
   box-shadow:
-    0 0 6px 2px #fff6d8,
-    0 0 14px 5px #ffd54f,
-    0 0 26px 10px rgba(255, 193, 7, 0.55);
+    0 0 6px 2px color-mix(in srgb, var(--tier-glow, #7cf29a) 80%, white),
+    0 0 14px 5px var(--tier-glow, #7cf29a),
+    0 0 26px 10px color-mix(in srgb, var(--tier-c2, #34c759) 55%, transparent);
   animation: speedTipPulse 0.9s ease-in-out infinite;
 }
 
@@ -800,7 +828,7 @@ body {
   width: 46px;
   max-width: 70%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 245, 200, 0.85));
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--tier-glow, #7cf29a) 85%, transparent));
   pointer-events: none;
 }
 

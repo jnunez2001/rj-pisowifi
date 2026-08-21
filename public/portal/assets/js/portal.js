@@ -792,6 +792,16 @@ function renderSpeedIndicatorFrame(expiresAtMs, startedAtMs) {
   const totalMs = startedAtMs && expiresAtMs > startedAtMs ? expiresAtMs - startedAtMs : null;
   const pct = totalMs ? Math.max(0, Math.min(100, (msLeft / totalMs) * 100)) : 100;
   fill.style.width = pct + '%';
+
+  // Urgency color scale (portal.css's .speed-tier-* classes) - green while
+  // there's plenty of time left, yellow in the middle stretch, red once
+  // it's about to run out. Applied on the outer container so both the
+  // label text and the fill/glow/sparks all pick up the same variables.
+  el.classList.remove('speed-tier-green', 'speed-tier-yellow', 'speed-tier-red');
+  if (pct > 50) el.classList.add('speed-tier-green');
+  else if (pct > 20) el.classList.add('speed-tier-yellow');
+  else el.classList.add('speed-tier-red');
+
   el.style.display = 'block';
 }
 
