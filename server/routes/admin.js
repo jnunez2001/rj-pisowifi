@@ -5411,10 +5411,16 @@ router.get('/router/local-interfaces', adminAuth, (req, res) => {
 
 // GET /api/admin/router/provision/preview, shows exactly what "Configure"
 // would run, without touching the router (ROUTER_MODE_PLAN.md §4.6).
+// ?ports=ether4,ether5 scopes it to just the lane(s) touching those ports
+// (see mikrotikProvisioner.js's buildPlan scopePortNames) instead of the
+// whole router - what the per-port "Apply" action in the Routers page uses.
 router.get('/router/provision/preview', adminAuth, async (req, res) => {
   try {
     const provisioner = require('../services/mikrotikProvisioner');
-    const preview = await provisioner.preview();
+    const scopePortNames = req.query.ports
+      ? String(req.query.ports).split(',').map((p) => p.trim()).filter(Boolean)
+      : undefined;
+    const preview = await provisioner.preview(scopePortNames);
     return res.json({ success: true, ...preview });
   } catch (err) {
     console.error('Provision preview error:', err.message);
@@ -5425,10 +5431,18 @@ router.get('/router/provision/preview', adminAuth, async (req, res) => {
 // POST /api/admin/router/provision/apply, the actual "Configure" action.
 // Always backs up the router's current config first, stops immediately on
 // the first failed step rather than pushing a half-applied config further.
+// Body { ports: ['ether4'] } scopes this to just the lane(s) touching
+// those physical ports - only their bridge/VLAN/DHCP/hotspot steps run,
+// router-wide steps (WAN NAT, fasttrack, API user, etc.) are skipped, so
+// editing one port's lane assignment doesn't have to re-touch every other
+// port on the router to take effect.
 router.post('/router/provision/apply', adminAuth, async (req, res) => {
   try {
     const provisioner = require('../services/mikrotikProvisioner');
-    const result = await provisioner.apply();
+    const scopePortNames = Array.isArray(req.body?.ports) && req.body.ports.length > 0
+      ? req.body.ports.map((p) => String(p).trim()).filter(Boolean)
+      : undefined;
+    const result = await provisioner.apply(scopePortNames);
     return res.json({ success: true, ...result });
   } catch (err) {
     console.error('Provision apply error:', err.message);

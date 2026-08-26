@@ -173,7 +173,18 @@ function existenceCheckFor(words) {
 // cakeAvailable: true/false if actually confirmed live (detectCakeAvailable()
 // below), null if unknown - see the bug note near useCake for why this
 // can't just be inferred from routerOsMajor alone.
-function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
+// scopePortNames: optional array of physical port names (e.g. ['ether4']).
+// When given, only the lane(s) that own one of those ports get their
+// bridge/VLAN/DHCP/hotspot steps built - every other lane is left alone.
+// This is what makes "I just changed ether4's lane assignment" apply as a
+// small, fast, single-lane push instead of the previous behavior (walking
+// and re-touching every lane on the router, one unrelated failure away
+// from aborting the whole run). The one-time/router-wide steps (WAN NAT,
+// disabling the factory fasttrack rule, game-priority marking, the shared
+// PCQ queue-type definitions every lane's cap references, and the
+// dedicated API user) are skipped in scoped mode too - they aren't
+// per-port concerns, and a full unscoped Configure already covers them.
+function buildPlan(routerOsMajor, ownPortName, cakeAvailable, scopePortNames) {
   const allLanes = db.prepare('SELECT * FROM router_ports WHERE role != ? ORDER BY id').all('unused');
   const wanLanes = allLanes.filter((l) => l.role === 'wan');
   const laneCandidates = allLanes.filter((l) => l.role === 'gated' || l.role === 'open');
@@ -200,17 +211,29 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
   // ever touching the one this app itself depends on - and that port's own
   // brief disconnection happens right at the very end, with nothing left
   // afterward that could be aborted by losing it early.
+  // A single physical port can anchor more than one lane at once (its own
+  // untagged lane plus a VLAN-tagged lane sharing the same wire, e.g.
+  // ether2 carrying both a plain lane and a VLAN 13 lane) - every check
+  // below needs to catch a lane via any port it touches, not just its own.
+  const laneOwnsPort = (l, portName) => l.port_name === portName
+    || (membersByPrimaryId[l.id] || []).some((m) => m.port_name === portName);
+
   if (ownPortName) {
-    // A single physical port can anchor more than one lane at once (its
-    // own untagged lane plus a VLAN-tagged lane sharing the same wire, e.g.
-    // ether2 carrying both a plain lane and a VLAN 13 lane) - every lane
-    // touching that port needs to move, not just the first one found.
-    const ownsPort = (l) => l.port_name === ownPortName
-      || (membersByPrimaryId[l.id] || []).some((m) => m.port_name === ownPortName);
+    const ownsPort = (l) => laneOwnsPort(l, ownPortName);
     const notOwning = primaryLanes.filter((l) => !ownsPort(l));
     const owning = primaryLanes.filter(ownsPort);
     primaryLanes.length = 0;
     primaryLanes.push(...notOwning, ...owning);
+  }
+
+  // Scoped run: drop every lane that doesn't touch one of the requested
+  // ports, so only that lane's steps get built at all.
+  const scopedPortSet = Array.isArray(scopePortNames) && scopePortNames.length > 0
+    ? new Set(scopePortNames) : null;
+  if (scopedPortSet) {
+    const inScope = primaryLanes.filter((l) => [...scopedPortSet].some((p) => laneOwnsPort(l, p)));
+    primaryLanes.length = 0;
+    primaryLanes.push(...inScope);
   }
 
   const steps = [];
@@ -253,49 +276,54 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
     warnings.push('Could not confirm live whether this router actually has the CAKE queue type available, so this preview assumes PCQ (works on every router) for the smart queue. Configure will check live and use CAKE automatically instead if it\'s genuinely available.');
   }
 
-  // WAN: NAT masquerade out each WAN-role port (WAN lanes are always
-  // untagged - VLAN tagging a WAN uplink isn't something this build supports).
-  for (const w of wanLanes) {
+  // Router-wide steps (WAN NAT, fasttrack, game-priority marking) aren't
+  // per-port concerns - a scoped single-lane run skips them entirely and
+  // relies on a prior full Configure having already put them in place.
+  if (!scopedPortSet) {
+    // WAN: NAT masquerade out each WAN-role port (WAN lanes are always
+    // untagged - VLAN tagging a WAN uplink isn't something this build supports).
+    for (const w of wanLanes) {
+      steps.push({
+        description: `Enable internet sharing (NAT) out ${w.port_name} (WAN)`,
+        words: ['/ip/firewall/nat/add', '=chain=srcnat', `=out-interface=${w.port_name}`, '=action=masquerade', `=comment=rj-piso-wan-${w.port_name}`],
+      });
+    }
+
+    // Bug found on real hardware: a factory-default router's own "defconf:
+    // fasttrack" firewall filter rule (chain=forward,
+    // action=fasttrack-connection) sends any established connection through
+    // an accelerated kernel path that completely bypasses Simple Queues for
+    // the rest of that connection's life - only the initial connection-setup
+    // packets ever hit the queue tree, so a per-client bandwidth cap looked
+    // like it existed (correct max-limit, correctly ordered) but never
+    // actually held under real load, since almost all of a customer's real
+    // traffic silently skipped it. This is the single biggest reason a smart
+    // queue or per-client cap can appear completely inert despite being
+    // configured correctly. Disabling it is required for any bandwidth
+    // shaping in this build to mean anything at all.
+    steps.push({ type: 'disable-fasttrack', description: 'Disable the router\'s factory-default fasttrack rule (it bypasses all bandwidth shaping)' });
+
+    // Game-traffic prioritization (ROUTER_MODE_PLAN.md-style QoS): marks UDP
+    // traffic - what most real-time games use for gameplay data - so each
+    // client's bandwidth queue (mikrotikService.js's setClientBandwidth) can
+    // give it priority over that same client's own/other bulk traffic
+    // (downloads, video) without raising anyone's overall cap. One rule,
+    // applied globally, not per-lane - marking is harmless on lanes that
+    // never end up using it (Home/PC-Rental lanes with no per-client queue
+    // at all just never reference this mark).
+    //
+    // Excludes port 443: modern YouTube/Chrome/Google traffic increasingly
+    // uses QUIC, which - unlike classic HTTPS - runs over UDP, not TCP.
+    // Without this exclusion, a plain "all UDP" rule would also mark that
+    // bulk video traffic as game-priority, defeating the entire point of
+    // separating real-time gameplay data from bulk streaming/downloads.
+    // "port" (not "dst-port") matches either side of the connection, so this
+    // excludes QUIC traffic in both directions through chain=forward.
     steps.push({
-      description: `Enable internet sharing (NAT) out ${w.port_name} (WAN)`,
-      words: ['/ip/firewall/nat/add', '=chain=srcnat', `=out-interface=${w.port_name}`, '=action=masquerade', `=comment=rj-piso-wan-${w.port_name}`],
+      description: 'Mark UDP traffic for game-priority queueing (excluding QUIC/port 443)',
+      words: ['/ip/firewall/mangle/add', '=chain=forward', '=protocol=udp', '=port=!443', '=action=mark-packet', '=new-packet-mark=rj-game-priority', '=passthrough=no', '=comment=rj-piso-game-priority'],
     });
   }
-
-  // Bug found on real hardware: a factory-default router's own "defconf:
-  // fasttrack" firewall filter rule (chain=forward,
-  // action=fasttrack-connection) sends any established connection through
-  // an accelerated kernel path that completely bypasses Simple Queues for
-  // the rest of that connection's life - only the initial connection-setup
-  // packets ever hit the queue tree, so a per-client bandwidth cap looked
-  // like it existed (correct max-limit, correctly ordered) but never
-  // actually held under real load, since almost all of a customer's real
-  // traffic silently skipped it. This is the single biggest reason a smart
-  // queue or per-client cap can appear completely inert despite being
-  // configured correctly. Disabling it is required for any bandwidth
-  // shaping in this build to mean anything at all.
-  steps.push({ type: 'disable-fasttrack', description: 'Disable the router\'s factory-default fasttrack rule (it bypasses all bandwidth shaping)' });
-
-  // Game-traffic prioritization (ROUTER_MODE_PLAN.md-style QoS): marks UDP
-  // traffic - what most real-time games use for gameplay data - so each
-  // client's bandwidth queue (mikrotikService.js's setClientBandwidth) can
-  // give it priority over that same client's own/other bulk traffic
-  // (downloads, video) without raising anyone's overall cap. One rule,
-  // applied globally, not per-lane - marking is harmless on lanes that
-  // never end up using it (Home/PC-Rental lanes with no per-client queue
-  // at all just never reference this mark).
-  //
-  // Excludes port 443: modern YouTube/Chrome/Google traffic increasingly
-  // uses QUIC, which - unlike classic HTTPS - runs over UDP, not TCP.
-  // Without this exclusion, a plain "all UDP" rule would also mark that
-  // bulk video traffic as game-priority, defeating the entire point of
-  // separating real-time gameplay data from bulk streaming/downloads.
-  // "port" (not "dst-port") matches either side of the connection, so this
-  // excludes QUIC traffic in both directions through chain=forward.
-  steps.push({
-    description: 'Mark UDP traffic for game-priority queueing (excluding QUIC/port 443)',
-    words: ['/ip/firewall/mangle/add', '=chain=forward', '=protocol=udp', '=port=!443', '=action=mark-packet', '=new-packet-mark=rj-game-priority', '=passthrough=no', '=comment=rj-piso-game-priority'],
-  });
 
   // Custom portal hostname (e.g. "rjcyberzone.wifi") - gives already-paid
   // customers on a gated lane an easy, memorable address to return to for
@@ -308,7 +336,7 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
   // everything else upstream so normal internet browsing is unaffected -
   // that's a one-time, router-wide setting, not per-lane.
   const portalHostname = (db.prepare("SELECT value FROM settings WHERE key = 'portal_hostname'").get()?.value || '').trim();
-  if (portalHostname) {
+  if (portalHostname && !scopedPortSet) {
     steps.push({
       description: `Enable the router's own DNS server for LAN clients (so "${portalHostname}" can resolve)`,
       words: ['/ip/dns/set', '=allow-remote-requests=yes', '=servers=8.8.8.8,1.1.1.1'],
@@ -491,12 +519,17 @@ function buildPlan(routerOsMajor, ownPortName, cakeAvailable) {
     }
   });
 
-  // Dedicated least-privilege API user (SECURITY_PLAN.md Tier 1) - the
-  // app switches to using this instead of the admin login that was used
-  // to run the Configure step itself.
-  const apiPassword = generatedPassword();
-  steps.push({ description: 'Create a limited-permission group for this app to use going forward', words: ['/user/group/add', `=name=${API_USER_GROUP}`, '=policy=read,write,api,!local,!telnet,!ssh,!ftp,!reboot,!policy,!winbox,!password,!web,!sniff,!sensitive,!romon'] });
-  steps.push({ description: 'Create a dedicated API user in that group (not the router\'s real admin login)', words: ['/user/add', `=name=${API_USER_NAME}`, `=password=${apiPassword}`, `=group=${API_USER_GROUP}`] });
+  // Dedicated least-privilege API user (SECURITY_PLAN.md Tier 1) - the app
+  // switches to using this instead of the admin login that was used to run
+  // the Configure step itself. Router-wide, one-time - skipped in scoped
+  // mode (apply() only rotates the stored credential when apiPassword is
+  // actually set, so a scoped run never overwrites it with nothing).
+  let apiPassword = null;
+  if (!scopedPortSet) {
+    apiPassword = generatedPassword();
+    steps.push({ description: 'Create a limited-permission group for this app to use going forward', words: ['/user/group/add', `=name=${API_USER_GROUP}`, '=policy=read,write,api,!local,!telnet,!ssh,!ftp,!reboot,!policy,!winbox,!password,!web,!sniff,!sensitive,!romon'] });
+    steps.push({ description: 'Create a dedicated API user in that group (not the router\'s real admin login)', words: ['/user/add', `=name=${API_USER_NAME}`, `=password=${apiPassword}`, `=group=${API_USER_GROUP}`] });
+  }
 
   return { steps, warnings, apiPassword };
 }
@@ -546,7 +579,7 @@ async function detectCakeAvailable(client) {
   }
 }
 
-async function preview() {
+async function preview(scopePortNames) {
   const routerOsMajor = await detectRouterOsMajor();
   let ownPortName = null;
   let cakeAvailable = null;
@@ -562,11 +595,11 @@ async function preview() {
     // Best-effort, same as detectRouterOsMajor() above - Preview should
     // still work even if this specific lookup fails.
   }
-  const { steps, warnings } = buildPlan(routerOsMajor, ownPortName, cakeAvailable);
+  const { steps, warnings } = buildPlan(routerOsMajor, ownPortName, cakeAvailable, scopePortNames);
   return { steps: steps.map((s) => s.description), warnings };
 }
 
-async function apply() {
+async function apply(scopePortNames) {
   const config = getMikrotikConfig();
   if (!config.ip) throw new Error('MikroTik IP not configured');
 
@@ -615,7 +648,7 @@ async function apply() {
       log.push({ step: `This app's own connection is arriving via ${ownPortName} - that lane will be configured last`, ok: true });
     }
 
-    ({ steps, warnings, apiPassword } = buildPlan(routerOsMajor, ownPortName, cakeAvailable));
+    ({ steps, warnings, apiPassword } = buildPlan(routerOsMajor, ownPortName, cakeAvailable, scopePortNames));
 
     // Port-freeing (a brand-new router isn't actually blank - MikroTik's
     // factory-default config usually already bridges most LAN ports
@@ -690,11 +723,15 @@ async function apply() {
 
   // Switch this app's own stored credentials to the new dedicated API user
   // now that it exists, so ongoing operation never uses the router's real
-  // admin login again.
-  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-  upsert.run('mikrotik_user', API_USER_NAME);
-  upsert.run('mikrotik_pass', encryptSecret(apiPassword));
-  log.push({ step: 'Switched this app to the new dedicated API user', ok: true });
+  // admin login again. Scoped runs never create that user (buildPlan
+  // returns apiPassword: null for them), so this has to skip - blindly
+  // running it would overwrite the real stored credential with nothing.
+  if (apiPassword) {
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    upsert.run('mikrotik_user', API_USER_NAME);
+    upsert.run('mikrotik_pass', encryptSecret(apiPassword));
+    log.push({ step: 'Switched this app to the new dedicated API user', ok: true });
+  }
 
   return { log, warnings, backedUp };
 }

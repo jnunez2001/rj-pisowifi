@@ -467,9 +467,14 @@ function renderPortCard(port) {
           <span style="font-size:12px;color:var(--text-muted);margin-left:8px;">${port.mac}</span>
           ${runningBadge}
         </div>
-        <button type="button" class="btn btn-sm btn-secondary" onclick="addVlanLane('${port.name}')">
-          <i class="fas fa-plus"></i> Add VLAN lane
-        </button>
+        <div style="display:flex;gap:6px;">
+          <button type="button" class="btn btn-sm btn-primary" onclick="applyPortProvisioning('${port.name}')" title="Push only this port's lane setup to the router">
+            <i class="fas fa-bolt"></i> Apply this port
+          </button>
+          <button type="button" class="btn btn-sm btn-secondary" onclick="addVlanLane('${port.name}')">
+            <i class="fas fa-plus"></i> Add VLAN lane
+          </button>
+        </div>
       </div>`;
   html += renderLaneBlock(untaggedIndex);
   for (const i of vlanIndices) html += renderLaneBlock(i);
@@ -753,6 +758,52 @@ async function applyProvisioning() {
     }
   } catch(e) {
     el.innerHTML = '<div style="color:var(--accent-red);">Server error: ' + escapeHtml(e.message || 'unknown error') + '</div>';
+  }
+}
+
+// Scoped version of the "Configure" button above - only rebuilds the
+// lane(s) that touch this one physical port (see mikrotikProvisioner.js's
+// buildPlan scopePortNames), instead of walking the entire router. This is
+// what a single "Apply" click on one port card in renderPortCard() calls,
+// so changing one port's lane assignment doesn't have to re-touch (and
+// risk) every other port to take effect.
+async function applyPortProvisioning(portName) {
+  if (!confirm(`Push this port's lane setup to the router now (${portName} only - the rest of the router is left untouched)?`)) return;
+  showToast(`Applying ${portName}...`);
+  try {
+    // Persist whatever's currently in the form first - the apply endpoint
+    // reads lane assignments straight from the database, so without this
+    // an edit made but not yet saved would get silently ignored and the
+    // router would end up pushed with the OLD role/lane, not what's shown.
+    syncLanesFromDom();
+    const ns = laneNs();
+    const lanes = ns.lanes.map((l) => ({
+      port_name: l.port_name,
+      vlan_id: l.vlan_id || 0,
+      role: l.role,
+      lane_name: l.lane_name || '',
+      speed_mbps: l.speed_mbps || 0,
+      burst_mbps: l.burst_mbps || 0,
+      isolate_clients: l.isolate_clients !== false,
+      bridge_with_port: l.bridge_with_port || '',
+      bridge_with_vlan: l.bridge_with_vlan || 0,
+    }));
+    const saveResult = await apiCall('POST', ns.apiPath, { lanes });
+    if (!saveResult.success) {
+      showToast(saveResult.message || 'Failed to save port settings before applying.', 'error');
+      return;
+    }
+
+    const data = await apiCall('POST', '/api/admin/router/provision/apply', { ports: [portName] });
+    if (data.success) {
+      showToast(`${portName} applied.`);
+      await loadNetworkModeSettings();
+      await loadRouterStatus();
+    } else {
+      showToast(data.message || `Applying ${portName} failed.`, 'error');
+    }
+  } catch (e) {
+    showToast('Server error: ' + (e.message || 'unknown error'), 'error');
   }
 }
 
