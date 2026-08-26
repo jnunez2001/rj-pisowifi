@@ -373,6 +373,17 @@
 <!-- DNS FILTERING (blocking service, both modes, opt-in) -->
 <div class="zf-card">
   <div class="zf-card-title">DNS Filtering</div>
+
+  <!-- Controller Mode (MikroTik): dnsmasq isn't running (the router owns
+       DHCP/DNS), so instead of a local dnsmasq redirect, enabling this
+       points the router's own DNS servers at this box (setDnsFilterServers()
+       in mikrotikService.js), which setup-network.sh's mikrotik-mode branch
+       redirects to the filtering service. Needs "Server's Network
+       Connection" set correctly under Routers > MikroTik Connection. -->
+  <div id="dnsFilterControllerNote" style="display:none;padding:0 16px 8px;font-size:12px;color:var(--text-muted);">
+    <i class="fas fa-circle-info"></i> Controller Mode: this points your router's own DNS at this box. Requires "Server's Network Connection" to be set correctly under Routers &gt; MikroTik Connection.
+  </div>
+
   <div style="padding:0 16px 12px;font-size:13px;color:var(--text-muted);">Blocks ads and trackers for every connected customer. Requires the DNS filtering service to be installed on this server first.</div>
   <div style="display:flex;align-items:center;gap:12px;padding:0 16px 16px;">
     <label class="toggle-switch">

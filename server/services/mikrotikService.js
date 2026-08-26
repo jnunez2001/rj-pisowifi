@@ -602,6 +602,41 @@ async function setPortalDnsName(hostname) {
   }
 }
 
+// Settings > Network > DNS Filtering, Controller Mode's equivalent of
+// standalone mode's dnsmasq UPSTREAM_DNS_LINES. In this mode the router
+// itself is the DNS resolver every hotspot client actually talks to (it
+// answers client queries directly, allow-remote-requests=yes), so the
+// only way to filter Controller Mode traffic is to point the router's own
+// upstream at this server instead of a public resolver. setup-network.sh's
+// mikrotik-mode branch redirects that inbound port 53 to Pi-hole
+// (127.0.0.1:5335) - this just tells the router where to send it.
+// Same public-DNS default already used by setPortalDnsName() above so
+// disabling this cleanly reverts to that, not an arbitrary different pair.
+async function setDnsFilterServers(enable) {
+  const config = getMikrotikConfig();
+  if (!config.ip) return false;
+  try {
+    return await withMikrotik(config, async (client) => {
+      if (enable) {
+        const ip = getOwnLanIp();
+        if (!ip) {
+          console.warn('[MikroTik] setDnsFilterServers: server_lan_mac not set or not matching a live interface - cannot enable');
+          return false;
+        }
+        await client.talk(['/ip/dns/set', '=allow-remote-requests=yes', `=servers=${ip}`]);
+        console.log(`[MikroTik] DNS filtering enabled - router now queries ${ip}`);
+      } else {
+        await client.talk(['/ip/dns/set', '=allow-remote-requests=yes', '=servers=8.8.8.8,1.1.1.1']);
+        console.log('[MikroTik] DNS filtering disabled - router reverted to public DNS');
+      }
+      return true;
+    });
+  } catch (err) {
+    console.error('[MikroTik] setDnsFilterServers failed:', err.message);
+    return false;
+  }
+}
+
 // "Test connection" button, just needs to prove login succeeds, doesn't
 // need the full status payload.
 async function testConnection() {
@@ -1311,6 +1346,7 @@ module.exports = {
   getInterfaceTraffic,
   pruneOrphanedQueues,
   setPortalDnsName,
+  setDnsFilterServers,
   testConnection,
   getMacFromIp,
   getIpFromMac,

@@ -908,6 +908,9 @@ async function loadStandaloneVisibilityAndDnsFiltering() {
     updateDhcpControllerWarning();
     showStandaloneModeCards(mode === 'standalone');
 
+    const controllerNote = document.getElementById('dnsFilterControllerNote');
+    if (controllerNote) controllerNote.style.display = mode === 'mikrotik' ? 'block' : 'none';
+
     const piholeToggle = document.getElementById('enablePiholeToggle');
     if (piholeToggle) {
       piholeToggle.checked = s.enable_pihole === '1';
@@ -1050,7 +1053,11 @@ async function onDnsFilterToggle() {
   try {
     const data = await apiCall('POST', '/api/admin/settings', { enable_pihole: enabled ? '1' : '0' });
     if (data.success) {
-      showToast(enabled ? 'DNS filtering enabled.' : 'DNS filtering disabled.');
+      if (data.warning) {
+        showToast(data.warning, 'error');
+      } else {
+        showToast(enabled ? 'DNS filtering enabled.' : 'DNS filtering disabled.');
+      }
       if (enabled) loadDnsFilterStatus();
     } else {
       showToast(data.message || 'Failed to save.', 'error');

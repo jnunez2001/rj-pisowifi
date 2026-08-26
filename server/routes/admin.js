@@ -2121,6 +2121,23 @@ router.post('/settings', adminAuth, async (req, res) => {
       applyNetworkSetup();
     }
 
+    // DNS Filtering in Controller Mode: standalone mode's dnsmasq picks up
+    // the Pi-hole redirect automatically via applyNetworkSetup() above, but
+    // Controller Mode has no local dnsmasq - the router itself needs to be
+    // told where to send DNS queries instead. Best-effort: a stale/wrong
+    // dnsFilterWarning here doesn't block the toggle from saving, same
+    // pattern as portalHostnameWarning below.
+    let dnsFilterWarning = null;
+    if ('enable_pihole' in updates) {
+      const mode = db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
+      if (mode === 'mikrotik') {
+        const applied = await require('../services/mikrotikService').setDnsFilterServers(updates.enable_pihole === '1');
+        if (!applied) {
+          dnsFilterWarning = 'DNS Filtering setting was saved, but could not be applied on the router (check the Server\'s Network Connection is set correctly and the router is reachable).';
+        }
+      }
+    }
+
     // Bug: Customer Portal Address ("Give customers an easy, memorable
     // address for checking or adding time later") saved to the database
     // and did nothing else - nothing ever made it actually resolve to
@@ -2153,7 +2170,7 @@ router.post('/settings', adminAuth, async (req, res) => {
       }
     }
 
-    return res.json({ success: true, message: 'Settings updated', warning: portalHostnameWarning });
+    return res.json({ success: true, message: 'Settings updated', warning: portalHostnameWarning || dnsFilterWarning });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
   }

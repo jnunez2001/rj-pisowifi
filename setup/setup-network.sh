@@ -995,6 +995,38 @@ else
   systemctl disable dnsmasq >> $LOG 2>&1 || true
   echo "mikrotik mode: dnsmasq disabled, deferring to router for DHCP" >> $LOG
   sqlite3 "$DB" "DELETE FROM settings WHERE key = 'standalone_lane_map'" 2>/dev/null
+
+  # DNS Filtering (Pi-hole) in Controller Mode: the router itself is told
+  # (via admin.js/mikrotikService.js's setDnsFilterServers()) to use this
+  # box's own IP as its DNS server, but RouterOS's DNS client always
+  # queries port 53 - Pi-hole's container only ever listens on
+  # 127.0.0.1:5335 (see install-pihole.sh), never exposed to the network.
+  # Rather than rebind the container itself (which would make it a real
+  # network-facing DNS listener, one more thing to firewall correctly),
+  # redirect inbound port 53 arriving specifically on the router-facing
+  # interface to that loopback port - same DNAT idiom the standalone
+  # captive-portal path already uses for its own port 53 interception.
+  # Scoped to $LAN_VIF only, so nothing on the WAN side can ever reach it
+  # (this box has no WAN-facing interface of its own in this mode anyway).
+  nft delete table ip rj_piso_dns_filter 2>/dev/null || true
+  if [ "$ENABLE_PIHOLE" = "1" ] && [ -n "$LAN_VIF" ]; then
+    cat > /tmp/rj-piso-dns-filter.nft << NFTEOF
+table ip rj_piso_dns_filter {
+    chain input {
+        type filter hook input priority filter; policy accept;
+        iifname "$LAN_VIF" udp dport 53 accept
+        iifname "$LAN_VIF" tcp dport 53 accept
+    }
+    chain prerouting {
+        type nat hook prerouting priority dstnat; policy accept;
+        iifname "$LAN_VIF" udp dport 53 dnat to 127.0.0.1:5335
+        iifname "$LAN_VIF" tcp dport 53 dnat to 127.0.0.1:5335
+    }
+}
+NFTEOF
+    nft -f /tmp/rj-piso-dns-filter.nft >> $LOG 2>&1
+    echo "mikrotik mode: DNS filtering redirect active on $LAN_VIF -> 127.0.0.1:5335" >> $LOG
+  fi
   echo "MikroTik mode" >> $LOG
 fi
 
