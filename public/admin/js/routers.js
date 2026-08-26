@@ -461,6 +461,23 @@ function openRouterDetail(id) {
   document.getElementById('routerDetailInterfaces').style.display = 'none';
   document.getElementById('routerDetailMore').style.display = 'none';
   document.getElementById('routerDetailModal').classList.add('show');
+  loadOverviewLiveStatus();
+}
+
+// Live Status lives on Overview now (moved out of the "More" tab), which
+// loads before loadNetworkModeSettings() ever runs (that only fires once
+// the More tab is opened) - fetch the mode here directly instead of relying
+// on currentNetworkMode already being set.
+async function loadOverviewLiveStatus() {
+  const card = document.getElementById('routerStatusCard');
+  if (!card) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/settings');
+    if (!data.success) return;
+    const mode = data.settings.network_mode || 'standalone';
+    card.style.display = mode === 'mikrotik' ? 'block' : 'none';
+    if (mode === 'mikrotik') loadRouterStatus();
+  } catch (e) {}
 }
 
 function renderRouterDetail(r) {

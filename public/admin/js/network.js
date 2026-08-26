@@ -421,7 +421,6 @@ function updateLaneSummary(ns, activeLaneCount, guaranteed, plan) {
 
 function openRouterPortsModal() {
   activeLaneNamespace = 'router';
-  openModal('routerPortsModal');
   loadLanePorts();
 }
 

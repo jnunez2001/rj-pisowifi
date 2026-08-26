@@ -34,7 +34,6 @@ function setMtNavSub(elId, data, listKey, singular) {
 // ===== VLANS =====
 
 function openMtVlanModal() {
-  document.getElementById('mtVlanModal').classList.add('show');
   populateMtVlanParentOptions();
   loadMtVlans();
 }
@@ -123,7 +122,6 @@ async function deleteMtVlan(id) {
 // ===== DHCP SERVERS =====
 
 function openMtDhcpModal() {
-  document.getElementById('mtDhcpModal').classList.add('show');
   populateMtDhcpInterfaceOptions();
   loadMtDhcp();
 }
@@ -222,7 +220,6 @@ async function deleteMtDhcp(id) {
 // ===== PORT / INTERFACE ROLES =====
 
 function openMtRolesModal() {
-  document.getElementById('mtRolesModal').classList.add('show');
   loadMtRoles();
 }
 
@@ -288,7 +285,6 @@ async function setMtRole(interfaceName, role, selectEl, confirmed) {
 // ===== FIREWALL ZONES =====
 
 function openMtZonesModal() {
-  document.getElementById('mtZonesModal').classList.add('show');
   loadMtZones();
 }
 
@@ -357,7 +353,6 @@ async function deleteMtZone(id) {
 // ===== PORT FORWARDS =====
 
 function openMtForwardsModal() {
-  document.getElementById('mtForwardsModal').classList.add('show');
   loadMtForwards();
 }
 
@@ -448,7 +443,6 @@ const MT_CAPABILITY_LABELS = {
 };
 
 function openMtCapabilitiesModal() {
-  document.getElementById('mtCapabilitiesModal').classList.add('show');
   loadMtCapabilities();
 }
 
