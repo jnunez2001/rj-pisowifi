@@ -374,6 +374,127 @@ function setRouterDetailTab(tab, el) {
   document.getElementById('routerDetailInterfaces').style.display = tab === 'interfaces' ? 'block' : 'none';
   document.getElementById('routerDetailMore').style.display = tab === 'more' ? 'block' : 'none';
   if (tab === 'interfaces') loadRouterInterfaces(rtDetailId);
+  if (tab === 'more') loadRouterMoreTab();
+}
+
+// Closes this modal before leaving, so the destination page doesn't render
+// underneath an open overlay the user has to close manually afterward.
+function goToPageFromRouterDetail(page) {
+  closeModal('routerDetailModal');
+  navigateTo(page);
+}
+
+let rmMoreLoaded = false;
+function setRouterMoreSubtab(name, el) {
+  document.querySelectorAll('#routerMoreSubtabs .zf3-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.rm-subtab-panel').forEach(p => p.style.display = 'none');
+  const panelId = 'rm' + name.charAt(0).toUpperCase() + name.slice(1);
+  const panel = document.getElementById(panelId);
+  if (panel) panel.style.display = 'block';
+}
+
+// Loads all six "More" sub-tab summaries in parallel, once per modal open
+// (not once per sub-tab click - it's cheap read-only data, and switching
+// sub-tabs should feel instant instead of re-fetching every time).
+async function loadRouterMoreTab() {
+  if (rmMoreLoaded) return;
+  rmMoreLoaded = true;
+  loadRouterMoreWan();
+  loadRouterMoreLan();
+  loadRouterMoreRouting();
+  loadRouterMoreFirewall();
+  loadRouterMoreLogs();
+}
+
+async function loadRouterMoreWan() {
+  const el = document.getElementById('rmWanBody');
+  try {
+    const data = await apiCall('GET', '/api/admin/network/wan-health');
+    if (!data.success) throw new Error(data.message || 'Failed to load');
+    const h = data.health || {};
+    el.innerHTML = `
+      <div class="zf3-wan-grid">
+        <div><div class="zf3-wan-item-label">Status</div><div class="zf3-wan-item-value">${escapeHtml(h.ping_status || 'unknown')}</div></div>
+        <div><div class="zf3-wan-item-label">Latency</div><div class="zf3-wan-item-value">${h.avg_latency_ms !== null && h.avg_latency_ms !== undefined ? h.avg_latency_ms + ' ms' : '-'}</div></div>
+        <div><div class="zf3-wan-item-label">Packet Loss</div><div class="zf3-wan-item-value">${h.packet_loss_pct !== null && h.packet_loss_pct !== undefined ? h.packet_loss_pct + '%' : '-'}</div></div>
+        <div><div class="zf3-wan-item-label">Health Score</div><div class="zf3-wan-item-value">${h.score !== undefined ? h.score : '-'}</div></div>
+      </div>`;
+  } catch (e) {
+    el.innerHTML = '<div class="alert alert-error">' + escapeHtml(e.message || 'Failed to load WAN health.') + '</div>';
+  }
+}
+
+async function loadRouterMoreLan() {
+  const el = document.getElementById('rmLanBody');
+  try {
+    const data = await apiCall('GET', '/api/admin/network/leases');
+    if (!data.success) throw new Error(data.message || 'Failed to load');
+    const leases = data.leases || [];
+    if (leases.length === 0) {
+      el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">No static DHCP reservations yet.</p>';
+      return;
+    }
+    el.innerHTML = '<div class="table-wrapper"><table class="table-stack"><thead><tr><th>Label</th><th>MAC</th><th>IP</th></tr></thead><tbody>' +
+      leases.map((l) => `<tr><td>${escapeHtml(l.label || '-')}</td><td>${escapeHtml(l.mac_address)}</td><td>${escapeHtml(l.ip_address)}</td></tr>`).join('') +
+      '</tbody></table></div>';
+  } catch (e) {
+    el.innerHTML = '<div class="alert alert-error">' + escapeHtml(e.message || 'Failed to load DHCP reservations.') + '</div>';
+  }
+}
+
+async function loadRouterMoreRouting() {
+  const el = document.getElementById('rmRoutingBody');
+  try {
+    const data = await apiCall('GET', '/api/admin/network/mikrotik/port-forwards');
+    if (!data.success) throw new Error(data.message || 'MikroTik mode is not enabled');
+    const forwards = data.forwards || [];
+    if (forwards.length === 0) {
+      el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">No port forwards configured.</p>';
+      return;
+    }
+    el.innerHTML = '<div class="table-wrapper"><table class="table-stack"><thead><tr><th>Protocol</th><th>External Port</th><th>Internal</th><th>Status</th></tr></thead><tbody>' +
+      forwards.map((f) => `<tr><td>${escapeHtml((f.protocol || '').toUpperCase())}</td><td>${f.external_port}</td><td>${escapeHtml(f.internal_ip)}:${f.internal_port}</td><td>${f.disabled ? 'Disabled' : 'Active'}</td></tr>`).join('') +
+      '</tbody></table></div>';
+  } catch (e) {
+    el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">' + escapeHtml(e.message || 'Failed to load port forwards.') + '</p>';
+  }
+}
+
+async function loadRouterMoreFirewall() {
+  const el = document.getElementById('rmFirewallBody');
+  try {
+    const data = await apiCall('GET', '/api/admin/network/mikrotik/firewall-zones');
+    if (!data.success) throw new Error(data.message || 'MikroTik mode is not enabled');
+    const policies = data.policies || [];
+    if (policies.length === 0) {
+      el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">No zone policies configured.</p>';
+      return;
+    }
+    el.innerHTML = '<div class="table-wrapper"><table class="table-stack"><thead><tr><th>From Zone</th><th>To Zone</th><th>Action</th><th>Status</th></tr></thead><tbody>' +
+      policies.map((p) => `<tr><td>${escapeHtml(p.from_zone || '-')}</td><td>${escapeHtml(p.to_zone || '-')}</td><td>${escapeHtml(p.action || '-')}</td><td>${p.disabled ? 'Disabled' : 'Active'}</td></tr>`).join('') +
+      '</tbody></table></div>';
+  } catch (e) {
+    el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">' + escapeHtml(e.message || 'Failed to load firewall zone policies.') + '</p>';
+  }
+}
+
+async function loadRouterMoreLogs() {
+  const el = document.getElementById('rmLogsBody');
+  try {
+    const data = await apiCall('GET', '/api/admin/logs?limit=15');
+    if (!data.success) throw new Error(data.message || 'Failed to load');
+    const events = data.events || data.logs || [];
+    if (events.length === 0) {
+      el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">No recent log events.</p>';
+      return;
+    }
+    el.innerHTML = '<div class="table-wrapper"><table class="table-stack"><thead><tr><th>Time</th><th>Level</th><th>Message</th></tr></thead><tbody>' +
+      events.map((e) => `<tr><td>${escapeHtml(e.time || '-')}</td><td>${escapeHtml(e.level || '-')}</td><td>${escapeHtml(e.message || '-')}${e.detail ? ' - ' + escapeHtml(e.detail) : ''}</td></tr>`).join('') +
+      '</tbody></table></div>';
+  } catch (e) {
+    el.innerHTML = '<div class="alert alert-error">' + escapeHtml(e.message || 'Failed to load logs.') + '</div>';
+  }
 }
 
 function openSelfRouterDetail() {
@@ -401,6 +522,7 @@ function openRouterDetail(id) {
   const r = rtAllRouters.find(x => x.id === id);
   if (!r) return;
   rtDetailId = id;
+  rmMoreLoaded = false;
   renderRouterDetail(r);
   document.querySelectorAll('#routerDetailTabs .zf3-tab').forEach(t => t.classList.remove('active'));
   document.querySelector('#routerDetailTabs .zf3-tab').classList.add('active');

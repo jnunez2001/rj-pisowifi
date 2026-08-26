@@ -303,10 +303,66 @@
     </div>
 
     <div id="routerDetailMore" style="display:none;">
-      <div class="empty-state">
-        <i class="fas fa-screwdriver-wrench"></i>
-        <h3>WAN / LAN / Hotspot / Routing / Firewall / Logs</h3>
-        <p>Per-router configuration for these areas isn't built yet. Interface-level data is available in the Interfaces tab.</p>
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+        This app currently manages one MikroTik connection - these sections show and link to that shared
+        configuration, not independent settings per router row.
+      </p>
+      <div class="zf3-tabs" id="routerMoreSubtabs" style="margin-bottom:16px;">
+        <div class="zf3-tab active" data-subtab="wan" onclick="setRouterMoreSubtab('wan', this)"><i class="fas fa-globe"></i> WAN</div>
+        <div class="zf3-tab" data-subtab="lan" onclick="setRouterMoreSubtab('lan', this)"><i class="fas fa-network-wired"></i> LAN</div>
+        <div class="zf3-tab" data-subtab="hotspot" onclick="setRouterMoreSubtab('hotspot', this)"><i class="fas fa-wifi"></i> Hotspot</div>
+        <div class="zf3-tab" data-subtab="routing" onclick="setRouterMoreSubtab('routing', this)"><i class="fas fa-diagram-project"></i> Routing</div>
+        <div class="zf3-tab" data-subtab="firewall" onclick="setRouterMoreSubtab('firewall', this)"><i class="fas fa-shield-halved"></i> Firewall</div>
+        <div class="zf3-tab" data-subtab="logs" onclick="setRouterMoreSubtab('logs', this)"><i class="fas fa-list"></i> Logs</div>
+      </div>
+
+      <div id="rmWan" class="rm-subtab-panel">
+        <div class="zf3-card">
+          <div class="zf3-card-title" style="margin-bottom:12px;">WAN Health</div>
+          <div id="rmWanBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
+          <div style="margin-top:12px;"><button type="button" class="btn btn-secondary" onclick="goToPageFromRouterDetail('network')"><i class="fas fa-arrow-up-right-from-square"></i> Manage WAN / Server IP</button></div>
+        </div>
+      </div>
+
+      <div id="rmLan" class="rm-subtab-panel" style="display:none;">
+        <div class="zf3-card">
+          <div class="zf3-card-title" style="margin-bottom:12px;">DHCP Reservations</div>
+          <div id="rmLanBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
+          <div style="margin-top:12px;"><button type="button" class="btn btn-secondary" onclick="goToPageFromRouterDetail('network')"><i class="fas fa-arrow-up-right-from-square"></i> Manage LAN / VLANs / Ports and Roles</button></div>
+        </div>
+      </div>
+
+      <div id="rmHotspot" class="rm-subtab-panel" style="display:none;">
+        <div class="zf3-card">
+          <div class="zf3-card-title" style="margin-bottom:12px;">Hotspot / Captive Portal</div>
+          <p style="font-size:13px;color:var(--text-muted);">Hotspot and captive portal settings aren't stored per-router - manage them on their own pages.</p>
+          <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-secondary" onclick="goToPageFromRouterDetail('hotspot-dashboard')"><i class="fas fa-arrow-up-right-from-square"></i> Hotspot Settings</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="rmRouting" class="rm-subtab-panel" style="display:none;">
+        <div class="zf3-card">
+          <div class="zf3-card-title" style="margin-bottom:12px;">Port Forwards</div>
+          <div id="rmRoutingBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
+          <div style="margin-top:12px;"><button type="button" class="btn btn-secondary" onclick="goToPageFromRouterDetail('network')"><i class="fas fa-arrow-up-right-from-square"></i> Manage Routing</button></div>
+        </div>
+      </div>
+
+      <div id="rmFirewall" class="rm-subtab-panel" style="display:none;">
+        <div class="zf3-card">
+          <div class="zf3-card-title" style="margin-bottom:12px;">Firewall Zone Policies</div>
+          <div id="rmFirewallBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
+          <div style="margin-top:12px;"><button type="button" class="btn btn-secondary" onclick="goToPageFromRouterDetail('network')"><i class="fas fa-arrow-up-right-from-square"></i> Manage Firewall</button></div>
+        </div>
+      </div>
+
+      <div id="rmLogs" class="rm-subtab-panel" style="display:none;">
+        <div class="zf3-card">
+          <div class="zf3-card-title" style="margin-bottom:12px;">Recent Log Events</div>
+          <div id="rmLogsBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
+        </div>
       </div>
     </div>
   </div>
