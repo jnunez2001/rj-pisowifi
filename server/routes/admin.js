@@ -5438,11 +5438,29 @@ router.post('/router/terminal', adminAuth, async (req, res) => {
   // same combined-path form every other call in this codebase already
   // uses (e.g. "/ip/hotspot/ip-binding/print"), not the space-separated
   // form the interactive CLI console alone accepts.
-  const words = command.trim().match(/"[^"]*"|'[^']*'|\S+/g).map(w =>
-    (w.startsWith('"') && w.endsWith('"')) || (w.startsWith("'") && w.endsWith("'"))
+  //
+  // Bug found live: a key=value parameter word typed the natural WinBox
+  // CLI way (e.g. "servers=10.50.0.31") isn't a valid MikroTik API word -
+  // the API layer requires a leading "=" ("=servers=10.50.0.31", see
+  // mikrotikApiClient.js's own protocol notes) to mark it as a parameter
+  // rather than a bare positional argument. Without it, RouterOS's API
+  // just silently ignores the word - no error, the command "succeeds"
+  // with an empty response, and nothing actually changes. WinBox's own
+  // interactive console does this translation invisibly; this endpoint
+  // didn't, so every operator typing commands the way WinBox teaches them
+  // to would hit a command that looks like it worked but did nothing.
+  // Auto-prefix any word after the command path that looks like
+  // key=value and doesn't already start with = or ? (query filters keep
+  // their own leading ? untouched).
+  const words = command.trim().match(/"[^"]*"|'[^']*'|\S+/g).map((w, i) => {
+    const unquoted = (w.startsWith('"') && w.endsWith('"')) || (w.startsWith("'") && w.endsWith("'"))
       ? w.slice(1, -1)
-      : w
-  );
+      : w;
+    if (i > 0 && /^[a-zA-Z0-9_-]+=/.test(unquoted)) {
+      return `=${unquoted}`;
+    }
+    return unquoted;
+  });
 
   try {
     const { getMikrotikConfig } = require('../services/mikrotikConfigHelper');
