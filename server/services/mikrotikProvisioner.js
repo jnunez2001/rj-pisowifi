@@ -51,12 +51,27 @@ function laneInterfaceName(lane) {
   return lane.vlan_id ? `${lane.port_name}-vlan${lane.vlan_id}` : lane.port_name;
 }
 
+// Bug found live: a box with Docker installed (e.g. for the optional
+// Pi-hole add-on) always has a docker0 bridge - non-internal, a real IPv4
+// address, a real MAC, so it passed every check below identically to a
+// genuine physical NIC. On a single-NIC box this silently turned into a
+// "2 interfaces" box from the app's point of view, keeping the picker
+// hidden (the app assumes one entry means nothing to choose) while also
+// never auto-selecting anything, so server_lan_mac stayed permanently
+// unset with no picker ever shown to fix it manually either - not just a
+// cosmetic prefix mismatch, but a dead end for anything depending on
+// getOwnLanIp() (Portal Hostname, DNS Filtering). Skip container/virtual
+// interface naming patterns so only real physical connections are ever
+// candidates here.
+const VIRTUAL_IFACE_PREFIXES = ['docker', 'veth', 'br-', 'virbr', 'tun', 'tap', 'wg', 'lxc'];
+
 // Lists this server's own local network interfaces (name + MAC), for the
 // admin to explicitly pick which one is plugged into the gated lane.
 function listLocalInterfaces() {
   const ifaces = os.networkInterfaces();
   const result = [];
   for (const name of Object.keys(ifaces)) {
+    if (VIRTUAL_IFACE_PREFIXES.some((prefix) => name.startsWith(prefix))) continue;
     for (const iface of ifaces[name]) {
       if (!iface.internal && iface.family === 'IPv4' && iface.mac && iface.mac !== '00:00:00:00:00:00') {
         result.push({ name, mac: iface.mac, address: iface.address });
