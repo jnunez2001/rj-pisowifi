@@ -2118,7 +2118,16 @@ router.post('/settings', adminAuth, async (req, res) => {
     // it to take effect immediately (the UI gives no indication otherwise)
     // would see stale behavior with no visible error.
     if ('network_mode' in updates || 'enable_pihole' in updates) {
-      applyNetworkSetup();
+      // Bug found live: this used to be fire-and-forget, so the DNS
+      // Filtering check right below could run WHILE this script's own
+      // interface-identity detection was still bouncing the link (visible
+      // in journalctl as a burst of DHCPDISCOVER/DHCPACK on the LAN
+      // interface right as this fires) - os.networkInterfaces() could
+      // catch that interface mid-renegotiation with no IPv4 address
+      // assigned yet, making getOwnLanIp() (setDnsFilterServers below)
+      // intermittently fail to find a match even with server_lan_mac set
+      // correctly. Await it so the network has actually settled first.
+      await applyNetworkSetup();
     }
 
     // DNS Filtering in Controller Mode: standalone mode's dnsmasq picks up
@@ -3884,21 +3893,34 @@ router.post('/dns-filter/update-lists', adminAuth, (req, res) => {
 // wire (mode 'lan'). Applying a change re-runs setup-network.sh so the
 // owner never has to SSH in and run it by hand.
 
+// Returns a Promise (resolves after the script finishes either way, never
+// rejects - callers that need to know about failure already get that via
+// the optional callback param, same as before). Callers that need
+// something ELSE to only run once the network has actually finished
+// settling (e.g. the DNS Filtering apply below, which reads this box's
+// live interface state) must await this - previously this was always
+// fire-and-forget, so a fast-following read of os.networkInterfaces()
+// could land mid-renegotiation while this script's own interface-identity
+// detection logic was still bouncing the link, intermittently seeing no
+// IPv4 address on the right interface at all.
 function applyNetworkSetup(callback) {
   const scriptPath = path.join(__dirname, '../../setup/setup-network.sh');
-  // Bug: only err.message was ever logged on failure - that's just
-  // "Command failed: sudo bash .../setup-network.sh", the exit code and
-  // reason (a real script error, a timeout, sudo denying it) with no way
-  // to tell which from the log alone. execFile's callback gets stdout/
-  // stderr too - log them so a real failure is actually diagnosable
-  // instead of a dead end every time.
-  execFile('sudo', ['bash', scriptPath], { timeout: 20000 }, (err, stdout, stderr) => {
-    if (err) {
-      console.error('setup-network.sh re-apply failed:', err.message);
-      if (stderr) console.error('setup-network.sh stderr:', stderr);
-      if (stdout) console.error('setup-network.sh stdout:', stdout);
-    }
-    if (callback) callback(err);
+  return new Promise((resolve) => {
+    // Bug: only err.message was ever logged on failure - that's just
+    // "Command failed: sudo bash .../setup-network.sh", the exit code and
+    // reason (a real script error, a timeout, sudo denying it) with no way
+    // to tell which from the log alone. execFile's callback gets stdout/
+    // stderr too - log them so a real failure is actually diagnosable
+    // instead of a dead end every time.
+    execFile('sudo', ['bash', scriptPath], { timeout: 20000 }, (err, stdout, stderr) => {
+      if (err) {
+        console.error('setup-network.sh re-apply failed:', err.message);
+        if (stderr) console.error('setup-network.sh stderr:', stderr);
+        if (stdout) console.error('setup-network.sh stdout:', stdout);
+      }
+      if (callback) callback(err);
+      resolve(err);
+    });
   });
 }
 
