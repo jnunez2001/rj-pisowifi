@@ -3886,8 +3886,18 @@ router.post('/dns-filter/update-lists', adminAuth, (req, res) => {
 
 function applyNetworkSetup(callback) {
   const scriptPath = path.join(__dirname, '../../setup/setup-network.sh');
-  execFile('sudo', ['bash', scriptPath], { timeout: 20000 }, (err) => {
-    if (err) console.error('setup-network.sh re-apply failed:', err.message);
+  // Bug: only err.message was ever logged on failure - that's just
+  // "Command failed: sudo bash .../setup-network.sh", the exit code and
+  // reason (a real script error, a timeout, sudo denying it) with no way
+  // to tell which from the log alone. execFile's callback gets stdout/
+  // stderr too - log them so a real failure is actually diagnosable
+  // instead of a dead end every time.
+  execFile('sudo', ['bash', scriptPath], { timeout: 20000 }, (err, stdout, stderr) => {
+    if (err) {
+      console.error('setup-network.sh re-apply failed:', err.message);
+      if (stderr) console.error('setup-network.sh stderr:', stderr);
+      if (stdout) console.error('setup-network.sh stdout:', stdout);
+    }
     if (callback) callback(err);
   });
 }
