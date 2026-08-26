@@ -3570,8 +3570,19 @@ router.post('/network', adminAuth, (req, res) => {
     if (!['dhcp', 'static'].includes(type)) {
       return res.status(400).json({ success: false, message: 'Invalid network type' });
     }
-    if (type === 'static' && (!ip || !gateway)) {
-      return res.status(400).json({ success: false, message: 'IP and gateway required for static' });
+    if (type === 'static') {
+      // Presence alone isn't enough - a placeholder like the admin panel's
+      // own "N/A" display text is a truthy, non-empty string, and got
+      // submitted as a literal gateway value once already, writing an
+      // invalid netplan config to disk (netplan then refused to apply
+      // *any* config, "invalid IP family '-1'"). Actual IPv4 shape check
+      // closes that off regardless of what the frontend sends.
+      const IPV4_RE = /^(\d{1,3}\.){3}\d{1,3}$/;
+      const isValidIpv4 = (v) => typeof v === 'string' && IPV4_RE.test(v) &&
+        v.split('.').every((octet) => Number(octet) <= 255);
+      if (!isValidIpv4(ip) || !isValidIpv4(gateway)) {
+        return res.status(400).json({ success: false, message: 'A valid IP address and gateway are required for static' });
+      }
     }
 
     applyNetworkConfig({ type, ip, gateway, dns, subnet })
