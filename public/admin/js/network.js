@@ -1376,15 +1376,26 @@ function setNetworkMode(mode) {
 async function saveNetworkSettings() {
   const mode = document.querySelector('input[name="networkMode"]:checked').value;
   try {
-    const data = await apiCall('POST', '/api/admin/settings', {
+    const payload = {
       network_mode: mode,
       mikrotik_ip: document.getElementById('mikrotikIp').value,
       mikrotik_user: document.getElementById('mikrotikUser').value,
       mikrotik_pass: document.getElementById('mikrotikPass').value,
       mikrotik_interface: document.getElementById('mikrotikInterface').value,
       mikrotik_ssl: document.getElementById('mikrotikSsl').checked ? '1' : '0',
-      server_lan_mac: document.getElementById('serverLanMac').value,
-    });
+    };
+    // Bug found live: on a single-NIC box the picker stays hidden
+    // (loadLocalInterfaces() auto-saves server_lan_mac directly via API
+    // instead), but this always sent the select's value regardless - an
+    // empty hidden select overwrote that auto-saved MAC back to blank on
+    // every single "Save Network Settings" click, breaking Portal
+    // Hostname and DNS Filtering again each time. Only include it when
+    // the picker is actually visible (genuine multi-NIC choice).
+    const group = document.getElementById('serverLanMacGroup');
+    if (group && group.style.display !== 'none') {
+      payload.server_lan_mac = document.getElementById('serverLanMac').value;
+    }
+    const data = await apiCall('POST', '/api/admin/settings', payload);
     if (data.success) showToast('Network settings saved!');
     else showToast(data.message || 'Failed to save.', 'error');
   } catch(e) { showToast('Server error, please try again.', 'error'); }
