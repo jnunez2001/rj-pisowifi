@@ -2,6 +2,57 @@
 
 <div class="grid-2">
 
+  <!-- SERVER IP CONFIGURATION (moved here from the old Network page) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <i class="fas fa-network-wired" style="margin-right:8px;color:var(--accent-green);"></i>Server IP Configuration
+      </div>
+      <span id="currentIpDisplay" style="font-size:12px;font-weight:700;color:var(--accent-green);">Loading...</span>
+    </div>
+    <div class="form-group">
+      <label class="form-label">IP Configuration</label>
+      <select id="networkType" class="form-control" onchange="onNetworkTypeChange()">
+        <option value="dhcp">DHCP (Automatic)</option>
+        <option value="static">Static IP (Manual)</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Current IP Address</label>
+      <input type="text" id="currentIpField" class="form-control" readonly disabled>
+    </div>
+    <div id="staticIpFields" style="display:none;">
+      <div class="form-group">
+        <label class="form-label">Static IP Address</label>
+        <input type="text" id="staticIp" class="form-control" placeholder="192.168.0.59">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Gateway</label>
+        <input type="text" id="staticGateway" class="form-control" readonly disabled>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Subnet Prefix</label>
+        <select id="staticSubnet" class="form-control">
+          <option value="24">/24, 255.255.255.0</option>
+          <option value="16">/16, 255.255.0.0</option>
+          <option value="8">/8, 255.0.0.0</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">DNS Server</label>
+        <input type="text" id="staticDns" class="form-control" placeholder="8.8.8.8">
+      </div>
+    </div>
+    <div id="dhcpControllerWarning" style="display:none;background:var(--bg-primary);border:1px solid var(--border-color);color:var(--accent-orange);border-radius:8px;margin-bottom:12px;padding:10px 12px;font-size:12px;">
+      <i class="fas fa-triangle-exclamation"></i> Controller Mode boxes should use a Static IP outside your router's DHCP pool. On DHCP, this box can lose its own address and become unreachable if the router briefly goes offline, even without a reboot.
+    </div>
+    <button class="btn btn-primary" onclick="saveNetworkConfig()" id="saveNetworkBtn">
+      <i class="fas fa-save"></i> Apply Network Settings
+    </button>
+    <small style="display:block;color:var(--text-muted);margin-top:8px;">Switch back to DHCP before changing routers or ISPs, otherwise the server may become unreachable.</small>
+    <div id="networkStatus" style="display:none;margin-top:12px;padding:12px;border-radius:8px;font-size:13px;"></div>
+  </div>
+
   <!-- SITE INFORMATION -->
   <div class="card">
     <div class="card-header">

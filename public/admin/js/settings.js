@@ -39,6 +39,12 @@ async function loadSettings() {
     loadScheduledBackups();
     load2faStatus();
 
+    // Server IP Configuration
+    currentNetworkMode = s.network_mode || 'standalone';
+    updateDhcpControllerWarning();
+    loadNetworkConfig();
+    loadCurrentIp();
+
     // Business Type
     document.getElementById('venueType').value = s.venue_type || 'piso_wifi';
 

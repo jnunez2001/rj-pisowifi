@@ -309,8 +309,8 @@
 
     <div id="routerDetailMore" style="display:none;">
       <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
-        This app currently manages one MikroTik connection - these sections show and link to that shared
-        configuration, not independent settings per router row.
+        This app currently manages one MikroTik connection - these are that shared configuration, not
+        independent settings per router row. Server IP Configuration lives on the Settings page instead.
       </p>
       <div class="zf3-tabs" id="routerMoreSubtabs" style="margin-bottom:16px;">
         <div class="zf3-tab active" data-subtab="wan" onclick="setRouterMoreSubtab('wan', this)"><i class="fas fa-globe"></i> WAN</div>
@@ -322,25 +322,212 @@
       </div>
 
       <div id="rmWan" class="rm-subtab-panel">
-        <div class="zf3-card">
-          <div class="zf3-card-title" style="margin-bottom:12px;">WAN Health</div>
-          <div id="rmWanBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
-          <div style="margin-top:12px;"><button type="button" class="btn btn-secondary" onclick="goToPageFromRouterDetail('network')"><i class="fas fa-arrow-up-right-from-square"></i> Manage WAN / Server IP</button></div>
+        <!-- NETWORK MODE -->
+        <div class="zf-card">
+          <div class="zf-card-title">Network Mode</div>
+          <input type="radio" name="networkMode" id="modeStandalone" value="standalone" onchange="onNetworkModeChange()" style="display:none;">
+          <input type="radio" name="networkMode" id="modeMikrotik" value="mikrotik" onchange="onNetworkModeChange()" style="display:none;">
+          <input type="radio" name="networkMode" id="modeOpenwrt" value="openwrt" onchange="onNetworkModeChange()" style="display:none;">
+          <div id="networkModeSwitch" class="zf-segmented">
+            <button type="button" id="modeStandaloneCard" onclick="setNetworkMode('standalone')">
+              <img src="/assets/starkfi/routers/icons/router.svg" alt="" width="18" height="18" style="vertical-align:-4px;margin-right:6px;"> Router Mode
+            </button>
+            <button type="button" id="modeControllerCard" onclick="toggleControllerVendorPicker()">
+              <img src="/assets/starkfi/routers/icons/gateway-server.svg" alt="" width="18" height="18" style="vertical-align:-4px;margin-right:6px;"> Controller Mode
+            </button>
+          </div>
+          <div id="controllerVendorPicker" class="zf-row" style="display:none;flex-wrap:wrap;gap:8px;padding:10px 16px 14px;border-top:1px solid var(--border-color);">
+            <button type="button" class="zf-vendor-chip" id="vendorMikrotikChip" onclick="setNetworkMode('mikrotik')">
+              <img src="/assets/starkfi/routers/devices/mikrotik-style-router.svg" alt="" width="20" height="10" style="vertical-align:-1px;margin-right:6px;"> MikroTik
+            </button>
+            <button type="button" class="zf-vendor-chip" disabled title="Coming soon - no Ubiquiti driver yet">
+              <img src="/assets/starkfi/routers/devices/access-point.svg" alt="" width="16" height="16" style="vertical-align:-3px;margin-right:6px;opacity:.7;"> Ubiquiti
+            </button>
+            <button type="button" class="zf-vendor-chip" disabled title="Coming soon - no TP-Link driver yet">
+              <img src="/assets/starkfi/routers/devices/tp-link-style-gateway.svg" alt="" width="20" height="12" style="vertical-align:-2px;margin-right:6px;opacity:.7;"> TP-Link
+            </button>
+            <button type="button" class="zf-vendor-chip" disabled title="Not yet verified against real OpenWRT hardware">
+              <img src="/assets/starkfi/routers/icons/router.svg" alt="" width="16" height="16" style="vertical-align:-3px;margin-right:6px;opacity:.7;"> OpenWRT
+            </button>
+          </div>
+        </div>
+
+        <!-- OPENWRT CONNECTION (openwrt mode only) -->
+        <div class="zf-card" id="openwrtFields" style="display:none;">
+          <div class="zf-card-title">OpenWRT Connection</div>
+          <div class="zf-row">
+            <div class="zf-row-label">Status</div>
+            <span class="zf-status-pill" id="openwrtLiveStatus" style="color:var(--text-muted);">
+              <i class="fas fa-spinner fa-spin"></i> Checking...
+            </span>
+          </div>
+          <div class="zf-row">
+            <div class="zf-row-label">Router IP Address</div>
+            <input type="text" id="openwrtHost" placeholder="192.168.1.1">
+          </div>
+          <div class="zf-row">
+            <div class="zf-row-label">SSH Port</div>
+            <input type="text" id="openwrtPort" placeholder="22">
+          </div>
+          <div class="zf-row">
+            <div class="zf-row-label">Username</div>
+            <input type="text" id="openwrtUser" placeholder="root">
+          </div>
+          <div class="zf-row">
+            <div class="zf-row-label">Password</div>
+            <div class="zf-pw-wrap">
+              <input type="password" id="openwrtPass" placeholder="Leave blank if using a key">
+              <button type="button" class="zf-eye-btn" id="openwrtPassToggle" onclick="toggleOpenwrtPassword()">
+                <i class="fas fa-eye"></i> Show
+              </button>
+            </div>
+          </div>
+          <div class="zf-row-hint" id="openwrtPassHint" style="display:none;padding:0 16px 12px;">A password is already saved. Leave it blank to keep it, or enter a new one to replace it.</div>
+          <div class="zf-row">
+            <div class="zf-row-label">LAN Bridge Interface</div>
+            <input type="text" id="openwrtLanInterface" placeholder="br-lan">
+          </div>
+          <div style="display:flex;justify-content:flex-end;padding:0 16px 14px;">
+            <button type="button" class="zf-eye-btn" style="font-size:13px;" onclick="testOpenwrtConnection()"><i class="fas fa-rotate"></i> Recheck</button>
+          </div>
+          <button class="zf-btn-row" onclick="saveOpenwrtSettings()">Save Network Settings</button>
+          <div class="zf-footnote">Connects over SSH. The router needs an nftables set (rj_piso_allowed) and an ifb0 device for upload shaping set up once beforehand, see the OpenWRT setup guide.</div>
+        </div>
+
+        <!-- MIKROTIK CONNECTION (mikrotik mode only) -->
+        <div class="zf-card" id="mikrotikFields" style="display:none;">
+          <div class="zf-card-title">MikroTik Connection</div>
+          <div class="zf-row">
+            <div class="zf-row-label">Status</div>
+            <span class="zf-status-pill" id="mikrotikLiveStatus" style="color:var(--text-muted);">
+              <i class="fas fa-spinner fa-spin"></i> Checking...
+            </span>
+          </div>
+          <div class="zf-row">
+            <div class="zf-row-label">Router IP Address</div>
+            <input type="text" id="mikrotikIp" placeholder="192.168.0.1">
+          </div>
+          <div class="zf-row">
+            <div class="zf-row-label">Username</div>
+            <input type="text" id="mikrotikUser" placeholder="admin">
+          </div>
+          <div class="zf-row">
+            <div class="zf-row-label">Password</div>
+            <div class="zf-pw-wrap">
+              <input type="password" id="mikrotikPass" placeholder="Leave blank if none">
+              <button type="button" class="zf-eye-btn" id="mikrotikPassToggle" onclick="toggleMikrotikPassword()">
+                <i class="fas fa-eye"></i> Show
+              </button>
+            </div>
+          </div>
+          <div class="zf-row-hint" id="mikrotikPassHint" style="display:none;padding:0 16px 12px;">A password is already saved. Leave it blank to keep it, or enter a new one to replace it.</div>
+          <div class="zf-row">
+            <div class="zf-row-label">Hotspot Interface</div>
+            <input type="text" id="mikrotikInterface" placeholder="ether1">
+          </div>
+          <div class="zf-row">
+            <label style="display:flex;align-items:center;gap:8px;font-size:14px;cursor:pointer;">
+              <input type="checkbox" id="mikrotikSsl" style="width:auto;">
+              Use encrypted connection
+            </label>
+          </div>
+          <div id="serverLanMacGroup" style="display:none;">
+            <div class="zf-row">
+              <div class="zf-row-label">Server's Network Connection</div>
+              <select id="serverLanMac"></select>
+            </div>
+            <div class="zf-footnote" style="padding-top:0;">This machine has more than one network connection. Choose the one connected to your gated lane (for example, WiFi rental) so this server stays reachable at a fixed address and your portal link keeps working.</div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;padding:0 16px 14px;">
+            <button type="button" class="zf-eye-btn" style="font-size:13px;" onclick="testMikrotikConnection()"><i class="fas fa-rotate"></i> Recheck</button>
+          </div>
+          <button class="zf-btn-row" onclick="saveNetworkSettings()">Save Network Settings</button>
+          <div class="zf-footnote">Supports MikroTik routers running RouterOS 6 or 7. Your router's Hotspot service and DHCP server must already be set up on the network you're connecting to. Customers go straight to your portal to pay and connect. They'll never see the router's own login page.</div>
+        </div>
+
+        <!-- ROUTER CONSOLE (mikrotik mode only) -->
+        <div class="zf-card" id="routerTerminalCard" style="display:none;">
+          <div class="zf-card-title">Router Console</div>
+          <div class="zf-nav-row" onclick="openRouterTerminal()">
+            <div class="zf-nav-left">
+              <div class="zf-nav-title">Router Terminal</div>
+              <div class="zf-nav-sub">Run MikroTik commands without opening WinBox</div>
+            </div>
+            <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+          </div>
+        </div>
+
+        <!-- ROUTER MODE: LIVE STATUS (mikrotik mode only) -->
+        <div class="zf-card" id="routerStatusCard" style="display:none;">
+          <div class="zf-card-title">Live Status</div>
+          <div id="routerStatusGrid">
+            <div class="zf-row"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
+          </div>
         </div>
       </div>
 
       <div id="rmLan" class="rm-subtab-panel" style="display:none;">
-        <div class="zf3-card">
-          <div class="zf3-card-title" style="margin-bottom:12px;">DHCP Reservations</div>
-          <div id="rmLanBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
-          <div style="margin-top:12px;"><button type="button" class="btn btn-secondary" onclick="goToPageFromRouterDetail('network')"><i class="fas fa-arrow-up-right-from-square"></i> Manage LAN / VLANs / Ports and Roles</button></div>
+        <!-- ROUTER SETUP (mikrotik mode only) -->
+        <div class="zf-card" id="routerSetupCard" style="display:none;">
+          <div class="zf-card-title">Router Setup</div>
+          <div class="zf-nav-row" id="ispPlanNavRow" onclick="toggleAccordion('ispPlanNavRow','ispPlanPanel',loadIspPlan)">
+            <div class="zf-nav-left">
+              <div class="zf-nav-title">Internet Plan</div>
+              <div class="zf-nav-sub" id="ispPlanNavSub">Loading...</div>
+            </div>
+            <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+          </div>
+          <div class="zf-accordion-panel" id="ispPlanPanel">
+            <div class="zf-modal-body-text" style="margin-bottom:10px;">Every warning across this router's setup is based on this number, not a fixed default.</div>
+            <div class="form-group" style="max-width:220px;">
+              <label class="form-label">Total Plan Speed (Mbps)</label>
+              <input type="number" id="ispPlanMbps" class="form-control" placeholder="e.g. 50" min="0">
+            </div>
+            <button class="btn btn-primary" onclick="saveIspPlan()">
+              <i class="fas fa-save"></i> Save
+            </button>
+          </div>
+          <div class="zf-nav-row" onclick="openRouterPortsModal()">
+            <div class="zf-nav-left">
+              <div class="zf-nav-title">Ports and Roles</div>
+              <div class="zf-nav-sub" id="routerPortsSummary">Loading...</div>
+            </div>
+            <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+          </div>
+        </div>
+
+        <!-- ROUTER MODE: NETWORK POWER (mikrotik mode only) -->
+        <div class="zf-card" id="routerPowerCard" style="display:none;">
+          <div class="zf-card-title">Network Power</div>
+          <div class="zf-row-hint" style="padding:0 16px 8px;">VLANs, DHCP, port roles, firewall zones, and port forwards, configured directly on your MikroTik router.</div>
+          <div class="zf-nav-row" onclick="openMtVlanModal()">
+            <div class="zf-nav-left">
+              <div class="zf-nav-title">VLANs</div>
+              <div class="zf-nav-sub" id="mtVlanNavSub">Loading...</div>
+            </div>
+            <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+          </div>
+          <div class="zf-nav-row" onclick="openMtDhcpModal()">
+            <div class="zf-nav-left">
+              <div class="zf-nav-title">DHCP Servers</div>
+              <div class="zf-nav-sub" id="mtDhcpNavSub">Loading...</div>
+            </div>
+            <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+          </div>
+          <div class="zf-nav-row" onclick="openMtCapabilitiesModal()">
+            <div class="zf-nav-left">
+              <div class="zf-nav-title">Detected Capabilities</div>
+              <div class="zf-nav-sub" id="mtCapabilitiesNavSub">What this specific router actually supports</div>
+            </div>
+            <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+          </div>
         </div>
       </div>
 
       <div id="rmHotspot" class="rm-subtab-panel" style="display:none;">
         <div class="zf3-card">
           <div class="zf3-card-title" style="margin-bottom:12px;">Hotspot / Captive Portal</div>
-          <p style="font-size:13px;color:var(--text-muted);">Hotspot and captive portal settings aren't stored per-router - manage them on their own pages.</p>
+          <p style="font-size:13px;color:var(--text-muted);">Hotspot and captive portal settings aren't stored per-router - manage them on their own page.</p>
           <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
             <button type="button" class="btn btn-secondary" onclick="goToPageFromRouterDetail('hotspot-dashboard')"><i class="fas fa-arrow-up-right-from-square"></i> Hotspot Settings</button>
           </div>
@@ -348,18 +535,35 @@
       </div>
 
       <div id="rmRouting" class="rm-subtab-panel" style="display:none;">
-        <div class="zf3-card">
-          <div class="zf3-card-title" style="margin-bottom:12px;">Port Forwards</div>
-          <div id="rmRoutingBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
-          <div style="margin-top:12px;"><button type="button" class="btn btn-secondary" onclick="goToPageFromRouterDetail('network')"><i class="fas fa-arrow-up-right-from-square"></i> Manage Routing</button></div>
+        <div class="zf-card" id="routerPowerCardForwards" style="display:none;">
+          <div class="zf-card-title">Port Forwards</div>
+          <div class="zf-nav-row" onclick="openMtForwardsModal()">
+            <div class="zf-nav-left">
+              <div class="zf-nav-title">MikroTik Port Forwards</div>
+              <div class="zf-nav-sub" id="mtForwardsNavSub">Loading...</div>
+            </div>
+            <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+          </div>
         </div>
       </div>
 
       <div id="rmFirewall" class="rm-subtab-panel" style="display:none;">
-        <div class="zf3-card">
-          <div class="zf3-card-title" style="margin-bottom:12px;">Firewall Zone Policies</div>
-          <div id="rmFirewallBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
-          <div style="margin-top:12px;"><button type="button" class="btn btn-secondary" onclick="goToPageFromRouterDetail('network')"><i class="fas fa-arrow-up-right-from-square"></i> Manage Firewall</button></div>
+        <div class="zf-card" id="routerPowerCardZones" style="display:none;">
+          <div class="zf-card-title">Firewall Zones</div>
+          <div class="zf-nav-row" onclick="openMtZonesModal()">
+            <div class="zf-nav-left">
+              <div class="zf-nav-title">Firewall Zone Policies</div>
+              <div class="zf-nav-sub" id="mtZonesNavSub">Loading...</div>
+            </div>
+            <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+          </div>
+          <div class="zf-nav-row" onclick="openMtRolesModal()">
+            <div class="zf-nav-left">
+              <div class="zf-nav-title">Port / Interface Roles</div>
+              <div class="zf-nav-sub" id="mtRolesNavSub">Loading...</div>
+            </div>
+            <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
+          </div>
         </div>
       </div>
 
@@ -367,6 +571,276 @@
         <div class="zf3-card">
           <div class="zf3-card-title" style="margin-bottom:12px;">Recent Log Events</div>
           <div id="rmLogsBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>
+        </div>
+      </div>
+
+      <!-- ROUTER TERMINAL MODAL -->
+      <div class="modal-overlay" id="routerTerminalModal">
+        <div class="modal" style="max-width:640px;">
+          <div class="modal-header">
+            <div class="modal-title">Router Terminal</div>
+            <button class="modal-close" onclick="closeModal('routerTerminalModal')">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <div class="zf-modal-body-text" style="color:var(--accent-orange);">
+            <i class="fas fa-exclamation-triangle"></i>
+            This runs directly on your router with full admin access, the same as WinBox's own terminal. Nothing here can be undone.
+          </div>
+          <div id="routerTerminalOutput" style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:8px;height:280px;overflow-y:auto;white-space:pre-wrap;margin-bottom:10px;">Type a command below, e.g. /interface/print</div>
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="routerTerminalInput" class="form-control" placeholder="/ip/hotspot/ip-binding/print" style="font-family:monospace;" onkeydown="if(event.key==='Enter') runRouterTerminalCommand()">
+            <button class="btn btn-primary" onclick="runRouterTerminalCommand()">
+              <i class="fas fa-play"></i> Run
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ROUTER MODE: PORTS AND ROLES + PROVISION MODAL -->
+      <div class="modal-overlay" id="routerPortsModal">
+        <div class="modal" style="max-width:720px;">
+          <div class="modal-header">
+            <div class="modal-title">Ports and Roles</div>
+            <button class="modal-close" onclick="closeModal('routerPortsModal')">
+              <i class="fas fa-times"></i>
+            </button>
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-bottom:10px;">
+            <button type="button" class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="loadRouterPorts()">
+              <i class="fas fa-rotate"></i> Rescan
+            </button>
+          </div>
+          <div id="routerPortsList" style="max-height:340px;overflow-y:auto;">
+            <div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>
+          </div>
+          <p id="routerPortsTotal" style="font-size:13px;margin-top:10px;"></p>
+          <button class="btn btn-primary" onclick="saveRouterPorts()">
+            <i class="fas fa-save"></i> Save Port Roles
+          </button>
+
+          <div style="border-top:1px solid var(--border-color);margin-top:18px;padding-top:16px;">
+            <div style="font-weight:700;font-size:14px;margin-bottom:6px;"><i class="fas fa-bolt" style="margin-right:6px;color:var(--accent-yellow);"></i>Apply to Router</div>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">
+              Save your port roles above first. This backs up your router's current config, then applies everything live. Preview what will happen before running it.
+            </p>
+            <div style="display:flex;gap:10px;">
+              <button class="btn btn-secondary" onclick="previewProvisioning()">
+                <i class="fas fa-eye"></i> Preview Changes
+              </button>
+              <button class="btn btn-primary" onclick="applyProvisioning()">
+                <i class="fas fa-bolt"></i> Configure
+              </button>
+            </div>
+            <div id="provisionResult" style="margin-top:16px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MT CAPABILITIES MODAL -->
+      <div class="modal-overlay" id="mtCapabilitiesModal">
+        <div class="modal" style="max-width:520px;">
+          <div class="modal-header">
+            <div class="modal-title">Detected Capabilities</div>
+            <button class="modal-close" onclick="closeModal('mtCapabilitiesModal')"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="zf-row-hint" style="padding:0 0 10px;">Read directly from this router right now, never assumed from its RouterOS version. A different router may show different results.</div>
+          <div id="mtCapabilitiesBody">
+            <div class="loading"><i class="fas fa-spinner fa-spin"></i> Checking router...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MT VLAN MODAL -->
+      <div class="modal-overlay" id="mtVlanModal">
+        <div class="modal" style="max-width:640px;">
+          <div class="modal-header">
+            <div class="modal-title">MikroTik VLANs</div>
+            <button class="modal-close" onclick="closeModal('mtVlanModal')"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="table-wrapper">
+            <table class="table-stack">
+              <thead><tr><th>Interface</th><th>VLAN ID</th><th>Parent</th><th>IP Address</th><th></th></tr></thead>
+              <tbody id="mtVlanTableBody"><tr><td colspan="5" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
+            </table>
+          </div>
+          <div style="border-top:1px solid var(--border-color);margin-top:14px;padding-top:14px;">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Parent Interface</label>
+                <select id="mtVlanParent" class="form-control"></select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">VLAN ID</label>
+                <input type="number" id="mtVlanId" class="form-control" min="1" max="4094" placeholder="e.g. 20">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Name (optional)</label>
+                <input type="text" id="mtVlanName" class="form-control" placeholder="e.g. guest-vlan20">
+              </div>
+              <div class="form-group">
+                <label class="form-label">IP Address (optional, CIDR)</label>
+                <input type="text" id="mtVlanIp" class="form-control" placeholder="e.g. 192.168.20.1/24">
+              </div>
+            </div>
+            <button class="btn btn-primary" id="mtVlanAddBtn" onclick="createMtVlan()"><i class="fas fa-plus"></i> Add VLAN</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MT DHCP MODAL -->
+      <div class="modal-overlay" id="mtDhcpModal">
+        <div class="modal" style="max-width:680px;">
+          <div class="modal-header">
+            <div class="modal-title">MikroTik DHCP Servers</div>
+            <button class="modal-close" onclick="closeModal('mtDhcpModal')"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="table-wrapper">
+            <table class="table-stack">
+              <thead><tr><th>Interface</th><th>Name</th><th>Network</th><th>Pool</th><th>Gateway</th><th></th></tr></thead>
+              <tbody id="mtDhcpTableBody"><tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
+            </table>
+          </div>
+          <div style="border-top:1px solid var(--border-color);margin-top:14px;padding-top:14px;">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Interface</label>
+                <select id="mtDhcpInterface" class="form-control"></select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Name (optional)</label>
+                <input type="text" id="mtDhcpName" class="form-control" placeholder="e.g. guest-dhcp">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Network (CIDR)</label>
+                <input type="text" id="mtDhcpNetwork" class="form-control" placeholder="e.g. 192.168.20.0/24">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Gateway</label>
+                <input type="text" id="mtDhcpGateway" class="form-control" placeholder="e.g. 192.168.20.1">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Pool Range</label>
+                <input type="text" id="mtDhcpPool" class="form-control" placeholder="e.g. 192.168.20.10-192.168.20.250">
+              </div>
+              <div class="form-group">
+                <label class="form-label">DNS Server (optional)</label>
+                <input type="text" id="mtDhcpDns" class="form-control" placeholder="e.g. 192.168.20.1">
+              </div>
+            </div>
+            <button class="btn btn-primary" id="mtDhcpAddBtn" onclick="createMtDhcp()"><i class="fas fa-plus"></i> Add DHCP Server</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MT ROLES MODAL -->
+      <div class="modal-overlay" id="mtRolesModal">
+        <div class="modal" style="max-width:560px;">
+          <div class="modal-header">
+            <div class="modal-title">Port / Interface Roles</div>
+            <button class="modal-close" onclick="closeModal('mtRolesModal')"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="zf-row-hint" style="padding:0 0 10px;">Changing a role that removes the router's only WAN uplink requires confirmation and is automatically rolled back if the router becomes unreachable afterward.</div>
+          <div class="table-wrapper">
+            <table class="table-stack">
+              <thead><tr><th>Interface</th><th>MAC</th><th>Status</th><th>Role</th></tr></thead>
+              <tbody id="mtRolesTableBody"><tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- MT FIREWALL ZONES MODAL -->
+      <div class="modal-overlay" id="mtZonesModal">
+        <div class="modal" style="max-width:560px;">
+          <div class="modal-header">
+            <div class="modal-title">Firewall Zones</div>
+            <button class="modal-close" onclick="closeModal('mtZonesModal')"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="zf-row-hint" style="padding:0 0 10px;">Simple allow/block policies between zones (WAN/LAN/Guest), built from your port roles above. No raw firewall syntax needed.</div>
+          <div class="table-wrapper">
+            <table class="table-stack">
+              <thead><tr><th>From</th><th>To</th><th>Action</th><th></th></tr></thead>
+              <tbody id="mtZonesTableBody"><tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
+            </table>
+          </div>
+          <div style="border-top:1px solid var(--border-color);margin-top:14px;padding-top:14px;">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">From Zone</label>
+                <select id="mtZoneFrom" class="form-control">
+                  <option value="guest">Guest</option>
+                  <option value="lan">LAN</option>
+                  <option value="wan">WAN</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">To Zone</label>
+                <select id="mtZoneTo" class="form-control">
+                  <option value="lan">LAN</option>
+                  <option value="wan">WAN</option>
+                  <option value="guest">Guest</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Action</label>
+                <select id="mtZoneAction" class="form-control">
+                  <option value="drop">Block</option>
+                  <option value="accept">Allow</option>
+                  <option value="reject">Reject</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn btn-primary" id="mtZoneAddBtn" onclick="createMtZone()"><i class="fas fa-plus"></i> Add Policy</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MT PORT FORWARDS MODAL -->
+      <div class="modal-overlay" id="mtForwardsModal">
+        <div class="modal" style="max-width:600px;">
+          <div class="modal-header">
+            <div class="modal-title">MikroTik Port Forwards</div>
+            <button class="modal-close" onclick="closeModal('mtForwardsModal')"><i class="fas fa-times"></i></button>
+          </div>
+          <div class="table-wrapper">
+            <table class="table-stack">
+              <thead><tr><th>Protocol</th><th>External</th><th>Internal</th><th></th></tr></thead>
+              <tbody id="mtForwardsTableBody"><tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Loading...</td></tr></tbody>
+            </table>
+          </div>
+          <div style="border-top:1px solid var(--border-color);margin-top:14px;padding-top:14px;">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Protocol</label>
+                <select id="mtFwdProtocol" class="form-control">
+                  <option value="tcp">TCP</option>
+                  <option value="udp">UDP</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">External Port</label>
+                <input type="number" id="mtFwdExternalPort" class="form-control" min="1" max="65535">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Internal IP</label>
+                <input type="text" id="mtFwdInternalIp" class="form-control" placeholder="e.g. 192.168.20.50">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Internal Port</label>
+                <input type="number" id="mtFwdInternalPort" class="form-control" min="1" max="65535">
+              </div>
+            </div>
+            <button class="btn btn-primary" id="mtFwdAddBtn" onclick="createMtForward()"><i class="fas fa-plus"></i> Add Forward</button>
+          </div>
         </div>
       </div>
     </div>

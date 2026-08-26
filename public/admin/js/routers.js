@@ -394,89 +394,20 @@ function setRouterMoreSubtab(name, el) {
   if (panel) panel.style.display = 'block';
 }
 
-// Loads all six "More" sub-tab summaries in parallel, once per modal open
-// (not once per sub-tab click - it's cheap read-only data, and switching
-// sub-tabs should feel instant instead of re-fetching every time).
+// The "More" tab now holds the REAL Network Mode / MikroTik Connection /
+// Router Console / Router Setup / Network Power cards (moved here from
+// network.html, which keeps only the mode-agnostic cards). This is the
+// same loader that used to run on network.html's own page-load
+// (loadNetworkPage() no longer calls it - see network.js) - it fetches
+// current settings, fills in every one of those fields, and (via
+// showRouterModeCards()) triggers loadIspPlan/loadRouterPorts/
+// loadRouterStatus/loadMikrotikNetworkPowerSummaries for whichever mode
+// is actually active.
 async function loadRouterMoreTab() {
   if (rmMoreLoaded) return;
   rmMoreLoaded = true;
-  loadRouterMoreWan();
-  loadRouterMoreLan();
-  loadRouterMoreRouting();
-  loadRouterMoreFirewall();
+  loadNetworkModeSettings();
   loadRouterMoreLogs();
-}
-
-async function loadRouterMoreWan() {
-  const el = document.getElementById('rmWanBody');
-  try {
-    const data = await apiCall('GET', '/api/admin/network/wan-health');
-    if (!data.success) throw new Error(data.message || 'Failed to load');
-    const h = data.health || {};
-    el.innerHTML = `
-      <div class="zf3-wan-grid">
-        <div><div class="zf3-wan-item-label">Status</div><div class="zf3-wan-item-value">${escapeHtml(h.ping_status || 'unknown')}</div></div>
-        <div><div class="zf3-wan-item-label">Latency</div><div class="zf3-wan-item-value">${h.avg_latency_ms !== null && h.avg_latency_ms !== undefined ? h.avg_latency_ms + ' ms' : '-'}</div></div>
-        <div><div class="zf3-wan-item-label">Packet Loss</div><div class="zf3-wan-item-value">${h.packet_loss_pct !== null && h.packet_loss_pct !== undefined ? h.packet_loss_pct + '%' : '-'}</div></div>
-        <div><div class="zf3-wan-item-label">Health Score</div><div class="zf3-wan-item-value">${h.score !== undefined ? h.score : '-'}</div></div>
-      </div>`;
-  } catch (e) {
-    el.innerHTML = '<div class="alert alert-error">' + escapeHtml(e.message || 'Failed to load WAN health.') + '</div>';
-  }
-}
-
-async function loadRouterMoreLan() {
-  const el = document.getElementById('rmLanBody');
-  try {
-    const data = await apiCall('GET', '/api/admin/network/leases');
-    if (!data.success) throw new Error(data.message || 'Failed to load');
-    const leases = data.leases || [];
-    if (leases.length === 0) {
-      el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">No static DHCP reservations yet.</p>';
-      return;
-    }
-    el.innerHTML = '<div class="table-wrapper"><table class="table-stack"><thead><tr><th>Label</th><th>MAC</th><th>IP</th></tr></thead><tbody>' +
-      leases.map((l) => `<tr><td>${escapeHtml(l.label || '-')}</td><td>${escapeHtml(l.mac_address)}</td><td>${escapeHtml(l.ip_address)}</td></tr>`).join('') +
-      '</tbody></table></div>';
-  } catch (e) {
-    el.innerHTML = '<div class="alert alert-error">' + escapeHtml(e.message || 'Failed to load DHCP reservations.') + '</div>';
-  }
-}
-
-async function loadRouterMoreRouting() {
-  const el = document.getElementById('rmRoutingBody');
-  try {
-    const data = await apiCall('GET', '/api/admin/network/mikrotik/port-forwards');
-    if (!data.success) throw new Error(data.message || 'MikroTik mode is not enabled');
-    const forwards = data.forwards || [];
-    if (forwards.length === 0) {
-      el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">No port forwards configured.</p>';
-      return;
-    }
-    el.innerHTML = '<div class="table-wrapper"><table class="table-stack"><thead><tr><th>Protocol</th><th>External Port</th><th>Internal</th><th>Status</th></tr></thead><tbody>' +
-      forwards.map((f) => `<tr><td>${escapeHtml((f.protocol || '').toUpperCase())}</td><td>${f.external_port}</td><td>${escapeHtml(f.internal_ip)}:${f.internal_port}</td><td>${f.disabled ? 'Disabled' : 'Active'}</td></tr>`).join('') +
-      '</tbody></table></div>';
-  } catch (e) {
-    el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">' + escapeHtml(e.message || 'Failed to load port forwards.') + '</p>';
-  }
-}
-
-async function loadRouterMoreFirewall() {
-  const el = document.getElementById('rmFirewallBody');
-  try {
-    const data = await apiCall('GET', '/api/admin/network/mikrotik/firewall-zones');
-    if (!data.success) throw new Error(data.message || 'MikroTik mode is not enabled');
-    const policies = data.policies || [];
-    if (policies.length === 0) {
-      el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">No zone policies configured.</p>';
-      return;
-    }
-    el.innerHTML = '<div class="table-wrapper"><table class="table-stack"><thead><tr><th>From Zone</th><th>To Zone</th><th>Action</th><th>Status</th></tr></thead><tbody>' +
-      policies.map((p) => `<tr><td>${escapeHtml(p.from_zone || '-')}</td><td>${escapeHtml(p.to_zone || '-')}</td><td>${escapeHtml(p.action || '-')}</td><td>${p.disabled ? 'Disabled' : 'Active'}</td></tr>`).join('') +
-      '</tbody></table></div>';
-  } catch (e) {
-    el.innerHTML = '<p style="font-size:13px;color:var(--text-muted);">' + escapeHtml(e.message || 'Failed to load firewall zone policies.') + '</p>';
-  }
 }
 
 async function loadRouterMoreLogs() {

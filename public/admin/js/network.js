@@ -880,9 +880,15 @@ function renderProvisionLog(data, success) {
 
 async function loadNetworkPage() {
   await loadBiosPowerLossReminder();
-  await loadNetworkConfig();
-  setTimeout(loadCurrentIp, 500);
-  await loadNetworkModeSettings();
+  // Server IP Configuration (loadNetworkConfig/loadCurrentIp) now lives on
+  // the Settings page - see settings.js. Network Mode / MikroTik Connection
+  // / Router Console / Router Setup / Network Power now live on the
+  // Routers page's detail modal - see routers.js's loadRouterMoreTab().
+  // What's left here (Standalone-only cards, DNS filtering toggle) still
+  // needs to know the current mode, via this smaller loader instead of the
+  // full loadNetworkModeSettings() (which now targets fields that no
+  // longer exist on this page).
+  await loadStandaloneVisibilityAndDnsFiltering();
   await loadAdminHostname();
   await loadPortalHostname();
   await loadInterfaces();
@@ -891,9 +897,43 @@ async function loadNetworkPage() {
   await loadDnsServers();
 }
 
+// Trimmed-down replacement for loadNetworkModeSettings() on this page:
+// this page keeps only the Standalone-only cards (static leases, port
+// forwards, standalone ports) and DNS filtering, both of which still need
+// to know the current network_mode, without touching the Network Mode
+// switcher / MikroTik / OpenWRT fields that moved to the Routers page.
+async function loadStandaloneVisibilityAndDnsFiltering() {
+  try {
+    const data = await apiCall('GET', '/api/admin/settings');
+    if (!data.success) return;
+    const s = data.settings;
+    const mode = s.network_mode || 'standalone';
+    currentNetworkMode = mode;
+    updateDhcpControllerWarning();
+    showStandaloneModeCards(mode === 'standalone');
+
+    const piholeToggle = document.getElementById('enablePiholeToggle');
+    if (piholeToggle) {
+      piholeToggle.checked = s.enable_pihole === '1';
+      updateToggleLabel('enablePiholeToggle', 'piholeStatusLabel');
+      document.getElementById('dnsFilterStats').style.display = piholeToggle.checked ? 'block' : 'none';
+      if (piholeToggle.checked) loadDnsFilterStatus();
+    }
+  } catch (e) {
+    console.error('Standalone visibility / DNS filtering load error:', e);
+  }
+}
+
 function showRouterModeCards(show) {
-  ['routerSetupCard', 'routerStatusCard', 'routerTerminalCard', 'routerPowerCard'].forEach(id => {
-    document.getElementById(id).style.display = show ? 'block' : 'none';
+  // routerPowerCardForwards/routerPowerCardZones: the original single
+  // "Network Power" card's Port Forwards and Firewall Zones nav-rows now
+  // live under their own sub-tab panels in the Routers page's detail
+  // modal (Routing / Firewall), split out of routerPowerCard - each needs
+  // the same mode-based show/hide the original single card had, or they'd
+  // stay visible even in Standalone mode where they don't apply.
+  ['routerSetupCard', 'routerStatusCard', 'routerTerminalCard', 'routerPowerCard', 'routerPowerCardForwards', 'routerPowerCardZones'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = show ? 'block' : 'none';
   });
   if (show) {
     loadIspPlan();
