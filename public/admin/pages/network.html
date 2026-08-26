@@ -312,32 +312,6 @@
   </div>
 </div>
 
-<!-- ADMIN PORTAL ADDRESS (both modes) -->
-<div class="zf-card">
-  <div class="zf-card-title">Admin Portal Address</div>
-  <div class="zf-row">
-    <div class="zf-row-label">Local Hostname</div>
-    <div style="display:flex;align-items:center;gap:4px;">
-      <input type="text" id="adminHostname" placeholder="e.g. rjcyberzone">
-      <span style="color:var(--text-muted);white-space:nowrap;font-size:14px;">.local</span>
-    </div>
-  </div>
-  <button class="zf-btn-row" onclick="saveAdminHostname()">Save</button>
-  <div class="zf-footnote">Customize the address you use to reach this admin panel on your own network, instead of always using rjpisowifi.local. Letters, numbers, and hyphens only. Changing this restarts the mDNS service.</div>
-  <div id="adminHostnameStatus" style="display:none;margin:0 16px 14px;padding:12px;border-radius:8px;font-size:13px;"></div>
-</div>
-
-<!-- CUSTOMER PORTAL ADDRESS (both modes) -->
-<div class="zf-card" id="portalAddressCard">
-  <div class="zf-card-title">Customer Portal Address</div>
-  <div class="zf-row">
-    <div class="zf-row-label">Portal Hostname</div>
-    <input type="text" id="portalHostname" placeholder="e.g. rjcyberzone.wifi">
-  </div>
-  <button class="zf-btn-row" onclick="savePortalHostname()">Save</button>
-  <div class="zf-footnote">Give customers an easy, memorable address for checking or adding time later, instead of a raw IP address they could easily mistype. Applies immediately on Save. Leave blank to disable.</div>
-</div>
-
 <!-- VLAN MANAGEMENT -->
 <div class="zf-card">
   <div class="zf-card-title">VLAN Management</div>
@@ -378,60 +352,6 @@
       </table>
     </div>
   </div>
-</div>
-
-<!-- DEVICES (both modes) -->
-<div class="zf-card">
-  <div class="zf-card-title">Devices</div>
-  <div class="zf-nav-row" id="clientLabelsNavRow" onclick="toggleAccordion('clientLabelsNavRow','clientLabelsPanel',loadClientLabels)">
-    <div class="zf-nav-left">
-      <div class="zf-nav-title">Name Your Devices</div>
-      <div class="zf-nav-sub" id="clientLabelsNavSub">Loading...</div>
-    </div>
-    <span class="zf-chevron"><i class="fas fa-chevron-right"></i></span>
-  </div>
-  <div class="zf-accordion-panel" id="clientLabelsPanel">
-    <div class="zf-modal-body-text">Give a MAC address a friendly name so it's easy to recognize elsewhere.</div>
-    <div class="table-wrapper">
-      <table class="table-stack">
-        <thead>
-          <tr>
-            <th>MAC Address</th>
-            <th>Name</th>
-            <th style="text-align:right;">Actions</th>
-          </tr>
-        </thead>
-        <tbody id="clientLabelsTableBody">
-          <tr><td colspan="3" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <div class="grid-2" style="margin-top:16px;">
-      <div class="form-group">
-        <label class="form-label">MAC Address</label>
-        <input type="text" id="newClientLabelMac" class="form-control" placeholder="aa:bb:cc:dd:ee:ff">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Name</label>
-        <input type="text" id="newClientLabelName" class="form-control" placeholder="e.g. Owner's Phone">
-      </div>
-    </div>
-    <button class="btn btn-primary" onclick="addClientLabel()">
-      <i class="fas fa-plus"></i> Save Name
-    </button>
-  </div>
-</div>
-
-<!-- SYSTEM HEALTH CHECK (plain-language pass/fail, no terminal needed) -->
-<div class="zf-card">
-  <div class="zf-card-title">System Health Check</div>
-  <div style="padding:0 16px 12px;font-size:13px;color:var(--text-muted);">Checks the network connection, internet access, and the tools this box needs to run correctly. Plain pass/fail, no terminal required.</div>
-  <div style="padding:0 16px 12px;">
-    <button class="btn btn-primary" id="runHealthCheckBtn" onclick="runHealthCheck()">
-      <i class="fas fa-stethoscope"></i> Run Health Check
-    </button>
-  </div>
-  <div id="healthCheckResults" style="padding:0 16px 16px;"></div>
 </div>
 
 <!-- NETWORK DIAGNOSTICS (both modes, always visible, not a popup or dropdown) -->

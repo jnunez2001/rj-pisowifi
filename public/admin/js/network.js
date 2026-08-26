@@ -888,11 +888,8 @@ async function loadNetworkPage() {
   // full loadNetworkModeSettings() (which now targets fields that no
   // longer exist on this page).
   await loadStandaloneVisibilityAndDnsFiltering();
-  await loadAdminHostname();
-  await loadPortalHostname();
   await loadInterfaces();
   await loadVlans();
-  await loadClientLabels();
   await loadDnsServers();
 }
 
@@ -1668,101 +1665,7 @@ async function deletePortForward(id, label) {
   }
 }
 
-// ===== CLIENT NAMING =====
-
-async function loadClientLabels() {
-  const tbody = document.getElementById('clientLabelsTableBody');
-  if (!tbody) return;
-  try {
-    const data = await apiCall('GET', '/api/admin/network/client-labels');
-    if (!data.success) throw new Error(data.message);
-    const sub = document.getElementById('clientLabelsNavSub');
-    if (sub) sub.textContent = data.labels.length === 0 ? 'None named' : `${data.labels.length} named`;
-    if (data.labels.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);">No named devices yet.</td></tr>';
-      return;
-    }
-    tbody.innerHTML = data.labels.map(l => `
-      <tr>
-        <td data-label="MAC Address">${escapeHtml(l.mac_address)}</td>
-        <td data-label="Name">${escapeHtml(l.label)}</td>
-        <td class="table-stack-full" style="text-align:right;">
-          <button class="btn btn-sm btn-danger" onclick="deleteClientLabel('${escapeHtml(l.mac_address)}')">
-            <i class="fas fa-trash"></i>
-          </button>
-        </td>
-      </tr>
-    `).join('');
-  } catch(e) {
-    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--accent-red);">Failed to load.</td></tr>';
-  }
-}
-
-async function addClientLabel() {
-  const mac = document.getElementById('newClientLabelMac').value.trim();
-  const label = document.getElementById('newClientLabelName').value.trim();
-  try {
-    const data = await apiCall('POST', '/api/admin/network/client-labels', { mac_address: mac, label });
-    if (data.success) {
-      showToast('Name saved!');
-      document.getElementById('newClientLabelMac').value = '';
-      document.getElementById('newClientLabelName').value = '';
-      await loadClientLabels();
-    } else {
-      showToast(data.message || 'Failed to save name.', 'error');
-    }
-  } catch(e) {
-    showToast('Server error, please try again.', 'error');
-  }
-}
-
-async function deleteClientLabel(mac) {
-  try {
-    const data = await apiCall('POST', '/api/admin/network/client-labels', { mac_address: mac, label: '' });
-    if (data.success) {
-      showToast('Name removed.');
-      await loadClientLabels();
-    } else {
-      showToast(data.message || 'Failed to remove.', 'error');
-    }
-  } catch(e) {
-    showToast('Server error, please try again.', 'error');
-  }
-}
-
 // ===== NETWORK DIAGNOSTICS =====
-
-async function runHealthCheck() {
-  const btn = document.getElementById('runHealthCheckBtn');
-  const box = document.getElementById('healthCheckResults');
-  btn.disabled = true;
-  btn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i> Checking...';
-  box.innerHTML = '';
-  try {
-    const data = await apiCall('GET', '/api/admin/diagnostics/run');
-    if (!data.success) {
-      box.innerHTML = `<div style="color:var(--danger,#e74c3c);font-size:13px;">${data.message || 'Health check failed to run.'}</div>`;
-      return;
-    }
-    const r = data.report;
-    const summary = `<div style="font-size:13px;font-weight:600;margin-bottom:10px;color:${r.overallOk ? 'var(--success,#27ae60)' : 'var(--danger,#e74c3c)'};">${r.passCount}/${r.totalCount} checks passed</div>`;
-    const rows = r.results.map((item) => `
-      <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-top:1px solid var(--border-color);">
-        <i class="fas ${item.pass ? 'fa-check-circle' : 'fa-times-circle'}" style="color:${item.pass ? 'var(--success,#27ae60)' : 'var(--danger,#e74c3c)'};margin-top:2px;"></i>
-        <div>
-          <div style="font-size:13px;font-weight:500;">${item.label}</div>
-          <div style="font-size:12px;color:var(--text-muted);">${item.detail}</div>
-        </div>
-      </div>
-    `).join('');
-    box.innerHTML = summary + rows;
-  } catch (e) {
-    box.innerHTML = '<div style="color:var(--danger,#e74c3c);font-size:13px;">Server error running health check.</div>';
-  } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fas fa-stethoscope"></i> Run Health Check';
-  }
-}
 
 async function runDiagnostic(type) {
   const target = document.getElementById('diagTarget').value.trim();

@@ -45,6 +45,10 @@ async function loadSettings() {
     loadNetworkConfig();
     loadCurrentIp();
 
+    // Portal Addresses
+    loadAdminHostname();
+    loadPortalHostname();
+
     // Business Type
     document.getElementById('venueType').value = s.venue_type || 'piso_wifi';
 

@@ -94,6 +94,36 @@
     </button>
   </div>
 
+  <!-- PORTAL ADDRESSES (moved here from the old Network page) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <i class="fas fa-globe" style="margin-right:8px;color:var(--accent-green);"></i>Portal Addresses
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Admin Panel Local Hostname</label>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <input type="text" id="adminHostname" class="form-control" placeholder="e.g. rjcyberzone">
+        <span style="color:var(--text-muted);white-space:nowrap;font-size:14px;">.local</span>
+      </div>
+      <small style="color:var(--text-muted);">The address you use to reach this admin panel on your own network. Letters, numbers, and hyphens only. Changing this restarts the mDNS service.</small>
+    </div>
+    <button class="btn btn-primary" onclick="saveAdminHostname()">
+      <i class="fas fa-save"></i> Save Admin Hostname
+    </button>
+    <div id="adminHostnameStatus" style="display:none;margin-top:12px;padding:12px;border-radius:8px;font-size:13px;"></div>
+
+    <div class="form-group" style="margin-top:20px;">
+      <label class="form-label">Customer Portal Hostname</label>
+      <input type="text" id="portalHostname" class="form-control" placeholder="e.g. rjcyberzone.wifi">
+      <small style="color:var(--text-muted);">An easy, memorable address for customers checking or adding time later, instead of a raw IP address. Applies immediately on Save. Leave blank to disable.</small>
+    </div>
+    <button class="btn btn-primary" onclick="savePortalHostname()">
+      <i class="fas fa-save"></i> Save Portal Hostname
+    </button>
+  </div>
+
   <!-- ADMIN CREDENTIALS -->
   <div class="card">
     <div class="card-header">
