@@ -420,12 +420,20 @@ echo "$USER ALL=(ALL) NOPASSWD: /sbin/shutdown, /usr/sbin/shutdown" \
 #
 # Bug found the same night: this used to target 50-cloud-init.yaml, which
 # cloud-init regenerates back to DHCP on every boot, silently reverting any
-# static IP a client set. The app now writes to 60-rj-pisowifi.yaml instead
-# (a filename that wins netplan's merge without cloud-init involved), so a
-# commercial install needs the matching sudoers entry from day one instead
-# of a client hitting "Failed to apply network settings" and needing this
-# fixed by hand, the way tonight's live troubleshooting session did.
+# static IP a client set. Moved to 60-rj-pisowifi.yaml, then later to
+# 95-rj-pisowifi.yaml (hostNetworkService.js) once setup-network.sh's own
+# 90-rj-pisowifi-<iface>.yaml turned out to outrank 60- in netplan's merge
+# order and could leave the interface addressless during a DHCP fallback.
+# Each rename broke this exact sudoers grant again on already-provisioned
+# boxes (it's filename-specific, not a wildcard) - a client hitting "Failed
+# to apply network settings" needing this fixed by hand, more than once
+# now. Keep the retired filename's rule too so an already-deployed box
+# that hasn't picked up the latest app code yet doesn't break either.
+echo "$USER ALL=(ALL) NOPASSWD: /bin/cp * /etc/netplan/95-rj-pisowifi.yaml" \
+  >> /etc/sudoers.d/rj-pisowifi
 echo "$USER ALL=(ALL) NOPASSWD: /bin/cp * /etc/netplan/60-rj-pisowifi.yaml" \
+  >> /etc/sudoers.d/rj-pisowifi
+echo "$USER ALL=(ALL) NOPASSWD: /bin/rm -f /etc/netplan/60-rj-pisowifi.yaml" \
   >> /etc/sudoers.d/rj-pisowifi
 echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/netplan apply" \
   >> /etc/sudoers.d/rj-pisowifi
