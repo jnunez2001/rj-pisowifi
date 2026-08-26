@@ -612,13 +612,32 @@ async function setPortalDnsName(hostname) {
 // (127.0.0.1:5335) - this just tells the router where to send it.
 // Same public-DNS default already used by setPortalDnsName() above so
 // disabling this cleanly reverts to that, not an arbitrary different pair.
+// Bug found live: setup-network.sh's own interface-identity detection
+// calls `dhclient -nw` (no-wait) on the LAN interface as part of every
+// re-apply, which backgrounds the actual DHCP negotiation and returns
+// immediately - the script (and the applyNetworkSetup() promise this runs
+// right after) finishes well before the interface has actually reacquired
+// an IPv4 address again. getOwnLanIp() reads os.networkInterfaces() live,
+// so it could land in that in-between window and fail even with
+// server_lan_mac correctly set, matching the correct MAC. Short retry
+// instead of a single read, since the real negotiation only takes about a
+// second on a healthy LAN (confirmed live via journalctl timestamps).
+async function waitForOwnLanIp(retries = 8, delayMs = 500) {
+  for (let i = 0; i < retries; i++) {
+    const ip = getOwnLanIp();
+    if (ip) return ip;
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  return null;
+}
+
 async function setDnsFilterServers(enable) {
   const config = getMikrotikConfig();
   if (!config.ip) return false;
   try {
     return await withMikrotik(config, async (client) => {
       if (enable) {
-        const ip = getOwnLanIp();
+        const ip = await waitForOwnLanIp();
         if (!ip) {
           console.warn('[MikroTik] setDnsFilterServers: server_lan_mac not set or not matching a live interface - cannot enable');
           return false;
