@@ -3559,7 +3559,7 @@ router.post('/system/shutdown', adminAuth, (req, res) => {
   }, 500);
 });
 
-const { applyNetworkConfig } = require('../services/hostNetworkService');
+const { applyNetworkConfig, refreshConsoleBanner } = require('../services/hostNetworkService');
 
 // POST /api/admin/network (Bug #22 - use execFile for safer execution)
 router.post('/network', adminAuth, (req, res) => {
@@ -3596,6 +3596,7 @@ router.post('/network', adminAuth, (req, res) => {
         upsert.run('static_subnet', subnet || '24');
 
         console.log(`🌐 Network changed to: ${type}`);
+        refreshConsoleBanner();
         return res.json({ success: true, message: `Network set to ${type}` });
       })
       .catch((err) => {

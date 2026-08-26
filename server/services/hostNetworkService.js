@@ -1,5 +1,18 @@
 const fs = require('fs');
+const path = require('path');
 const { execFile, execSync } = require('child_process');
+
+// Refreshes the pre-login console banner (/etc/issue) so it reflects the
+// IP actually assigned instead of the boot-time snapshot setup-network.sh
+// wrote before this static IP was applied. Best-effort - a box without a
+// physical/serial console attached, or one where the sudoers grant for
+// this script hasn't been provisioned, just keeps running normally.
+const CONSOLE_BANNER_SCRIPT = path.join(__dirname, '..', '..', 'setup', 'update-console-banner.sh');
+function refreshConsoleBanner() {
+  execFile('sudo', ['bash', CONSOLE_BANNER_SCRIPT], { timeout: 5000 }, (err) => {
+    if (err) console.error('Could not refresh console banner:', err.message);
+  });
+}
 
 // Real bug found live: this used to detect the interface purely from
 // "whatever currently holds the default route" - fine once the box is
@@ -95,6 +108,7 @@ async function reapplyStaticNetworkOnBoot(db) {
 
     await applyNetworkConfig({ type: 'static', ip, gateway, dns, subnet });
     console.log(`🌐 Static IP re-applied on boot: ${ip}`);
+    refreshConsoleBanner();
   } catch (err) {
     console.error('Could not re-apply static network config on boot:', err.message);
   }
@@ -145,6 +159,7 @@ function checkStaticConnectivity(db) {
             .then(() => {
               strandedOnTemporaryDhcp = false;
               console.log(`🌐 Static IP restored: ${ip}`);
+              refreshConsoleBanner();
             })
             .catch((restoreErr) => console.error('Could not restore static IP:', restoreErr.message));
         }
@@ -177,4 +192,4 @@ function startConnectivityWatchdog(db) {
   cron.schedule('*/3 * * * *', () => checkStaticConnectivity(db));
 }
 
-module.exports = { getPrimaryInterface, applyNetworkConfig, reapplyStaticNetworkOnBoot, startConnectivityWatchdog };
+module.exports = { getPrimaryInterface, applyNetworkConfig, reapplyStaticNetworkOnBoot, startConnectivityWatchdog, refreshConsoleBanner };

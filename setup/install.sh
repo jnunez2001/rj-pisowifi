@@ -438,6 +438,13 @@ echo "$USER ALL=(ALL) NOPASSWD: /bin/rm -f /etc/netplan/60-rj-pisowifi.yaml" \
 echo "$USER ALL=(ALL) NOPASSWD: /usr/sbin/netplan apply" \
   >> /etc/sudoers.d/rj-pisowifi
 
+# Let the app refresh the pre-login console banner (/etc/issue) right
+# after it applies a static IP - see update-console-banner.sh - instead
+# of the console being stuck showing whatever setup-network.sh's own
+# early-boot snapshot found before the app got a chance to run.
+echo "$USER ALL=(ALL) NOPASSWD: /bin/bash $APP_DIR/setup/update-console-banner.sh" \
+  >> /etc/sudoers.d/rj-pisowifi
+
 # Allow Node.js to change the admin panel's .local mDNS hostname
 # (Network > Admin Portal Address) without a password prompt
 echo "$USER ALL=(ALL) NOPASSWD: /usr/bin/hostnamectl set-hostname *" \

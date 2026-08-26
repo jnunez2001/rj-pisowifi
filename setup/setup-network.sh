@@ -1034,56 +1034,13 @@ echo "nftables restore service installed" >> $LOG
 # which mode branch actually ran above, and still shows something useful
 # on a single-NIC box or an unusual wiring setup those two variables
 # don't fully capture.
-ISSUE_VERSION=$(grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "$APP_DIR/package.json" 2>/dev/null | sed 's/.*:[[:space:]]*"//;s/"$//')
-[ -z "$ISSUE_VERSION" ] && ISSUE_VERSION="unknown"
-{
-    echo ""
-    # Same branding as the post-login MOTD (/etc/update-motd.d/00-starkfi),
-    # but shown here in /etc/issue too - agetty prints this the instant boot
-    # finishes, before anyone has typed a username, matching how a real
-    # network appliance (e.g. RouterOS) shows its own branding immediately
-    # rather than only after a successful login. Login itself still
-    # requires the real password either way - this only moves where the
-    # branding appears, not the security boundary.
-    printf '\033[36m'
-    cat << 'ISSUELOGO'
-                                                    ,,
- .M"""bgd mm                   `7MM      `7MM"""YMM db
-,MI    "Y MM                     MM        MM    `7
-`MMb.   mmMMmm  ,6"Yb.  `7Mb,od8 MM  ,MP'  MM   d `7MM
-  `YMMNq. MM   8)   MM    MM' "' MM ;Y     MM""MM   MM
-.     `MM MM    ,pm9MM    MM     MM;Mm     MM   Y   MM
-Mb     dM MM   8M   MM    MM     MM `Mb.   MM       MM
-P"Ybmmd"  `Mbmo`Moo9^Yo..JMML. .JMML. YA..JMML.   .JMML.
-ISSUELOGO
-    printf '\033[0m'
-    echo ""
-    echo "Zentry Systems - StarkFi Hotspot Server $ISSUE_VERSION"
-    echo "Copyright (c) $(date +%Y) Zentry Systems. All rights reserved."
-    echo "-----------------------------------------------"
-    FOUND_IP=0
-    ISSUE_PRIMARY_IP=""
-    for ifc in $(ls /sys/class/net/ | grep -vE '^(lo|docker|veth|br-)'); do
-        IP=$(ip -4 -o addr show dev "$ifc" 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | head -1)
-        if [ -n "$IP" ]; then
-            echo "  $ifc: $IP"
-            [ -z "$ISSUE_PRIMARY_IP" ] && ISSUE_PRIMARY_IP="$IP"
-            FOUND_IP=1
-        fi
-    done
-    [ "$FOUND_IP" = "0" ] && echo "  (no IP assigned yet)"
-    echo "-----------------------------------------------"
-    ISSUE_DEVICE_ID=$(grep -o '"id"[[:space:]]*:[[:space:]]*"[^"]*"' /var/lib/rj-pisowifi/.device-identity 2>/dev/null | sed 's/.*:[[:space:]]*"//;s/"$//')
-    [ -n "$ISSUE_DEVICE_ID" ] && echo "  Device ID: $ISSUE_DEVICE_ID"
-    if [ -n "$ISSUE_PRIMARY_IP" ]; then
-        echo "  Admin panel: http://$ISSUE_PRIMARY_IP:3000/admin"
-        echo "  Portal: http://$ISSUE_PRIMARY_IP:3000/portal"
-    else
-        echo "  Admin panel: (unavailable - no IP assigned yet)"
-    fi
-    echo "-----------------------------------------------"
-    echo ""
-} > /etc/issue
+# Extracted to its own script (update-console-banner.sh) rather than
+# inlined here, so hostNetworkService.js can call it again after the real
+# static IP is applied later in boot (that happens when the Node app
+# itself starts, well after this script has already run and written its
+# own snapshot) - otherwise the console kept showing "no IP assigned yet"
+# even once the box was fully up and reachable at its real static IP.
+bash "$APP_DIR/setup/update-console-banner.sh"
 echo "Console IP banner updated (/etc/issue)" >> $LOG
 
 # The "<hostname> login:" prompt agetty prints after /etc/issue comes from
