@@ -3903,9 +3903,25 @@ router.post('/dns-filter/update-lists', adminAuth, (req, res) => {
 // could land mid-renegotiation while this script's own interface-identity
 // detection logic was still bouncing the link, intermittently seeing no
 // IPv4 address on the right interface at all.
+// Bug found live: two settings saves fired seconds apart (e.g. a fast
+// double-click on the DNS Filtering toggle) each spawned their own
+// overlapping `sudo bash setup-network.sh` run. Both processes' own
+// interface-identity detection independently pkill+restart dhclient on
+// the SAME interface, fighting each other - confirmed live via
+// journalctl, one run took 16+ seconds to finish (usually well under a
+// second) with repeated DHCPDISCOVER/DHCPACK churn the whole time, long
+// enough to blow past both the retry window below AND get close to this
+// function's own 20s timeout. A second call while one is already running
+// now shares that same in-flight run instead of starting a competing one.
+let inFlightNetworkSetup = null;
+
 function applyNetworkSetup(callback) {
+  if (inFlightNetworkSetup) {
+    if (callback) inFlightNetworkSetup.then(callback);
+    return inFlightNetworkSetup;
+  }
   const scriptPath = path.join(__dirname, '../../setup/setup-network.sh');
-  return new Promise((resolve) => {
+  inFlightNetworkSetup = new Promise((resolve) => {
     // Bug: only err.message was ever logged on failure - that's just
     // "Command failed: sudo bash .../setup-network.sh", the exit code and
     // reason (a real script error, a timeout, sudo denying it) with no way
@@ -3918,10 +3934,12 @@ function applyNetworkSetup(callback) {
         if (stderr) console.error('setup-network.sh stderr:', stderr);
         if (stdout) console.error('setup-network.sh stdout:', stdout);
       }
+      inFlightNetworkSetup = null;
       if (callback) callback(err);
       resolve(err);
     });
   });
+  return inFlightNetworkSetup;
 }
 
 // GET /api/admin/network/interfaces, physical interfaces available as a
