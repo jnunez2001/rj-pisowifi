@@ -228,7 +228,7 @@ router.post('/login', (req, res) => {
   const ip = getRealClientIp(req);
   const spamCheck = checkSpam(`admin-auth:${ip}`);
   if (spamCheck.blocked) {
-    return res.status(429).json({ success: false, message: spamCheck.message });
+    return res.status(429).json({ success: false, message: spamCheck.message, remaining: spamCheck.remaining });
   }
 
   const { password, otp_token } = req.body || {};

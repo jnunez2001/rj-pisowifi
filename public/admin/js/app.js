@@ -63,7 +63,11 @@ async function doLogin() {
       return;
     }
     if (!loginData.success) {
-      showLoginError(loginData.message || 'Invalid username or password.');
+      if (loginRes.status === 429 && loginData.remaining) {
+        showLoginRateLimitCountdown(loginData.remaining);
+      } else {
+        showLoginError(loginData.message || 'Invalid username or password.');
+      }
       return;
     }
 
@@ -106,11 +110,42 @@ async function doLogin() {
   }
 }
 
+let loginRateLimitInterval = null;
+
 function showLoginError(msg) {
+  if (loginRateLimitInterval) {
+    clearInterval(loginRateLimitInterval);
+    loginRateLimitInterval = null;
+  }
   const err = document.getElementById('loginError');
   document.getElementById('loginErrorMsg').textContent = msg;
   err.style.display = 'flex';
   setTimeout(() => err.style.display = 'none', 3000);
+}
+
+// Ticks down live instead of freezing the "Try again in N seconds" message
+// at whatever N the server happened to return, which used to sit there
+// stale for the whole block since the popup only ever showed once.
+function showLoginRateLimitCountdown(seconds) {
+  if (loginRateLimitInterval) clearInterval(loginRateLimitInterval);
+  let remaining = seconds;
+  const err = document.getElementById('loginError');
+  const msgEl = document.getElementById('loginErrorMsg');
+  const render = () => {
+    msgEl.textContent = `Too many attempts. Try again in ${remaining} second${remaining === 1 ? '' : 's'}.`;
+  };
+  render();
+  err.style.display = 'flex';
+  loginRateLimitInterval = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      clearInterval(loginRateLimitInterval);
+      loginRateLimitInterval = null;
+      err.style.display = 'none';
+      return;
+    }
+    render();
+  }, 1000);
 }
 
 function togglePasswordView() {
