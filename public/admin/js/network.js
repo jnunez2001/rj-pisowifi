@@ -1158,8 +1158,22 @@ async function loadLocalInterfaces(savedMac) {
 
     // Only show the picker when there's genuine ambiguity. One detected
     // connection means there's nothing to choose, so stay out of the way.
+    //
+    // Bug found live: on a single-NIC box this left server_lan_mac
+    // permanently blank forever - nothing else ever wrote it, since the
+    // only other writer is this same picker's save button, which the admin
+    // never sees. getOwnLanIp() (setPortalDnsName, setDnsFilterServers)
+    // requires server_lan_mac to be set and just silently no-ops without
+    // it, so on the single-NIC case (the common one) Portal Hostname and
+    // DNS Filtering could never actually apply on the router, with no
+    // error shown anywhere pointing at this. Auto-save the one obvious
+    // choice instead of requiring a picker nobody would ever see.
     if (data.interfaces.length <= 1) {
       group.style.display = 'none';
+      const only = data.interfaces[0];
+      if (only && only.mac && only.mac !== savedMac) {
+        await apiCall('POST', '/api/admin/settings', { server_lan_mac: only.mac });
+      }
       return;
     }
 
