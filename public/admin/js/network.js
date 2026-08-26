@@ -1373,30 +1373,41 @@ function setNetworkMode(mode) {
   onNetworkModeChange();
 }
 
+// Bug found live, twice: this used to also submit server_lan_mac
+// alongside the router credentials. Whether that was correct depended on
+// a DOM visibility check that could be stale (leftover from a previous
+// page load, or just wrong timing) - confirmed live, it kept silently
+// wiping the auto-saved MAC back to blank on ordinary credential saves,
+// breaking Portal Hostname and DNS Filtering's router-side apply each
+// time. server_lan_mac is now owned entirely by loadLocalInterfaces()'s
+// auto-save and the picker's own onchange (saveServerLanMac() below) -
+// this function no longer touches it at all, so there's no path left
+// where saving a router password can accidentally blank it out.
 async function saveNetworkSettings() {
   const mode = document.querySelector('input[name="networkMode"]:checked').value;
   try {
-    const payload = {
+    const data = await apiCall('POST', '/api/admin/settings', {
       network_mode: mode,
       mikrotik_ip: document.getElementById('mikrotikIp').value,
       mikrotik_user: document.getElementById('mikrotikUser').value,
       mikrotik_pass: document.getElementById('mikrotikPass').value,
       mikrotik_interface: document.getElementById('mikrotikInterface').value,
       mikrotik_ssl: document.getElementById('mikrotikSsl').checked ? '1' : '0',
-    };
-    // Bug found live: on a single-NIC box the picker stays hidden
-    // (loadLocalInterfaces() auto-saves server_lan_mac directly via API
-    // instead), but this always sent the select's value regardless - an
-    // empty hidden select overwrote that auto-saved MAC back to blank on
-    // every single "Save Network Settings" click, breaking Portal
-    // Hostname and DNS Filtering again each time. Only include it when
-    // the picker is actually visible (genuine multi-NIC choice).
-    const group = document.getElementById('serverLanMacGroup');
-    if (group && group.style.display !== 'none') {
-      payload.server_lan_mac = document.getElementById('serverLanMac').value;
-    }
-    const data = await apiCall('POST', '/api/admin/settings', payload);
+    });
     if (data.success) showToast('Network settings saved!');
+    else showToast(data.message || 'Failed to save.', 'error');
+  } catch(e) { showToast('Server error, please try again.', 'error'); }
+}
+
+// Multi-NIC case only (picker visible) - saves the instant a choice is
+// made instead of folding it into the unrelated "Save Network Settings"
+// button above, so there's exactly one writer for this setting: this
+// function, and the single-NIC auto-save in loadLocalInterfaces().
+async function saveServerLanMac() {
+  const value = document.getElementById('serverLanMac').value;
+  try {
+    const data = await apiCall('POST', '/api/admin/settings', { server_lan_mac: value });
+    if (data.success) showToast('Server network connection saved!');
     else showToast(data.message || 'Failed to save.', 'error');
   } catch(e) { showToast('Server error, please try again.', 'error'); }
 }
