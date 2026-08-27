@@ -404,16 +404,33 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
       // shares what's left at priority=8. Total throughput still never
       // exceeds the parent's max-limit - this changes ordering under
       // contention, not the cap itself.
-      const parentWords = ['/queue/simple/add', `=name=${baseName}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`];
-      if (placeBeforeId) parentWords.push(`=place-before=${placeBeforeId}`);
-      if (burstMbps) {
+      // Bug found live ("temporary boost not applying"): burst gets
+      // silently ignored (burstMbps set to null above) whenever it's
+      // <= the cap - correct - but this used to just OMIT the burst-*
+      // words in that case, rather than explicitly zeroing them. That's
+      // fine on a genuinely fresh /add (nothing to conflict with), but
+      // deleteQueue() right above this is the only thing standing between
+      // "fresh" and "stale" - any gap there (a remove that silently
+      // failed, a race between two overlapping re-applies) leaves the
+      // queue's OLD burst-limit in place from a previous call. RouterOS
+      // then rejects the /set fallback outright ("download-burst-limit
+      // less than download-max-limit") the moment a new, smaller max-limit
+      // is applied under that stale higher burst-limit - confirmed live,
+      // exactly matching the observed failure. Always sending explicit
+      // burst-limit=0/0 (i.e. "no burst") when burst isn't wanted this
+      // round means the router's state is never ambiguous, regardless of
+      // whether deleteQueue() actually ran cleanly beforehand.
+      const burstWords = burstMbps ? [
         // burst-threshold = the sustained cap itself: bursting is allowed
-        // only while this client's own average stays at/below what they're
-        // already paying for, not above it.
-        parentWords.push(`=burst-limit=${burstMbps}M/${burstMbps}M`);
-        parentWords.push(`=burst-threshold=${upload}M/${download}M`);
-        parentWords.push(`=burst-time=${burstSeconds}s/${burstSeconds}s`);
-      }
+        // only while this client's own average stays at/below what
+        // they're already paying for, not above it.
+        `=burst-limit=${burstMbps}M/${burstMbps}M`,
+        `=burst-threshold=${upload}M/${download}M`,
+        `=burst-time=${burstSeconds}s/${burstSeconds}s`,
+      ] : ['=burst-limit=0/0', '=burst-threshold=0/0', '=burst-time=0s/0s'];
+
+      const parentWords = ['/queue/simple/add', `=name=${baseName}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`, ...burstWords];
+      if (placeBeforeId) parentWords.push(`=place-before=${placeBeforeId}`);
       await addOrUpdateQueue(client, parentWords);
 
       // Bug found live: burst was configured on the parent queue only. Real
@@ -424,11 +441,11 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
       // a child's flat max-limit is the real bottleneck regardless of what
       // the parent allows, silently capping every client at the base rate -
       // exactly the "still not bursting, maintained the Xmbps cap" symptom.
-      const childBurstWords = burstMbps ? [
-        `=burst-limit=${burstMbps}M/${burstMbps}M`,
-        `=burst-threshold=${upload}M/${download}M`,
-        `=burst-time=${burstSeconds}s/${burstSeconds}s`,
-      ] : [];
+      // Reuses the same always-explicit burstWords (never omitted) as the
+      // parent queue above, for the same reason - a child queue can just
+      // as easily be left with a stale higher burst-limit from a previous
+      // call otherwise.
+      const childBurstWords = burstWords;
 
       // Bug found live (matches place-before's own history above): a child
       // queue's =parent= alone isn't enough for RouterOS to accept it on
