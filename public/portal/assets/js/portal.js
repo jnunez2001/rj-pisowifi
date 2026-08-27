@@ -569,12 +569,20 @@ async function handleInsertCoin(mode) {
   const modal = document.getElementById('coinModal');
   modal.classList.toggle('coin-modal-premium', mode === 'premium' || mode === 'convert');
   const title = document.getElementById('coinModalTitle');
+  // A Converted customer pressing what's now their ONLY "add time" button
+  // still goes through mode 'premium' server-side (same crediting path,
+  // correct Premium pricing) - but calling it "PREMIUM BOOST" here is
+  // wrong once there's no baseline speed left to boost FROM, they're
+  // already permanently on Premium. Same coin flow, different framing.
+  const alreadyConvertedForModal = currentSession && currentSession.converted_to_premium;
   title.innerHTML = mode === 'convert'
     ? '<i class="fas fa-bolt"></i>&nbsp; INSERT COIN (CONVERT TO PREMIUM)'
     : mode === 'convert_down'
       ? '<i class="fas fa-arrow-down"></i>&nbsp; INSERT COIN (CONVERT TO REGULAR)'
       : mode === 'premium'
-        ? '<i class="fas fa-bolt"></i>&nbsp; INSERT COIN (PREMIUM BOOST)'
+        ? (alreadyConvertedForModal
+            ? '<i class="fas fa-bolt"></i>&nbsp; INSERT COIN TO ADD TIME'
+            : '<i class="fas fa-bolt"></i>&nbsp; INSERT COIN (PREMIUM BOOST)')
         : '<i class="fas fa-coins"></i>&nbsp; INSERT COIN';
   renderCoinRatesList();
 
@@ -605,6 +613,9 @@ async function handleInsertCoin(mode) {
       stackNotice.style.display = 'block';
     } else if (mode === 'convert_down') {
       stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This switches your speed back to Regular for the rest of your session. Your remaining time converts to its Regular-speed equivalent (a bit more, since Regular time costs less per minute) and the new coin\'s time is added on top.';
+      stackNotice.style.display = 'block';
+    } else if (mode === 'premium' && alreadyConvertedForModal) {
+      stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; Adds more time at your current Premium speed.';
       stackNotice.style.display = 'block';
     } else if (mode === 'premium' && hasRegularSessionRunning && !alreadyHasPremium) {
       stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This adds temporary high-speed time on top of your current session, it does not replace your regular minutes.';
