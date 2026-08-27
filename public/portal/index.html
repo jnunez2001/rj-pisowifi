@@ -147,7 +147,7 @@
       <button class="btn btn-premium" id="premiumBtnConnected" onclick="handleInsertCoin('premium')" style="display:none;">
         <i class="fas fa-bolt"></i>&nbsp; <span id="premiumBtnConnectedLabel">BOOST (TEMPORARY HIGH SPEED)</span>
       </button>
-      <button class="btn btn-premium" id="convertBtnConnected" onclick="handleInsertCoin('convert')" style="display:none;" title="Permanently switch your speed to Premium for the rest of your session">
+      <button class="btn btn-premium" id="convertBtnConnected" onclick="confirmConvertToPremium()" style="display:none;" title="Permanently switch your speed to Premium for the rest of your session">
         <i class="fas fa-arrow-up-right-dots"></i>&nbsp; CONVERT TO PREMIUM
       </button>
       <!-- Only shown when the operator has enabled it (Settings > Allow
@@ -268,6 +268,45 @@
 
         <div id="coinRatesList"></div>
 
+      </div>
+    </div>
+
+  <!-- CONVERT TO PREMIUM - CONFIRM MODAL -->
+    <div class="modal-overlay" id="convertConfirmModal">
+      <div class="modal-box convert-confirm-box">
+        <div class="modal-handle"></div>
+        <div class="convert-confirm-icon"><i class="fas fa-bolt"></i></div>
+        <h3 class="convert-confirm-title">Switch to a high-speed priority connection?</h3>
+        <p class="convert-confirm-body" id="convertConfirmBody">
+          Your remaining time converts to its Premium-speed equivalent, and stays at Premium speed for the rest of your session.
+        </p>
+        <div class="convert-confirm-actions">
+          <button class="btn btn-outline" onclick="declineConvertToPremium()">NOT NOW</button>
+          <button class="btn btn-premium" onclick="acceptConvertToPremium()">YES, CONVERT</button>
+        </div>
+      </div>
+    </div>
+
+  <!-- CONVERT TO PREMIUM - CONVERSION ANIMATION OVERLAY -->
+    <div class="convert-anim-overlay" id="convertAnimOverlay">
+      <canvas id="confettiCanvas"></canvas>
+      <div class="convert-anim-card">
+        <div class="convert-anim-bolt"><i class="fas fa-bolt"></i></div>
+        <div class="convert-anim-label">CONVERTING TO PREMIUM</div>
+        <div class="convert-anim-row">
+          <div class="convert-anim-stat">
+            <div class="convert-anim-stat-value" id="convertAnimMinutes">--</div>
+            <div class="convert-anim-stat-label">minutes</div>
+          </div>
+          <i class="fas fa-arrow-right-long convert-anim-arrow"></i>
+          <div class="convert-anim-stat convert-anim-stat-gold">
+            <div class="convert-anim-stat-value" id="convertAnimMbps">--</div>
+            <div class="convert-anim-stat-label">Mbps</div>
+          </div>
+        </div>
+        <div class="convert-anim-done" id="convertAnimDone">
+          <i class="fas fa-circle-check"></i>&nbsp; You're on Premium speed!
+        </div>
       </div>
     </div>
 

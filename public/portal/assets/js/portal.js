@@ -545,6 +545,131 @@ async function cancelPendingGpioCoin() {
 // on once inserted.
 let insertingMode = 'regular';
 
+// ===== CONVERT TO PREMIUM: CONFIRM STEP =====
+// A coin, once physically inserted, is real money - there's no "cancel and
+// get it back." So the accept/decline choice has to happen BEFORE any
+// money changes hands, not after. Declining doesn't cancel anything, it
+// just routes the very same "insert a coin" action into the plain Regular
+// flow instead of Convert, so nothing is lost either way.
+function confirmConvertToPremium() {
+  if (!convertEligible()) return; // button should already be disabled/hidden
+  const canConvertBack = portalSettings.allow_premium_to_regular_convert === '1';
+  const body = document.getElementById('convertConfirmBody');
+  if (body) {
+    body.innerHTML = 'Your remaining time converts to its Premium-speed equivalent, and stays at Premium speed for the rest of your session.' +
+      (canConvertBack
+        ? ' You can switch back to Regular speed later if you change your mind.'
+        : ' <strong>This cannot be undone for the rest of your session.</strong>');
+  }
+  document.getElementById('convertConfirmModal').classList.add('show');
+}
+
+function declineConvertToPremium() {
+  document.getElementById('convertConfirmModal').classList.remove('show');
+  handleInsertCoin('regular');
+}
+
+function acceptConvertToPremium() {
+  document.getElementById('convertConfirmModal').classList.remove('show');
+  handleInsertCoin('convert');
+}
+
+// Animated "N minutes -> M Mbps" counter, then confetti, then auto-closes.
+// Purely a celebratory confirmation - the actual conversion already
+// happened server-side (this fires off the resulting session data), so
+// there's nothing to wait on or retry here.
+function playConversionAnimation(prevSession, newSession) {
+  const overlay = document.getElementById('convertAnimOverlay');
+  const minutesEl = document.getElementById('convertAnimMinutes');
+  const mbpsEl = document.getElementById('convertAnimMbps');
+  const doneEl = document.getElementById('convertAnimDone');
+  if (!overlay || !minutesEl || !mbpsEl) return;
+
+  playSound('success');
+  doneEl.classList.remove('show');
+  overlay.classList.add('show');
+
+  const targetMinutes = Math.round(newSession.minutes_remaining || 0);
+  const targetMbps = newSession.premium_download_mbps || 0;
+  const startMinutes = Math.round(prevSession.minutes_remaining || 0);
+
+  const durationMs = 1100;
+  const startTime = performance.now();
+  function tick(now) {
+    const t = Math.min(1, (now - startTime) / durationMs);
+    const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+    minutesEl.textContent = Math.round(startMinutes + (targetMinutes - startMinutes) * eased);
+    mbpsEl.textContent = Math.round(targetMbps * eased);
+    if (t < 1) {
+      requestAnimationFrame(tick);
+    } else {
+      minutesEl.textContent = targetMinutes;
+      mbpsEl.textContent = targetMbps;
+      doneEl.classList.add('show');
+      launchConfetti();
+    }
+  }
+  requestAnimationFrame(tick);
+
+  setTimeout(() => overlay.classList.remove('show'), 3800);
+}
+
+// Lightweight self-contained confetti burst - no external library, this
+// app has no CDN access from a customer-facing captive-portal page (real
+// devices often have no general internet yet at this exact moment, only
+// walled-garden access to this server itself).
+function launchConfetti() {
+  const canvas = document.getElementById('confettiCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = canvas.clientWidth * dpr;
+  canvas.height = canvas.clientHeight * dpr;
+  ctx.scale(dpr, dpr);
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+
+  const colors = ['#d4af37', '#f9d873', '#ffffff', '#7ee787', '#5ec8ff'];
+  const pieces = Array.from({ length: 140 }, () => ({
+    x: w / 2 + (Math.random() - 0.5) * 60,
+    y: h * 0.35 + (Math.random() - 0.5) * 40,
+    vx: (Math.random() - 0.5) * 9,
+    vy: -Math.random() * 9 - 4,
+    size: Math.random() * 7 + 4,
+    color: colors[Math.floor(Math.random() * colors.length)],
+    rotation: Math.random() * Math.PI * 2,
+    rotationSpeed: (Math.random() - 0.5) * 0.3,
+    gravity: 0.28 + Math.random() * 0.12,
+  }));
+
+  const startTime = performance.now();
+  const durationMs = 2600;
+  function frame(now) {
+    const elapsed = now - startTime;
+    ctx.clearRect(0, 0, w, h);
+    for (const p of pieces) {
+      p.vy += p.gravity * 0.15;
+      p.x += p.vx * 0.6;
+      p.y += p.vy * 0.6;
+      p.rotation += p.rotationSpeed;
+      const fade = Math.max(0, 1 - elapsed / durationMs);
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rotation);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+      ctx.restore();
+    }
+    if (elapsed < durationMs) {
+      requestAnimationFrame(frame);
+    } else {
+      ctx.clearRect(0, 0, w, h);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
 async function handleInsertCoin(mode) {
   if (isBlocked) return;
   if (mode === 'convert' && !convertEligible()) return; // button should already be disabled/hidden
@@ -978,6 +1103,15 @@ function updateUI(session) {
     }
     updatePausesRemainingHint(session);
     updateConvertButton();
+
+    // Fires exactly once, the moment a session actually flips from not-
+    // converted to converted - catches the real server-confirmed switch
+    // (after the coin's pending window closes) rather than the instant
+    // Accept was tapped, so this plays even if the tab was backgrounded
+    // or the poll landed a beat late.
+    if (prev && !prev.converted_to_premium && session.converted_to_premium) {
+      playConversionAnimation(prev, session);
+    }
 
     document.getElementById('sectionDisconnected').style.display = 'none';
     document.getElementById('sectionConnected').style.display = 'block';
