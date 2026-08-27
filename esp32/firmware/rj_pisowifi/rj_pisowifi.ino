@@ -76,7 +76,14 @@ void loop() {
   // Skip while a coin is actively being processed or the relay is armed -
   // an OTA update mid-insertion would be bad timing for a customer paying
   // right now, and this check can safely wait for the next interval.
-  if (!setupMode && !relayActive && !processingCoin &&
+  //
+  // Also skips while the setup button is held (btnHeld) - matches the same
+  // fix in the ESP8266 firmware. checkForFirmwareUpdate()'s version check
+  // is a blocking HTTP call (ota.cpp), so firing mid-hold freezes the
+  // entire loop() - including digitalRead(SETUP_BTN) - for up to the
+  // request's full timeout, on a button whose whole job is reading a
+  // precise continuous hold.
+  if (!setupMode && !relayActive && !processingCoin && !btnHeld &&
       millis() - lastOTACheck >= OTA_CHECK_INTERVAL_MS) {
     lastOTACheck = millis();
     checkForFirmwareUpdate();

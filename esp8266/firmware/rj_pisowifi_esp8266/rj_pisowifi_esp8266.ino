@@ -108,7 +108,19 @@ void loop() {
   // Skip while a coin is actively being processed or the relay is armed -
   // an OTA update mid-insertion would be bad timing for a customer paying
   // right now, and this check can safely wait for the next interval.
-  if (!setupMode && !relayActive && !processingCoin &&
+  //
+  // Bug found live: also needs to skip while the setup button is being
+  // held (btnHeld). checkForFirmwareUpdate()'s version check is a
+  // BLOCKING HTTP call with up to a 5-second timeout (ota.cpp) - if it
+  // fires mid-hold, the entire loop() stalls for up to 5 seconds with no
+  // digitalRead(SETUP_BTN) happening at all, on a device whose setup mode
+  // specifically requires reading a continuous 5-second hold. Whether
+  // that stall makes the hold appear to silently do nothing (frustrated
+  // release before the check returns) or just delays it unpredictably,
+  // neither is acceptable for a button whose entire job is a precise
+  // timed hold - skip the check outright while btnHeld is true, same as
+  // the existing relay/coin exceptions above.
+  if (!setupMode && !relayActive && !processingCoin && !btnHeld &&
       millis() - lastOTACheck >= OTA_CHECK_INTERVAL_MS) {
     lastOTACheck = millis();
     checkForFirmwareUpdate();

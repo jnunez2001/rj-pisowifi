@@ -54,7 +54,15 @@ void checkForFirmwareUpdate() {
   String versionUrl = "http://" + config.server_ip + ":" +
                        String(config.server_port) + "/api/admin/vendo/firmware/version";
   versionCheck.begin(versionClient, versionUrl);
-  versionCheck.setTimeout(5000);
+  // Was 5000ms - this is a blocking call inside the main loop() with no
+  // yield, so the full timeout duration freezes coin processing, the web
+  // server, and setup-button detection on a slow/unreachable server. A
+  // real version check response is tiny and fast on a healthy LAN;
+  // shortening this reduces worst-case freeze time without meaningfully
+  // risking a false "no update" read on a server that's merely a little
+  // slow (see also the btnHeld skip added in the main loop for this same
+  // reason).
+  versionCheck.setTimeout(2000);
   int code = versionCheck.GET();
   if (code != 200) {
     versionCheck.end();
