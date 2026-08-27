@@ -89,6 +89,7 @@ router.get('/detect', async (req, res) => {
   detectRateLimit.set(ip, Date.now());
 
   const mac = await getMacFromIp(ip);
+  console.log(`[Portal /detect DEBUG] socket ip="${ip}" -> resolved mac="${mac}"`);
 
   return res.json({
     success: !!mac,
