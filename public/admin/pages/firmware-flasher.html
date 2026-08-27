@@ -1,54 +1,41 @@
 <style>
-/* Scoped to this page only - Serial Monitor's "terminal" look. */
-@keyframes monitorBorderSpin {
-  0% { background-position: 0% 50%; }
-  100% { background-position: 200% 50%; }
-}
-@keyframes monitorDotPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(56, 224, 123, 0.6); }
-  70% { box-shadow: 0 0 0 8px rgba(56, 224, 123, 0); }
-}
+/* Scoped to this page only - Serial Monitor styled like the device's own
+   physical character LCD (the same kind this firmware drives via
+   lcdPrint()): a plain grey bezel frame around a monochrome green-on-black
+   panel. Static - no animated/color-shifting border. */
 .monitor-card {
-  position: relative;
-  border-radius: 14px;
-  padding: 2px;
-  background: linear-gradient(120deg, #22d3ee, #38e07b, #a78bfa, #22d3ee);
-  background-size: 300% 100%;
-  animation: monitorBorderSpin 6s linear infinite;
   margin-top: 16px;
-}
-.monitor-card-inner {
   background: var(--bg-card);
+  border: 1px solid var(--border-color);
   border-radius: 12px;
   padding: 20px;
 }
-.monitor-terminal-chrome {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 12px;
-  background: #161b22;
-  border-radius: 8px 8px 0 0;
-  border: 1px solid #30363d;
-  border-bottom: none;
+.monitor-lcd-frame {
+  background: linear-gradient(180deg, #4b4f56, #34373c);
+  border: 1px solid #23262a;
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -2px 4px rgba(0,0,0,0.4), 0 2px 6px rgba(0,0,0,0.25);
 }
-.monitor-terminal-dot { width: 10px; height: 10px; border-radius: 50%; }
+.monitor-lcd-screen {
+  background: #0b1f14;
+  border: 1px solid #06120b;
+  border-radius: 4px;
+  box-shadow: inset 0 0 14px rgba(0,0,0,0.6);
+  padding: 12px 14px;
+}
+#monitorLog {
+  color: #7cf59a;
+  text-shadow: 0 0 3px rgba(124, 245, 154, 0.35);
+}
 .monitor-live-dot {
-  width: 9px; height: 9px;
+  width: 8px; height: 8px;
   border-radius: 50%;
   background: #6b7280;
   display: inline-block;
   margin-right: 6px;
-  transition: background 0.2s;
 }
-.monitor-live-dot.live {
-  background: #38e07b;
-  animation: monitorDotPulse 1.6s infinite;
-}
-#monitorLog {
-  border: 1px solid #30363d;
-  border-radius: 0 0 8px 8px !important;
-}
+.monitor-live-dot.live { background: #38e07b; }
 </style>
 
 <div class="zf3-header">
@@ -109,31 +96,27 @@
        Arduino IDE's Serial Monitor shows, without needing Arduino IDE
        installed at all. -->
   <div class="monitor-card">
-    <div class="monitor-card-inner">
-      <div class="zf3-card-title" style="margin-bottom:10px;"><i class="fas fa-terminal"></i>&nbsp; Serial Monitor</div>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Watches the device's live debug output over USB - useful for seeing exactly what happens during boot, WiFi connection, or setup-button presses. Uses a separate USB connection from Flash above; disconnect one before using the other.</p>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
-        <button class="btn btn-secondary" id="monitorConnectBtn" onclick="monitorConnect()">
-          <i class="fas fa-plug"></i> Connect
-        </button>
-        <button class="btn btn-secondary" id="monitorDisconnectBtn" onclick="monitorDisconnect()" style="display:none;">
-          <i class="fas fa-plug-circle-xmark"></i> Disconnect
-        </button>
-        <button class="btn btn-secondary" id="monitorClearBtn" onclick="monitorClear()">
-          <i class="fas fa-eraser"></i> Clear
-        </button>
-        <span style="font-size:13px;color:var(--text-muted);display:flex;align-items:center;">
-          <span class="monitor-live-dot" id="monitorLiveDot"></span>
-          <span id="monitorStatus">Not connected</span>
-        </span>
+    <div class="zf3-card-title" style="margin-bottom:10px;"><i class="fas fa-display"></i>&nbsp; Serial Monitor</div>
+    <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">Watches the device's live debug output over USB - useful for seeing exactly what happens during boot, WiFi connection, or setup-button presses. Uses a separate USB connection from Flash above; disconnect one before using the other.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+      <button class="btn btn-secondary" id="monitorConnectBtn" onclick="monitorConnect()">
+        <i class="fas fa-plug"></i> Connect
+      </button>
+      <button class="btn btn-secondary" id="monitorDisconnectBtn" onclick="monitorDisconnect()" style="display:none;">
+        <i class="fas fa-plug-circle-xmark"></i> Disconnect
+      </button>
+      <button class="btn btn-secondary" id="monitorClearBtn" onclick="monitorClear()">
+        <i class="fas fa-eraser"></i> Clear
+      </button>
+      <span style="font-size:13px;color:var(--text-muted);display:flex;align-items:center;">
+        <span class="monitor-live-dot" id="monitorLiveDot"></span>
+        <span id="monitorStatus">Not connected</span>
+      </span>
+    </div>
+    <div class="monitor-lcd-frame">
+      <div class="monitor-lcd-screen">
+        <pre id="monitorLog" style="background:transparent;padding:0;font-size:13px;height:260px;overflow-y:auto;white-space:pre-wrap;margin:0;font-family:monospace;line-height:1.5;">Click Connect, then power-cycle or reset the device to see its boot log.</pre>
       </div>
-      <div class="monitor-terminal-chrome">
-        <span class="monitor-terminal-dot" style="background:#ff5f56;"></span>
-        <span class="monitor-terminal-dot" style="background:#ffbd2e;"></span>
-        <span class="monitor-terminal-dot" style="background:#27c93f;"></span>
-        <span style="font-size:11px;color:#8b949e;margin-left:8px;font-family:monospace;">vendo-serial</span>
-      </div>
-      <pre id="monitorLog" style="background:#0d1117;color:#c9d1d9;padding:12px;font-size:12px;height:280px;overflow-y:auto;white-space:pre-wrap;margin:0;font-family:monospace;">Click Connect, then power-cycle or reset the device to see its boot log.</pre>
     </div>
   </div>
 </div>
