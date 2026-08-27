@@ -593,7 +593,15 @@ async function handleInsertCoin(mode) {
     new Date(currentSession.premium_expires_at).getTime() > Date.now();
   if (stackNotice) {
     if (mode === 'convert') {
-      stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This permanently switches your speed to Premium for the rest of your session. Your remaining time converts to its Premium-speed equivalent (a bit less, since Premium time costs more per minute) and the new coin\'s time is added on top.';
+      // Whether this is reversible later depends entirely on the
+      // operator's own setting (Settings > Allow Premium-to-Regular
+      // Convert) - showing a fixed "no going back" warning regardless
+      // would be flatly wrong on any install where that's turned on.
+      const canConvertBack = portalSettings.allow_premium_to_regular_convert === '1';
+      stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This permanently switches your speed to Premium for the rest of your session. Your remaining time converts to its Premium-speed equivalent (a bit less, since Premium time costs more per minute) and the new coin\'s time is added on top.' +
+        (canConvertBack
+          ? ' You can switch back to Regular speed later if you change your mind.'
+          : ' <strong>This cannot be undone for the rest of your session.</strong>');
       stackNotice.style.display = 'block';
     } else if (mode === 'convert_down') {
       stackNotice.innerHTML = '<i class="fas fa-circle-info"></i>&nbsp; This switches your speed back to Regular for the rest of your session. Your remaining time converts to its Regular-speed equivalent (a bit more, since Regular time costs less per minute) and the new coin\'s time is added on top.';
@@ -1139,12 +1147,47 @@ function buildRatesUI(rates) {
 function updateConvertButton() {
   const hasPremium = premiumRates.length > 0;
   const eligible = hasPremium && convertEligible();
+  const alreadyConverted = !!(currentSession && currentSession.converted_to_premium);
+
+  // Once a customer has actually Converted (permanent for the rest of the
+  // session), converting again makes no sense - hide that button. A plain
+  // Boost purchase (temporary, stacks on top) never sets converted_to_premium,
+  // so this only fires for a real Convert, not every Premium session.
   ['convertBtn', 'convertBtnConnected'].forEach(id => {
     const btn = document.getElementById(id);
     if (!btn) return;
-    btn.style.display = hasPremium ? 'block' : 'none';
+    btn.style.display = (hasPremium && !alreadyConverted) ? 'block' : 'none';
     btn.disabled = !eligible;
   });
+
+  // Bug found live: a Converted customer's plain "Insert Coin to Add Time"
+  // button still credited REGULAR-priced minutes, which then rode on the
+  // Premium speed for free until the session's own premium window would
+  // otherwise have ended (correct in principle - speed is a property of
+  // the live connection, not tied to which coin paid for which minute -
+  // but confusing and easy to read as a bug from the operator side, and a
+  // real revenue gap since Regular-priced time is quietly getting
+  // Premium-priced treatment). Once truly Converted, the portal should
+  // only offer PREMIUM-priced ways to add more time, not a cheaper
+  // regular option sitting right next to it - hide the regular button
+  // entirely and repurpose the existing Boost button (same coin flow,
+  // Premium rates) as the one and only "add time" action, relabeled since
+  // "Boost (temporary)" no longer describes what it does for someone
+  // already permanently on Premium.
+  const insertBtnConnected = document.getElementById('insertBtnConnected');
+  const premiumBtnConnected = document.getElementById('premiumBtnConnected');
+  const premiumBtnConnectedLabel = document.getElementById('premiumBtnConnectedLabel');
+  if (insertBtnConnected && alreadyConverted) {
+    insertBtnConnected.style.display = 'none';
+  }
+  if (premiumBtnConnected && premiumBtnConnectedLabel) {
+    if (alreadyConverted) {
+      premiumBtnConnected.style.display = hasPremium ? 'block' : 'none';
+      premiumBtnConnectedLabel.textContent = 'INSERT COIN TO ADD TIME';
+    } else {
+      premiumBtnConnectedLabel.textContent = 'BOOST (TEMPORARY HIGH SPEED)';
+    }
+  }
 
   // Convert-back-to-Regular only shows when the operator has explicitly
   // turned it on AND this specific session's elevated speed actually came
@@ -1152,7 +1195,7 @@ function updateConvertButton() {
   const downBtn = document.getElementById('convertDownBtnConnected');
   if (downBtn) {
     const show = portalSettings.allow_premium_to_regular_convert === '1' &&
-      currentSession && currentSession.converted_to_premium && standardRates.length > 0;
+      alreadyConverted && standardRates.length > 0;
     downBtn.style.display = show ? 'block' : 'none';
   }
 }
