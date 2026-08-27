@@ -160,9 +160,29 @@ async function startTimer() {
         AND is_paused = 0
       `).all(expiryCutoff);
 
+      // Bug found live: a vendo (coin slot relay) device's own MAC somehow
+      // ended up with a regular time-limited session, same as any paying
+      // customer's. restoreTrustedDevices() above only reapplies a trusted
+      // device's access once, at server boot - it has no ongoing say over
+      // this cron's expiry sweep, so once that session's expires_at passed,
+      // this would have blocked the vendo's own network access exactly
+      // like it does any expired customer, breaking coin acceptance for
+      // every customer until someone noticed and manually intervened. A
+      // vendo's own device should never be subject to pay-per-time expiry
+      // at all - skip any session whose MAC is a registered/adopted vendo,
+      // regardless of how it ended up with one.
+      const adoptedVendoMacs = new Set(
+        db.prepare("SELECT mac_address FROM vendos WHERE status = 'adopted'").all().map((v) => v.mac_address)
+      );
+
       for (const session of expiredSessions) {
         // Skip if already being expired
         if (expiringNow.has(session.voucher_code)) continue;
+
+        if (adoptedVendoMacs.has(session.mac_address)) {
+          console.warn(`⚠️ Skipping expiry for ${session.voucher_code} - ${session.mac_address} is an adopted vendo device, not a customer`);
+          continue;
+        }
 
         expiringNow.add(session.voucher_code);
         console.log(`⏰ Expiring: ${session.voucher_code} (${session.mac_address})`);
