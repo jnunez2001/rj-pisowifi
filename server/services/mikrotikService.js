@@ -338,12 +338,41 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
       if (lease.server) {
         const bridgeName = lease.server.replace(/-dhcp$/, '');
         const regularCapRes = await client.talk(['/queue/simple/print', `?name=${bridgeName}-regular-cap`]);
-        if (regularCapRes.re.length > 0) {
-          placeBeforeId = regularCapRes.re[0]['.id'];
-          regularCapExists = true;
-        } else {
-          const laneQueueRes = await client.talk(['/queue/simple/print', `?name=${bridgeName}-queue`]);
-          if (laneQueueRes.re.length > 0) placeBeforeId = laneQueueRes.re[0]['.id'];
+        regularCapExists = regularCapRes.re.length > 0;
+
+        // Bug found live: this used to check for "-regular-cap" OR (only if
+        // that didn't exist) "-queue", as if a lane only ever had one or the
+        // other. A router that's had Configure re-run since regular-cap was
+        // introduced has BOTH - the lane's own smart/CAKE queue ("-queue",
+        // created first, wide /24 target) AND the shared PCQ default-rate
+        // queue ("-regular-cap", created after it). Only checking for
+        // "-regular-cap" and using its position placed the per-client queue
+        // before THAT, but never checked "-queue" - which sits even earlier
+        // in the list and matches this client's /32 just as well, so it won
+        // the "first match wins" race regardless. Confirmed live: a 5Mbps
+        // per-client queue correctly created, correctly re-asserted every
+        // 30s, and still measured 76Mbps down on the actual device, because
+        // "-queue" (100Mbps) caught the traffic first. Check both, and place
+        // before whichever one actually comes first in the router's real
+        // list - not whichever this code happened to check first.
+        const laneQueueRes = await client.talk(['/queue/simple/print', `?name=${bridgeName}-queue`]);
+        const laneQueueExists = laneQueueRes.re.length > 0;
+
+        if (regularCapExists || laneQueueExists) {
+          // Full unfiltered list, in the router's actual current order, so
+          // "which one comes first" reflects reality rather than assuming
+          // regular-cap always sorts after -queue (usually true given
+          // creation order, but never guaranteed once queues get
+          // reordered/recreated over a router's lifetime).
+          const fullList = await client.talk(['/queue/simple/print']);
+          const regularCapId = regularCapExists ? regularCapRes.re[0]['.id'] : null;
+          const laneQueueId = laneQueueExists ? laneQueueRes.re[0]['.id'] : null;
+          const earliestIndex = (id) => fullList.re.findIndex((row) => row['.id'] === id);
+          if (regularCapId && laneQueueId) {
+            placeBeforeId = earliestIndex(regularCapId) <= earliestIndex(laneQueueId) ? regularCapId : laneQueueId;
+          } else {
+            placeBeforeId = regularCapId || laneQueueId;
+          }
         }
       }
 
