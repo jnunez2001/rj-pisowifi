@@ -73,7 +73,7 @@
 #endif
 
 // ===== AP MODE =====
-#define AP_SSID     "ZenFi-Setup"
+#define AP_SSID     "StarkFi-Setup"
 #define AP_PASS     "rjpisowifi"
 
 // ===== TIMING =====
