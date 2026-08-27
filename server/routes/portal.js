@@ -5,6 +5,31 @@ const { getRates } = require('../services/voucherService');
 const { execSync } = require('child_process');
 const mikrotikService = require('../services/mikrotikService');
 
+// Bug found live: this route used to read only the raw socket address,
+// which is correct when this server is reached directly - but a portal
+// TLS setup (setup/nginx.conf) proxies HTTPS through nginx on this same
+// box first, and nginx always connects to this app from loopback. Every
+// real customer's request looked identical to the server itself talking
+// to itself (127.0.0.1), so /detect could never resolve a real MAC for
+// anyone once the box was set up with a TLS-enabled portal - the portal
+// page looked permanently blank/"0 time" even for an active, paid
+// session, with no error anywhere pointing at why. Same helper already
+// used correctly in admin.js/session.js/promo.js: only trust
+// X-Forwarded-For when the TCP connection itself is from loopback (nginx
+// sets this correctly; a remote client can't fake their own raw socket
+// address to BE loopback, so this can't be spoofed by anyone but nginx
+// itself). LAN clients never proxied through nginx fall through to the
+// raw socket address unchanged.
+function getRealClientIp(req) {
+  const raw = (req.connection.remoteAddress || req.socket.remoteAddress || '')
+    .replace('::ffff:', '').trim();
+  if (raw === '127.0.0.1' || raw === '::1') {
+    const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (forwarded) return forwarded;
+  }
+  return raw;
+}
+
 // Rate limiting for /detect endpoint (Bug #32)
 const detectRateLimit = new Map();
 const DETECT_RATE_LIMIT_MS = 5000; // Allow 1 request per 5 seconds per IP
@@ -67,16 +92,7 @@ async function getMacFromIp(ip) {
 
 // GET /api/portal/detect, detect client MAC from IP
 router.get('/detect', async (req, res) => {
-  // No reverse proxy sits in front of this server (setup/nginx.conf is an
-  // unused empty placeholder), x-forwarded-for is fully client-suppliable
-  // here, so trusting it let one device resolve (and act as) another
-  // device's MAC address just by sending a spoofed header. The raw socket
-  // address can't be set by the client.
-  const clientIp = req.connection.remoteAddress ||
-                   req.socket.remoteAddress;
-
-  // Clean IPv6 prefix
-  const ip = (clientIp || '').replace('::ffff:', '');
+  const ip = getRealClientIp(req);
 
   // Rate limiting (Bug #32)
   const lastRequest = detectRateLimit.get(ip);
@@ -89,7 +105,6 @@ router.get('/detect', async (req, res) => {
   detectRateLimit.set(ip, Date.now());
 
   const mac = await getMacFromIp(ip);
-  console.log(`[Portal /detect DEBUG] socket ip="${ip}" -> resolved mac="${mac}"`);
 
   return res.json({
     success: !!mac,
