@@ -1127,6 +1127,14 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('admin_2fa_enabled', '0');
   upsertIfMissing('admin_2fa_secret', '');
   upsertIfMissing('venue_type', 'piso_wifi');
+  // System Terminal (admin panel > System > Terminal) - a SEPARATE
+  // password from admin_password, required every time before the
+  // terminal opens, on top of already being logged into the admin panel.
+  // Empty means not set up yet (the terminal page refuses to open until
+  // the operator sets one) - this is real root-equivalent shell access to
+  // the server itself, deliberately not defaulted to anything guessable
+  // or left implicitly open just because someone has admin login.
+  upsertIfMissing('terminal_password', '');
   // Telemetry (server/services/telemetryService.js) - off by default,
   // mechanism-only until a real Privacy Policy is published and a UI
   // toggle is exposed (see that file's header for the full reasoning).

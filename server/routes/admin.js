@@ -5478,6 +5478,131 @@ router.post('/router/terminal', adminAuth, async (req, res) => {
   }
 });
 
+// ===== SYSTEM TERMINAL =====
+// Real shell access to the box this app itself runs on, not just the
+// router - deliberately gated behind a SEPARATE password from
+// admin_password, re-checked every session, on top of already being
+// logged into the admin panel. Same "one command in, one result back"
+// shape as the Router Terminal above rather than a persistent
+// interactive PTY (node-pty/xterm.js) - no new native dependency to
+// build on an already-fragile install (see passwordHash.js's own note
+// on this), and a per-command model can't leave an orphaned shell
+// process running if a browser tab just closes.
+//
+// terminalSessions: short-lived in-memory tokens (not the admin session
+// token) issued only after the separate terminal password is verified.
+// Tracks each session's own working directory server-side so `cd`
+// feels persistent across commands, the same as a real shell, even
+// though each command is its own independent process.
+const terminalSessions = new Map();
+const TERMINAL_SESSION_TTL_MS = 30 * 60 * 1000; // 30 minutes of inactivity
+
+function pruneTerminalSessions() {
+  const now = Date.now();
+  for (const [token, s] of terminalSessions) {
+    if (now > s.expiresAt) terminalSessions.delete(token);
+  }
+}
+
+// GET /api/admin/terminal/status - whether the separate terminal password
+// has ever been set, so the frontend can show "set a password first"
+// instead of a login form nothing could ever satisfy.
+router.get('/terminal/status', adminAuth, (req, res) => {
+  const configured = !!db.prepare("SELECT value FROM settings WHERE key = 'terminal_password'").get()?.value;
+  res.json({ success: true, configured });
+});
+
+// POST /api/admin/terminal/set-password - sets or changes the terminal-only
+// password. Requires the CURRENT terminal password too once one exists
+// (not just being logged into the admin panel) - otherwise anyone who
+// guessed/observed the admin login could silently set their own terminal
+// password and grant themselves shell access going forward.
+router.post('/terminal/set-password', adminAuth, (req, res) => {
+  const { current_password, new_password } = req.body || {};
+  if (!new_password || String(new_password).length < 8) {
+    return res.status(400).json({ success: false, message: 'New password must be at least 8 characters' });
+  }
+  const existing = db.prepare("SELECT value FROM settings WHERE key = 'terminal_password'").get()?.value;
+  if (existing && !verifyPassword(current_password, existing)) {
+    return res.status(401).json({ success: false, message: 'Current terminal password is incorrect' });
+  }
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('terminal_password', ?)")
+    .run(hashPassword(String(new_password)));
+  // Changing the password invalidates every session issued under the old
+  // one - same reasoning as changing admin_password elsewhere in this app.
+  terminalSessions.clear();
+  res.json({ success: true, message: 'Terminal password updated' });
+});
+
+// POST /api/admin/terminal/auth - verifies the separate terminal password
+// and issues a short-lived session token. Rate-limited the SAME way
+// admin login itself is (spamService, same IP-keyed pattern) - this is a
+// second real password guard, not meaningfully different from a login
+// form in terms of brute-force risk.
+router.post('/terminal/auth', adminAuth, (req, res) => {
+  const ip = getRealClientIp(req);
+  const spamCheck = checkSpam(`terminal-auth:${ip}`);
+  if (spamCheck.blocked) {
+    return res.status(429).json({ success: false, message: spamCheck.message });
+  }
+  const { password } = req.body || {};
+  const stored = db.prepare("SELECT value FROM settings WHERE key = 'terminal_password'").get()?.value;
+  if (!stored) {
+    return res.status(400).json({ success: false, message: 'No terminal password has been set yet - set one first' });
+  }
+  if (!password || !verifyPassword(password, stored)) {
+    recordAttempt(`terminal-auth:${ip}`);
+    return res.status(401).json({ success: false, message: 'Incorrect terminal password' });
+  }
+  clearAttempts(`terminal-auth:${ip}`);
+
+  pruneTerminalSessions();
+  const token = crypto.randomBytes(24).toString('hex');
+  terminalSessions.set(token, { cwd: os.homedir() || '/', expiresAt: Date.now() + TERMINAL_SESSION_TTL_MS });
+  res.json({ success: true, token });
+});
+
+// POST /api/admin/terminal/run - executes one shell command, returns its
+// output. `cd` is handled specially (child_process can't change THIS
+// process's own working directory for a future call) - resolved and
+// verified against the session's tracked cwd, same as a real shell would
+// reject `cd` into a nonexistent directory rather than silently no-op.
+router.post('/terminal/run', adminAuth, (req, res) => {
+  const { token, command } = req.body || {};
+  const session = token && terminalSessions.get(token);
+  if (!session || Date.now() > session.expiresAt) {
+    if (session) terminalSessions.delete(token);
+    return res.status(401).json({ success: false, message: 'Terminal session expired - re-enter the password' });
+  }
+  session.expiresAt = Date.now() + TERMINAL_SESSION_TTL_MS; // sliding expiry, same as an active SSH session
+  if (!command || typeof command !== 'string' || !command.trim()) {
+    return res.status(400).json({ success: false, message: 'Enter a command' });
+  }
+
+  const trimmed = command.trim();
+  const cdMatch = trimmed.match(/^cd(?:\s+(.*))?$/);
+  if (cdMatch) {
+    const target = (cdMatch[1] || '').trim() || os.homedir() || '/';
+    const resolved = path.resolve(session.cwd, target.replace(/^~/, os.homedir() || ''));
+    try {
+      if (!fs.statSync(resolved).isDirectory()) throw new Error('not a directory');
+      session.cwd = resolved;
+      return res.json({ success: true, stdout: '', stderr: '', cwd: session.cwd });
+    } catch (e) {
+      return res.json({ success: true, stdout: '', stderr: `cd: ${target}: No such file or directory`, cwd: session.cwd });
+    }
+  }
+
+  execFile('bash', ['-c', trimmed], { cwd: session.cwd, timeout: 20000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout, stderr) => {
+    res.json({
+      success: true,
+      stdout: stdout || '',
+      stderr: stderr || (err && !stdout ? err.message : ''),
+      cwd: session.cwd,
+    });
+  });
+});
+
 // GET /api/admin/router/local-interfaces, this server's own network
 // connections, so the admin can pick which one is on the gated lane
 // (Bug: auto-guessing this on a multi-NIC machine could reserve the wrong

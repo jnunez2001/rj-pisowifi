@@ -1,0 +1,82 @@
+<div class="zf3-header">
+  <div>
+    <div class="page-title">System Terminal</div>
+  </div>
+</div>
+
+<!-- PASSWORD NOT YET SET -->
+<div class="zf3-card" id="termSetupCard" style="display:none;">
+  <div class="zf3-card-title" style="margin-bottom:8px;"><i class="fas fa-key"></i>&nbsp; Set a Terminal Password</div>
+  <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
+    This runs real commands directly on the server this app is running on - full access, the same as SSH.
+    It needs its own separate password, on top of your admin login, before it can be used for the first time.
+  </p>
+  <div class="form-group">
+    <label class="form-label">New Terminal Password (min 8 characters)</label>
+    <input type="password" id="termNewPassword" class="form-control" placeholder="Choose a strong password" style="max-width:360px;">
+  </div>
+  <button class="btn btn-primary" onclick="termSetPassword()">
+    <i class="fas fa-save"></i> Set Password
+  </button>
+  <div id="termSetupError" style="display:none;margin-top:10px;color:var(--accent-red);font-size:13px;"></div>
+</div>
+
+<!-- LOGIN GATE -->
+<div class="zf3-card" id="termLoginCard" style="display:none;">
+  <div class="zf3-card-title" style="margin-bottom:8px;"><i class="fas fa-lock"></i>&nbsp; Enter Terminal Password</div>
+  <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px;">
+    Separate from your admin login password. Full shell access on the server once unlocked - keep this to yourself.
+  </p>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <input type="password" id="termLoginPassword" class="form-control" placeholder="Terminal password" style="max-width:280px;" onkeydown="if(event.key==='Enter') termLogin()">
+    <button class="btn btn-primary" onclick="termLogin()">
+      <i class="fas fa-unlock"></i> Unlock
+    </button>
+  </div>
+  <div id="termLoginError" style="display:none;margin-top:10px;color:var(--accent-red);font-size:13px;"></div>
+  <div style="margin-top:14px;">
+    <a href="#" onclick="termShowChangePassword(); return false;" style="font-size:12px;color:var(--text-muted);">Change terminal password</a>
+  </div>
+  <div id="termChangePasswordWrap" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--border-color);">
+    <div class="form-group">
+      <label class="form-label">Current Terminal Password</label>
+      <input type="password" id="termChangeCurrent" class="form-control" style="max-width:280px;">
+    </div>
+    <div class="form-group">
+      <label class="form-label">New Terminal Password (min 8 characters)</label>
+      <input type="password" id="termChangeNew" class="form-control" style="max-width:280px;">
+    </div>
+    <button class="btn btn-secondary" onclick="termChangePassword()">
+      <i class="fas fa-key"></i> Update Password
+    </button>
+    <div id="termChangeError" style="display:none;margin-top:10px;color:var(--accent-red);font-size:13px;"></div>
+  </div>
+</div>
+
+<!-- UNLOCKED TERMINAL -->
+<div id="termConsoleCard" style="display:none;">
+  <div class="zf3-card" style="border-color:var(--accent-red);">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <i class="fas fa-triangle-exclamation" style="color:var(--accent-red);font-size:18px;"></i>
+      <div style="font-size:13px;color:var(--accent-red);">
+        This runs directly on the server with full access, the same as SSH. Nothing here can be undone.
+      </div>
+    </div>
+  </div>
+
+  <div class="zf3-card" style="margin-top:16px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+      <div class="zf3-card-title" style="margin-bottom:0;"><i class="fas fa-terminal"></i>&nbsp; Terminal</div>
+      <button class="btn btn-secondary" style="padding:4px 10px;font-size:12px;" onclick="termLock()">
+        <i class="fas fa-lock"></i> Lock
+      </button>
+    </div>
+    <div id="termOutput" style="background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:13px;padding:12px;border-radius:8px 8px 0 0;height:380px;overflow-y:auto;white-space:pre-wrap;">Connected. Type a command below.</div>
+    <div style="display:flex;align-items:center;background:#161b22;border-radius:0 0 8px 8px;padding:8px 12px;border:1px solid #30363d;border-top:none;">
+      <span id="termPromptCwd" style="color:#7ee787;font-family:monospace;font-size:13px;white-space:nowrap;">$</span>
+      <input type="text" id="termInput" autocomplete="off" spellcheck="false"
+        style="flex:1;background:transparent;border:none;outline:none;color:#c9d1d9;font-family:monospace;font-size:13px;margin-left:8px;"
+        onkeydown="termHandleKey(event)">
+    </div>
+  </div>
+</div>

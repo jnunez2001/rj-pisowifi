@@ -328,6 +328,7 @@ const pageTitles = {
   users: 'Users',
   'sms-email-gateway': 'SMS / Email Gateway',
   'system-health': 'System Health',
+  terminal: 'System Terminal',
   logs: 'Logs',
   sales: 'Sales Report',
   sessions: 'Active Sessions',
@@ -477,6 +478,7 @@ async function navigateTo(page) {
       update: () => typeof loadUpdate === 'function' && loadUpdate(),
       about: () => typeof loadAbout === 'function' && loadAbout(),
       'system-health': () => typeof loadSystemHealth === 'function' && loadSystemHealth(),
+      terminal: () => typeof loadSystemTerminal === 'function' && loadSystemTerminal(),
       logs: () => typeof loadLogsPage === 'function' && loadLogsPage(),
     };
 
