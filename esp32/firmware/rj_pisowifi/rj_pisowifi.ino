@@ -32,9 +32,16 @@ void setup() {
     return;
   }
 
-  // No config, enter setup mode
-  if (config.wifi_ssid.isEmpty() || config.server_ip.isEmpty()) {
-    Serial.println("No config, entering setup mode");
+  // Bug found live (ESP8266 firmware, same shared structure): required
+  // BOTH wifi_ssid AND server_ip before ever leaving Setup Mode - but the
+  // zero-config discovery flow below (when server_ip is empty) exists
+  // specifically so Server IP can be left blank during setup and found
+  // automatically once connected. An empty server_ip alone sent the
+  // device straight back into Setup Mode every boot, regardless of a
+  // valid saved WiFi SSID/password, so discovery could never run. Only
+  // WiFi is actually required to attempt a normal boot.
+  if (config.wifi_ssid.isEmpty()) {
+    Serial.println("No WiFi configured, entering setup mode");
     startSetupMode();
     return;
   }

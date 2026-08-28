@@ -36,9 +36,20 @@ void setup() {
     return;
   }
 
-  // No config, enter setup mode
-  if (config.wifi_ssid.isEmpty() || config.server_ip.isEmpty()) {
-    Serial.println("No config, entering setup mode");
+  // Bug found live: this required BOTH wifi_ssid AND server_ip to be set
+  // before ever leaving Setup Mode - but the zero-config discovery flow
+  // right below (discoverServer(), when server_ip is empty) exists
+  // specifically so an operator CAN leave Server IP blank during setup
+  // and have the device find it automatically once connected. That
+  // discovery code could never run: an empty server_ip alone sent the
+  // device straight back into Setup Mode every single boot, regardless
+  // of a perfectly valid saved WiFi SSID/password. Confirmed live via the
+  // Serial Monitor - WiFi loaded fine ("R&J PisoWiFi"), but "Server: :3000"
+  // (empty) was still enough to trigger "No config, entering setup mode."
+  // Only WiFi is actually required to attempt a normal boot; a missing
+  // server address is exactly what discovery is meant to resolve next.
+  if (config.wifi_ssid.isEmpty()) {
+    Serial.println("No WiFi configured, entering setup mode");
     startSetupMode();
     return;
   }
