@@ -18,6 +18,33 @@ static AudioFileSourceHTTPStream *audioFile = nullptr;
 static AudioGeneratorWAV *audioGen = nullptr;
 static AudioOutputI2SNoDAC *audioOut = nullptr;
 
+// Small FIFO so a sound requested while one is already playing waits its
+// turn instead of cutting the first one off mid-sentence - real case:
+// coin.js announces the peso total the moment the pending window closes,
+// then portal.js's next poll notices the session just went active and
+// asks for "connected" right after. Both calls land close together, and
+// without a queue the second one (whichever arrives second) would kill
+// the first one's playback partway through. Sized generously above the
+// realistic case (never more than 2-3 sounds pile up in practice).
+#define AUDIO_QUEUE_SIZE 4
+static String audioQueue[AUDIO_QUEUE_SIZE];
+static int audioQueueCount = 0;
+
+static void playNow(const String &url) {
+  stopPlayingSound();
+
+  audioOut = new AudioOutputI2SNoDAC();
+  audioFile = new AudioFileSourceHTTPStream(url.c_str());
+  audioGen = new AudioGeneratorWAV();
+
+  if (!audioGen->begin(audioFile, audioOut)) {
+    Serial.println("Audio: failed to start playback for " + url);
+    stopPlayingSound();
+  } else {
+    Serial.println("Audio: playing " + url);
+  }
+}
+
 void stopPlayingSound() {
   if (audioGen) {
     if (audioGen->isRunning()) audioGen->stop();
@@ -35,21 +62,16 @@ void stopPlayingSound() {
 }
 
 void startPlayingSound(const String &url) {
-  // Only one sound at a time - a second request while one is already
-  // playing replaces it, same "latest instruction wins" behavior as
-  // activateRelay() elsewhere in this firmware, rather than queuing.
-  stopPlayingSound();
-
-  audioOut = new AudioOutputI2SNoDAC();
-  audioFile = new AudioFileSourceHTTPStream(url.c_str());
-  audioGen = new AudioGeneratorWAV();
-
-  if (!audioGen->begin(audioFile, audioOut)) {
-    Serial.println("Audio: failed to start playback for " + url);
-    stopPlayingSound();
-  } else {
-    Serial.println("Audio: playing " + url);
+  if (isAudioPlaying()) {
+    if (audioQueueCount < AUDIO_QUEUE_SIZE) {
+      audioQueue[audioQueueCount++] = url;
+      Serial.println("Audio: queued " + url);
+    } else {
+      Serial.println("Audio: queue full, dropping " + url);
+    }
+    return;
   }
+  playNow(url);
 }
 
 bool isAudioPlaying() {
@@ -66,5 +88,11 @@ void audioLoop() {
   if (!audioGen->loop()) {
     Serial.println("Audio: playback finished");
     stopPlayingSound();
+    if (audioQueueCount > 0) {
+      String next = audioQueue[0];
+      for (int i = 1; i < audioQueueCount; i++) audioQueue[i - 1] = audioQueue[i];
+      audioQueueCount--;
+      playNow(next);
+    }
   }
 }
