@@ -95,6 +95,13 @@ async function finalizePendingCoins(mac) {
     else if (mode === 'convert_down') result = await convertToRegularValue(mac, total, ip, kioskId);
     else result = await creditCoinValue(mac, total, ip, kioskId, mode === 'premium');
     console.log(`✅ Pending window closed for ${mac}: credited ₱${total} (${result.matched_as})`);
+    // Best-effort, never blocks the credit itself on the vendo being
+    // reachable or having a speaker wired up - see vendoAudioService.js.
+    // Fires from here (not the frontend) because this is the one place
+    // that knows the exact peso total credited; the portal only ever
+    // sees minutes added, which isn't the same number an operator's rate
+    // tiers use.
+    require('../services/vendoAudioService').playVendoAmount(total).catch(() => {});
     return { success: true, result };
   } catch (err) {
     if (err instanceof NoMatchingRateError) {

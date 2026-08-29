@@ -159,19 +159,33 @@ void setupWebServer() {
     server.send(200, "application/json", "{\"success\":true}");
   });
 
-  // POST /play?url=... - streams and plays a WAV file the server hosts,
-  // e.g. a voice prompt when the customer taps "Insert Coin" on the
-  // portal. The file is never saved to this device's own flash, it's
-  // decoded and played a chunk at a time as it streams in (see audio.cpp).
-  // Same server-only restriction as /relay/on|off - not something a
-  // random device on the customer network should be able to trigger.
+  // POST /play?sound=name - streams and plays a WAV file the server hosts
+  // (public/audio/vendo/name.wav), e.g. a voice prompt when the customer
+  // taps "Insert Coin" on the portal. The file is never saved to this
+  // device's own flash, it's decoded and played a chunk at a time as it
+  // streams in (see audio.cpp). Same server-only restriction as
+  // /relay/on|off - not something a random device on the customer
+  // network should be able to trigger.
+  //
+  // Takes a bare sound NAME, not a full URL - this device already knows
+  // exactly how to reach the server (config.server_ip/server_port, the
+  // same address every other call here already uses), so it builds the
+  // URL itself. The alternative (server builds and sends a full URL) only
+  // works when there's a live web request to derive that URL from (e.g.
+  // "same host the customer's browser used") - the amount-announcement
+  // trigger fires from a timer-based credit finalize with no such
+  // request in scope, so that approach couldn't cover every trigger
+  // point. This one can, since it never depends on where the request
+  // that triggered playback came from.
   server.on("/play", HTTP_POST, []() {
     if (!rejectUnlessFromServer()) return;
-    if (!server.hasArg("url") || server.arg("url").isEmpty()) {
-      server.send(400, "application/json", "{\"success\":false,\"message\":\"Missing url\"}");
+    if (!server.hasArg("sound") || server.arg("sound").isEmpty()) {
+      server.send(400, "application/json", "{\"success\":false,\"message\":\"Missing sound\"}");
       return;
     }
-    startPlayingSound(server.arg("url"));
+    String url = "http://" + config.server_ip + ":" + String(config.server_port) +
+                 "/audio/vendo/" + server.arg("sound") + ".wav";
+    startPlayingSound(url);
     server.send(200, "application/json", "{\"success\":true}");
   });
 
