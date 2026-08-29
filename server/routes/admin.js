@@ -5171,8 +5171,14 @@ router.delete('/movies/:id', adminAuth, (req, res) => {
 // these are the staff-facing management routes only.
 function rentalStatusFor(pc) {
   const session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
-  const remainingMs = session?.hard_expires_at ? new Date(session.hard_expires_at).getTime() - Date.now() : 0;
-  const remainingMinutes = Math.max(0, remainingMs / 60000);
+  const member = session?.member_id ? db.prepare('SELECT username, seconds FROM rental_members WHERE id = ?').get(session.member_id) : null;
+  // A logged-in member's remaining time is their own live balance (read-
+  // only here - the actual decrement only happens in GET /api/rental/
+  // status, the device's own poll, so this admin view never double-drains
+  // it). A guest-credited PC still uses the fixed hard_expires_at.
+  const remainingMinutes = member
+    ? Math.max(0, member.seconds / 60)
+    : Math.max(0, (session?.hard_expires_at ? new Date(session.hard_expires_at).getTime() - Date.now() : 0) / 60000);
   const todaySales = db.prepare(`
     SELECT COALESCE(SUM(coin_value), 0) AS total FROM rental_transactions
     WHERE pc_id = ? AND type = 'coin' AND created_at >= datetime('now', 'start of day')
@@ -5181,9 +5187,10 @@ function rentalStatusFor(pc) {
     ...pc,
     minutes_remaining: Math.round(remainingMinutes * 10) / 10,
     is_paused: session ? !!session.is_paused : false,
-    locked: !(pc.status === 'adopted' && session && !session.is_paused && remainingMinutes > 0),
+    locked: !(pc.status === 'adopted' && !(session?.is_paused) && remainingMinutes > 0),
     today_sales: todaySales,
-    last_insert: session?.updated_at || null
+    last_insert: session?.updated_at || null,
+    logged_in_user: member ? member.username : 'GUEST'
   };
 }
 
@@ -5282,7 +5289,6 @@ router.post('/rental/rates', adminAuth, (req, res) => {
   try {
     const coinValue = parseInt(req.body?.coin_value, 10);
     const minutes = parseFloat(req.body?.minutes);
-    const tier = ['non_vip', 'vip', 'vvip'].includes(req.body?.tier) ? req.body.tier : 'non_vip';
     const points = parseInt(req.body?.points, 10) || 0;
     if (!Number.isFinite(coinValue) || coinValue <= 0) {
       return res.status(400).json({ success: false, message: 'coin_value must be a positive number' });
@@ -5290,7 +5296,10 @@ router.post('/rental/rates', adminAuth, (req, res) => {
     if (!Number.isFinite(minutes) || minutes <= 0) {
       return res.status(400).json({ success: false, message: 'minutes must be a positive number' });
     }
-    db.prepare('INSERT INTO rental_rates (coin_value, minutes, tier, points) VALUES (?, ?, ?, ?)').run(coinValue, minutes, tier, points);
+    // tier column stays in the schema but is no longer set/shown - the
+    // VIP/VVIP/NON-VIP split was simplified away in favor of a plain
+    // guest-vs-member model, see rental_members.seconds.
+    db.prepare('INSERT INTO rental_rates (coin_value, minutes, points) VALUES (?, ?, ?)').run(coinValue, minutes, points);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -5310,7 +5319,7 @@ router.delete('/rental/rates/:id', adminAuth, (req, res) => {
 // PCs) ───────────────────────────────────────────────────────────────
 router.get('/rental/members', adminAuth, (req, res) => {
   try {
-    const members = db.prepare('SELECT id, username, name, non_vip_seconds, vip_seconds, vvip_seconds, credit_pesos, points, created_at, last_active FROM rental_members ORDER BY created_at DESC').all();
+    const members = db.prepare('SELECT id, username, name, seconds, credit_pesos, points, created_at, last_active FROM rental_members ORDER BY created_at DESC').all();
     res.json({ success: true, members });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -5346,12 +5355,12 @@ router.delete('/rental/members/:id', adminAuth, (req, res) => {
 });
 
 // POST /api/admin/rental/members/:id/manage-time - staff directly
-// adjusts one of a member's three tier balances, or their credit/points,
-// same "manual override" role as rental_pcs' own addtime route.
+// adjusts a member's time balance, credit, or points, same "manual
+// override" role as rental_pcs' own addtime route.
 router.post('/rental/members/:id/manage-time', adminAuth, (req, res) => {
   try {
     const field = req.body?.field;
-    const validFields = ['non_vip_seconds', 'vip_seconds', 'vvip_seconds', 'credit_pesos', 'points'];
+    const validFields = ['seconds', 'credit_pesos', 'points'];
     if (!validFields.includes(field)) {
       return res.status(400).json({ success: false, message: 'Invalid field' });
     }
@@ -5416,12 +5425,9 @@ router.get('/rental/redemptions', adminAuth, (req, res) => {
 });
 
 // POST /api/admin/rental/members/:id/redeem - staff-triggered redemption
-// (the member's own self-service redemption happens from the Windows
-// client login screen once that ships - not built yet, so this is the
-// only way to redeem for now). Adds the reward seconds to non_vip_seconds
-// (redeemed time defaults to the base tier - an operator can manually
-// move it to vip_seconds/vvip_seconds via manage-time if they want it
-// credited at a higher tier instead).
+// (member self-service redemption from the Windows client isn't built
+// yet, so this is the only way to redeem for now). Adds the reward
+// seconds straight to the member's one time balance.
 router.post('/rental/members/:id/redeem', adminAuth, (req, res) => {
   try {
     const redeemRateId = parseInt(req.body?.redeem_rate_id, 10);
@@ -5435,7 +5441,7 @@ router.post('/rental/members/:id/redeem', adminAuth, (req, res) => {
     }
 
     const remainingPoints = member.points - rate.points;
-    db.prepare('UPDATE rental_members SET points = ?, non_vip_seconds = non_vip_seconds + ? WHERE id = ?')
+    db.prepare('UPDATE rental_members SET points = ?, seconds = seconds + ? WHERE id = ?')
       .run(remainingPoints, rate.reward_seconds, member.id);
     db.prepare('INSERT INTO rental_redemptions (member_id, points_spent, reward_seconds, remaining_points) VALUES (?, ?, ?, ?)')
       .run(member.id, rate.points, rate.reward_seconds, remainingPoints);

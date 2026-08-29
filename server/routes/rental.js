@@ -2,6 +2,19 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const crypto = require('crypto');
+const { verifyPassword } = require('../utils/passwordHash');
+
+// Every device-facing route here (register/status/member-login/logout/
+// staff-override) authenticates the CALLING PC via its own device_secret
+// (see POST /register) - never adminAuth, since the Windows client has no
+// admin login of its own. This helper centralizes that lookup+check.
+function authenticatePc(mac, secret) {
+  if (!mac || !isValidMac(mac)) return { error: 400, message: 'Valid mac required' };
+  const pc = db.prepare('SELECT * FROM rental_pcs WHERE mac_address = ?').get(mac.toLowerCase());
+  if (!pc) return { error: 404, message: 'Not registered' };
+  if (pc.device_secret && secret !== pc.device_secret) return { error: 403, message: 'Invalid device secret' };
+  return { pc };
+}
 
 function isValidMac(mac) {
   return /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(String(mac || '').trim());
@@ -66,38 +79,146 @@ router.post('/register', (req, res) => {
 // design notes) - it only decides what to do locally on a run of failed
 // polls (lock defensively rather than trust a stale "unlocked" answer).
 router.get('/status', (req, res) => {
-  const mac = String(req.query.mac || '').trim().toLowerCase();
-  const secret = req.query.device_secret;
-  if (!mac || !isValidMac(mac)) {
-    return res.status(400).json({ success: false, message: 'Valid mac required' });
-  }
-
-  const pc = db.prepare('SELECT * FROM rental_pcs WHERE mac_address = ?').get(mac);
-  if (!pc) {
-    return res.status(404).json({ success: false, message: 'Not registered' });
-  }
-  if (pc.device_secret && secret !== pc.device_secret) {
-    return res.status(403).json({ success: false, message: 'Invalid device secret' });
-  }
+  const auth = authenticatePc(req.query.mac, req.query.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+  const pc = auth.pc;
 
   db.prepare('UPDATE rental_pcs SET last_seen = CURRENT_TIMESTAMP WHERE id = ?').run(pc.id);
 
-  const session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
-  // hard_expires_at is the single source of truth, not a stored
-  // minutes_remaining counter - no decrement cron needed, "remaining" is
-  // always just computed live from the timestamp, so it can never go
-  // stale the way a periodically-decremented field could.
-  const remainingMs = session?.hard_expires_at ? new Date(session.hard_expires_at).getTime() - Date.now() : 0;
-  const remainingMinutes = Math.max(0, remainingMs / 60000);
-  const active = !!(pc.status === 'adopted' && session && !session.is_paused && remainingMinutes > 0);
+  let session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
+  let remainingMinutes;
+  let loggedInUser = null;
+
+  if (session?.member_id) {
+    // A logged-in member's time is a live-draining balance, not a fixed
+    // expiry timestamp (unlike guest credit below) - it has to be, since
+    // the same balance can be spent across different PCs on different
+    // visits. Decremented here, on every poll, by exactly how much wall-
+    // clock time has actually passed since the last poll (session.
+    // updated_at) - server-authoritative, same "client never trusts
+    // itself" principle as the guest path, just computed differently
+    // because a portable balance can't be expressed as one fixed
+    // timestamp the way a single PC's guest session can.
+    const member = db.prepare('SELECT * FROM rental_members WHERE id = ?').get(session.member_id);
+    if (member) {
+      const elapsedSeconds = Math.max(0, (Date.now() - new Date(session.updated_at).getTime()) / 1000);
+      const newSeconds = Math.max(0, member.seconds - elapsedSeconds);
+      db.prepare('UPDATE rental_members SET seconds = ?, last_active = CURRENT_TIMESTAMP WHERE id = ?').run(Math.round(newSeconds), member.id);
+
+      if (newSeconds <= 0) {
+        // Ran out while logged in - same as an explicit logout, just
+        // triggered by hitting zero instead of the member choosing to end
+        // it. Nothing left to preserve either way.
+        db.prepare('UPDATE rental_sessions SET member_id = NULL WHERE pc_id = ?').run(pc.id);
+        session = { ...session, member_id: null };
+        remainingMinutes = 0;
+      } else {
+        // Bug found live: writing this via SQL's own CURRENT_TIMESTAMP
+        // produces a naive "YYYY-MM-DD HH:MM:SS" string in UTC, but
+        // JS's `new Date(str)` parses that space-separated (non-ISO)
+        // format as LOCAL time, not UTC - reading it back for the
+        // elapsed-time math above silently shifted it by the server's
+        // UTC offset, draining a member's whole balance in a single
+        // poll regardless of how much time had actually passed. Every
+        // other timestamp this file/coin.js relies on for real math
+        // (expires_at, hard_expires_at) is already built as a real ISO
+        // string in JS for exactly this reason - matching that here.
+        db.prepare('UPDATE rental_sessions SET updated_at = ? WHERE pc_id = ?').run(new Date().toISOString(), pc.id);
+        remainingMinutes = newSeconds / 60;
+        loggedInUser = member.username;
+      }
+    } else {
+      // Member row gone (deleted) but the session still pointed at it -
+      // clear the dangling reference rather than crash on it.
+      db.prepare('UPDATE rental_sessions SET member_id = NULL WHERE pc_id = ?').run(pc.id);
+      remainingMinutes = 0;
+    }
+  } else {
+    // Guest credit - hard_expires_at is the source of truth, not a
+    // stored minutes_remaining counter, so "remaining" is always
+    // computed live and can never go stale the way a periodically-
+    // decremented field could.
+    const remainingMs = session?.hard_expires_at ? new Date(session.hard_expires_at).getTime() - Date.now() : 0;
+    remainingMinutes = Math.max(0, remainingMs / 60000);
+  }
+
+  const active = !!(pc.status === 'adopted' && !session?.is_paused && remainingMinutes > 0);
 
   return res.json({
     success: true,
     locked: !active,
     pc_name: pc.name,
     minutes_remaining: Math.round(remainingMinutes * 10) / 10,
-    adopted: pc.status === 'adopted'
+    adopted: pc.status === 'adopted',
+    logged_in_user: loggedInUser
   });
+});
+
+// POST /api/rental/member-login - {mac, device_secret, username, password}.
+// The lock screen's login form. Rejects if the PC already has a DIFFERENT
+// member logged in (one login at a time per PC) or if this member has
+// nothing left to spend.
+router.post('/member-login', (req, res) => {
+  const { username, password } = req.body || {};
+  const auth = authenticatePc(req.body?.mac, req.body?.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+  const pc = auth.pc;
+
+  const member = db.prepare('SELECT * FROM rental_members WHERE username = ?').get(String(username || '').trim());
+  if (!member || !verifyPassword(password, member.password_hash)) {
+    return res.status(401).json({ success: false, message: 'Incorrect username or password' });
+  }
+  if (member.seconds <= 0) {
+    return res.status(400).json({ success: false, message: 'No time remaining on this account' });
+  }
+
+  const session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
+  if (session?.member_id && session.member_id !== member.id) {
+    return res.status(409).json({ success: false, message: 'Another member is already logged in on this PC' });
+  }
+
+  // updated_at written as a JS ISO string, not SQL's CURRENT_TIMESTAMP -
+  // see the matching comment in GET /status, same bug class.
+  db.prepare(`
+    UPDATE rental_sessions SET member_id = ?, is_paused = 0, updated_at = ? WHERE pc_id = ?
+  `).run(member.id, new Date().toISOString(), pc.id);
+  db.prepare('UPDATE rental_members SET last_active = CURRENT_TIMESTAMP WHERE id = ?').run(member.id);
+
+  console.log(`👤 Member "${member.username}" logged in on rental PC "${pc.name}"`);
+  return res.json({ success: true, minutes_remaining: Math.round((member.seconds / 60) * 10) / 10 });
+});
+
+// POST /api/rental/member-logout - {mac, device_secret}. Whatever the
+// member hasn't spent stays in their balance untouched - draining only
+// ever happens between logged-in polls (GET /status above), never after
+// logout.
+router.post('/member-logout', (req, res) => {
+  const auth = authenticatePc(req.body?.mac, req.body?.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  db.prepare('UPDATE rental_sessions SET member_id = NULL WHERE pc_id = ?').run(auth.pc.id);
+  console.log(`👤 Member logged out on rental PC "${auth.pc.name}"`);
+  return res.json({ success: true });
+});
+
+// POST /api/rental/staff-override - {mac, device_secret, password}. A
+// purely LOCAL physical fail-safe (per the client's own design notes) -
+// this only verifies the password, it never touches rental_sessions or
+// grants server-side credit. The client itself decides what a
+// successful override means locally (typically: unlock temporarily
+// without changing anything server-side).
+router.post('/staff-override', (req, res) => {
+  const auth = authenticatePc(req.body?.mac, req.body?.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const stored = db.prepare("SELECT value FROM settings WHERE key = 'rental_app_password'").get()?.value;
+  if (!stored) {
+    return res.status(400).json({ success: false, message: 'No app password has been set yet - set one in PC Rental > Settings' });
+  }
+  if (!req.body?.password || !verifyPassword(req.body.password, stored)) {
+    return res.status(401).json({ success: false, message: 'Incorrect app password' });
+  }
+  return res.json({ success: true });
 });
 
 module.exports = router;

@@ -852,6 +852,24 @@ try {
   db.exec("ALTER TABLE rental_rates ADD COLUMN points INTEGER NOT NULL DEFAULT 0");
 } catch (e) { /* already applied */ }
 
+// Members simplified from three tier balances (NON-VIP/VIP/VVIP) down to
+// one plain "seconds" balance - guest vs member is the only distinction
+// that matters now, not a tier system. Existing rows keep whatever
+// they'd already banked, summed into the new single column so nothing
+// is lost.
+try {
+  db.exec("ALTER TABLE rental_members ADD COLUMN seconds INTEGER NOT NULL DEFAULT 0");
+  db.exec("UPDATE rental_members SET seconds = non_vip_seconds + vip_seconds + vvip_seconds WHERE seconds = 0");
+} catch (e) { /* already applied */ }
+
+// Marks which member (if any) is currently logged into a given rental
+// PC - NULL means guest-credited (the original, unchanged behavior).
+// See server/routes/rental.js's POST /member-login|/member-logout and
+// the extended GET /status.
+try {
+  db.exec("ALTER TABLE rental_sessions ADD COLUMN member_id INTEGER REFERENCES rental_members(id)");
+} catch (e) { /* already applied */ }
+
 // Vendo Devices: satellite_kiosks extended in place rather than a separate
 // table - a Vendo IS a satellite kiosk (same device_key pairing, same
 // transactions.kiosk_id revenue attribution), just discovered automatically

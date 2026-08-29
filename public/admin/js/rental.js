@@ -56,7 +56,7 @@ function renderRentalPcRow(pc) {
         <div class="rental-pc-stat"><span>Status</span><b>${statusLabel}</b></div>
         <div class="rental-pc-stat"><span>Remaining</span><b>${formatRentalMinutes(pc.minutes_remaining)}</b></div>
         <div class="rental-pc-stat"><span>Today's Sales</span><b>₱${pc.today_sales || 0}</b></div>
-        <div class="rental-pc-stat"><span>User</span><b>GUEST</b></div>
+        <div class="rental-pc-stat"><span>User</span><b>${escapeHtmlRental(pc.logged_in_user || 'GUEST')}</b></div>
         <div class="rental-pc-stat"><span>IP</span><b>${escapeHtmlRental(pc.ip_address || '--')}</b></div>
         <div class="rental-pc-stat"><span>MAC</span><b>${escapeHtmlRental(pc.mac_address)}</b></div>
       </div>
@@ -147,39 +147,27 @@ function cancelRentalCoin() {
   document.getElementById('rentalCoinModal').classList.remove('show');
 }
 
-// ===== RATES (NON-VIP / VIP / VVIP) =====
-const RENTAL_TIER_LABELS = { non_vip: 'NON-VIP Rates', vip: 'VIP Rates', vvip: 'VVIP Rates' };
-
+// ===== RATES =====
 async function refreshRentalRates() {
   const el = document.getElementById('rentalRatesList');
   if (!el) return;
   const data = await apiCall('GET', '/api/admin/rental/rates');
   const rates = data.rates || [];
-
-  el.innerHTML = ['non_vip', 'vip', 'vvip'].map((tier) => {
-    const tierRates = rates.filter((r) => r.tier === tier);
-    return `
-      <div class="rental-rate-tier">
-        <div class="rental-rate-tier-title">${RENTAL_TIER_LABELS[tier]}</div>
-        ${tierRates.length
-          ? tierRates.map((r) => `
-              <div class="rental-rate-row">
-                <span>₱${r.coin_value} = ${formatRentalMinutes(r.minutes)} &middot; ${r.points} pts</span>
-                <button class="btn btn-secondary" onclick="deleteRentalRate(${r.id})"><i class="fas fa-trash"></i></button>
-              </div>
-            `).join('')
-          : '<div style="color:var(--text-muted);font-size:13px;">No rates yet</div>'}
-      </div>
-    `;
-  }).join('');
+  el.innerHTML = rates.length
+    ? rates.map((r) => `
+        <div class="rental-rate-row">
+          <span>₱${r.coin_value} = ${formatRentalMinutes(r.minutes)} &middot; ${r.points} pts</span>
+          <button class="btn btn-secondary" onclick="deleteRentalRate(${r.id})"><i class="fas fa-trash"></i></button>
+        </div>
+      `).join('')
+    : '<div style="color:var(--text-muted);font-size:13px;">No rates yet</div>';
 }
 
 async function addRentalRate() {
   const coinValue = document.getElementById('rentalRateCoin').value;
   const minutes = document.getElementById('rentalRateMinutes').value;
-  const tier = document.getElementById('rentalRateTier').value;
   const points = document.getElementById('rentalRatePoints').value || 0;
-  const data = await apiCall('POST', '/api/admin/rental/rates', { coin_value: coinValue, minutes, tier, points });
+  const data = await apiCall('POST', '/api/admin/rental/rates', { coin_value: coinValue, minutes, points });
   if (!data.success) {
     alert(data.message || 'Could not add rate');
     return;
@@ -207,8 +195,7 @@ async function refreshRentalMembers() {
           <div class="rental-pc-info">
             <div class="rental-pc-name">${escapeHtmlRental(m.name || m.username)} <span style="color:var(--text-muted);font-weight:400;">(@${escapeHtmlRental(m.username)})</span></div>
             <div class="rental-pc-meta">
-              NON-VIP ${formatRentalMinutes(m.non_vip_seconds / 60)} &middot; VIP ${formatRentalMinutes(m.vip_seconds / 60)} &middot; VVIP ${formatRentalMinutes(m.vvip_seconds / 60)}
-              &middot; ₱${m.credit_pesos} credit &middot; ${m.points} pts
+              ${formatRentalMinutes(m.seconds / 60)} remaining &middot; ₱${m.credit_pesos} credit &middot; ${m.points} pts
             </div>
           </div>
           <div class="rental-pc-actions">
@@ -243,7 +230,7 @@ async function deleteRentalMember(id) {
 }
 
 async function openRentalManageTime(id, name) {
-  const field = prompt(`Adjust which field for "${name}"? (non_vip_seconds / vip_seconds / vvip_seconds / credit_pesos / points)`, 'non_vip_seconds');
+  const field = prompt(`Adjust which field for "${name}"? (seconds / credit_pesos / points)`, 'seconds');
   if (!field) return;
   const deltaInput = prompt('Amount to add (negative to remove). For time fields, enter seconds.');
   if (!deltaInput) return;
