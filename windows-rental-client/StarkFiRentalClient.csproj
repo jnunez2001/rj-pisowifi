@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationIcon></ApplicationIcon>
+    <AssemblyName>StarkFiRentalClient</AssemblyName>
+    <!-- Runs continuously as the machine's lock enforcement - shouldn't
+         need a console window ever, including during development. -->
+    <StartupObject>StarkFiRentalClient.Program</StartupObject>
+  </PropertyGroup>
+
+</Project>

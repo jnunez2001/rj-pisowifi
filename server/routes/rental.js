@@ -144,13 +144,23 @@ router.get('/status', (req, res) => {
 
   const active = !!(pc.status === 'adopted' && !session?.is_paused && remainingMinutes > 0);
 
+  // Branding for the client's lock screen - included on every poll
+  // rather than a separate endpoint, since it's cheap and rarely
+  // changes; simpler than the client having to make (and cache) a
+  // second round trip.
+  const activeWallpaper = db.prepare('SELECT image_path FROM rental_wallpapers WHERE active = 1 LIMIT 1').get()?.image_path || null;
+  const getSetting = (key) => db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value || null;
+
   return res.json({
     success: true,
     locked: !active,
     pc_name: pc.name,
     minutes_remaining: Math.round(remainingMinutes * 10) / 10,
     adopted: pc.status === 'adopted',
-    logged_in_user: loggedInUser
+    logged_in_user: loggedInUser,
+    logo_url: getSetting('rental_logo_url'),
+    wallpaper_url: activeWallpaper,
+    lock_announcement: getSetting('rental_lock_announcement')
   });
 });
 
