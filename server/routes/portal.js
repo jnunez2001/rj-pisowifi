@@ -369,8 +369,8 @@ function hasActiveRental(movieId, mac) {
 
 // GET /movies?mac=xx - the Netflix-style browse grid. Free movies show
 // unlocked whenever the device has an active WiFi session (same gate as
-// internet); premium movies show unlocked only if that MAC has an
-// unexpired rental (movie_rentals), otherwise the price to unlock.
+// internet); premium movies ALWAYS need their own paid rental
+// (movie_rentals), regardless of how much WiFi time the device has.
 router.get('/movies', (req, res) => {
   const mac = String(req.query.mac || '').trim().toLowerCase();
   const sessionActive = mac ? hasActiveSession(mac) : false;

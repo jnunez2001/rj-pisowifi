@@ -1,8 +1,9 @@
 // ===== MOVIES BROWSE + PLAYER =====
-// Free titles unlock with any active WiFi session; premium titles need a
-// per-device rental (paid out of already-credited WiFi minutes - see
-// server/routes/portal.js's POST /movies/:id/rent). See
-// server/services/movieService.js for the transcode pipeline.
+// Free titles unlock with any active WiFi session; premium titles ALWAYS
+// need their own separate per-device coin payment (server/routes/coin.js's
+// mode:'movie' pending-coin branch), regardless of how much WiFi time the
+// device has. See server/services/movieService.js for the transcode
+// pipeline.
 let allMovies = [];
 let moviesTierFilter = '';
 let currentMac = '';
