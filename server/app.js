@@ -18,6 +18,7 @@ const sessionRoute = require('./routes/session');
 const promoRoute = require('./routes/promo');
 const adminRoute = require('./routes/admin');
 const portalRoute = require('./routes/portal');
+const rentalRoute = require('./routes/rental');
 
 const { startTimer } = require('./services/timerService');
 const mikrotikService = require('./services/mikrotikService');
@@ -413,6 +414,7 @@ app.use('/api/session', sessionRoute);
 app.use('/api/promo', promoRoute);
 app.use('/api/admin', adminRoute);
 app.use('/api/portal', portalRoute);
+app.use('/api/rental', rentalRoute);
 
 // Health check
 app.get('/api/health', (req, res) => {

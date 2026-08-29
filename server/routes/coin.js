@@ -104,6 +104,43 @@ async function finalizePendingCoins(mac) {
   // deduction with. Requires the FULL price in one window; falling short
   // just closes the window with nothing unlocked (matches how a real
   // coin-op device has no way to give change either).
+  // PC rental: staff-triggered from the admin panel's PC Rental page
+  // (shared coin box), targeting a specific rental_pcs row by its OWN
+  // registered mac_address (reusing the universal `mac` param rather than
+  // inventing a separate id field). Completely separate ledger from WiFi
+  // minutes AND from movie rentals - never touches sessions or
+  // movie_rentals. Same "full price or nothing" rule as movie rentals -
+  // the shared box can't give change either.
+  if (mode === 'pc_rental') {
+    const pc = db.prepare('SELECT * FROM rental_pcs WHERE mac_address = ?').get(mac);
+    if (!pc) {
+      return { success: false, reason: 'pc_not_found' };
+    }
+    const rate = db.prepare('SELECT minutes FROM rental_rates WHERE coin_value = ?').get(total);
+    const minutes = rate ? rate.minutes : null;
+    if (!minutes) {
+      console.error(`⚠️ PC rental coin window for "${pc.name}" closed with ₱${total}, no matching rate - not credited.`);
+      return { success: false, reason: 'no_matching_rate', total };
+    }
+    const existingSession = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
+    const currentRemainingMs = existingSession?.hard_expires_at
+      ? Math.max(0, new Date(existingSession.hard_expires_at).getTime() - Date.now()) : 0;
+    const newExpiresAt = new Date(Date.now() + currentRemainingMs + minutes * 60000).toISOString();
+
+    if (existingSession) {
+      db.prepare('UPDATE rental_sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE pc_id = ?')
+        .run(minutes, newExpiresAt, newExpiresAt, pc.id);
+    } else {
+      db.prepare('INSERT INTO rental_sessions (pc_id, minutes_remaining, expires_at, hard_expires_at) VALUES (?, ?, ?, ?)')
+        .run(pc.id, minutes, newExpiresAt, newExpiresAt);
+    }
+    db.prepare("INSERT INTO rental_transactions (pc_id, coin_value, minutes_added, type) VALUES (?, ?, ?, 'coin')")
+      .run(pc.id, total, minutes);
+
+    console.log(`✅ PC rental credited for "${pc.name}": ₱${total} (${minutes} min)`);
+    return { success: true, result: { pc_credited: true, pc_id: pc.id, minutes_added: minutes } };
+  }
+
   if (mode === 'movie') {
     const movieService = require('../services/movieService');
     const movie = movieService.getMovie(movieId);
@@ -186,10 +223,10 @@ router.post('/pending', (req, res) => {
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
-  // mode is the current contract ('regular'|'premium'|'convert'|'movie');
-  // is_premium is kept working for older portal.js builds still sending
-  // the plain boolean, mapped onto the same 'premium' mode.
-  const resolvedMode = (mode === 'convert' || mode === 'convert_down' || mode === 'movie') ? mode
+  // mode is the current contract ('regular'|'premium'|'convert'|'movie'|
+  // 'pc_rental'); is_premium is kept working for older portal.js builds
+  // still sending the plain boolean, mapped onto the same 'premium' mode.
+  const resolvedMode = (mode === 'convert' || mode === 'convert_down' || mode === 'movie' || mode === 'pc_rental') ? mode
     : (mode === 'premium' || is_premium) ? 'premium' : 'regular';
 
   if (resolvedMode === 'movie') {
@@ -197,6 +234,15 @@ router.post('/pending', (req, res) => {
     const movie = require('../services/movieService').getMovie(movieId);
     if (!movie || movie.tier !== 'premium') {
       return res.status(400).json({ success: false, message: 'Not a rentable movie' });
+    }
+  }
+  if (resolvedMode === 'pc_rental') {
+    // mac IS the rental PC's own registered MAC here, not a customer's
+    // phone - already validated as a well-formed MAC above; just confirm
+    // it's actually a known, adopted rental PC.
+    const pc = db.prepare("SELECT status FROM rental_pcs WHERE mac_address = ?").get(mac.toLowerCase());
+    if (!pc || pc.status !== 'adopted') {
+      return res.status(400).json({ success: false, message: 'Not an adopted rental PC' });
     }
   }
   const normalizedMac = mac.toLowerCase();

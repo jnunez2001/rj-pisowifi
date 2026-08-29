@@ -422,6 +422,58 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- ===== PC RENTAL =====
+  -- Completely separate ledger/session model from WiFi (sessions/
+  -- transactions) - a rental PC is a fixed station identified by its own
+  -- MAC, not a roaming phone, and its "session" is desktop lock/unlock
+  -- state, not bandwidth gating. Windows client pairing mirrors vendos'
+  -- candidate/adopted + device_secret pattern exactly (server/routes/
+  -- rental.js's POST /register).
+  CREATE TABLE IF NOT EXISTS rental_pcs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    mac_address TEXT UNIQUE NOT NULL,
+    device_secret TEXT,
+    ip_address TEXT,
+    status TEXT NOT NULL DEFAULT 'candidate', -- 'candidate' | 'adopted'
+    last_seen DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- One live row per PC (pc_id UNIQUE), same absolute-timestamp expiry
+  -- approach as sessions.expires_at/hard_expires_at rather than a poll-
+  -- driven countdown - the Windows client just asks "am I locked right
+  -- now" and the server always has an authoritative answer regardless of
+  -- how often it's asked.
+  CREATE TABLE IF NOT EXISTS rental_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pc_id INTEGER UNIQUE NOT NULL REFERENCES rental_pcs(id),
+    minutes_remaining REAL NOT NULL DEFAULT 0,
+    expires_at DATETIME,
+    hard_expires_at DATETIME,
+    is_paused INTEGER NOT NULL DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Revenue trail, mirrors transactions - never shares rows with WiFi's
+  -- transactions table, PC rental income is tracked completely separately.
+  CREATE TABLE IF NOT EXISTS rental_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pc_id INTEGER NOT NULL REFERENCES rental_pcs(id),
+    coin_value INTEGER NOT NULL,
+    minutes_added REAL NOT NULL,
+    type TEXT NOT NULL DEFAULT 'coin', -- 'coin' | 'admin_credit'
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Separate pricing from WiFi's own rates table - PC rental time is
+  -- priced independently.
+  CREATE TABLE IF NOT EXISTS rental_rates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    coin_value INTEGER NOT NULL,
+    minutes REAL NOT NULL
+  );
+
   -- Cash reconciliation: an operator's own physical coin count for a
   -- period, compared against what the system logged as credited over that
   -- same window (transactions.coin_value). A mismatch here isn't

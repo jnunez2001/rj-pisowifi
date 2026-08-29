@@ -1,0 +1,70 @@
+<div class="zf3-header">
+  <div>
+    <div class="page-title">PC Rental</div>
+    <div class="page-subtitle">Rental PCs, locked until credited - separate ledger from WiFi</div>
+  </div>
+  <div class="zf3-header-right">
+    <div class="zf3-icon-btn" onclick="loadRentalPage()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
+  </div>
+</div>
+
+<div class="zf3-card" style="padding:0;overflow:hidden;margin-bottom:16px;">
+  <div id="rentalPcsList" class="rental-pcs-list"></div>
+</div>
+
+<div class="zf3-card">
+  <div class="zf3-header" style="padding:0 0 12px;">
+    <div class="page-subtitle" style="margin:0;">Rates (coins → minutes)</div>
+  </div>
+  <div id="rentalRatesList" style="margin-bottom:12px;"></div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <span>₱</span>
+    <input type="number" id="rentalRateCoin" min="1" placeholder="coin value" style="width:100px;">
+    <span>=</span>
+    <input type="number" id="rentalRateMinutes" min="1" placeholder="minutes" style="width:100px;">
+    <button class="btn btn-primary" onclick="addRentalRate()"><i class="fas fa-plus"></i> Add rate</button>
+  </div>
+</div>
+
+<!-- INSERT COIN MODAL -->
+<div id="rentalCoinModal" class="rental-coin-modal">
+  <div class="rental-coin-box">
+    <h3 id="rentalCoinTitle">Insert coins</h3>
+    <div class="rental-coin-total">₱<span id="rentalCoinTotal">0</span></div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" style="flex:1;" onclick="cancelRentalCoin()">Cancel</button>
+      <button class="btn btn-primary" style="flex:1;" onclick="finishRentalCoin()">Done</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .rental-pcs-list { display: flex; flex-direction: column; }
+  .rental-pc-row {
+    display: flex; align-items: center; gap: 14px; padding: 14px 18px;
+    border-bottom: 1px solid var(--border-color, #2a2a2a);
+  }
+  .rental-pc-row:last-child { border-bottom: none; }
+  .rental-pc-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .rental-pc-dot.unlocked { background: var(--accent-green, #22c55e); }
+  .rental-pc-dot.locked { background: var(--accent-red, #ef4444); }
+  .rental-pc-dot.candidate { background: var(--accent-orange, #f59e0b); }
+  .rental-pc-info { flex: 1; min-width: 0; }
+  .rental-pc-name { font-weight: 700; font-size: 14px; }
+  .rental-pc-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .rental-pc-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .rental-pc-actions .btn { padding: 5px 10px; font-size: 12px; }
+  .rental-rate-row { display: flex; align-items: center; gap: 10px; font-size: 14px; padding: 6px 0; }
+  .rental-rate-row button { margin-left: auto; }
+
+  .rental-coin-modal {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    align-items: center; justify-content: center; z-index: 999;
+  }
+  .rental-coin-modal.show { display: flex; }
+  .rental-coin-box {
+    background: var(--bg-card, #1a1a1a); border-radius: 16px; padding: 28px;
+    text-align: center; width: 300px;
+  }
+  .rental-coin-total { font-size: 40px; font-weight: 900; margin: 16px 0; color: var(--accent-green, #22c55e); }
+</style>

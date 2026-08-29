@@ -5158,6 +5158,138 @@ router.delete('/movies/:id', adminAuth, (req, res) => {
   }
 });
 
+// ── PC Rental ────────────────────────────────────────────────────────
+// Device pairing (register/status) lives in server/routes/rental.js -
+// these are the staff-facing management routes only.
+function rentalStatusFor(pc) {
+  const session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
+  const remainingMs = session?.hard_expires_at ? new Date(session.hard_expires_at).getTime() - Date.now() : 0;
+  const remainingMinutes = Math.max(0, remainingMs / 60000);
+  return {
+    ...pc,
+    minutes_remaining: Math.round(remainingMinutes * 10) / 10,
+    is_paused: session ? !!session.is_paused : false,
+    locked: !(pc.status === 'adopted' && session && !session.is_paused && remainingMinutes > 0)
+  };
+}
+
+router.get('/rental/pcs', adminAuth, (req, res) => {
+  try {
+    const pcs = db.prepare('SELECT * FROM rental_pcs ORDER BY created_at DESC').all().map(rentalStatusFor);
+    res.json({ success: true, pcs });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/rental/pcs/:id/adopt', adminAuth, (req, res) => {
+  try {
+    db.prepare("UPDATE rental_pcs SET status = 'adopted' WHERE id = ?").run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/rental/pcs/:id', adminAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM rental_sessions WHERE pc_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM rental_transactions WHERE pc_id = ?').run(req.params.id);
+    db.prepare('DELETE FROM rental_pcs WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/rental/pcs/:id/addtime - staff-triggered direct credit
+// (payment method: manual, no coin box), same math as the existing
+// POST /session/:code/addtime.
+router.post('/rental/pcs/:id/addtime', adminAuth, (req, res) => {
+  try {
+    const minutes = parseFloat(req.body?.minutes);
+    if (!Number.isFinite(minutes) || minutes === 0) {
+      return res.status(400).json({ success: false, message: 'Minutes must be a non-zero number' });
+    }
+    const pcId = req.params.id;
+    const pc = db.prepare('SELECT * FROM rental_pcs WHERE id = ?').get(pcId);
+    if (!pc) return res.status(404).json({ success: false, message: 'PC not found' });
+
+    let session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pcId);
+    if (!session) {
+      db.prepare('INSERT INTO rental_sessions (pc_id, minutes_remaining) VALUES (?, 0)').run(pcId);
+      session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pcId);
+    }
+
+    const currentRemainingMs = session.hard_expires_at ? Math.max(0, new Date(session.hard_expires_at).getTime() - Date.now()) : 0;
+    const newExpiresAt = new Date(Date.now() + currentRemainingMs + minutes * 60000).toISOString();
+
+    db.prepare('UPDATE rental_sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE pc_id = ?')
+      .run(minutes, newExpiresAt, newExpiresAt, pcId);
+    db.prepare("INSERT INTO rental_transactions (pc_id, coin_value, minutes_added, type) VALUES (?, 0, ?, 'admin_credit')")
+      .run(pcId, minutes);
+
+    console.log(`➕ Admin added ${minutes} mins to rental PC "${pc.name}"`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Rental addtime error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/rental/pcs/:id/lock', adminAuth, (req, res) => {
+  try {
+    db.prepare('UPDATE rental_sessions SET is_paused = 1 WHERE pc_id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/rental/pcs/:id/unlock', adminAuth, (req, res) => {
+  try {
+    db.prepare('UPDATE rental_sessions SET is_paused = 0 WHERE pc_id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.get('/rental/rates', adminAuth, (req, res) => {
+  try {
+    const rates = db.prepare('SELECT * FROM rental_rates ORDER BY coin_value ASC').all();
+    res.json({ success: true, rates });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/rental/rates', adminAuth, (req, res) => {
+  try {
+    const coinValue = parseInt(req.body?.coin_value, 10);
+    const minutes = parseFloat(req.body?.minutes);
+    if (!Number.isFinite(coinValue) || coinValue <= 0) {
+      return res.status(400).json({ success: false, message: 'coin_value must be a positive number' });
+    }
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      return res.status(400).json({ success: false, message: 'minutes must be a positive number' });
+    }
+    db.prepare('INSERT INTO rental_rates (coin_value, minutes) VALUES (?, ?)').run(coinValue, minutes);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/rental/rates/:id', adminAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM rental_rates WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/alerts, merges two sources, both real:
 //  - live-recomputed checks (watchdog self-heal, WAN health score, disk
 //    space) - same as before, nothing here is persisted per-alert
