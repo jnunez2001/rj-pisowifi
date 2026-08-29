@@ -482,6 +482,24 @@ async function playVendoSound(sound) {
   } catch (e) {}
 }
 
+// Same voice prompt, played straight from the customer's own phone -
+// the vendo speaker and the portal page are two separate physical
+// locations (the coin slot vs wherever the customer is sitting/standing),
+// so playing it here too means they actually hear it even when they're
+// not standing right next to the machine. Files are the exact same WAVs
+// vendoAudioService.js streams to the ESP8266 (public/audio/vendo/), just
+// played locally instead of over HTTP to the device. Best-effort: mobile
+// browsers block autoplay before any user gesture on the page, so a
+// prompt that fires before the customer has tapped anything (e.g. the
+// very first "welcome" on page load) can silently fail to play here -
+// that's fine, the vendo speaker still covers that case.
+function playPortalSound(sound) {
+  try {
+    const audio = new Audio(`${SERVER}/audio/vendo/${sound}.wav`);
+    audio.play().catch(() => {});
+  } catch (e) {}
+}
+
 // Returns true if the coin slot is busy with another customer (single
 // physical acceptor - see server/routes/coin.js's POST /pending busy-lock
 // comment), so callers can bail out of the Insert Coin flow instead of
@@ -776,7 +794,7 @@ async function handleInsertCoin(mode) {
   startCoinTimer();
   startPendingPoll();
   activateVendoRelay();
-  if (mode === 'regular') playVendoSound('insert-coin');
+  if (mode === 'regular') { playVendoSound('insert-coin'); playPortalSound('insert-coin'); }
 }
 
 // Shared handler for both the CONNECT button and the modal's X close
@@ -1025,6 +1043,10 @@ function updateUI(session) {
     } else if (session.last_credit_at !== lastShownCreditAt) {
       lastShownCreditAt = session.last_credit_at;
       showToast(`You have added ₱${session.last_credit_amount}`, 'success');
+      const amt = Math.round(Number(session.last_credit_amount));
+      if (Number.isFinite(amt) && amt >= 1 && amt <= 300) {
+        playPortalSound(`amounts/amount-${amt}`);
+      }
     }
   }
 
@@ -1077,6 +1099,7 @@ function updateUI(session) {
         if (!prev && !welcomeSoundPlayed) {
           welcomeSoundPlayed = true;
           playVendoSound('welcome');
+          playPortalSound('welcome');
         }
       }
       welcomeMsg.style.display = 'block';
@@ -1111,6 +1134,7 @@ function updateUI(session) {
     if (!prev || !prev.active) {
       playSound('success');
       playVendoSound('connected');
+      playPortalSound('connected');
       if (coinModalOpen) {
         // Bug: this used to force-close the modal (and redirect) the instant
         // the first coin created a session, cutting the customer off mid
