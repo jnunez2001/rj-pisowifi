@@ -32,6 +32,12 @@ let pendingFinalizeTimer = null;
 // used at finalize to match against the right rate/crediting path, since
 // coin denominations alone don't disambiguate any of these three.
 let pendingMode = 'regular';
+// Only set/used when pendingMode === 'movie' - which premium movie this
+// coin window is paying to unlock (server/services/movieService.js). A
+// movie rental never touches session.minutes_remaining at all, it's a
+// completely separate real-coin payment from WiFi time (see
+// finalizePendingCoins()'s 'movie' branch below).
+let pendingMovieId = null;
 const PENDING_TIMEOUT_MS = 40000; // must match/slightly exceed portal's 30s coin timer
 
 // Bug found live: crediting each coin the instant it was detected meant a
@@ -62,6 +68,7 @@ async function finalizePendingCoins(mac) {
   const total = pendingTotal;
   const kioskId = pendingKioskId;
   const mode = pendingMode;
+  const movieId = pendingMovieId;
 
   // pendingIp only ever held whatever the coin-relay device (ESP32) self-
   // reported as its OWN WiFi IP, not the paying customer's - a physical
@@ -86,8 +93,38 @@ async function finalizePendingCoins(mac) {
   pendingIp = '';
   pendingKioskId = null;
   pendingMode = 'regular';
+  pendingMovieId = null;
   if (pendingFinalizeTimer) clearTimeout(pendingFinalizeTimer);
   pendingFinalizeTimer = null;
+
+  // Movie rental: a completely separate real-coin payment from WiFi
+  // time, never touches sessions/minutes_remaining at all - see
+  // server/services/movieService.js and the "no deduction of time"
+  // requirement this replaced the old approve-credit-style minutes
+  // deduction with. Requires the FULL price in one window; falling short
+  // just closes the window with nothing unlocked (matches how a real
+  // coin-op device has no way to give change either).
+  if (mode === 'movie') {
+    const movieService = require('../services/movieService');
+    const movie = movieService.getMovie(movieId);
+    if (!movie) {
+      return { success: false, reason: 'movie_not_found' };
+    }
+    if (total < movie.price_pesos) {
+      console.error(`⚠️ Movie rental window for ${mac} closed with ₱${total}, needed ₱${movie.price_pesos} - not unlocked.`);
+      return { success: false, reason: 'insufficient_amount', total, needed: movie.price_pesos };
+    }
+    const rentalHours = parseFloat(db.prepare("SELECT value FROM settings WHERE key = 'movie_rental_hours'").get()?.value || '48');
+    const expiresAt = new Date(Date.now() + rentalHours * 60 * 60 * 1000).toISOString();
+    db.prepare('INSERT INTO movie_rentals (movie_id, mac_address, expires_at) VALUES (?, ?, ?)').run(movie.id, mac, expiresAt);
+    db.prepare(`
+      INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, mac_address)
+      VALUES (?, ?, 0, 'movie_rental', ?)
+    `).run(`MOVIE-${movie.id}`, total, mac);
+    console.log(`✅ Movie rental unlocked for ${mac}: "${movie.title}" (₱${total})`);
+    require('../services/vendoAudioService').playVendoAmount(total).catch(() => {});
+    return { success: true, result: { movie_unlocked: true, movie_id: movie.id, expires_at: expiresAt } };
+  }
 
   try {
     let result;
@@ -145,15 +182,23 @@ function pruneCoinEventCache() {
 
 // POST /api/coin/pending, portal calls this right when INSERT COIN modal opens
 router.post('/pending', (req, res) => {
-  const { mac, is_premium, mode } = req.body;
+  const { mac, is_premium, mode, movie_id } = req.body;
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
-  // mode is the current contract ('regular'|'premium'|'convert');
+  // mode is the current contract ('regular'|'premium'|'convert'|'movie');
   // is_premium is kept working for older portal.js builds still sending
   // the plain boolean, mapped onto the same 'premium' mode.
-  const resolvedMode = (mode === 'convert' || mode === 'convert_down') ? mode
+  const resolvedMode = (mode === 'convert' || mode === 'convert_down' || mode === 'movie') ? mode
     : (mode === 'premium' || is_premium) ? 'premium' : 'regular';
+
+  if (resolvedMode === 'movie') {
+    const movieId = parseInt(movie_id, 10);
+    const movie = require('../services/movieService').getMovie(movieId);
+    if (!movie || movie.tier !== 'premium') {
+      return res.status(400).json({ success: false, message: 'Not a rentable movie' });
+    }
+  }
   const normalizedMac = mac.toLowerCase();
 
   // Single physical coin acceptor: only one customer can actually be
@@ -174,6 +219,7 @@ router.post('/pending', (req, res) => {
   pendingCoinMac = mac.toLowerCase();
   pendingSetAt = Date.now();
   pendingTotal = 0;
+  pendingMovieId = resolvedMode === 'movie' ? parseInt(movie_id, 10) : null;
   pendingIp = '';
   pendingKioskId = null;
   pendingMode = resolvedMode;

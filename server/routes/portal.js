@@ -404,51 +404,14 @@ router.get('/movies/:id/play', (req, res) => {
   return res.json({ success: true, status: 'ready', hls_url: `/movies_cache/${movie.id}/master.m3u8` });
 });
 
-// POST /movies/:id/rent - unlocks a premium movie for this MAC by
-// deducting its peso-equivalent minutes from the device's already-
-// credited WiFi time (no separate coin-insertion flow needed - the
-// customer pays out of time they've already bought). Rental window
-// length is settings.movie_rental_hours.
-router.post('/movies/:id/rent', (req, res) => {
-  const mac = String(req.body?.mac || '').trim().toLowerCase();
-  if (!mac) return res.status(400).json({ success: false, message: 'mac required' });
-
-  const movie = movieService.getMovie(req.params.id);
-  if (!movie || movie.tier !== 'premium') {
-    return res.status(400).json({ success: false, message: 'Not a rentable movie' });
-  }
-  if (hasActiveRental(movie.id, mac)) {
-    return res.json({ success: true, message: 'Already unlocked' });
-  }
-
-  const session = db.prepare(
-    "SELECT * FROM sessions WHERE mac_address = ? ORDER BY id DESC LIMIT 1"
-  ).get(mac);
-  const { getMinutesForCoin } = require('../services/voucherService');
-  const minutesCost = getMinutesForCoin(movie.price_pesos);
-  if (!minutesCost) {
-    return res.status(400).json({ success: false, message: `No rate configured for ₱${movie.price_pesos}` });
-  }
-  if (!session || session.minutes_remaining < minutesCost) {
-    return res.status(402).json({
-      success: false,
-      message: `Insert ₱${movie.price_pesos} of WiFi time first, then try again.`
-    });
-  }
-
-  const newMinutes = session.minutes_remaining - minutesCost;
-  db.prepare('UPDATE sessions SET minutes_remaining = ? WHERE voucher_code = ?').run(newMinutes, session.voucher_code);
-
-  const rentalHours = parseFloat(db.prepare("SELECT value FROM settings WHERE key = 'movie_rental_hours'").get()?.value || '48');
-  const expiresAt = new Date(Date.now() + rentalHours * 60 * 60 * 1000).toISOString();
-  db.prepare('INSERT INTO movie_rentals (movie_id, mac_address, expires_at) VALUES (?, ?, ?)').run(movie.id, mac, expiresAt);
-
-  db.prepare(`
-    INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, mac_address)
-    VALUES (?, ?, ?, 'movie_rental', ?)
-  `).run(session.voucher_code, movie.price_pesos, -minutesCost, mac);
-
-  return res.json({ success: true, minutes_remaining: newMinutes, expires_at: expiresAt });
-});
+// Premium movie unlocking is now a real, separate coin payment (see
+// server/routes/coin.js's 'movie' pendingMode branch in
+// finalizePendingCoins()) - deliberately NOT deducted from WiFi minutes,
+// even if the customer has plenty of time left. The old version of this
+// route did that minutes-deduction; removed in favor of the real coin
+// flow, which the movies portal page now drives via POST /api/coin/pending
+// (mode: 'movie', movie_id), POST /api/portal/relay/on to arm the coin
+// slot, and polling GET /api/coin/pending/:mac the same way the WiFi
+// Insert Coin modal already does.
 
 module.exports = router;

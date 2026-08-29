@@ -77,47 +77,120 @@ function openMovie(id) {
       return;
     }
     pendingRentMovieId = id;
-    document.getElementById('movieRentTitle').textContent = movie.title;
-    document.getElementById('movieRentDesc').textContent =
-      `Unlock this movie for ₱${movie.price_pesos} of your WiFi time. You'll be able to watch it for a limited rental window.`;
-    document.getElementById('movieRentConfirmBtn').textContent = `Unlock for ₱${movie.price_pesos}`;
-    document.getElementById('movieRentOverlay').classList.add('show');
+    showRentConfirmStep(movie);
     return;
   }
 
   startPlayback(movie);
 }
 
-function closeRentOverlay() {
-  document.getElementById('movieRentOverlay').classList.remove('show');
-  pendingRentMovieId = null;
+// This is a REAL, separate coin payment - not a deduction from WiFi time
+// (even a customer with hours of WiFi left still has to physically pay
+// this amount, matching the "insert an actual ₱10" requirement rather
+// than spending time they already bought). Drives the exact same
+// pending-coin mechanism the main portal's Insert Coin modal uses
+// (server/routes/coin.js), just tagged mode:'movie' so
+// finalizePendingCoins() unlocks the movie_rentals row instead of
+// crediting session minutes.
+function showRentConfirmStep(movie) {
+  document.getElementById('movieRentTitle').textContent = movie.title;
+  document.getElementById('movieRentDesc').textContent =
+    `Insert ₱${movie.price_pesos} in coins to unlock this movie. This is a separate payment from your WiFi time.`;
+  document.getElementById('movieRentConfirmBtn').textContent = `Insert ₱${movie.price_pesos} to unlock`;
+  document.getElementById('movieRentConfirmBtn').onclick = beginMovieCoinInsertion;
+  document.getElementById('movieRentOverlay').classList.add('show');
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-  const btn = document.getElementById('movieRentConfirmBtn');
-  if (btn) btn.onclick = confirmRentMovie;
-});
+let movieCoinPollInterval = null;
 
-async function confirmRentMovie() {
-  if (!pendingRentMovieId) return;
+async function beginMovieCoinInsertion() {
+  const movie = allMovies.find((m) => m.id === pendingRentMovieId);
+  if (!movie) return;
+
   try {
-    const res = await fetch(`/api/portal/movies/${pendingRentMovieId}/rent`, {
+    const res = await fetch('/api/coin/pending', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac: currentMac, mode: 'movie', movie_id: movie.id })
+    });
+    if (res.status === 409) {
+      alert('The coin slot is busy with another customer right now. Please wait a moment.');
+      return;
+    }
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.message || 'Could not start coin insertion.');
+      return;
+    }
+  } catch (e) {
+    alert('Could not reach the server, please try again.');
+    return;
+  }
+
+  await fetch('/api/portal/relay/on', { method: 'POST' }).catch(() => {});
+  showRentInsertingStep(movie);
+}
+
+function showRentInsertingStep(movie) {
+  document.getElementById('movieRentDesc').innerHTML =
+    `Inserted so far: <b id="movieRentRunningTotal">₱0</b> of ₱${movie.price_pesos}`;
+  document.getElementById('movieRentTitle').textContent = 'Insert coins now';
+  document.getElementById('movieRentConfirmBtn').textContent = 'Done';
+  document.getElementById('movieRentConfirmBtn').onclick = () => finishMovieCoinInsertion(movie.id);
+
+  clearInterval(movieCoinPollInterval);
+  movieCoinPollInterval = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/coin/pending/${encodeURIComponent(currentMac)}`);
+      const data = await res.json();
+      const totalEl = document.getElementById('movieRentRunningTotal');
+      if (totalEl) totalEl.textContent = `₱${data.total || 0}`;
+      if (!data.pending) {
+        // Window closed on its own (silence timeout) - see if it unlocked.
+        clearInterval(movieCoinPollInterval);
+        await loadMovies();
+        const refreshed = allMovies.find((m) => m.id === movie.id);
+        if (refreshed && refreshed.unlocked) {
+          closeRentOverlay();
+          startPlayback(refreshed);
+        } else {
+          closeRentOverlay();
+          alert('Not enough was inserted to unlock this movie. Please try again.');
+        }
+      }
+    } catch (e) {}
+  }, 2000);
+}
+
+async function finishMovieCoinInsertion(movieId) {
+  clearInterval(movieCoinPollInterval);
+  try {
+    const res = await fetch('/api/coin/finalize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mac: currentMac })
     });
     const data = await res.json();
-    if (data.success) {
-      closeRentOverlay();
+    await fetch('/api/portal/relay/off', { method: 'POST' }).catch(() => {});
+    closeRentOverlay();
+    if (data.success && data.result?.movie_unlocked) {
       await loadMovies();
-      const movie = allMovies.find((m) => m.id === pendingRentMovieId);
+      const movie = allMovies.find((m) => m.id === movieId);
       if (movie) startPlayback(movie);
     } else {
-      alert(data.message || 'Could not unlock this movie.');
+      alert(data.message || `Not enough was inserted (needed ₱${data.needed || ''}). Please try again.`);
+      await loadMovies();
     }
   } catch (e) {
     alert('Could not reach the server, please try again.');
   }
+}
+
+function closeRentOverlay() {
+  clearInterval(movieCoinPollInterval);
+  fetch('/api/portal/relay/off', { method: 'POST' }).catch(() => {});
+  document.getElementById('movieRentOverlay').classList.remove('show');
+  pendingRentMovieId = null;
 }
 
 function startPlayback(movie) {
