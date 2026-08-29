@@ -5,6 +5,7 @@
 let reportsFilter = 'open';
 let reportsData = [];
 let expandedReportId = null;
+let reportThreadPollInterval = null;
 
 const REPORT_CATEGORY_LABELS = {
   slow_internet: 'Slow internet',
@@ -60,11 +61,17 @@ async function loadReportsPage() {
 }
 
 function toggleReportThread(id) {
+  clearInterval(reportThreadPollInterval);
   expandedReportId = expandedReportId === id ? null : id;
   const panel = document.getElementById(`reportPanel-${id}`);
   if (!panel) return;
   panel.style.display = expandedReportId === id ? 'block' : 'none';
-  if (expandedReportId === id) loadReportMessages(id);
+  if (expandedReportId === id) {
+    loadReportMessages(id);
+    // Live-ish updates while a thread is open, so a customer's reply
+    // shows up without the admin needing to refresh the whole page.
+    reportThreadPollInterval = setInterval(() => loadReportMessages(id), 5000);
+  }
 }
 
 function renderReportThread(r) {
@@ -218,4 +225,8 @@ function escapeHtml(str) {
   const div = document.createElement('div');
   div.textContent = str == null ? '' : String(str);
   return div.innerHTML;
+}
+
+function destroyReports() {
+  clearInterval(reportThreadPollInterval);
 }

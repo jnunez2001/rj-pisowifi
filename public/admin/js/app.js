@@ -408,6 +408,7 @@ async function navigateTo(page) {
   if (typeof destroyHotspotDashboard === 'function') destroyHotspotDashboard();
   if (typeof destroyDevices === 'function') destroyDevices();
   if (typeof destroyNetworkDevices === 'function') destroyNetworkDevices();
+  if (typeof destroyReports === 'function') destroyReports();
 
   currentPage = page;
 
