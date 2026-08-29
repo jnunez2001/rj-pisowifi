@@ -1,4 +1,5 @@
 #include "config.h"
+#include "audio.h"
 
 void activateRelay() {
   digitalWrite(RELAY_PIN, RELAY_ON_STATE);
@@ -18,6 +19,7 @@ void deactivateRelay() {
   Serial.println("Relay OFF");
   lcdPrint(2, "");
   lcdPrint(3, "");
+  audioRelayReleased();
 }
 
 void checkRelayTimeout() {

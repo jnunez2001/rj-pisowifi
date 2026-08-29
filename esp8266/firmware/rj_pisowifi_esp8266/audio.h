@@ -12,5 +12,6 @@ void startPlayingSound(const String &url);
 void stopPlayingSound();
 void audioLoop();
 bool isAudioPlaying();
+void audioRelayReleased();
 
 #endif

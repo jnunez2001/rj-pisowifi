@@ -62,16 +62,41 @@ void stopPlayingSound() {
 }
 
 void startPlayingSound(const String &url) {
-  if (isAudioPlaying()) {
+  // Bug found live: starting a stream here means AudioFileSourceHTTPStream
+  // opens a real TCP+HTTP connection back to the server SYNCHRONOUSLY,
+  // blocking loop() until it connects - portal.js fires this (insert-coin
+  // prompt) at almost the exact same instant it arms the relay, so that
+  // block can land right when the coin acceptor is live and expecting a
+  // coin, delaying processCoinPulses()/checkRelayTimeout() servicing at
+  // the worst possible moment and making coins get missed/rejected.
+  // Refusing to start (or queue) any sound while the relay is armed
+  // removes that contention entirely - the customer's own phone already
+  // plays the same insert-coin prompt locally (portal.js's
+  // playPortalSound()), so nothing is lost by skipping it here.
+  if (relayActive || isAudioPlaying()) {
     if (audioQueueCount < AUDIO_QUEUE_SIZE) {
       audioQueue[audioQueueCount++] = url;
-      Serial.println("Audio: queued " + url);
+      Serial.println(relayActive ? "Audio: queued (relay armed) " + url
+                                  : "Audio: queued " + url);
     } else {
       Serial.println("Audio: queue full, dropping " + url);
     }
     return;
   }
   playNow(url);
+}
+
+// Called from relay.cpp's deactivateRelay() - anything that arrived while
+// the relay was armed (see the guard above) was queued instead of played,
+// so start it now that coin acceptance is no longer time-critical. A no-op
+// if nothing was queued or something is somehow already playing.
+void audioRelayReleased() {
+  if (audioQueueCount > 0 && !isAudioPlaying()) {
+    String next = audioQueue[0];
+    for (int i = 1; i < audioQueueCount; i++) audioQueue[i - 1] = audioQueue[i];
+    audioQueueCount--;
+    playNow(next);
+  }
 }
 
 bool isAudioPlaying() {
