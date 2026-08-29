@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PC Rental - StarkFi Admin</title>
+  <link rel="icon" type="image/png" href="../img/logo-icon.png">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link rel="stylesheet" href="../css/themes.css">
+  <link rel="stylesheet" href="../css/admin.css">
+  <style>
+    body { display: flex; height: 100vh; overflow: hidden; }
+    .rental-shell-nav {
+      width: 220px; flex-shrink: 0; background: var(--bg-sidebar, #1a1a1a);
+      padding: 20px 0; overflow-y: auto;
+    }
+    .rental-shell-title {
+      font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--text-muted); padding: 0 20px 14px;
+    }
+    .rental-shell-item {
+      display: flex; align-items: center; gap: 12px; padding: 12px 20px;
+      color: var(--text-secondary, #ccc); cursor: pointer; font-size: 14px; font-weight: 600;
+    }
+    .rental-shell-item:hover { background: rgba(255,255,255,0.05); }
+    .rental-shell-item.active { background: var(--accent-blue, #3b82f6); color: #fff; border-radius: 0 20px 20px 0; margin-right: 12px; }
+    .rental-shell-item i { width: 18px; text-align: center; }
+    .rental-shell-content { flex: 1; overflow-y: auto; padding: 24px 32px; background: var(--bg-primary); }
+    .rental-shell-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
+    .rental-dashboard-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 20px; }
+    .rental-stat-card { background: var(--bg-card, #1a1a1a); border-radius: 12px; padding: 18px; }
+    .rental-stat-label { font-size: 12px; color: var(--text-muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+    .rental-stat-value { font-size: 28px; font-weight: 900; margin-top: 6px; }
+  </style>
+</head>
+<body>
+
+  <div class="rental-shell-nav">
+    <div class="rental-shell-title">PC Rental</div>
+    <div class="rental-shell-item active" data-panel="dashboard" onclick="switchRentalPanel('dashboard')">
+      <i class="fas fa-grip"></i> Dashboard
+    </div>
+    <div class="rental-shell-item" data-panel="managepc" onclick="switchRentalPanel('managepc')">
+      <i class="fas fa-laptop"></i> Manage PC
+    </div>
+    <div class="rental-shell-item" data-panel="members" onclick="switchRentalPanel('members')">
+      <i class="fas fa-users"></i> Members
+    </div>
+    <div class="rental-shell-item" data-panel="timerrates" onclick="switchRentalPanel('timerrates')">
+      <i class="fas fa-dollar-sign"></i> Timer Rates
+    </div>
+    <div class="rental-shell-item" data-panel="redeemrates" onclick="switchRentalPanel('redeemrates')">
+      <i class="fas fa-star"></i> Redeem Rates
+    </div>
+    <div class="rental-shell-item" data-panel="redeemhistory" onclick="switchRentalPanel('redeemhistory')">
+      <i class="fas fa-clock-rotate-left"></i> Redeem History
+    </div>
+    <div class="rental-shell-item" data-panel="reports" onclick="switchRentalPanel('reports')">
+      <i class="fas fa-cash-register"></i> Reports
+    </div>
+    <div class="rental-shell-item" data-panel="subcoinslot" onclick="switchRentalPanel('subcoinslot')">
+      <i class="fas fa-dice"></i> Sub-Coinslot
+    </div>
+  </div>
+
+  <div class="rental-shell-content">
+    <div class="rental-shell-header">
+      <div class="page-title" id="rentalPanelTitle">Dashboard</div>
+      <button class="btn btn-secondary" onclick="location.reload()"><i class="fas fa-rotate-right"></i> Refresh</button>
+    </div>
+
+    <div id="rentalPanelDashboard" class="rental-panel">
+      <div class="rental-dashboard-stats">
+        <div class="rental-stat-card">
+          <div class="rental-stat-label">Total PCs</div>
+          <div class="rental-stat-value" id="rentalStatTotal">--</div>
+        </div>
+        <div class="rental-stat-card">
+          <div class="rental-stat-label">Unlocked Now</div>
+          <div class="rental-stat-value" id="rentalStatUnlocked">--</div>
+        </div>
+        <div class="rental-stat-card">
+          <div class="rental-stat-label">Pending Adoption</div>
+          <div class="rental-stat-value" id="rentalStatCandidates">--</div>
+        </div>
+      </div>
+      <div class="zf3-card" style="padding:0;overflow:hidden;">
+        <div id="rentalDashboardList" class="rental-pcs-list"></div>
+      </div>
+    </div>
+
+    <div id="rentalPanelManagepc" class="rental-panel" style="display:none;">
+      <div class="zf3-card" style="padding:0;overflow:hidden;">
+        <div id="rentalPcsList" class="rental-pcs-list"></div>
+      </div>
+    </div>
+
+    <div id="rentalPanelMembers" class="rental-panel" style="display:none;"></div>
+    <div id="rentalPanelTimerrates" class="rental-panel" style="display:none;">
+      <div class="zf3-card">
+        <div id="rentalRatesList" style="margin-bottom:12px;"></div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span>₱</span>
+          <input type="number" id="rentalRateCoin" min="1" placeholder="coin value" style="width:100px;">
+          <span>=</span>
+          <input type="number" id="rentalRateMinutes" min="1" placeholder="minutes" style="width:100px;">
+          <button class="btn btn-primary" onclick="addRentalRate()"><i class="fas fa-plus"></i> Add rate</button>
+        </div>
+      </div>
+    </div>
+    <div id="rentalPanelRedeemrates" class="rental-panel" style="display:none;"></div>
+    <div id="rentalPanelRedeemhistory" class="rental-panel" style="display:none;"></div>
+    <div id="rentalPanelReports" class="rental-panel" style="display:none;"></div>
+    <div id="rentalPanelSubcoinslot" class="rental-panel" style="display:none;"></div>
+  </div>
+
+  <!-- INSERT COIN MODAL -->
+  <div id="rentalCoinModal" class="rental-coin-modal">
+    <div class="rental-coin-box">
+      <h3 id="rentalCoinTitle">Insert coins</h3>
+      <div class="rental-coin-total">₱<span id="rentalCoinTotal">0</span></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" style="flex:1;" onclick="cancelRentalCoin()">Cancel</button>
+        <button class="btn btn-primary" style="flex:1;" onclick="finishRentalCoin()">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    .rental-pcs-list { display: flex; flex-direction: column; }
+    .rental-pc-row {
+      display: flex; align-items: center; gap: 14px; padding: 14px 18px;
+      border-bottom: 1px solid var(--border-color, #2a2a2a);
+    }
+    .rental-pc-row:last-child { border-bottom: none; }
+    .rental-pc-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .rental-pc-dot.unlocked { background: var(--accent-green, #22c55e); }
+    .rental-pc-dot.locked { background: var(--accent-red, #ef4444); }
+    .rental-pc-dot.candidate { background: var(--accent-orange, #f59e0b); }
+    .rental-pc-info { flex: 1; min-width: 0; }
+    .rental-pc-name { font-weight: 700; font-size: 14px; }
+    .rental-pc-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .rental-pc-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+    .rental-pc-actions .btn { padding: 5px 10px; font-size: 12px; }
+    .rental-rate-row { display: flex; align-items: center; gap: 10px; font-size: 14px; padding: 6px 0; }
+    .rental-rate-row button { margin-left: auto; }
+    .rental-coming-soon { text-align: center; color: var(--text-muted); padding: 60px 20px; }
+    .rental-coming-soon i { font-size: 32px; margin-bottom: 10px; display: block; }
+
+    .rental-coin-modal {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      align-items: center; justify-content: center; z-index: 999;
+    }
+    .rental-coin-modal.show { display: flex; }
+    .rental-coin-box {
+      background: var(--bg-card, #1a1a1a); border-radius: 16px; padding: 28px;
+      text-align: center; width: 300px;
+    }
+    .rental-coin-total { font-size: 40px; font-weight: 900; margin: 16px 0; color: var(--accent-green, #22c55e); }
+  </style>
+
+  <script src="../js/rental.js"></script>
+  <script src="rental-shell.js"></script>
+</body>
+</html>

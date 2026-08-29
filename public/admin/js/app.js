@@ -332,7 +332,6 @@ const pageTitles = {
   logs: 'Logs',
   reports: 'Reports',
   movies: 'Movies',
-  rental: 'PC Rental',
   sales: 'Sales Report',
   sessions: 'Active Sessions',
   vouchers: 'Vouchers',
@@ -412,7 +411,6 @@ async function navigateTo(page) {
   if (typeof destroyNetworkDevices === 'function') destroyNetworkDevices();
   if (typeof destroyReports === 'function') destroyReports();
   if (typeof destroyMovies === 'function') destroyMovies();
-  if (typeof destroyRental === 'function') destroyRental();
 
   currentPage = page;
 
@@ -488,7 +486,6 @@ async function navigateTo(page) {
       logs: () => typeof loadLogsPage === 'function' && loadLogsPage(),
       reports: () => typeof loadReportsPage === 'function' && loadReportsPage(),
       movies: () => typeof loadMoviesPage === 'function' && loadMoviesPage(),
-      rental: () => typeof loadRentalPage === 'function' && loadRentalPage(),
     };
 
     if (scripts[page]) scripts[page]();
