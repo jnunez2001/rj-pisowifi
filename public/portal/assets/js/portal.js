@@ -460,6 +460,19 @@ async function deactivateVendoRelay() {
   } catch(e) {}
 }
 
+// Best-effort, same silent-on-failure reasoning as activateVendoRelay()
+// above - a vendo without a speaker attached, or not configured at all,
+// shouldn't show the customer an error over a voice prompt not playing.
+async function playVendoSound(sound) {
+  try {
+    await fetch(`${SERVER}/api/portal/play-sound`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sound })
+    });
+  } catch (e) {}
+}
+
 // Returns true if the coin slot is busy with another customer (single
 // physical acceptor - see server/routes/coin.js's POST /pending busy-lock
 // comment), so callers can bail out of the Insert Coin flow instead of
@@ -754,6 +767,7 @@ async function handleInsertCoin(mode) {
   startCoinTimer();
   startPendingPoll();
   activateVendoRelay();
+  if (mode === 'regular') playVendoSound('insert-coin');
 }
 
 // Shared handler for both the CONNECT button and the modal's X close

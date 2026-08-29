@@ -200,4 +200,52 @@ router.post('/relay/:action', async (req, res) => {
   }
 });
 
+// Named sounds only, never an arbitrary client-supplied URL - the vendo
+// fetches whatever URL this tells it to, so accepting a raw URL from the
+// portal (unauthenticated, customer-facing) would let anyone make the
+// vendo device fetch/stream from anywhere. Add new prompts here as real
+// audio files land in public/audio/vendo/.
+const VENDO_SOUNDS = {
+  'insert-coin': 'insert-coin.wav',
+};
+
+// POST /play-sound - tells the vendo to stream and play one of the named
+// WAV files above, e.g. a voice prompt when the customer taps "Insert
+// Coin" on the portal (see portal.js's handleInsertCoin()). The file
+// itself is served straight out of public/ (app.js's express.static) and
+// streamed/decoded by the device a chunk at a time - never saved to the
+// vendo's own flash (esp8266/firmware's audio.cpp).
+router.post('/play-sound', async (req, res) => {
+  const { sound } = req.body || {};
+  const filename = VENDO_SOUNDS[sound];
+  if (!filename) {
+    return res.status(400).json({ success: false, message: 'Unknown sound' });
+  }
+
+  const vendoIp = db.prepare("SELECT value FROM settings WHERE key = 'vendo_ip'").get()?.value;
+  if (!vendoIp) {
+    return res.status(400).json({ success: false, message: 'No vendo configured' });
+  }
+
+  // Same host the requesting browser used to reach this server - the
+  // vendo is on the same LAN and reaches this server the same way a
+  // customer's phone does, so this is a reasonable, no-extra-config way
+  // to build a URL the device can actually fetch back.
+  const audioUrl = `${req.protocol}://${req.get('host')}/audio/vendo/${filename}`;
+
+  try {
+    const playRes = await fetch(`http://${vendoIp}/play?url=${encodeURIComponent(audioUrl)}`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(3000)
+    });
+    if (!playRes.ok) {
+      return res.status(502).json({ success: false, message: 'Vendo play request failed' });
+    }
+    return res.json({ success: true });
+  } catch (e) {
+    console.error('[Vendo] play-sound failed:', e.message);
+    return res.status(502).json({ success: false, message: 'Vendo unreachable' });
+  }
+});
+
 module.exports = router;

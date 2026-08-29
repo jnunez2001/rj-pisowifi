@@ -1,4 +1,5 @@
 #include "config.h"
+#include "audio.h"
 #include <ESP8266WiFi.h>
 #include <LittleFS.h>
 
@@ -96,6 +97,14 @@ void setup() {
 
 void loop() {
   server.handleClient();
+
+  // Plays one more decoded chunk of whatever sound is currently streaming
+  // (if any) - never blocks for the whole file, safe to call every
+  // iteration alongside everything else below. Runs even in setup mode,
+  // unlike coin/relay/OTA checks, since a sound could reasonably be
+  // useful during setup too and playback itself can't affect WiFi/button
+  // state the way those can.
+  audioLoop();
 
   // Setup button hold check
   if (!setupMode) {

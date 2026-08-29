@@ -1,4 +1,5 @@
 #include "config.h"
+#include "audio.h"
 #include <ESP8266WiFi.h>
 #include <LittleFS.h>
 
@@ -155,6 +156,22 @@ void setupWebServer() {
   server.on("/relay/off", HTTP_POST, []() {
     if (!rejectUnlessFromServer()) return;
     deactivateRelay();
+    server.send(200, "application/json", "{\"success\":true}");
+  });
+
+  // POST /play?url=... - streams and plays a WAV file the server hosts,
+  // e.g. a voice prompt when the customer taps "Insert Coin" on the
+  // portal. The file is never saved to this device's own flash, it's
+  // decoded and played a chunk at a time as it streams in (see audio.cpp).
+  // Same server-only restriction as /relay/on|off - not something a
+  // random device on the customer network should be able to trigger.
+  server.on("/play", HTTP_POST, []() {
+    if (!rejectUnlessFromServer()) return;
+    if (!server.hasArg("url") || server.arg("url").isEmpty()) {
+      server.send(400, "application/json", "{\"success\":false,\"message\":\"Missing url\"}");
+      return;
+    }
+    startPlayingSound(server.arg("url"));
     server.send(200, "application/json", "{\"success\":true}");
   });
 

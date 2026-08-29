@@ -5,7 +5,7 @@
 #include <ESP8266WebServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.16"
+#define FIRMWARE_VERSION "v1.0.17"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
@@ -41,6 +41,22 @@
 //                             stub). Kept defined so a future board
 //                             revision with an LED doesn't need a config
 //                             change, not because anything uses it today.
+//   RXD0 (GPIO3)  - AUDIO OUT: NOT a #define here - fixed by the
+//                             ESP8266's own I2S hardware, not a free
+//                             choice (audio.cpp uses AudioOutputI2SNoDAC,
+//                             which drives the real I2S peripheral in a
+//                             software delta-sigma mode to fake analog
+//                             output with no DAC chip needed - just a
+//                             cheap class-D amp, e.g. PAM8403, on this
+//                             pin). Wire: GPIO3 -> small capacitor
+//                             (~1-10uF, blocks DC bias) -> amp's audio
+//                             input; amp powered from VIN/G (5V), never
+//                             the 3.3V pin. This is the same pin used for
+//                             UART RX during USB flashing, but this
+//                             firmware never reads Serial input at
+//                             runtime, so there's no real conflict -
+//                             Serial.println() output (TX/GPIO1) is
+//                             completely separate and unaffected.
 //
 // Note on RST: while it's held, the chip is fully off and nothing is
 // running, so there is no way for firmware to distinguish a brief tap
