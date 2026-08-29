@@ -229,10 +229,17 @@ router.post('/play-sound', async (req, res) => {
 
 // POST /report - customer-facing "Report a Problem" button. No login
 // needed (same unauthenticated-by-design reasoning as every other portal
-// route here), just a MAC + free-text message, rate-limited per IP so it
-// can't be used to spam the operator's Reports page.
+// route here). Three layers keep this from being a spam/prank vector:
+//   1. A short per-IP cooldown (below) stops rapid-fire double-taps.
+//   2. A per-MAC daily cap (settings.max_reports_per_mac, operator-
+//      adjustable) stops one customer from flooding the Reports page.
+//   3. report_blocked_macs - an operator can permanently silence one
+//      specific MAC's report channel (POST /admin/reports/block-mac)
+//      after seeing it's just pranking, without touching their WiFi
+//      access at all.
+const REPORT_CATEGORIES = new Set(['slow_internet', 'credit_missed', 'other']);
 const reportRateLimit = new Map();
-const REPORT_RATE_LIMIT_MS = 30000; // 1 report per 30s per IP
+const REPORT_RATE_LIMIT_MS = 15000; // 1 report per 15s per IP
 
 router.post('/report', (req, res) => {
   const ip = getRealClientIp(req);
@@ -241,21 +248,50 @@ router.post('/report', (req, res) => {
     return res.status(429).json({ success: false, message: 'Please wait a moment before sending another report.' });
   }
 
-  const { mac, voucher_code, message } = req.body || {};
-  const trimmed = String(message || '').trim().slice(0, 1000);
-  if (!trimmed) {
+  const { mac, voucher_code, name, category, message } = req.body || {};
+  const macClean = mac ? String(mac).trim().toLowerCase() : null;
+  const trimmedName = String(name || '').trim().slice(0, 60);
+  const trimmedMessage = String(message || '').trim().slice(0, 1000);
+  const cat = REPORT_CATEGORIES.has(category) ? category : 'other';
+
+  if (!trimmedName) {
+    return res.status(400).json({ success: false, message: 'Please enter your name.' });
+  }
+  if (!trimmedMessage) {
     return res.status(400).json({ success: false, message: 'Please describe the issue.' });
+  }
+
+  if (macClean) {
+    const blocked = db.prepare('SELECT 1 FROM report_blocked_macs WHERE mac_address = ?').get(macClean);
+    if (blocked) {
+      // Deliberately vague, not a hard error - a blocked prankster
+      // shouldn't get useful feedback that the button is specifically
+      // disabled for them.
+      return res.json({ success: true });
+    }
+
+    const maxPerDay = parseInt(
+      db.prepare("SELECT value FROM settings WHERE key = 'max_reports_per_mac'").get()?.value || '5',
+      10
+    );
+    const countToday = db.prepare(`
+      SELECT COUNT(*) AS n FROM customer_reports
+      WHERE mac_address = ? AND created_at >= datetime('now', '-1 day')
+    `).get(macClean).n;
+    if (countToday >= maxPerDay) {
+      return res.status(429).json({ success: false, message: 'You have reached the report limit for today.' });
+    }
   }
 
   reportRateLimit.set(ip, Date.now());
   db.prepare(`
-    INSERT INTO customer_reports (mac_address, voucher_code, message)
-    VALUES (?, ?, ?)
-  `).run(
-    mac ? String(mac).trim().toLowerCase() : null,
-    voucher_code || null,
-    trimmed
-  );
+    INSERT INTO customer_reports (mac_address, voucher_code, name, category, message)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(macClean, voucher_code || null, trimmedName, cat, trimmedMessage);
+
+  const { logAlertEvent } = require('../services/alertEventService');
+  const categoryLabel = { slow_internet: 'Slow internet', credit_missed: 'Credit issue', other: 'Report' }[cat];
+  logAlertEvent('info', 'customer_report', `${categoryLabel} from ${trimmedName}`, trimmedMessage);
 
   return res.json({ success: true });
 });

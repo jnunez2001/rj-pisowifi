@@ -331,10 +331,23 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     mac_address TEXT,
     voucher_code TEXT,
+    name TEXT,
+    category TEXT NOT NULL DEFAULT 'other', -- 'slow_internet' | 'credit_missed' | 'other'
     message TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'open', -- 'open' | 'resolved'
+    status TEXT NOT NULL DEFAULT 'open', -- 'open' | 'resolved' | 'spam'
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     resolved_at DATETIME
+  );
+
+  -- A MAC blocked here can no longer submit new reports (server/routes/
+  -- portal.js's POST /report) - the operator's tool for a customer using
+  -- the report button to send junk/prank messages rather than a real
+  -- issue. Separate from network access entirely - a blocked MAC keeps
+  -- its WiFi/session exactly as before, this only silences the report
+  -- channel.
+  CREATE TABLE IF NOT EXISTS report_blocked_macs (
+    mac_address TEXT PRIMARY KEY,
+    blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   -- Cash reconciliation: an operator's own physical coin count for a
@@ -626,6 +639,16 @@ try {
 } catch (e) {
   // already applied
 }
+
+// customer_reports gained name/category after some installs already had
+// the table (from the report-button feature's first pass, before these
+// columns existed) - same additive-migration pattern as above.
+try {
+  db.exec("ALTER TABLE customer_reports ADD COLUMN name TEXT");
+} catch (e) { /* already applied */ }
+try {
+  db.exec("ALTER TABLE customer_reports ADD COLUMN category TEXT NOT NULL DEFAULT 'other'");
+} catch (e) { /* already applied */ }
 
 // Vendo Devices: satellite_kiosks extended in place rather than a separate
 // table - a Vendo IS a satellite kiosk (same device_key pairing, same
@@ -1149,6 +1172,12 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // the server itself, deliberately not defaulted to anything guessable
   // or left implicitly open just because someone has admin login.
   upsertIfMissing('terminal_password', '');
+  // Cap on how many reports a single MAC can submit via the portal's
+  // "Report a Problem" button per rolling 24h window (server/routes/
+  // portal.js's POST /report) - keeps the report channel usable for real
+  // issues without needing to manually block every prankster one at a
+  // time. Operator-adjustable in Settings.
+  upsertIfMissing('max_reports_per_mac', '5');
   // Telemetry (server/services/telemetryService.js) - off by default,
   // mechanism-only until a real Privacy Policy is published and a UI
   // toggle is exposed (see that file's header for the full reasoning).

@@ -1494,14 +1494,29 @@ function closeModal(id) {
 }
 
 // ===== REPORT A PROBLEM =====
+let reportCategory = 'other';
+
+function selectReportCategory(category) {
+  reportCategory = category;
+  document.querySelectorAll('.report-category-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.category === category);
+  });
+}
+
 function openReportModal() {
+  document.getElementById('reportName').value = '';
   document.getElementById('reportMessage').value = '';
+  selectReportCategory('other');
   document.getElementById('reportModal').classList.add('show');
 }
 
 async function submitReport() {
-  const textarea = document.getElementById('reportMessage');
-  const message = textarea.value.trim();
+  const name = document.getElementById('reportName').value.trim();
+  const message = document.getElementById('reportMessage').value.trim();
+  if (!name) {
+    showToast('Please enter your name.', 'error');
+    return;
+  }
   if (!message) {
     showToast('Please describe the issue.', 'error');
     return;
@@ -1513,6 +1528,8 @@ async function submitReport() {
       body: JSON.stringify({
         mac: detectedMac,
         voucher_code: currentSession?.voucher_code || null,
+        name,
+        category: reportCategory,
         message
       })
     });

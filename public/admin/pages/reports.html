@@ -9,12 +9,52 @@
 </div>
 
 <div class="zf3-card" style="margin-bottom:16px;">
-  <div style="display:flex;gap:8px;">
-    <button class="btn btn-secondary" id="reportsFilterOpen" onclick="setReportsFilter('open')">Open</button>
-    <button class="btn btn-secondary" id="reportsFilterAll" onclick="setReportsFilter('')">All</button>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between;">
+    <div style="display:flex;gap:8px;">
+      <button class="btn btn-secondary" id="reportsFilterOpen" onclick="setReportsFilter('open')">Open</button>
+      <button class="btn btn-secondary" id="reportsFilterAll" onclick="setReportsFilter('')">All</button>
+      <button class="btn btn-secondary" id="reportsFilterSpam" onclick="setReportsFilter('spam')">Spam</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;font-size:13px;color:var(--text-muted);">
+      <span>Max reports/day per customer</span>
+      <input type="number" id="maxReportsPerMac" min="1" max="100" style="width:60px;" onchange="saveMaxReportsPerMac()">
+    </div>
   </div>
 </div>
 
-<div class="zf3-card">
-  <div id="reportsBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+<div class="zf3-card" style="padding:0;overflow:hidden;">
+  <div id="reportsBody" class="reports-thread-list"></div>
 </div>
+
+<style>
+  .reports-thread-list { display: flex; flex-direction: column; }
+  .report-thread {
+    display: flex; gap: 12px; padding: 14px 18px;
+    border-bottom: 1px solid var(--border-color, #2a2a2a);
+    align-items: flex-start;
+  }
+  .report-thread:last-child { border-bottom: none; }
+  .report-avatar {
+    width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--accent-blue, #3b82f6); color: #fff;
+    font-weight: 700; font-size: 15px;
+  }
+  .report-thread.status-open .report-avatar { background: var(--accent-orange, #f59e0b); }
+  .report-thread.status-spam .report-avatar { background: var(--accent-red, #ef4444); }
+  .report-body { flex: 1; min-width: 0; }
+  .report-top-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .report-name { font-weight: 700; font-size: 14px; }
+  .report-category-pill {
+    font-size: 11px; padding: 2px 8px; border-radius: 10px;
+    background: var(--bg-hover, #222); color: var(--text-muted);
+  }
+  .report-time { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+  .report-bubble {
+    margin-top: 6px; background: var(--bg-hover, #222); border-radius: 14px;
+    padding: 10px 14px; font-size: 14px; max-width: 520px; display: inline-block;
+  }
+  .report-meta-line { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+  .report-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .report-actions .btn { padding: 5px 12px; font-size: 12px; }
+</style>

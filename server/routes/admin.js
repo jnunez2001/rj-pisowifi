@@ -4869,6 +4869,57 @@ router.post('/reports/:id/resolve', adminAuth, (req, res) => {
   }
 });
 
+// Marks a report as spam - distinct from resolve, for a report that was
+// never a real issue (a prank message) rather than one that got handled.
+// Doesn't block the MAC by itself - see POST /reports/block-mac for that.
+router.post('/reports/:id/spam', adminAuth, (req, res) => {
+  try {
+    db.prepare(`
+      UPDATE customer_reports SET status = 'spam', resolved_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(req.params.id);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Report spam-mark error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Silences one MAC's report channel entirely (portal.js's POST /report
+// checks report_blocked_macs before accepting a new one) - for a customer
+// using the button to prank rather than report a real issue. Does not
+// touch their WiFi/session access at all, only the report button.
+router.post('/reports/block-mac', adminAuth, (req, res) => {
+  try {
+    const mac = String(req.body?.mac || '').trim().toLowerCase();
+    if (!mac) return res.status(400).json({ success: false, message: 'Missing MAC address' });
+    db.prepare('INSERT OR IGNORE INTO report_blocked_macs (mac_address) VALUES (?)').run(mac);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Report block-mac error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/reports/unblock-mac', adminAuth, (req, res) => {
+  try {
+    const mac = String(req.body?.mac || '').trim().toLowerCase();
+    db.prepare('DELETE FROM report_blocked_macs WHERE mac_address = ?').run(mac);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Report unblock-mac error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.get('/reports/blocked-macs', adminAuth, (req, res) => {
+  try {
+    const rows = db.prepare('SELECT mac_address, blocked_at FROM report_blocked_macs ORDER BY blocked_at DESC').all();
+    return res.json({ success: true, blocked: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/alerts, merges two sources, both real:
 //  - live-recomputed checks (watchdog self-heal, WAN health score, disk
 //    space) - same as before, nothing here is persisted per-alert
