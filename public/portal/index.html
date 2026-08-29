@@ -26,9 +26,6 @@
   <audio id="soundInsert" preload="auto" loop>
     <source src="/portal/assets/sounds/insert.mp3" type="audio/mpeg">
   </audio>
-  <audio id="soundSuccess" preload="auto">
-    <source src="/portal/assets/sounds/success.mp3" type="audio/mpeg">
-  </audio>
   <audio id="soundCoin" preload="auto">
     <source src="/portal/assets/sounds/coin.mp3" type="audio/mpeg">
   </audio>
@@ -212,7 +209,31 @@
       </button>
     </div>
 
-    <div class="footer">POWERED BY STARKFI</div>
+    <div class="footer">
+      POWERED BY STARKFI &nbsp;·&nbsp;
+      <a href="#" onclick="openReportModal();return false;" style="color:inherit;text-decoration:underline;">Report a Problem</a>
+    </div>
+  </div>
+
+  <!-- REPORT A PROBLEM MODAL -->
+  <div class="modal-overlay" id="reportModal">
+    <div class="modal-box">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h3><i class="fas fa-flag"></i>&nbsp; REPORT A PROBLEM</h3>
+        <button class="modal-close" onclick="closeModal('reportModal')">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <p style="color:#888;font-size:13px;margin:0 0 12px;">
+        Having an issue with your connection or coin insertion? Let us know and we'll take a look.
+      </p>
+      <textarea id="reportMessage" rows="4" placeholder="Describe the issue..."
+        style="width:100%;box-sizing:border-box;border-radius:10px;border:1px solid #333;background:#111;color:#fff;padding:12px;font-size:14px;resize:vertical;"></textarea>
+      <button class="btn btn-activate" style="margin-top:12px;" onclick="submitReport()">
+        <i class="fas fa-paper-plane"></i>&nbsp; SEND REPORT
+      </button>
+    </div>
   </div>
 
   <!-- RATES MODAL -->

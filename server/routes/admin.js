@@ -4842,6 +4842,33 @@ router.get('/logs', adminAuth, (req, res) => {
   }
 });
 
+// GET /api/admin/reports - customer-submitted issue reports from the
+// portal's "Report a Problem" button (portal.js's POST /report).
+router.get('/reports', adminAuth, (req, res) => {
+  try {
+    const status = req.query.status; // optional filter: 'open' | 'resolved'
+    const rows = status
+      ? db.prepare('SELECT * FROM customer_reports WHERE status = ? ORDER BY created_at DESC').all(status)
+      : db.prepare('SELECT * FROM customer_reports ORDER BY created_at DESC').all();
+    return res.json({ success: true, reports: rows });
+  } catch (err) {
+    console.error('Reports list error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/reports/:id/resolve', adminAuth, (req, res) => {
+  try {
+    db.prepare(`
+      UPDATE customer_reports SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(req.params.id);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Report resolve error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/alerts, merges two sources, both real:
 //  - live-recomputed checks (watchdog self-heal, WAN health score, disk
 //    space) - same as before, nothing here is persisted per-alert

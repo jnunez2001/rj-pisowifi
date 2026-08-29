@@ -330,6 +330,7 @@ const pageTitles = {
   'system-health': 'System Health',
   terminal: 'System Terminal',
   logs: 'Logs',
+  reports: 'Reports',
   sales: 'Sales Report',
   sessions: 'Active Sessions',
   vouchers: 'Vouchers',
@@ -480,6 +481,7 @@ async function navigateTo(page) {
       'system-health': () => typeof loadSystemHealth === 'function' && loadSystemHealth(),
       terminal: () => typeof loadSystemTerminal === 'function' && loadSystemTerminal(),
       logs: () => typeof loadLogsPage === 'function' && loadLogsPage(),
+      reports: () => typeof loadReportsPage === 'function' && loadReportsPage(),
     };
 
     if (scripts[page]) scripts[page]();

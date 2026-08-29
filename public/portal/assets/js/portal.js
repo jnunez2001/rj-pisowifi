@@ -182,7 +182,6 @@ function stopPendingPoll() {
 // ===== SOUNDS =====
 const sounds = {
   insert: document.getElementById('soundInsert'),
-  success: document.getElementById('soundSuccess'),
   coin: document.getElementById('soundCoin')
 };
 
@@ -1146,9 +1145,12 @@ function updateUI(session) {
       } else {
         deactivateVendoRelay();
         if (portalSettings.redirect_url) {
+          // At least 3s so the "connected" voice prompt (~2.8s) finishes
+          // before navigating away - leaving the page kills any audio
+          // still playing mid-sentence.
           setTimeout(() => {
             window.location.href = portalSettings.redirect_url;
-          }, 2000);
+          }, 3000);
         }
       }
     } else if (prev.voucher_code === session.voucher_code &&
@@ -1491,6 +1493,41 @@ function closeModal(id) {
   document.getElementById(id).classList.remove('show');
 }
 
+// ===== REPORT A PROBLEM =====
+function openReportModal() {
+  document.getElementById('reportMessage').value = '';
+  document.getElementById('reportModal').classList.add('show');
+}
+
+async function submitReport() {
+  const textarea = document.getElementById('reportMessage');
+  const message = textarea.value.trim();
+  if (!message) {
+    showToast('Please describe the issue.', 'error');
+    return;
+  }
+  try {
+    const res = await fetch(`${SERVER}/api/portal/report`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mac: detectedMac,
+        voucher_code: currentSession?.voucher_code || null,
+        message
+      })
+    });
+    const data = await res.json();
+    if (data.success) {
+      closeModal('reportModal');
+      showToast('Report sent, thank you.', 'success');
+    } else {
+      showToast(data.message || 'Could not send report.', 'error');
+    }
+  } catch (e) {
+    showToast('Could not reach the server, please try again.', 'error');
+  }
+}
+
 // ===== SESSION ACTIONS =====
 async function pauseSession() {
   if (!currentSession) return;
@@ -1713,7 +1750,35 @@ function tryAutoRedeemFromQr() {
   window.history.replaceState({}, '', url);
 }
 
+// Android's captive-portal popup can open this page inside a restricted
+// embedded WebView (CaptivePortalLogin) instead of real Chrome - that
+// WebView's user agent always carries the literal "; wv)" marker Google
+// adds to WebView UAs, real Chrome (including its Custom Tabs mode, which
+// most modern Android versions actually use here and don't need this
+// banner for) never has it. Some things behave worse inside that
+// restricted WebView (audio, some JS APIs), so offer a one-tap way out via
+// Chrome's intent:// scheme, which relaunches the exact same URL in the
+// real Chrome app. iOS's equivalent (Captive Network Assistant) has no
+// public API for this at all - nothing to do there but instruct the
+// customer to tap "Done" and open Safari manually.
+function checkOpenInChrome() {
+  const ua = navigator.userAgent || '';
+  if (!/Android/.test(ua) || !/; wv\)/.test(ua)) return;
+  const banner = document.createElement('div');
+  banner.id = 'openInChromeBanner';
+  banner.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#0c8f6d;color:#fff;padding:10px 14px;font-size:13px;text-align:center;z-index:9999;';
+  banner.innerHTML = 'For the best experience, <a href="#" id="openInChromeLink" style="color:#fff;text-decoration:underline;font-weight:700;">tap here to open in Chrome</a>';
+  document.body.prepend(banner);
+  document.getElementById('openInChromeLink').addEventListener('click', (e) => {
+    e.preventDefault();
+    const target = window.location.href.replace(/^https?:\/\//, '');
+    const scheme = window.location.protocol === 'https:' ? 'https' : 'http';
+    window.location.href = `intent://${target}#Intent;scheme=${scheme};package=com.android.chrome;end`;
+  });
+}
+
 async function init() {
+  checkOpenInChrome();
   await loadSettings();
   await detectDevice();
   connectEventStream(getMac());

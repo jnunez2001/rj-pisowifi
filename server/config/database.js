@@ -323,6 +323,20 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Customer-submitted issue reports from the portal's "Report a Problem"
+  -- button (server/routes/portal.js's POST /report), shown in the admin
+  -- panel's Reports page so the operator can see and resolve complaints
+  -- without needing the customer to flag someone down in person.
+  CREATE TABLE IF NOT EXISTS customer_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac_address TEXT,
+    voucher_code TEXT,
+    message TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open', -- 'open' | 'resolved'
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    resolved_at DATETIME
+  );
+
   -- Cash reconciliation: an operator's own physical coin count for a
   -- period, compared against what the system logged as credited over that
   -- same window (transactions.coin_value). A mismatch here isn't

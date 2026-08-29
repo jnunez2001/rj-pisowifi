@@ -227,4 +227,37 @@ router.post('/play-sound', async (req, res) => {
   return res.json({ success: true });
 });
 
+// POST /report - customer-facing "Report a Problem" button. No login
+// needed (same unauthenticated-by-design reasoning as every other portal
+// route here), just a MAC + free-text message, rate-limited per IP so it
+// can't be used to spam the operator's Reports page.
+const reportRateLimit = new Map();
+const REPORT_RATE_LIMIT_MS = 30000; // 1 report per 30s per IP
+
+router.post('/report', (req, res) => {
+  const ip = getRealClientIp(req);
+  const lastRequest = reportRateLimit.get(ip);
+  if (lastRequest && Date.now() - lastRequest < REPORT_RATE_LIMIT_MS) {
+    return res.status(429).json({ success: false, message: 'Please wait a moment before sending another report.' });
+  }
+
+  const { mac, voucher_code, message } = req.body || {};
+  const trimmed = String(message || '').trim().slice(0, 1000);
+  if (!trimmed) {
+    return res.status(400).json({ success: false, message: 'Please describe the issue.' });
+  }
+
+  reportRateLimit.set(ip, Date.now());
+  db.prepare(`
+    INSERT INTO customer_reports (mac_address, voucher_code, message)
+    VALUES (?, ?, ?)
+  `).run(
+    mac ? String(mac).trim().toLowerCase() : null,
+    voucher_code || null,
+    trimmed
+  );
+
+  return res.json({ success: true });
+});
+
 module.exports = router;

@@ -1,0 +1,20 @@
+<div class="zf3-header">
+  <div>
+    <div class="page-title">Reports</div>
+    <div class="page-subtitle">Issues customers have reported from the portal</div>
+  </div>
+  <div class="zf3-header-right">
+    <div class="zf3-icon-btn" onclick="loadReportsPage()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
+  </div>
+</div>
+
+<div class="zf3-card" style="margin-bottom:16px;">
+  <div style="display:flex;gap:8px;">
+    <button class="btn btn-secondary" id="reportsFilterOpen" onclick="setReportsFilter('open')">Open</button>
+    <button class="btn btn-secondary" id="reportsFilterAll" onclick="setReportsFilter('')">All</button>
+  </div>
+</div>
+
+<div class="zf3-card">
+  <div id="reportsBody"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+</div>
