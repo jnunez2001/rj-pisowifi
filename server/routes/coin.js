@@ -286,6 +286,15 @@ router.post('/', async (req, res) => {
     }
     mac = mac.toLowerCase();
 
+    // Raw receipt proof, logged before spam-blocking/pending-accumulation
+    // decide what happens to this pulse - see CREATE TABLE coin_pulse_log
+    // in database.js. Best-effort, must never block a real coin credit.
+    try {
+      db.prepare(
+        'INSERT INTO coin_pulse_log (mac_address, coin_value, kiosk_id) VALUES (?, ?, ?)'
+      ).run(mac, coin_value, kioskId ?? null);
+    } catch (e) {}
+
     // Check spam
     const spamCheck = checkSpam(mac);
     if (spamCheck.blocked) {

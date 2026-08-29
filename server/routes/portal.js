@@ -296,4 +296,58 @@ router.post('/report', (req, res) => {
   return res.json({ success: true });
 });
 
+// GET /reports?mac=xx - "My Reports": a customer's own submitted reports
+// plus a preview of the latest thread message, so the portal can show a
+// two-way conversation instead of a fire-and-forget form. Scoped to the
+// requesting MAC only (mac_address column, never trusted from anywhere
+// else) - no login exists here to check ownership against otherwise.
+router.get('/reports', (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  if (!mac || !/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac)) {
+    return res.status(400).json({ success: false, message: 'Valid mac required' });
+  }
+  const reports = db.prepare(
+    'SELECT * FROM customer_reports WHERE mac_address = ? ORDER BY created_at DESC'
+  ).all(mac);
+  return res.json({ success: true, reports });
+});
+
+// GET /reports/:id/messages?mac=xx - the thread for one of THIS mac's own
+// reports. mac is required and cross-checked against the report's owner
+// so one customer can never read another's thread.
+router.get('/reports/:id/messages', (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  const report = db.prepare('SELECT mac_address FROM customer_reports WHERE id = ?').get(req.params.id);
+  if (!report || report.mac_address !== mac) {
+    return res.status(403).json({ success: false, message: 'Not found' });
+  }
+  const messages = db.prepare(
+    'SELECT sender, message, created_at FROM report_messages WHERE report_id = ? ORDER BY created_at ASC'
+  ).all(req.params.id);
+  return res.json({ success: true, messages });
+});
+
+// POST /reports/:id/reply - a customer follow-up message on their own
+// existing report thread (two-way, not just the initial report). Same
+// mac ownership check as the messages route above; same blocked-MAC
+// check as the original POST /report so a blocked prankster can't just
+// use reply as a side door back into the thread.
+router.post('/reports/:id/reply', (req, res) => {
+  const mac = String(req.body?.mac || '').trim().toLowerCase();
+  const message = String(req.body?.message || '').trim().slice(0, 1000);
+  if (!message) return res.status(400).json({ success: false, message: 'Message required' });
+
+  const report = db.prepare('SELECT mac_address FROM customer_reports WHERE id = ?').get(req.params.id);
+  if (!report || report.mac_address !== mac) {
+    return res.status(403).json({ success: false, message: 'Not found' });
+  }
+  const blocked = db.prepare('SELECT 1 FROM report_blocked_macs WHERE mac_address = ?').get(mac);
+  if (blocked) return res.json({ success: true });
+
+  db.prepare(
+    "INSERT INTO report_messages (report_id, sender, message) VALUES (?, 'customer', ?)"
+  ).run(req.params.id, message);
+  return res.json({ success: true });
+});
+
 module.exports = router;

@@ -350,6 +350,35 @@ db.exec(`
     blocked_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Two-way thread under a customer_reports row - the admin's reply and
+  -- any follow-up from the customer, not just a single status change.
+  -- 'system' entries are auto-generated (e.g. "Admin credited ₱10"), so
+  -- the approve-credit action leaves a visible paper trail in the same
+  -- thread instead of a silent DB update.
+  CREATE TABLE IF NOT EXISTS report_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id INTEGER NOT NULL REFERENCES customer_reports(id),
+    sender TEXT NOT NULL, -- 'admin' | 'customer' | 'system'
+    message TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Raw receipt log for every coin pulse report the server gets from a
+  -- vendo (server/routes/coin.js's POST /), logged the instant it's
+  -- received - before spam-blocking, pending-window accumulation, or
+  -- crediting decide what happens to it. This is the "backup sensor":
+  -- when a customer disputes a missed credit, this table is the proof
+  -- the hardware really did (or didn't) send a signal to the server at
+  -- that time, independent of whatever the pending/credit logic then did
+  -- with it.
+  CREATE TABLE IF NOT EXISTS coin_pulse_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac_address TEXT,
+    coin_value INTEGER,
+    kiosk_id INTEGER,
+    received_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Cash reconciliation: an operator's own physical coin count for a
   -- period, compared against what the system logged as credited over that
   -- same window (transactions.coin_value). A mismatch here isn't

@@ -408,6 +408,12 @@ body {
   color: #fff;
 }
 
+.report-tab.active {
+  background: var(--brand-teal);
+  border-color: var(--brand-teal);
+  color: #fff;
+}
+
 .btn-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

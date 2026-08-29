@@ -57,4 +57,35 @@
   .report-meta-line { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
   .report-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
   .report-actions .btn { padding: 5px 12px; font-size: 12px; }
+
+  .report-panel {
+    padding: 14px 18px 18px 70px;
+    border-bottom: 1px solid var(--border-color, #2a2a2a);
+    background: var(--bg-secondary, #161616);
+  }
+  .report-messages {
+    display: flex; flex-direction: column; gap: 8px;
+    max-height: 320px; overflow-y: auto; padding: 4px 0 10px;
+  }
+  .report-msg { display: flex; flex-direction: column; max-width: 70%; }
+  .report-msg-customer { align-items: flex-start; }
+  .report-msg-admin, .report-msg-system { align-items: flex-end; align-self: flex-end; }
+  .report-msg-bubble {
+    padding: 8px 12px; border-radius: 14px; font-size: 13px;
+    background: var(--bg-hover, #222); color: var(--text-primary, #eee);
+  }
+  .report-msg-admin .report-msg-bubble { background: var(--accent-blue, #3b82f6); color: #fff; }
+  .report-msg-system .report-msg-bubble { background: transparent; border: 1px dashed var(--border-color, #444); color: var(--text-muted); font-style: italic; }
+  .report-msg-time { font-size: 10px; color: var(--text-muted); margin-top: 2px; }
+  .report-reply-row { display: flex; gap: 8px; margin-top: 4px; }
+  .report-reply-row input {
+    flex: 1; padding: 8px 12px; border-radius: 10px;
+    border: 1px solid var(--border-color, #333); background: var(--bg-primary, #111);
+    color: var(--text-primary, #eee); font-size: 13px;
+  }
+  .report-credit-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: 13px; }
+  .report-credit-row input {
+    padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border-color, #333);
+    background: var(--bg-primary, #111); color: var(--text-primary, #eee);
+  }
 </style>

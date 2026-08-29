@@ -1507,7 +1507,99 @@ function openReportModal() {
   document.getElementById('reportName').value = '';
   document.getElementById('reportMessage').value = '';
   selectReportCategory('other');
+  setReportModalTab('new');
   document.getElementById('reportModal').classList.add('show');
+}
+
+function setReportModalTab(tab) {
+  document.getElementById('reportTabNew').classList.toggle('active', tab === 'new');
+  document.getElementById('reportTabMine').classList.toggle('active', tab === 'mine');
+  document.getElementById('reportPaneNew').style.display = tab === 'new' ? 'block' : 'none';
+  document.getElementById('reportPaneMine').style.display = tab === 'mine' ? 'block' : 'none';
+  if (tab === 'mine') loadMyReports();
+}
+
+async function loadMyReports() {
+  const el = document.getElementById('myReportsList');
+  if (!detectedMac) {
+    el.innerHTML = '<div style="color:#888;font-size:13px;text-align:center;padding:20px;">Device not detected yet.</div>';
+    return;
+  }
+  el.innerHTML = '<div style="text-align:center;padding:20px;"><i class="fas fa-spinner fa-spin"></i></div>';
+  try {
+    const res = await fetch(`${SERVER}/api/portal/reports?mac=${encodeURIComponent(detectedMac)}`);
+    const data = await res.json();
+    if (!data.success || !data.reports || data.reports.length === 0) {
+      el.innerHTML = '<div style="color:#888;font-size:13px;text-align:center;padding:20px;">No reports yet.</div>';
+      return;
+    }
+    el.innerHTML = data.reports.map((r) => `
+      <div class="my-report-item" style="border:1px solid #333;border-radius:12px;padding:10px 12px;margin-bottom:10px;cursor:pointer;" onclick="openMyReportThread(${r.id})">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;color:#888;">
+          <span>${new Date(r.created_at).toLocaleString()}</span>
+          <span>${r.status === 'resolved' ? 'Resolved' : r.status === 'spam' ? 'Spam' : 'Open'}</span>
+        </div>
+        <div style="font-size:14px;color:#fff;margin-top:4px;">${(r.message || '').slice(0, 80)}${(r.message || '').length > 80 ? '...' : ''}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    el.innerHTML = '<div style="color:#888;font-size:13px;text-align:center;padding:20px;">Could not load reports.</div>';
+  }
+}
+
+let openMyReportId = null;
+
+async function openMyReportThread(id) {
+  openMyReportId = id;
+  const el = document.getElementById('myReportsList');
+  el.innerHTML = '<div style="text-align:center;padding:20px;"><i class="fas fa-spinner fa-spin"></i></div>';
+  try {
+    const res = await fetch(`${SERVER}/api/portal/reports/${id}/messages?mac=${encodeURIComponent(detectedMac)}`);
+    const data = await res.json();
+    const messages = (data.messages || []).map((m) => `
+      <div style="display:flex;${m.sender === 'customer' ? 'justify-content:flex-end;' : 'justify-content:flex-start;'}margin-bottom:8px;">
+        <div style="max-width:75%;padding:8px 12px;border-radius:12px;font-size:13px;
+          background:${m.sender === 'customer' ? 'var(--brand-teal)' : m.sender === 'system' ? 'transparent' : '#222'};
+          border:${m.sender === 'system' ? '1px dashed #444' : 'none'};
+          font-style:${m.sender === 'system' ? 'italic' : 'normal'};color:#fff;">
+          ${escapeHtmlPortal(m.message)}
+        </div>
+      </div>
+    `).join('');
+    el.innerHTML = `
+      <button class="btn btn-outline" style="margin-bottom:10px;" onclick="loadMyReports()"><i class="fas fa-arrow-left"></i> Back</button>
+      <div style="max-height:220px;overflow-y:auto;margin-bottom:10px;">${messages || '<div style="color:#888;font-size:13px;">No replies yet.</div>'}</div>
+      <div style="display:flex;gap:8px;">
+        <input id="myReportReplyInput" type="text" placeholder="Type a message..."
+          style="flex:1;border-radius:10px;border:1px solid #333;background:#111;color:#fff;padding:10px;font-size:13px;"
+          onkeydown="if(event.key==='Enter') sendMyReportReply(${id})">
+        <button class="btn btn-activate" style="padding:10px 14px;" onclick="sendMyReportReply(${id})"><i class="fas fa-paper-plane"></i></button>
+      </div>
+    `;
+  } catch (e) {
+    el.innerHTML = '<div style="color:#888;font-size:13px;text-align:center;padding:20px;">Could not load thread.</div>';
+  }
+}
+
+async function sendMyReportReply(id) {
+  const input = document.getElementById('myReportReplyInput');
+  const message = input.value.trim();
+  if (!message) return;
+  input.value = '';
+  try {
+    await fetch(`${SERVER}/api/portal/reports/${id}/reply`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac: detectedMac, message })
+    });
+    openMyReportThread(id);
+  } catch (e) {}
+}
+
+function escapeHtmlPortal(str) {
+  const div = document.createElement('div');
+  div.textContent = str == null ? '' : String(str);
+  return div.innerHTML;
 }
 
 async function submitReport() {
