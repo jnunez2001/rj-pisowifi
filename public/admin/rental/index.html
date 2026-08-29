@@ -61,6 +61,23 @@
     <div class="rental-shell-item" data-panel="subcoinslot" onclick="switchRentalPanel('subcoinslot')">
       <i class="fas fa-dice"></i> Sub-Coinslot
     </div>
+
+    <div class="rental-shell-title" style="margin-top:18px;">System Management</div>
+    <div class="rental-shell-item" data-panel="settings" onclick="switchRentalPanel('settings')">
+      <i class="fas fa-gear"></i> Settings
+    </div>
+    <div class="rental-shell-item" data-panel="systeminfo" onclick="switchRentalPanel('systeminfo')">
+      <i class="fas fa-circle-info"></i> System Info
+    </div>
+    <div class="rental-shell-item" data-panel="remote" onclick="switchRentalPanel('remote')">
+      <i class="fas fa-puzzle-piece"></i> Remote
+    </div>
+    <div class="rental-shell-item" data-panel="telegrambot" onclick="switchRentalPanel('telegrambot')">
+      <i class="fas fa-paper-plane"></i> Telegram Bot
+    </div>
+    <div class="rental-shell-item" data-panel="cronjobs" onclick="switchRentalPanel('cronjobs')">
+      <i class="fas fa-list-check"></i> Cron Jobs
+    </div>
   </div>
 
   <div class="rental-shell-content">
@@ -153,6 +170,110 @@
     </div>
 
     <div id="rentalPanelSubcoinslot" class="rental-panel" style="display:none;"></div>
+
+    <div id="rentalPanelSettings" class="rental-panel" style="display:none;">
+      <div class="zf3-card" style="margin-bottom:16px;">
+        <div class="rental-settings-title">Timers &amp; Others</div>
+        <div class="rental-settings-grid">
+          <label>Shutdown Timer (secs)<input type="number" id="rs_rental_shutdown_timer_secs"></label>
+          <label>Insert Timer (secs)<input type="number" id="rs_rental_insert_timer_secs"></label>
+          <label>Max Attempt<input type="number" id="rs_rental_max_attempt"></label>
+          <label>Max Attempt Lockout (secs)<input type="number" id="rs_rental_max_attempt_lockout_secs"></label>
+          <label>Create Account Min Credit (₱)<input type="number" id="rs_rental_create_account_min_credit"></label>
+          <label>Insert Beep Alert On (secs)<input type="number" id="rs_rental_insert_beep_alert_on_secs"></label>
+          <label>Speed Timer (secs)<input type="number" id="rs_rental_speed_timer_secs"></label>
+          <label>Minimum Transfer Time (min)<input type="number" id="rs_rental_minimum_transfer_time_minutes"></label>
+          <label>Enable Member Login<select id="rs_rental_enable_member_login"><option value="1">YES</option><option value="0">NO</option></select></label>
+          <label>Enable Create Account<select id="rs_rental_enable_create_account"><option value="1">YES</option><option value="0">NO</option></select></label>
+          <label>Enable Voucher<select id="rs_rental_enable_voucher"><option value="1">YES</option><option value="0">NO</option></select></label>
+          <label>Enable Transfer Time<select id="rs_rental_enable_transfer_time"><option value="1">YES</option><option value="0">NO</option></select></label>
+          <label>Enable Auto-Reset Guest Time on Shutdown<select id="rs_rental_enable_auto_reset_guest_time_on_shutdown"><option value="1">YES</option><option value="0">NO</option></select></label>
+          <label>Enable Auto-Close Running Apps<select id="rs_rental_enable_auto_close_apps"><option value="1">YES</option><option value="0">NO</option></select></label>
+          <label title="Not built yet - stored for when it is">Enable Watch TV<select id="rs_rental_enable_watch_tv"><option value="1">YES</option><option value="0">NO</option></select></label>
+          <label title="Not built yet - stored for when it is">Enable Camera Recording<select id="rs_rental_enable_camera_recording"><option value="1">YES</option><option value="0">NO</option></select></label>
+          <label title="Not built yet - stored for when it is">Enable Spectate<select id="rs_rental_enable_spectate"><option value="1">YES</option><option value="0">NO</option></select></label>
+          <label title="Not built yet - stored for when it is">Enable PC Performance<select id="rs_rental_enable_pc_performance"><option value="1">YES</option><option value="0">NO</option></select></label>
+        </div>
+        <button class="btn btn-primary" style="margin-top:14px;" onclick="saveRentalSettingsGroup(['rental_shutdown_timer_secs','rental_insert_timer_secs','rental_max_attempt','rental_max_attempt_lockout_secs','rental_create_account_min_credit','rental_insert_beep_alert_on_secs','rental_speed_timer_secs','rental_minimum_transfer_time_minutes','rental_enable_member_login','rental_enable_create_account','rental_enable_voucher','rental_enable_transfer_time','rental_enable_auto_reset_guest_time_on_shutdown','rental_enable_auto_close_apps','rental_enable_watch_tv','rental_enable_camera_recording','rental_enable_spectate','rental_enable_pc_performance'])">Save</button>
+      </div>
+
+      <div class="zf3-card" style="margin-bottom:16px;">
+        <div class="rental-settings-title">Anti-Abuse Login Rules</div>
+        <div class="rental-settings-grid">
+          <label>Enabled<select id="rs_rental_antiabuse_enabled"><option value="1">ENABLE</option><option value="0">DISABLE</option></select></label>
+          <label>Minimum Consume Time (min)<input type="number" id="rs_rental_antiabuse_min_consume_minutes"></label>
+          <label>Max Attempt<input type="number" id="rs_rental_antiabuse_max_attempt"></label>
+          <label>Lock Time (min)<input type="number" id="rs_rental_antiabuse_lock_minutes"></label>
+          <label>Penalty Deduction (min)<input type="number" id="rs_rental_antiabuse_penalty_minutes"></label>
+        </div>
+        <button class="btn btn-primary" style="margin-top:14px;" onclick="saveRentalSettingsGroup(['rental_antiabuse_enabled','rental_antiabuse_min_consume_minutes','rental_antiabuse_max_attempt','rental_antiabuse_lock_minutes','rental_antiabuse_penalty_minutes'])">Save</button>
+      </div>
+
+      <div class="zf3-card" style="margin-bottom:16px;">
+        <div class="rental-settings-title">Whitelisted Applications</div>
+        <div style="color:var(--text-muted);font-size:12px;margin-bottom:10px;">Exempted from auto-close when "Enable Auto-Close Running Apps" is on.</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <input type="text" id="rentalWhitelistAppInput" placeholder="Application name (e.g. Discord.exe)" style="flex:1;">
+          <button class="btn btn-primary" onclick="addRentalWhitelistApp()"><i class="fas fa-plus"></i> Add</button>
+        </div>
+        <div id="rentalWhitelistAppsList"></div>
+      </div>
+
+      <div class="zf3-card" style="margin-bottom:16px;">
+        <div class="rental-settings-title">Announcement</div>
+        <label style="display:block;margin-bottom:10px;">Lock Screen Announcement
+          <textarea id="rs_rental_lock_announcement" rows="2" style="width:100%;margin-top:4px;"></textarea>
+        </label>
+        <label style="display:block;">Before-Close Announcement
+          <textarea id="rs_rental_close_announcement" rows="2" style="width:100%;margin-top:4px;"></textarea>
+        </label>
+        <button class="btn btn-primary" style="margin-top:14px;" onclick="saveRentalSettingsGroup(['rental_lock_announcement','rental_close_announcement'])">Save</button>
+      </div>
+
+      <div class="zf3-card" style="margin-bottom:16px;">
+        <div class="rental-settings-title">Shop Schedule</div>
+        <div class="rental-settings-grid">
+          <label>Enable Schedule<select id="rs_rental_schedule_enabled"><option value="1">YES</option><option value="0">NO</option></select></label>
+          <label>Open Time<input type="time" id="rs_rental_schedule_open_time"></label>
+          <label>Before-Close Time<input type="time" id="rs_rental_schedule_before_close_time"></label>
+          <label>Closed Time<input type="time" id="rs_rental_schedule_closed_time"></label>
+        </div>
+        <button class="btn btn-primary" style="margin-top:14px;" onclick="saveRentalSettingsGroup(['rental_schedule_enabled','rental_schedule_open_time','rental_schedule_before_close_time','rental_schedule_closed_time'])">Save</button>
+      </div>
+
+      <div class="zf3-card" style="margin-bottom:16px;">
+        <div class="rental-settings-title">Lock Screen Logo</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="file" id="rentalLogoFile" accept="image/*">
+          <button class="btn btn-primary" onclick="uploadRentalLogo()"><i class="fas fa-upload"></i> Upload</button>
+        </div>
+        <div id="rentalLogoPreview" style="margin-top:12px;"></div>
+      </div>
+
+      <div class="zf3-card" style="margin-bottom:16px;">
+        <div class="rental-settings-title">Lock Screen Wallpaper</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+          <input type="file" id="rentalWallpaperFile" accept="image/*">
+          <button class="btn btn-primary" onclick="uploadRentalWallpaper()"><i class="fas fa-upload"></i> Upload</button>
+        </div>
+        <div id="rentalWallpapersList" style="display:flex;gap:10px;flex-wrap:wrap;"></div>
+      </div>
+
+      <div class="zf3-card">
+        <div class="rental-settings-title">App Password</div>
+        <div style="color:var(--text-muted);font-size:12px;margin-bottom:10px;">Separate override password for the Windows client's local fail-safe unlock - not your admin login.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input type="password" id="rentalAppPasswordCurrent" placeholder="Current (leave blank if none set)" style="flex:1;min-width:180px;">
+          <input type="password" id="rentalAppPasswordNew" placeholder="New app password" style="flex:1;min-width:180px;">
+          <button class="btn btn-primary" onclick="saveRentalAppPassword()">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="rentalPanelSysteminfo" class="rental-panel" style="display:none;"></div>
+    <div id="rentalPanelRemote" class="rental-panel" style="display:none;"></div>
+    <div id="rentalPanelTelegrambot" class="rental-panel" style="display:none;"></div>
+    <div id="rentalPanelCronjobs" class="rental-panel" style="display:none;"></div>
   </div>
 
   <!-- REDEEM FOR MEMBER MODAL -->
@@ -228,6 +349,23 @@
       text-align: center; width: 300px;
     }
     .rental-coin-total { font-size: 40px; font-weight: 900; margin: 16px 0; color: var(--accent-green, #22c55e); }
+
+    .rental-settings-title { font-weight: 700; font-size: 14px; margin-bottom: 12px; }
+    .rental-settings-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px 18px;
+    }
+    .rental-settings-grid label {
+      display: flex; flex-direction: column; gap: 5px; font-size: 12px;
+      color: var(--text-secondary); font-weight: 600;
+    }
+    .rental-settings-grid input, .rental-settings-grid select {
+      padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-color, #2a2a2a);
+      background: var(--bg-primary); color: var(--text-primary); font-size: 13px;
+    }
+    .rental-wallpaper-thumb { position: relative; width: 140px; }
+    .rental-wallpaper-thumb img { width: 140px; height: 80px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border-color, #2a2a2a); }
+    .rental-wallpaper-thumb .btn { width: 100%; margin-top: 4px; padding: 4px; font-size: 11px; }
   </style>
 
   <script src="../js/rental.js"></script>

@@ -353,6 +353,140 @@ async function refreshRentalReports() {
   `).join('');
 }
 
+// ===== SETTINGS =====
+const RENTAL_SETTINGS_FIELDS = [
+  'rental_shutdown_timer_secs', 'rental_insert_timer_secs', 'rental_max_attempt',
+  'rental_max_attempt_lockout_secs', 'rental_create_account_min_credit',
+  'rental_insert_beep_alert_on_secs', 'rental_speed_timer_secs', 'rental_minimum_transfer_time_minutes',
+  'rental_enable_member_login', 'rental_enable_create_account', 'rental_enable_voucher',
+  'rental_enable_transfer_time', 'rental_enable_auto_reset_guest_time_on_shutdown',
+  'rental_enable_auto_close_apps', 'rental_enable_watch_tv', 'rental_enable_camera_recording',
+  'rental_enable_spectate', 'rental_enable_pc_performance',
+  'rental_antiabuse_enabled', 'rental_antiabuse_min_consume_minutes', 'rental_antiabuse_max_attempt',
+  'rental_antiabuse_lock_minutes', 'rental_antiabuse_penalty_minutes',
+  'rental_lock_announcement', 'rental_close_announcement',
+  'rental_schedule_enabled', 'rental_schedule_open_time', 'rental_schedule_before_close_time',
+  'rental_schedule_closed_time'
+];
+
+async function loadRentalSettings() {
+  const data = await apiCall('GET', '/api/admin/settings');
+  if (!data.success) return;
+  RENTAL_SETTINGS_FIELDS.forEach((key) => {
+    const el = document.getElementById(`rs_${key}`);
+    if (el && data.settings[key] !== undefined) el.value = data.settings[key];
+  });
+  refreshRentalWhitelistApps();
+  refreshRentalWallpapers();
+  refreshRentalLogoPreview(data.settings.rental_logo_url);
+}
+
+async function saveRentalSettingsGroup(keys) {
+  const updates = {};
+  keys.forEach((key) => {
+    const el = document.getElementById(`rs_${key}`);
+    if (el) updates[key] = el.value;
+  });
+  const data = await apiCall('POST', '/api/admin/settings', updates);
+  if (data.success) alert('Saved'); else alert(data.message || 'Could not save');
+}
+
+async function refreshRentalWhitelistApps() {
+  const el = document.getElementById('rentalWhitelistAppsList');
+  if (!el) return;
+  const data = await apiCall('GET', '/api/admin/rental/whitelisted-apps');
+  const apps = data.apps || [];
+  el.innerHTML = apps.length
+    ? apps.map((a) => `
+        <div class="rental-rate-row">
+          <span>${escapeHtmlRental(a.app_name)}</span>
+          <button class="btn btn-secondary" onclick="deleteRentalWhitelistApp(${a.id})"><i class="fas fa-trash"></i></button>
+        </div>
+      `).join('')
+    : '<div style="color:var(--text-muted);font-size:13px;">No whitelisted apps yet</div>';
+}
+
+async function addRentalWhitelistApp() {
+  const input = document.getElementById('rentalWhitelistAppInput');
+  const appName = input.value.trim();
+  if (!appName) return;
+  await apiCall('POST', '/api/admin/rental/whitelisted-apps', { app_name: appName });
+  input.value = '';
+  refreshRentalWhitelistApps();
+}
+
+async function deleteRentalWhitelistApp(id) {
+  await apiCall('DELETE', `/api/admin/rental/whitelisted-apps/${id}`);
+  refreshRentalWhitelistApps();
+}
+
+function refreshRentalLogoPreview(url) {
+  const el = document.getElementById('rentalLogoPreview');
+  if (!el) return;
+  el.innerHTML = url ? `<img src="${url}" style="max-height:70px;">` : '<span style="color:var(--text-muted);font-size:12px;">No logo uploaded</span>';
+}
+
+async function uploadRentalLogo() {
+  const file = document.getElementById('rentalLogoFile').files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('image', file);
+  const res = await fetch('/api/admin/upload/rental_logo', { method: 'POST', headers: { password: authToken }, body: formData });
+  const data = await res.json();
+  if (data.success) refreshRentalLogoPreview(data.url);
+  else alert(data.message || 'Upload failed');
+}
+
+async function refreshRentalWallpapers() {
+  const el = document.getElementById('rentalWallpapersList');
+  if (!el) return;
+  const data = await apiCall('GET', '/api/admin/rental/wallpapers');
+  const wallpapers = data.wallpapers || [];
+  el.innerHTML = wallpapers.length
+    ? wallpapers.map((w) => `
+        <div class="rental-wallpaper-thumb">
+          <img src="${w.image_path}">
+          <button class="btn ${w.active ? 'btn-primary' : 'btn-secondary'}" onclick="activateRentalWallpaper(${w.id})">${w.active ? 'Active' : 'Set Active'}</button>
+          <button class="btn btn-secondary" onclick="deleteRentalWallpaper(${w.id})"><i class="fas fa-trash"></i></button>
+        </div>
+      `).join('')
+    : '<div style="color:var(--text-muted);font-size:13px;">No wallpapers yet</div>';
+}
+
+async function uploadRentalWallpaper() {
+  const file = document.getElementById('rentalWallpaperFile').files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('image', file);
+  const res = await fetch('/api/admin/upload/rental_wallpaper', { method: 'POST', headers: { password: authToken }, body: formData });
+  const data = await res.json();
+  if (data.success) refreshRentalWallpapers();
+  else alert(data.message || 'Upload failed');
+}
+
+async function activateRentalWallpaper(id) {
+  await apiCall('POST', `/api/admin/rental/wallpapers/${id}/activate`);
+  refreshRentalWallpapers();
+}
+
+async function deleteRentalWallpaper(id) {
+  await apiCall('DELETE', `/api/admin/rental/wallpapers/${id}`);
+  refreshRentalWallpapers();
+}
+
+async function saveRentalAppPassword() {
+  const current_password = document.getElementById('rentalAppPasswordCurrent').value;
+  const new_password = document.getElementById('rentalAppPasswordNew').value;
+  const data = await apiCall('POST', '/api/admin/rental/app-password', { current_password, new_password });
+  if (data.success) {
+    alert('App password updated');
+    document.getElementById('rentalAppPasswordCurrent').value = '';
+    document.getElementById('rentalAppPasswordNew').value = '';
+  } else {
+    alert(data.message || 'Could not update app password');
+  }
+}
+
 function destroyRental() {
   clearInterval(rentalPollInterval);
   clearInterval(rentalCoinPollInterval);

@@ -2269,8 +2269,8 @@ router.post('/spam-settings', adminAuth, (req, res) => {
 router.post('/upload/:type', adminAuth, upload.single('image'), (req, res) => {
   try {
     const { type } = req.params;
-    if (!['logo', 'banner', 'voucher', 'promo'].includes(type)) {
-      return res.status(400).json({ success: false, message: 'Type must be logo, banner, voucher, or promo' });
+    if (!['logo', 'banner', 'voucher', 'promo', 'rental_logo', 'rental_wallpaper'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'Invalid upload type' });
     }
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -2294,7 +2294,15 @@ router.post('/upload/:type', adminAuth, upload.single('image'), (req, res) => {
       return res.json({ success: true, url: fileUrl, message: 'Promo image uploaded successfully' });
     }
 
-    const key = type === 'logo' ? 'logo_url' : 'banner_url';
+    // 'rental_wallpaper' is also a list (like 'promo' above), one active
+    // at a time - see the /rental/wallpapers* routes for activate/delete.
+    if (type === 'rental_wallpaper') {
+      db.prepare('INSERT INTO rental_wallpapers (image_path, active) VALUES (?, 0)').run(fileUrl);
+      console.log(`📸 Uploaded rental wallpaper: ${fileUrl}`);
+      return res.json({ success: true, url: fileUrl, message: 'Wallpaper uploaded successfully' });
+    }
+
+    const key = type === 'logo' ? 'logo_url' : type === 'rental_logo' ? 'rental_logo_url' : 'banner_url';
     const existing = db.prepare('SELECT key FROM settings WHERE key = ?').get(key);
     if (existing) {
       db.prepare('UPDATE settings SET value = ? WHERE key = ?').run(fileUrl, key);
@@ -5456,6 +5464,88 @@ router.get('/rental/reports/summary', adminAuth, (req, res) => {
       monthly: sumSince('-30 days'),
       yearly: sumSince('-365 days')
     });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── PC Rental Settings: app password, whitelisted apps, wallpapers ─────
+// A separate override password (same "fail-safe" role zencafe-os's own
+// design notes called for), never sent/stored in plaintext - exact same
+// set/verify pattern as terminal_password above, deliberately NOT part
+// of the generic bulk /api/admin/settings save so it can't accidentally
+// round-trip in plaintext through that form.
+router.post('/rental/app-password', adminAuth, (req, res) => {
+  const { current_password, new_password } = req.body || {};
+  if (!new_password || String(new_password).length < 6) {
+    return res.status(400).json({ success: false, message: 'New password must be at least 6 characters' });
+  }
+  const existing = db.prepare("SELECT value FROM settings WHERE key = 'rental_app_password'").get()?.value;
+  if (existing && !verifyPassword(current_password, existing)) {
+    return res.status(401).json({ success: false, message: 'Current app password is incorrect' });
+  }
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('rental_app_password', ?)")
+    .run(hashPassword(String(new_password)));
+  res.json({ success: true, message: 'App password updated' });
+});
+
+router.get('/rental/whitelisted-apps', adminAuth, (req, res) => {
+  try {
+    const apps = db.prepare('SELECT * FROM rental_whitelisted_apps ORDER BY app_name ASC').all();
+    res.json({ success: true, apps });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/rental/whitelisted-apps', adminAuth, (req, res) => {
+  try {
+    const appName = String(req.body?.app_name || '').trim();
+    if (!appName) return res.status(400).json({ success: false, message: 'app_name required' });
+    db.prepare('INSERT INTO rental_whitelisted_apps (app_name) VALUES (?)').run(appName);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/rental/whitelisted-apps/:id', adminAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM rental_whitelisted_apps WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.get('/rental/wallpapers', adminAuth, (req, res) => {
+  try {
+    const wallpapers = db.prepare('SELECT * FROM rental_wallpapers ORDER BY created_at DESC').all();
+    res.json({ success: true, wallpapers });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/rental/wallpapers/:id/activate', adminAuth, (req, res) => {
+  try {
+    db.prepare('UPDATE rental_wallpapers SET active = 0').run();
+    db.prepare('UPDATE rental_wallpapers SET active = 1 WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/rental/wallpapers/:id', adminAuth, (req, res) => {
+  try {
+    const row = db.prepare('SELECT image_path FROM rental_wallpapers WHERE id = ?').get(req.params.id);
+    db.prepare('DELETE FROM rental_wallpapers WHERE id = ?').run(req.params.id);
+    if (row) {
+      const filePath = path.join(__dirname, '../../public', row.image_path);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+    res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
   }

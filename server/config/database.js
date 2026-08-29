@@ -521,6 +521,25 @@ db.exec(`
     redeemed_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Apps exempted from the Windows client's auto-close-all-running-apps
+  -- behavior on lockscreen (a Settings toggle, see settings.rental_
+  -- enable_auto_close) - e.g. antivirus, the client itself.
+  CREATE TABLE IF NOT EXISTS rental_whitelisted_apps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_name TEXT NOT NULL
+  );
+
+  -- Lock-screen wallpaper images the Windows client displays - separate
+  -- from the WiFi portal's own branding (public/portal), since this
+  -- shows on the physical rental PC's screen, not a customer's phone.
+  -- Only one is 'active' at a time.
+  CREATE TABLE IF NOT EXISTS rental_wallpapers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    image_path TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Cash reconciliation: an operator's own physical coin count for a
   -- period, compared against what the system logged as credited over that
   -- same window (transactions.coin_value). A mismatch here isn't
@@ -1354,6 +1373,43 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // unlock lasts once paid for.
   upsertIfMissing('movies_source_dir', '');
   upsertIfMissing('movie_rental_hours', '48');
+  // PC Rental Settings (public/admin/rental) - all read/written through
+  // the existing generic GET/POST /api/admin/settings, same as every
+  // other operator-facing setting in this file. Defaults match the
+  // reference system's own defaults where one was shown, mapped onto
+  // this app's actual built features - toggles for features not built
+  // yet (Watch TV, Camera Recording, Spectate, PC Performance) are
+  // stored but inert until those features exist.
+  upsertIfMissing('rental_shutdown_timer_secs', '120');
+  upsertIfMissing('rental_insert_timer_secs', '60');
+  upsertIfMissing('rental_max_attempt', '5');
+  upsertIfMissing('rental_max_attempt_lockout_secs', '50');
+  upsertIfMissing('rental_create_account_min_credit', '20');
+  upsertIfMissing('rental_insert_beep_alert_on_secs', '120');
+  upsertIfMissing('rental_speed_timer_secs', '600');
+  upsertIfMissing('rental_enable_member_login', '1');
+  upsertIfMissing('rental_enable_create_account', '1');
+  upsertIfMissing('rental_enable_voucher', '0');
+  upsertIfMissing('rental_enable_watch_tv', '0');
+  upsertIfMissing('rental_enable_auto_reset_guest_time_on_shutdown', '0');
+  upsertIfMissing('rental_enable_auto_close_apps', '0');
+  upsertIfMissing('rental_enable_camera_recording', '0');
+  upsertIfMissing('rental_enable_transfer_time', '1');
+  upsertIfMissing('rental_minimum_transfer_time_minutes', '5');
+  upsertIfMissing('rental_enable_spectate', '0');
+  upsertIfMissing('rental_enable_pc_performance', '0');
+  upsertIfMissing('rental_antiabuse_enabled', '1');
+  upsertIfMissing('rental_antiabuse_min_consume_minutes', '5');
+  upsertIfMissing('rental_antiabuse_max_attempt', '3');
+  upsertIfMissing('rental_antiabuse_lock_minutes', '5');
+  upsertIfMissing('rental_antiabuse_penalty_minutes', '5');
+  upsertIfMissing('rental_lock_announcement', '');
+  upsertIfMissing('rental_close_announcement', '');
+  upsertIfMissing('rental_schedule_enabled', '0');
+  upsertIfMissing('rental_schedule_open_time', '06:00');
+  upsertIfMissing('rental_schedule_before_close_time', '22:50');
+  upsertIfMissing('rental_schedule_closed_time', '23:15');
+  upsertIfMissing('rental_app_password', '');
   // Telemetry (server/services/telemetryService.js) - off by default,
   // mechanism-only until a real Privacy Policy is published and a UI
   // toggle is exposed (see that file's header for the full reasoning).

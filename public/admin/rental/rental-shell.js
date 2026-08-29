@@ -51,7 +51,11 @@ const RENTAL_PANEL_TITLES = {
 // PC Performance/Spectate (deferred, need a system-stats/screen-streaming
 // agent on the Windows client) stay placeholders.
 const RENTAL_COMING_SOON = {
-  subcoinslot: 'Per-PC dedicated coin acceptor configuration'
+  subcoinslot: 'Per-PC dedicated coin acceptor configuration',
+  systeminfo: 'Per-PC system information (CPU, RAM, disk) - needs a stats agent on the Windows client',
+  remote: 'Remote PC control',
+  telegrambot: 'Telegram notifications integration',
+  cronjobs: 'Scheduled maintenance jobs for PC rental'
 };
 
 // Real panels load their content once, on first switch to them, rather
@@ -62,7 +66,8 @@ const RENTAL_PANEL_LOADERS = {
   timerrates: refreshRentalRates,
   redeemrates: refreshRentalRedeemRates,
   redeemhistory: refreshRentalRedemptions,
-  reports: refreshRentalReports
+  reports: refreshRentalReports,
+  settings: loadRentalSettings
 };
 
 function switchRentalPanel(panel) {
