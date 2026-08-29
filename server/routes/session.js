@@ -120,6 +120,20 @@ router.get('/mac/:mac', async (req, res) => {
       ? session.minutes_remaining
       : Math.max(0, (new Date(session.expires_at) - now) / 60000);
 
+    // Latest coin credit for this session, so the portal can show "You
+    // added ₱X" at the same moment the vendo speaker announces it -
+    // finalizePendingCoins() (coin.js) is the only place that knows the
+    // exact peso total, and it doesn't run in a web request the portal
+    // could read a response from directly (it can fire from a background
+    // timer when the pending window closes on its own). Reading the most
+    // recent transactions row instead of trying to push/return a value
+    // from that flow works regardless of which path credited it.
+    const lastTransaction = db.prepare(`
+      SELECT coin_value, created_at FROM transactions
+      WHERE voucher_code = ? AND type != 'convert' AND type != 'convert_down'
+      ORDER BY id DESC LIMIT 1
+    `).get(session.voucher_code);
+
     return res.json({
       success: true,
       active: true,
@@ -139,7 +153,9 @@ router.get('/mac/:mac', async (req, res) => {
       premium_expires_at: session.premium_expires_at,
       premium_started_at: session.premium_started_at,
       premium_download_mbps: session.premium_download_mbps,
-      premium_upload_mbps: session.premium_upload_mbps
+      premium_upload_mbps: session.premium_upload_mbps,
+      last_credit_amount: lastTransaction?.coin_value ?? null,
+      last_credit_at: lastTransaction?.created_at ?? null
     });
 
   } catch (err) {

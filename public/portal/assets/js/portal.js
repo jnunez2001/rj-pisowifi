@@ -1,6 +1,14 @@
 const SERVER = '';
 let currentSession = null;
 let welcomeSoundPlayed = false;
+// Tracks the last transactions.created_at value already shown to the
+// customer as a "you added ₱X" toast, so the SAME credited total (still
+// being returned on every poll until the next coin lands) doesn't toast
+// again - only a genuinely newer last_credit_at does. Starts as null on
+// page load so the very first poll's existing credit (if any) is treated
+// as already-seen, not re-announced.
+let lastShownCreditAt = null;
+let lastShownCreditInit = false;
 let timerInterval = null;
 let pollInterval = null;
 let soundEnabled = true;
@@ -1003,6 +1011,22 @@ function updatePausesRemainingHint(session) {
 function updateUI(session) {
   const prev = currentSession;
   currentSession = session;
+
+  // Peso-credit toast: fires once per completed coin total (server batches
+  // rapid coin pulses into one transactions row per finalizePendingCoins()
+  // call, so last_credit_at only changes when a NEW total posts, not per
+  // individual coin). First poll after page load just records whatever's
+  // already there without toasting it - otherwise reopening the portal
+  // page would re-announce an old credit that happened minutes/hours ago.
+  if (session && session.last_credit_at) {
+    if (!lastShownCreditInit) {
+      lastShownCreditInit = true;
+      lastShownCreditAt = session.last_credit_at;
+    } else if (session.last_credit_at !== lastShownCreditAt) {
+      lastShownCreditAt = session.last_credit_at;
+      showToast(`You have added ₱${session.last_credit_amount}`, 'success');
+    }
+  }
 
   const badge = document.getElementById('statusBadge');
   const timeDisplay = document.getElementById('timeDisplay');
