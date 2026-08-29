@@ -91,6 +91,47 @@ body {
   object-fit: contain;
 }
 
+/* Promo/ad carousel - full-clarity images the operator uploads (new
+   movies, promos), distinct from banner-bg above which is a fixed,
+   low-opacity texture behind the whole banner. */
+.promo-carousel {
+  position: relative;
+  width: 100%;
+  max-width: 380px;
+  margin: 0 auto 14px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+}
+.promo-carousel-track {
+  display: flex;
+  transition: transform 0.5s ease;
+}
+.promo-carousel-track img {
+  width: 100%;
+  flex-shrink: 0;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  display: block;
+}
+.promo-carousel-dots {
+  position: absolute;
+  bottom: 8px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+}
+.promo-carousel-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.45);
+  transition: background 0.2s;
+}
+.promo-carousel-dot.active { background: #fff; }
+
 .banner h1 {
   font-family: 'Roboto', sans-serif;
   font-size: 26px;
@@ -328,6 +369,12 @@ body {
   transition: all 0.2s;
   font-family: 'Roboto', sans-serif;
   outline: none;
+  /* .btn is also used on <a> tags (e.g. the Movies link) - these two
+     have no effect on <button> elements (already centered/undecorated by
+     default) but are required for an <a> to match. */
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
 }
 
 .btn:active { transform: scale(0.98); }
@@ -640,33 +687,6 @@ body {
   justify-content: center;
   box-shadow: var(--shadow-sm);
 }
-
-/* Always-visible entry point to the movie library - a link buried at the
-   bottom of the page (below the session card/footer) went unnoticed, so
-   this sits fixed opposite the sound toggle, visible immediately on load
-   without any scrolling. */
-.movies-btn {
-  position: fixed;
-  top: 14px;
-  left: 14px;
-  background: var(--brand-teal);
-  border: none;
-  border-radius: 20px;
-  height: 40px;
-  padding: 0 16px;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  cursor: pointer;
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: var(--shadow-sm);
-  text-decoration: none;
-}
-.movies-btn:hover { background: var(--brand-teal-dark); }
 
 /* ===== CONNECTION LOST BANNER ===== */
 .connection-lost-banner {

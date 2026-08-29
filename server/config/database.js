@@ -410,6 +410,18 @@ db.exec(`
     expires_at DATETIME NOT NULL
   );
 
+  -- Portal ad/promo carousel (new movies, promos, whatever the operator
+  -- wants customers to see the moment they connect) - a list of images
+  -- shown above the STARKFI banner text, distinct from the existing
+  -- single low-opacity settings.banner_url background image. See
+  -- server/routes/admin.js's /promo-banner-images* routes.
+  CREATE TABLE IF NOT EXISTS promo_banner_images (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    image_path TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Cash reconciliation: an operator's own physical coin count for a
   -- period, compared against what the system logged as credited over that
   -- same window (transactions.coin_value). A mismatch here isn't

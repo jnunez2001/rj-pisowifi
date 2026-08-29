@@ -1292,6 +1292,8 @@ async function loadSettings() {
       bg.style.display = 'block';
     }
 
+    renderPromoCarousel(data.promo_banner_images || []);
+
     const welcomeMsg = document.getElementById('welcomeMsg');
     if (welcomeMsg) {
       welcomeMsg.textContent = portalSettings.welcome_message;
@@ -1300,6 +1302,41 @@ async function loadSettings() {
 
     buildRatesUI(data.rates);
   } catch(e) { console.error(e); }
+}
+
+// ===== PROMO/AD CAROUSEL =====
+// Operator-managed images (public/admin - Branding page), auto-advancing
+// above the STARKFI banner text so it's the first thing a customer sees
+// on connecting. Hidden entirely when nothing's configured.
+let promoCarouselIndex = 0;
+let promoCarouselInterval = null;
+const PROMO_CAROUSEL_INTERVAL_MS = 5000;
+
+function renderPromoCarousel(images) {
+  const wrap = document.getElementById('promoCarousel');
+  const track = document.getElementById('promoCarouselTrack');
+  const dots = document.getElementById('promoCarouselDots');
+  clearInterval(promoCarouselInterval);
+
+  if (!images.length) {
+    wrap.style.display = 'none';
+    return;
+  }
+
+  track.innerHTML = images.map((src) => `<img src="${src}" alt="">`).join('');
+  dots.innerHTML = images.map((_, i) => `<div class="promo-carousel-dot${i === 0 ? ' active' : ''}"></div>`).join('');
+  wrap.style.display = 'block';
+  promoCarouselIndex = 0;
+
+  if (images.length > 1) {
+    promoCarouselInterval = setInterval(() => {
+      promoCarouselIndex = (promoCarouselIndex + 1) % images.length;
+      track.style.transform = `translateX(-${promoCarouselIndex * 100}%)`;
+      dots.querySelectorAll('.promo-carousel-dot').forEach((d, i) => {
+        d.classList.toggle('active', i === promoCarouselIndex);
+      });
+    }, PROMO_CAROUSEL_INTERVAL_MS);
+  }
 }
 
 // ===== RATES UI =====

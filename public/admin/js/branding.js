@@ -24,9 +24,78 @@ async function loadBranding() {
       document.getElementById('previewTagline').textContent =
         settings.settings.banner_text || 'HIGH SPEED CONNECTION!';
     }
+
+    await loadPromoImages();
   } catch(e) {
     console.error('Branding error:', e);
   }
+}
+
+// ===== PROMO/AD CAROUSEL =====
+async function loadPromoImages() {
+  const el = document.getElementById('promoImagesList');
+  if (!el) return;
+  const data = await apiCall('GET', '/api/admin/promo-banner-images');
+  const images = data.images || [];
+  if (images.length === 0) {
+    el.innerHTML = '<p style="font-size:12px;color:var(--text-muted);">No promo images yet.</p>';
+    return;
+  }
+  el.innerHTML = images.map((img, i) => `
+    <div style="position:relative;width:120px;">
+      <img src="${img.image_path}" style="width:120px;height:68px;object-fit:cover;border-radius:8px;border:1px solid var(--border-color);">
+      <div style="display:flex;gap:4px;margin-top:4px;">
+        <button class="btn btn-sm btn-secondary" style="flex:1;padding:3px;" onclick="movePromoImage(${img.id},-1)" ${i === 0 ? 'disabled' : ''}><i class="fas fa-arrow-left"></i></button>
+        <button class="btn btn-sm btn-secondary" style="flex:1;padding:3px;" onclick="movePromoImage(${img.id},1)" ${i === images.length - 1 ? 'disabled' : ''}><i class="fas fa-arrow-right"></i></button>
+        <button class="btn btn-sm btn-secondary" style="flex:1;padding:3px;color:var(--accent-red);" onclick="deletePromoImage(${img.id})"><i class="fas fa-trash"></i></button>
+      </div>
+    </div>
+  `).join('');
+  window._promoImagesOrder = images.map((img) => img.id);
+}
+
+async function uploadPromoImage() {
+  const fileInput = document.getElementById('promoFile');
+  const file = fileInput.files[0];
+  if (!file) {
+    showToast('Please select an image first', 'error');
+    return;
+  }
+  const formData = new FormData();
+  formData.append('image', file);
+  try {
+    const res = await fetch('/api/admin/upload/promo', {
+      method: 'POST',
+      headers: { 'password': authToken },
+      body: formData
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('Added to carousel', 'success');
+      fileInput.value = '';
+      loadPromoImages();
+    } else {
+      showToast(data.message || 'Upload failed', 'error');
+    }
+  } catch (e) {
+    showToast('Upload error', 'error');
+  }
+}
+
+async function deletePromoImage(id) {
+  if (!confirm('Remove this image from the carousel?')) return;
+  await apiCall('DELETE', `/api/admin/promo-banner-images/${id}`);
+  loadPromoImages();
+}
+
+async function movePromoImage(id, direction) {
+  const ids = window._promoImagesOrder || [];
+  const index = ids.indexOf(id);
+  const swapWith = index + direction;
+  if (index === -1 || swapWith < 0 || swapWith >= ids.length) return;
+  [ids[index], ids[swapWith]] = [ids[swapWith], ids[index]];
+  await apiCall('POST', '/api/admin/promo-banner-images/reorder', { ids });
+  loadPromoImages();
 }
 
 function previewImage(inputId, previewId) {

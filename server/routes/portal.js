@@ -140,7 +140,8 @@ router.get('/rates', (req, res) => {
       vendo_ip: getSetting('vendo_ip', ''),
       vapid_public_key: getSetting('vapid_public_key', ''),
       portal_hostname: getSetting('portal_hostname', ''),
-      allow_premium_to_regular_convert: getSetting('allow_premium_to_regular_convert', '0')
+      allow_premium_to_regular_convert: getSetting('allow_premium_to_regular_convert', '0'),
+      promo_banner_images: db.prepare('SELECT image_path FROM promo_banner_images ORDER BY sort_order ASC').all().map((r) => r.image_path)
     });
 
   } catch (err) {

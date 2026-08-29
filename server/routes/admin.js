@@ -2269,8 +2269,8 @@ router.post('/spam-settings', adminAuth, (req, res) => {
 router.post('/upload/:type', adminAuth, upload.single('image'), (req, res) => {
   try {
     const { type } = req.params;
-    if (!['logo', 'banner', 'voucher'].includes(type)) {
-      return res.status(400).json({ success: false, message: 'Type must be logo, banner, or voucher' });
+    if (!['logo', 'banner', 'voucher', 'promo'].includes(type)) {
+      return res.status(400).json({ success: false, message: 'Type must be logo, banner, voucher, or promo' });
     }
     if (!req.file) {
       return res.status(400).json({ success: false, message: 'No file uploaded' });
@@ -2282,6 +2282,16 @@ router.post('/upload/:type', adminAuth, upload.single('image'), (req, res) => {
     if (type === 'voucher') {
       console.log(`📸 Uploaded voucher logo: ${fileUrl}`);
       return res.json({ success: true, url: fileUrl, message: 'Logo uploaded successfully' });
+    }
+
+    // 'promo' images are a whole ordered LIST (the portal's ad/promo
+    // carousel), not a single overwritten setting like logo/banner below.
+    if (type === 'promo') {
+      const maxOrder = db.prepare('SELECT MAX(sort_order) AS m FROM promo_banner_images').get().m;
+      db.prepare('INSERT INTO promo_banner_images (image_path, sort_order) VALUES (?, ?)')
+        .run(fileUrl, (maxOrder ?? -1) + 1);
+      console.log(`📸 Uploaded promo banner image: ${fileUrl}`);
+      return res.json({ success: true, url: fileUrl, message: 'Promo image uploaded successfully' });
     }
 
     const key = type === 'logo' ? 'logo_url' : 'banner_url';
@@ -2296,6 +2306,43 @@ router.post('/upload/:type', adminAuth, upload.single('image'), (req, res) => {
   } catch (err) {
     console.error('Upload error:', err);
     res.status(500).json({ success: false, message: 'Upload failed' });
+  }
+});
+
+// ── Promo/ad carousel (portal's banner) ─────────────────────────────
+router.get('/promo-banner-images', adminAuth, (req, res) => {
+  try {
+    const images = db.prepare('SELECT * FROM promo_banner_images ORDER BY sort_order ASC').all();
+    res.json({ success: true, images });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/promo-banner-images/:id', adminAuth, (req, res) => {
+  try {
+    const row = db.prepare('SELECT image_path FROM promo_banner_images WHERE id = ?').get(req.params.id);
+    db.prepare('DELETE FROM promo_banner_images WHERE id = ?').run(req.params.id);
+    if (row) {
+      const filePath = path.join(__dirname, '../../public', row.image_path);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/promo-banner-images/reorder - body: { ids: [3, 1, 2] }
+// (the full id list in the operator's desired display order).
+router.post('/promo-banner-images/reorder', adminAuth, (req, res) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const update = db.prepare('UPDATE promo_banner_images SET sort_order = ? WHERE id = ?');
+    ids.forEach((id, index) => update.run(index, id));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
   }
 });
 

@@ -81,6 +81,27 @@
 
 </div>
 
+<!-- PROMO/AD CAROUSEL -->
+<div class="card" style="margin-top:16px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-images" style="margin-right:8px;color:var(--accent-purple);"></i>
+      Promo Carousel
+    </div>
+  </div>
+  <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">
+    Images shown above the STARKFI banner text the moment a customer connects - use this for new movies, promos, or announcements. Auto-rotates when more than one image is added.
+  </p>
+  <div class="form-group">
+    <label class="form-label">Add Image</label>
+    <input type="file" id="promoFile" class="form-control" accept="image/*">
+  </div>
+  <button class="btn btn-primary" onclick="uploadPromoImage()">
+    <i class="fas fa-upload"></i> Add to Carousel
+  </button>
+  <div id="promoImagesList" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;"></div>
+</div>
+
 <!-- PORTAL PREVIEW -->
 <div class="card" style="margin-top:16px;">
   <div class="card-header">

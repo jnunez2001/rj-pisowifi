@@ -17,11 +17,6 @@
     <i class="fas fa-volume-up"></i>
   </button>
 
-  <!-- MOVIES -->
-  <a href="/portal/movies.html" class="movies-btn" id="moviesBtn">
-    <i class="fas fa-film"></i>&nbsp; MOVIES
-  </a>
-
   <!-- CONNECTION LOST BANNER -->
   <div id="connectionLostBanner" class="connection-lost-banner">
     <i class="fas fa-wifi"></i> Can't reach the server, reconnecting...
@@ -39,6 +34,15 @@
   <div class="banner">
     <img id="bannerBg" class="banner-bg" src="" style="display:none">
     <div class="banner-content">
+      <!-- PROMO/AD CAROUSEL - operator-managed images (new movies, promos,
+           anything), shown above the STARKFI text so it's the first thing
+           a customer sees on connecting. Hidden entirely when the admin
+           hasn't added any images (see public/portal/assets/js/portal.js's
+           renderPromoCarousel()). -->
+      <div class="promo-carousel" id="promoCarousel" style="display:none;">
+        <div class="promo-carousel-track" id="promoCarouselTrack"></div>
+        <div class="promo-carousel-dots" id="promoCarouselDots"></div>
+      </div>
       <img id="bannerLogo" class="banner-logo" src="" style="display:none">
       <div class="wifi-signal"><i class="fas fa-wifi"></i></div>
       <h1 id="cafeName">STARKFI</h1>
@@ -118,6 +122,9 @@
       <button class="btn btn-free" id="freeClaimBtn" onclick="claimFreeMinutes()" style="display:none;">
         <i class="fas fa-gift"></i>&nbsp; CLAIM FREE 5 MINS
       </button>
+      <a href="/portal/movies.html" class="btn btn-outline">
+        <i class="fas fa-film"></i>&nbsp; MOVIES
+      </a>
       <div class="btn-grid">
         <button class="btn btn-outline" onclick="showRates()">
           <i class="fas fa-list"></i>&nbsp; WiFi Rates
@@ -158,6 +165,9 @@
       <button class="btn btn-outline" id="convertDownBtnConnected" onclick="handleInsertCoin('convert_down')" style="display:none;" title="Switch your speed back to Regular for the rest of your session">
         <i class="fas fa-arrow-down"></i>&nbsp; CONVERT TO REGULAR
       </button>
+      <a href="/portal/movies.html" class="btn btn-outline">
+        <i class="fas fa-film"></i>&nbsp; MOVIES
+      </a>
       <div class="btn-grid">
         <button class="btn btn-pause" id="pauseBtn" onclick="pauseSession()">
           <i class="fas fa-pause"></i>&nbsp; PAUSE
