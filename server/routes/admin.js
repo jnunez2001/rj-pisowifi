@@ -5046,6 +5046,71 @@ router.post('/reports/:id/approve-credit', adminAuth, async (req, res) => {
   }
 });
 
+// ── Local Movie Server (server/services/movieService.js) ───────────────
+const movieService = require('../services/movieService');
+
+router.get('/movies/ffmpeg-check', adminAuth, async (req, res) => {
+  const installed = await movieService.checkFfmpeg();
+  res.json({ success: true, installed });
+});
+
+router.get('/movies', adminAuth, (req, res) => {
+  try {
+    res.json({ success: true, movies: movieService.getMovies() });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/movies/scan', adminAuth, async (req, res) => {
+  try {
+    const result = await movieService.scanMoviesFolder();
+    res.json(result);
+  } catch (err) {
+    console.error('Movie scan error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/movies/:id', adminAuth, (req, res) => {
+  try {
+    const { title, tier, price_pesos } = req.body || {};
+    const movie = movieService.getMovie(req.params.id);
+    if (!movie) return res.status(404).json({ success: false, message: 'Movie not found' });
+    if (tier && !['free', 'premium'].includes(tier)) {
+      return res.status(400).json({ success: false, message: 'Invalid tier' });
+    }
+    db.prepare(`
+      UPDATE movies SET title = COALESCE(?, title), tier = COALESCE(?, tier),
+        price_pesos = COALESCE(?, price_pesos) WHERE id = ?
+    `).run(title || null, tier || null, Number.isFinite(parseInt(price_pesos, 10)) ? parseInt(price_pesos, 10) : null, req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Kicks off the one-time transcode for a movie (idempotent - a no-op if
+// already ready or already in progress). Doesn't wait for it to finish;
+// the admin/customer UI polls GET /movies for status.
+router.post('/movies/:id/prepare', adminAuth, (req, res) => {
+  try {
+    movieService.ensureTranscoded(parseInt(req.params.id, 10));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/movies/:id', adminAuth, (req, res) => {
+  try {
+    movieService.deleteMovie(parseInt(req.params.id, 10));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // GET /api/admin/alerts, merges two sources, both real:
 //  - live-recomputed checks (watchdog self-heal, WAN health score, disk
 //    space) - same as before, nothing here is persisted per-alert

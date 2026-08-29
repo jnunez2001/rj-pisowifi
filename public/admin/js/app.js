@@ -331,6 +331,7 @@ const pageTitles = {
   terminal: 'System Terminal',
   logs: 'Logs',
   reports: 'Reports',
+  movies: 'Movies',
   sales: 'Sales Report',
   sessions: 'Active Sessions',
   vouchers: 'Vouchers',
@@ -409,6 +410,7 @@ async function navigateTo(page) {
   if (typeof destroyDevices === 'function') destroyDevices();
   if (typeof destroyNetworkDevices === 'function') destroyNetworkDevices();
   if (typeof destroyReports === 'function') destroyReports();
+  if (typeof destroyMovies === 'function') destroyMovies();
 
   currentPage = page;
 
@@ -483,6 +485,7 @@ async function navigateTo(page) {
       terminal: () => typeof loadSystemTerminal === 'function' && loadSystemTerminal(),
       logs: () => typeof loadLogsPage === 'function' && loadLogsPage(),
       reports: () => typeof loadReportsPage === 'function' && loadReportsPage(),
+      movies: () => typeof loadMoviesPage === 'function' && loadMoviesPage(),
     };
 
     if (scripts[page]) scripts[page]();

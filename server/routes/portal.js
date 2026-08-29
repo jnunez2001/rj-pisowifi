@@ -350,4 +350,105 @@ router.post('/reports/:id/reply', (req, res) => {
   return res.json({ success: true });
 });
 
+// ── Local Movie Server (server/services/movieService.js) ───────────────
+const movieService = require('../services/movieService');
+
+function hasActiveSession(mac) {
+  const session = db.prepare(
+    "SELECT * FROM sessions WHERE mac_address = ? ORDER BY id DESC LIMIT 1"
+  ).get(mac);
+  return !!(session && session.minutes_remaining > 0 && new Date(session.hard_expires_at) > new Date());
+}
+
+function hasActiveRental(movieId, mac) {
+  return !!db.prepare(`
+    SELECT 1 FROM movie_rentals WHERE movie_id = ? AND mac_address = ? AND expires_at > datetime('now')
+  `).get(movieId, mac);
+}
+
+// GET /movies?mac=xx - the Netflix-style browse grid. Free movies show
+// unlocked whenever the device has an active WiFi session (same gate as
+// internet); premium movies show unlocked only if that MAC has an
+// unexpired rental (movie_rentals), otherwise the price to unlock.
+router.get('/movies', (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  const sessionActive = mac ? hasActiveSession(mac) : false;
+  const movies = movieService.getMovies().map((m) => {
+    const unlocked = m.tier === 'free' ? sessionActive : (mac ? hasActiveRental(m.id, mac) : false);
+    return {
+      id: m.id, title: m.title, tier: m.tier, price_pesos: m.price_pesos,
+      duration_seconds: m.duration_seconds, thumbnail_path: m.thumbnail_path,
+      status: m.status, unlocked
+    };
+  });
+  res.json({ success: true, movies, session_active: sessionActive });
+});
+
+// GET /movies/:id/play?mac=xx - gate check, then either return the HLS
+// URL (already transcoded) or kick off transcoding and tell the client
+// to keep polling this same route until status flips to 'ready'.
+router.get('/movies/:id/play', (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  const movie = movieService.getMovie(req.params.id);
+  if (!movie) return res.status(404).json({ success: false, message: 'Movie not found' });
+
+  const unlocked = movie.tier === 'free' ? hasActiveSession(mac) : hasActiveRental(movie.id, mac);
+  if (!unlocked) {
+    return res.status(403).json({ success: false, message: 'Not unlocked for this device' });
+  }
+
+  if (movie.status !== 'ready') {
+    movieService.ensureTranscoded(movie.id);
+    return res.json({ success: true, status: movie.status === 'failed' ? 'transcoding' : movie.status });
+  }
+  return res.json({ success: true, status: 'ready', hls_url: `/movies_cache/${movie.id}/master.m3u8` });
+});
+
+// POST /movies/:id/rent - unlocks a premium movie for this MAC by
+// deducting its peso-equivalent minutes from the device's already-
+// credited WiFi time (no separate coin-insertion flow needed - the
+// customer pays out of time they've already bought). Rental window
+// length is settings.movie_rental_hours.
+router.post('/movies/:id/rent', (req, res) => {
+  const mac = String(req.body?.mac || '').trim().toLowerCase();
+  if (!mac) return res.status(400).json({ success: false, message: 'mac required' });
+
+  const movie = movieService.getMovie(req.params.id);
+  if (!movie || movie.tier !== 'premium') {
+    return res.status(400).json({ success: false, message: 'Not a rentable movie' });
+  }
+  if (hasActiveRental(movie.id, mac)) {
+    return res.json({ success: true, message: 'Already unlocked' });
+  }
+
+  const session = db.prepare(
+    "SELECT * FROM sessions WHERE mac_address = ? ORDER BY id DESC LIMIT 1"
+  ).get(mac);
+  const { getMinutesForCoin } = require('../services/voucherService');
+  const minutesCost = getMinutesForCoin(movie.price_pesos);
+  if (!minutesCost) {
+    return res.status(400).json({ success: false, message: `No rate configured for ₱${movie.price_pesos}` });
+  }
+  if (!session || session.minutes_remaining < minutesCost) {
+    return res.status(402).json({
+      success: false,
+      message: `Insert ₱${movie.price_pesos} of WiFi time first, then try again.`
+    });
+  }
+
+  const newMinutes = session.minutes_remaining - minutesCost;
+  db.prepare('UPDATE sessions SET minutes_remaining = ? WHERE voucher_code = ?').run(newMinutes, session.voucher_code);
+
+  const rentalHours = parseFloat(db.prepare("SELECT value FROM settings WHERE key = 'movie_rental_hours'").get()?.value || '48');
+  const expiresAt = new Date(Date.now() + rentalHours * 60 * 60 * 1000).toISOString();
+  db.prepare('INSERT INTO movie_rentals (movie_id, mac_address, expires_at) VALUES (?, ?, ?)').run(movie.id, mac, expiresAt);
+
+  db.prepare(`
+    INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, mac_address)
+    VALUES (?, ?, ?, 'movie_rental', ?)
+  `).run(session.voucher_code, movie.price_pesos, -minutesCost, mac);
+
+  return res.json({ success: true, minutes_remaining: newMinutes, expires_at: expiresAt });
+});
+
 module.exports = router;

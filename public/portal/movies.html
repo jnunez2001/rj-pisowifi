@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Movies - StarkFi</title>
+  <link rel="icon" type="image/png" href="/portal/assets/img/logo-icon.png">
+  <link rel="stylesheet" href="/portal/assets/css/all.min.css">
+  <link rel="stylesheet" href="/portal/assets/css/portal.css">
+  <link rel="stylesheet" href="/portal/assets/css/movies.css">
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+</head>
+<body class="movies-body">
+
+  <div class="movies-header">
+    <a href="/portal/" class="movies-back"><i class="fas fa-arrow-left"></i></a>
+    <div class="movies-header-title">Movies</div>
+    <div style="width:24px;"></div>
+  </div>
+
+  <div class="movies-tabs">
+    <button class="movies-tab active" data-tier="" onclick="setMoviesTierFilter('')">All</button>
+    <button class="movies-tab" data-tier="free" onclick="setMoviesTierFilter('free')">Free</button>
+    <button class="movies-tab" data-tier="premium" onclick="setMoviesTierFilter('premium')">New / Premium</button>
+  </div>
+
+  <div id="moviesEmptyState" class="movies-empty" style="display:none;">
+    <i class="fas fa-film"></i>
+    <p>No movies available yet.</p>
+  </div>
+
+  <div id="moviesGridPortal" class="movies-grid"></div>
+
+  <!-- PLAYER OVERLAY -->
+  <div id="moviePlayerOverlay" class="movie-player-overlay">
+    <div class="movie-player-topbar">
+      <button class="movie-player-close" onclick="closeMoviePlayer()"><i class="fas fa-times"></i></button>
+      <div id="moviePlayerTitle" class="movie-player-title"></div>
+    </div>
+    <div id="moviePlayerBody" class="movie-player-body">
+      <video id="moviePlayerVideo" class="movie-player-video" controls playsinline></video>
+      <div id="moviePlayerStatus" class="movie-player-status"></div>
+    </div>
+  </div>
+
+  <!-- RENT CONFIRM -->
+  <div id="movieRentOverlay" class="movie-rent-overlay">
+    <div class="movie-rent-box">
+      <i class="fas fa-lock" style="font-size:32px;color:var(--brand-teal);"></i>
+      <h3 id="movieRentTitle"></h3>
+      <p id="movieRentDesc" style="color:var(--text-secondary);font-size:14px;"></p>
+      <div class="movie-rent-actions">
+        <button class="btn btn-outline" onclick="closeRentOverlay()">Cancel</button>
+        <button class="btn btn-activate" id="movieRentConfirmBtn">Unlock</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/portal/assets/js/vendor/hls.min.js"></script>
+  <script src="/portal/assets/js/movies.js"></script>
+</body>
+</html>

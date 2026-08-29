@@ -379,6 +379,37 @@ db.exec(`
     received_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Local movie library (server/services/movieService.js). One row per
+  -- source video file found under settings.movies_source_dir. 'free'
+  -- tier movies are watchable by anyone with an active WiFi session (the
+  -- same gate as internet access); 'premium' movies need a separate
+  -- per-device coin unlock (movie_rentals below), independent of the
+  -- WiFi timer - matches new releases being pay-per-unlock while the
+  -- older library is bundled with any paid session.
+  CREATE TABLE IF NOT EXISTS movies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    tier TEXT NOT NULL DEFAULT 'free', -- 'free' | 'premium'
+    price_pesos INTEGER NOT NULL DEFAULT 0,
+    duration_seconds INTEGER,
+    thumbnail_path TEXT,
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'transcoding' | 'ready' | 'failed'
+    added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- One row per device that has paid to unlock one premium movie.
+  -- expires_at follows settings.movie_rental_hours (operator-adjustable,
+  -- same "rental window" concept as a real video-rental unlock) rather
+  -- than being permanent.
+  CREATE TABLE IF NOT EXISTS movie_rentals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    movie_id INTEGER NOT NULL REFERENCES movies(id),
+    mac_address TEXT NOT NULL,
+    rented_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL
+  );
+
   -- Cash reconciliation: an operator's own physical coin count for a
   -- period, compared against what the system logged as credited over that
   -- same window (transactions.coin_value). A mismatch here isn't
@@ -1207,6 +1238,11 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // issues without needing to manually block every prankster one at a
   // time. Operator-adjustable in Settings.
   upsertIfMissing('max_reports_per_mac', '5');
+  // Local movie server (server/services/movieService.js) - where source
+  // video files live on disk, and how long a premium per-movie rental
+  // unlock lasts once paid for.
+  upsertIfMissing('movies_source_dir', '');
+  upsertIfMissing('movie_rental_hours', '48');
   // Telemetry (server/services/telemetryService.js) - off by default,
   // mechanism-only until a real Privacy Policy is published and a UI
   // toggle is exposed (see that file's header for the full reasoning).

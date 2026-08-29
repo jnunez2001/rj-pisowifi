@@ -78,3 +78,8 @@ ZENTRY-ZENFI-DEVELOPER-HANDOFF-v2/
 # Local mini-PC provisioning material - contains a temp-password hash for
 # first-boot cloud-init, kept local-only rather than in repo history.
 setup/mini-pc-autoinstall/
+
+# Local movie server's transcoded HLS output (server/services/
+# movieService.js) - generated per-box from the operator's own movies
+# folder, large binary video segments, never belongs in repo history.
+public/movies_cache/

@@ -1,0 +1,67 @@
+/* Netflix-style browse/player for the local movie server. Reuses the
+   main portal's CSS variables (brand teal, light theme) so it matches
+   the rest of the app instead of introducing a separate dark theme. */
+
+.movies-body { background: var(--bg-primary); min-height: 100vh; padding-bottom: 40px; }
+
+.movies-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; background: var(--bg-card);
+  box-shadow: var(--shadow-sm); position: sticky; top: 0; z-index: 10;
+}
+.movies-back { color: var(--text-primary); font-size: 18px; text-decoration: none; width: 24px; }
+.movies-header-title { font-size: 18px; font-weight: 900; color: var(--text-primary); }
+
+.movies-tabs { display: flex; gap: 8px; padding: 16px 20px 0; }
+.movies-tab {
+  border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-secondary);
+  border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.movies-tab.active { background: var(--brand-teal); border-color: var(--brand-teal); color: #fff; }
+
+.movies-empty { text-align: center; color: var(--text-muted); padding: 60px 20px; }
+.movies-empty i { font-size: 40px; margin-bottom: 12px; display: block; }
+
+.movies-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 14px; padding: 16px 20px;
+}
+.movie-card {
+  border-radius: 10px; overflow: hidden; cursor: pointer; background: var(--bg-card);
+  box-shadow: var(--shadow-sm); position: relative;
+}
+.movie-card-thumb {
+  width: 100%; aspect-ratio: 2/3; background: var(--brand-teal-light);
+  background-size: cover; background-position: center;
+  display: flex; align-items: center; justify-content: center; color: var(--brand-teal);
+}
+.movie-card-title { padding: 8px 10px; font-size: 12px; font-weight: 700; color: var(--text-primary); }
+.movie-card-lock {
+  position: absolute; top: 8px; right: 8px; width: 26px; height: 26px; border-radius: 50%;
+  background: rgba(0,0,0,0.6); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px;
+}
+.movie-card-price {
+  position: absolute; bottom: 34px; left: 8px; background: var(--brand-teal); color: #fff;
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 8px;
+}
+
+.movie-player-overlay, .movie-rent-overlay {
+  display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.92); z-index: 999;
+  flex-direction: column;
+}
+.movie-player-overlay.show, .movie-rent-overlay.show { display: flex; }
+.movie-player-topbar { display: flex; align-items: center; gap: 12px; padding: 14px 16px; color: #fff; }
+.movie-player-close { background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; }
+.movie-player-title { font-size: 15px; font-weight: 700; }
+.movie-player-body { flex: 1; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 0 12px; }
+.movie-player-video { width: 100%; max-height: 80vh; background: #000; border-radius: 6px; }
+.movie-player-status { color: #ccc; font-size: 13px; margin-top: 14px; text-align: center; }
+
+.movie-rent-overlay { align-items: center; justify-content: center; }
+.movie-rent-box {
+  background: var(--bg-card); border-radius: 16px; padding: 28px; text-align: center;
+  max-width: 320px; width: 90%;
+}
+.movie-rent-box h3 { margin: 12px 0 6px; color: var(--text-primary); }
+.movie-rent-actions { display: flex; gap: 10px; margin-top: 18px; }
+.movie-rent-actions .btn { flex: 1; }

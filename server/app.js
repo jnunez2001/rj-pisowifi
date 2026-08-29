@@ -60,6 +60,15 @@ app.use(helmet({
       styleSrcAttr: ["'unsafe-inline'"],
       fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'data:'],
       imgSrc: ["'self'", 'data:', 'blob:'],
+      // hls.js (public/portal/movies.html's player) attaches video via a
+      // MediaSource blob: URL, not a direct network request - without
+      // 'blob:' here the browser silently refuses to play it, same CSP
+      // gap class as the img-src blob: line above.
+      mediaSrc: ["'self'", 'blob:'],
+      // hls.js also spawns its demuxer as a blob: web worker by default -
+      // without this it falls back to the (slower) non-worker path rather
+      // than failing outright, but there's no reason to pay that cost.
+      workerSrc: ["'self'", 'blob:'],
       connectSrc: ["'self'"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
@@ -189,6 +198,18 @@ app.use('/admin/assets/firmware', (req, res, next) => {
   res.set('Cache-Control', 'no-store');
   next();
 }, express.static(path.join(__dirname, '../public/admin/assets/firmware')));
+
+// HLS files (.m3u8/.ts) need the right MIME type for players (Safari's
+// native HLS support in particular checks the playlist's Content-Type,
+// not just its extension) - express's default static mime lookup doesn't
+// always have these mapped, so set them explicitly ahead of the general
+// static mount below.
+app.use('/movies_cache', express.static(path.join(__dirname, '../public/movies_cache'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.m3u8')) res.set('Content-Type', 'application/vnd.apple.mpegurl');
+    else if (filePath.endsWith('.ts')) res.set('Content-Type', 'video/mp2t');
+  }
+}));
 
 app.use(express.static(path.join(__dirname, '../public')));
 
