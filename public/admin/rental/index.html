@@ -95,23 +95,76 @@
       </div>
     </div>
 
-    <div id="rentalPanelMembers" class="rental-panel" style="display:none;"></div>
+    <div id="rentalPanelMembers" class="rental-panel" style="display:none;">
+      <div class="zf3-card" style="margin-bottom:16px;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="rentalMemberUsername" placeholder="Username" style="width:140px;">
+          <input type="text" id="rentalMemberName" placeholder="Display name" style="width:140px;">
+          <input type="password" id="rentalMemberPassword" placeholder="Password" style="width:140px;">
+          <button class="btn btn-primary" onclick="addRentalMember()"><i class="fas fa-user-plus"></i> Add member</button>
+        </div>
+      </div>
+      <div class="zf3-card" style="padding:0;overflow:hidden;">
+        <div id="rentalMembersList" class="rental-pcs-list"></div>
+      </div>
+    </div>
+
     <div id="rentalPanelTimerrates" class="rental-panel" style="display:none;">
       <div class="zf3-card">
         <div id="rentalRatesList" style="margin-bottom:12px;"></div>
-        <div style="display:flex;gap:8px;align-items:center;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <span>₱</span>
           <input type="number" id="rentalRateCoin" min="1" placeholder="coin value" style="width:100px;">
           <span>=</span>
           <input type="number" id="rentalRateMinutes" min="1" placeholder="minutes" style="width:100px;">
+          <select id="rentalRateTier" style="width:110px;">
+            <option value="non_vip">NON-VIP</option>
+            <option value="vip">VIP</option>
+            <option value="vvip">VVIP</option>
+          </select>
+          <input type="number" id="rentalRatePoints" min="0" placeholder="points" style="width:90px;">
           <button class="btn btn-primary" onclick="addRentalRate()"><i class="fas fa-plus"></i> Add rate</button>
         </div>
       </div>
     </div>
-    <div id="rentalPanelRedeemrates" class="rental-panel" style="display:none;"></div>
-    <div id="rentalPanelRedeemhistory" class="rental-panel" style="display:none;"></div>
-    <div id="rentalPanelReports" class="rental-panel" style="display:none;"></div>
+
+    <div id="rentalPanelRedeemrates" class="rental-panel" style="display:none;">
+      <div class="zf3-card" style="margin-bottom:16px;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="number" id="rentalRedeemPoints" min="1" placeholder="points" style="width:100px;">
+          <span>=</span>
+          <input type="number" id="rentalRedeemMinutes" min="1" placeholder="minutes" style="width:100px;">
+          <button class="btn btn-primary" onclick="addRentalRedeemRate()"><i class="fas fa-plus"></i> Add redeem rate</button>
+        </div>
+      </div>
+      <div class="zf3-card" style="padding:0;overflow:hidden;">
+        <div id="rentalRedeemRatesList"></div>
+      </div>
+    </div>
+
+    <div id="rentalPanelRedeemhistory" class="rental-panel" style="display:none;">
+      <div class="zf3-card" style="padding:0;overflow:hidden;">
+        <div id="rentalRedemptionsList"></div>
+      </div>
+    </div>
+
+    <div id="rentalPanelReports" class="rental-panel" style="display:none;">
+      <div class="rental-dashboard-stats" id="rentalReportsStats"></div>
+    </div>
+
     <div id="rentalPanelSubcoinslot" class="rental-panel" style="display:none;"></div>
+  </div>
+
+  <!-- REDEEM FOR MEMBER MODAL -->
+  <div id="rentalRedeemModal" class="rental-coin-modal">
+    <div class="rental-coin-box">
+      <h3 id="rentalRedeemMemberTitle">Redeem points</h3>
+      <select id="rentalRedeemRateSelect" style="width:100%;margin:14px 0;padding:8px;"></select>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-secondary" style="flex:1;" onclick="closeRentalRedeemModal()">Cancel</button>
+        <button class="btn btn-primary" style="flex:1;" onclick="confirmRentalRedeem()">Redeem</button>
+      </div>
+    </div>
   </div>
 
   <!-- INSERT COIN MODAL -->
@@ -127,21 +180,39 @@
   </div>
 
   <style>
-    .rental-pcs-list { display: flex; flex-direction: column; }
+    .rental-pcs-list {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px; padding: 16px;
+    }
+    .rental-pc-card {
+      border: 1px solid var(--border-color, #2a2a2a); border-radius: 12px; overflow: hidden;
+      background: var(--bg-primary);
+    }
+    .rental-pc-card-head {
+      display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+      border-bottom: 1px solid var(--border-color, #2a2a2a);
+    }
+    .rental-pc-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+    .rental-pc-dot.unlocked { background: var(--accent-green, #22c55e); }
+    .rental-pc-dot.locked { background: var(--accent-red, #ef4444); }
+    .rental-pc-dot.candidate { background: var(--accent-orange, #f59e0b); }
+    .rental-pc-name { font-weight: 700; font-size: 14px; }
+    .rental-pc-card-body { padding: 10px 14px; }
+    .rental-pc-stat { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
+    .rental-pc-stat span { color: var(--text-muted); }
+    .rental-pc-actions { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 14px; border-top: 1px solid var(--border-color, #2a2a2a); }
+    .rental-pc-actions .btn { padding: 5px 10px; font-size: 12px; }
+
     .rental-pc-row {
       display: flex; align-items: center; gap: 14px; padding: 14px 18px;
       border-bottom: 1px solid var(--border-color, #2a2a2a);
     }
     .rental-pc-row:last-child { border-bottom: none; }
-    .rental-pc-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-    .rental-pc-dot.unlocked { background: var(--accent-green, #22c55e); }
-    .rental-pc-dot.locked { background: var(--accent-red, #ef4444); }
-    .rental-pc-dot.candidate { background: var(--accent-orange, #f59e0b); }
     .rental-pc-info { flex: 1; min-width: 0; }
-    .rental-pc-name { font-weight: 700; font-size: 14px; }
     .rental-pc-meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-    .rental-pc-actions { display: flex; gap: 6px; flex-wrap: wrap; }
-    .rental-pc-actions .btn { padding: 5px 10px; font-size: 12px; }
+
+    .rental-rate-tier { margin-bottom: 18px; }
+    .rental-rate-tier-title { font-weight: 700; font-size: 13px; margin-bottom: 8px; color: var(--text-secondary); }
     .rental-rate-row { display: flex; align-items: center; gap: 10px; font-size: 14px; padding: 6px 0; }
     .rental-rate-row button { margin-left: auto; }
     .rental-coming-soon { text-align: center; color: var(--text-muted); padding: 60px 20px; }

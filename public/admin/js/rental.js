@@ -30,7 +30,7 @@ async function refreshRentalPcs() {
 
 function renderRentalPcRow(pc) {
   const dotClass = pc.status !== 'adopted' ? 'candidate' : (pc.locked ? 'locked' : 'unlocked');
-  const statusLabel = pc.status !== 'adopted' ? 'Not adopted' : (pc.locked ? 'Locked' : `Unlocked - ${pc.minutes_remaining} min left`);
+  const statusLabel = pc.status !== 'adopted' ? 'Not adopted' : (pc.locked ? 'Locked' : 'Unlocked');
 
   let actions = '';
   if (pc.status !== 'adopted') {
@@ -47,15 +47,30 @@ function renderRentalPcRow(pc) {
   actions += `<button class="btn btn-secondary" onclick="deleteRentalPc(${pc.id})"><i class="fas fa-trash"></i></button>`;
 
   return `
-    <div class="rental-pc-row">
-      <div class="rental-pc-dot ${dotClass}"></div>
-      <div class="rental-pc-info">
+    <div class="rental-pc-card">
+      <div class="rental-pc-card-head">
+        <div class="rental-pc-dot ${dotClass}"></div>
         <div class="rental-pc-name">${escapeHtmlRental(pc.name)}</div>
-        <div class="rental-pc-meta">${escapeHtmlRental(pc.mac_address)} &middot; ${statusLabel}</div>
+      </div>
+      <div class="rental-pc-card-body">
+        <div class="rental-pc-stat"><span>Status</span><b>${statusLabel}</b></div>
+        <div class="rental-pc-stat"><span>Remaining</span><b>${formatRentalMinutes(pc.minutes_remaining)}</b></div>
+        <div class="rental-pc-stat"><span>Today's Sales</span><b>₱${pc.today_sales || 0}</b></div>
+        <div class="rental-pc-stat"><span>User</span><b>GUEST</b></div>
+        <div class="rental-pc-stat"><span>IP</span><b>${escapeHtmlRental(pc.ip_address || '--')}</b></div>
+        <div class="rental-pc-stat"><span>MAC</span><b>${escapeHtmlRental(pc.mac_address)}</b></div>
       </div>
       <div class="rental-pc-actions">${actions}</div>
     </div>
   `;
+}
+
+function formatRentalMinutes(minutes) {
+  const total = Math.max(0, Math.round(minutes * 60));
+  const h = String(Math.floor(total / 3600)).padStart(2, '0');
+  const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+  const s = String(total % 60).padStart(2, '0');
+  return `${h}:${m}:${s}`;
 }
 
 async function adoptRentalPc(id) {
@@ -132,38 +147,210 @@ function cancelRentalCoin() {
   document.getElementById('rentalCoinModal').classList.remove('show');
 }
 
-// ===== RATES =====
+// ===== RATES (NON-VIP / VIP / VVIP) =====
+const RENTAL_TIER_LABELS = { non_vip: 'NON-VIP Rates', vip: 'VIP Rates', vvip: 'VVIP Rates' };
+
 async function refreshRentalRates() {
   const el = document.getElementById('rentalRatesList');
   if (!el) return;
   const data = await apiCall('GET', '/api/admin/rental/rates');
   const rates = data.rates || [];
-  el.innerHTML = rates.length
-    ? rates.map((r) => `
-        <div class="rental-rate-row">
-          <span>₱${r.coin_value} = ${r.minutes} min</span>
-          <button class="btn btn-secondary" onclick="deleteRentalRate(${r.id})"><i class="fas fa-trash"></i></button>
-        </div>
-      `).join('')
-    : '<div style="color:var(--text-muted);font-size:13px;">No rates yet</div>';
+
+  el.innerHTML = ['non_vip', 'vip', 'vvip'].map((tier) => {
+    const tierRates = rates.filter((r) => r.tier === tier);
+    return `
+      <div class="rental-rate-tier">
+        <div class="rental-rate-tier-title">${RENTAL_TIER_LABELS[tier]}</div>
+        ${tierRates.length
+          ? tierRates.map((r) => `
+              <div class="rental-rate-row">
+                <span>₱${r.coin_value} = ${formatRentalMinutes(r.minutes)} &middot; ${r.points} pts</span>
+                <button class="btn btn-secondary" onclick="deleteRentalRate(${r.id})"><i class="fas fa-trash"></i></button>
+              </div>
+            `).join('')
+          : '<div style="color:var(--text-muted);font-size:13px;">No rates yet</div>'}
+      </div>
+    `;
+  }).join('');
 }
 
 async function addRentalRate() {
   const coinValue = document.getElementById('rentalRateCoin').value;
   const minutes = document.getElementById('rentalRateMinutes').value;
-  const data = await apiCall('POST', '/api/admin/rental/rates', { coin_value: coinValue, minutes });
+  const tier = document.getElementById('rentalRateTier').value;
+  const points = document.getElementById('rentalRatePoints').value || 0;
+  const data = await apiCall('POST', '/api/admin/rental/rates', { coin_value: coinValue, minutes, tier, points });
   if (!data.success) {
     alert(data.message || 'Could not add rate');
     return;
   }
   document.getElementById('rentalRateCoin').value = '';
   document.getElementById('rentalRateMinutes').value = '';
+  document.getElementById('rentalRatePoints').value = '';
   refreshRentalRates();
 }
 
 async function deleteRentalRate(id) {
   await apiCall('DELETE', `/api/admin/rental/rates/${id}`);
   refreshRentalRates();
+}
+
+// ===== MEMBERS =====
+async function refreshRentalMembers() {
+  const el = document.getElementById('rentalMembersList');
+  if (!el) return;
+  const data = await apiCall('GET', '/api/admin/rental/members');
+  const members = data.members || [];
+  el.innerHTML = members.length
+    ? members.map((m) => `
+        <div class="rental-pc-row">
+          <div class="rental-pc-info">
+            <div class="rental-pc-name">${escapeHtmlRental(m.name || m.username)} <span style="color:var(--text-muted);font-weight:400;">(@${escapeHtmlRental(m.username)})</span></div>
+            <div class="rental-pc-meta">
+              NON-VIP ${formatRentalMinutes(m.non_vip_seconds / 60)} &middot; VIP ${formatRentalMinutes(m.vip_seconds / 60)} &middot; VVIP ${formatRentalMinutes(m.vvip_seconds / 60)}
+              &middot; ₱${m.credit_pesos} credit &middot; ${m.points} pts
+            </div>
+          </div>
+          <div class="rental-pc-actions">
+            <button class="btn btn-secondary" onclick="openRentalManageTime(${m.id},'${escapeHtmlRental(m.name || m.username)}')"><i class="fas fa-clock"></i> Manage Time</button>
+            <button class="btn btn-secondary" onclick="openRentalRedeemModal(${m.id},'${escapeHtmlRental(m.name || m.username)}')"><i class="fas fa-star"></i> Redeem</button>
+            <button class="btn btn-secondary" onclick="deleteRentalMember(${m.id})"><i class="fas fa-trash"></i></button>
+          </div>
+        </div>
+      `).join('')
+    : '<div style="text-align:center;color:var(--text-muted);padding:24px;font-size:13px;">No members yet</div>';
+}
+
+async function addRentalMember() {
+  const username = document.getElementById('rentalMemberUsername').value.trim();
+  const name = document.getElementById('rentalMemberName').value.trim();
+  const password = document.getElementById('rentalMemberPassword').value;
+  const data = await apiCall('POST', '/api/admin/rental/members', { username, name, password });
+  if (!data.success) {
+    alert(data.message || 'Could not add member');
+    return;
+  }
+  document.getElementById('rentalMemberUsername').value = '';
+  document.getElementById('rentalMemberName').value = '';
+  document.getElementById('rentalMemberPassword').value = '';
+  refreshRentalMembers();
+}
+
+async function deleteRentalMember(id) {
+  if (!confirm('Remove this member and all their time/points?')) return;
+  await apiCall('DELETE', `/api/admin/rental/members/${id}`);
+  refreshRentalMembers();
+}
+
+async function openRentalManageTime(id, name) {
+  const field = prompt(`Adjust which field for "${name}"? (non_vip_seconds / vip_seconds / vvip_seconds / credit_pesos / points)`, 'non_vip_seconds');
+  if (!field) return;
+  const deltaInput = prompt('Amount to add (negative to remove). For time fields, enter seconds.');
+  if (!deltaInput) return;
+  const delta = parseInt(deltaInput, 10);
+  if (!Number.isFinite(delta)) return;
+  const data = await apiCall('POST', `/api/admin/rental/members/${id}/manage-time`, { field, delta });
+  if (!data.success) alert(data.message || 'Could not update member');
+  refreshRentalMembers();
+}
+
+// ===== REDEEM RATES + REDEEM (points economy) =====
+let rentalRedeemRatesCache = [];
+
+async function refreshRentalRedeemRates() {
+  const el = document.getElementById('rentalRedeemRatesList');
+  if (!el) return;
+  const data = await apiCall('GET', '/api/admin/rental/redeem-rates');
+  rentalRedeemRatesCache = data.rates || [];
+  el.innerHTML = rentalRedeemRatesCache.length
+    ? rentalRedeemRatesCache.map((r) => `
+        <div class="rental-rate-row" style="padding:10px 18px;">
+          <span>${r.points} pts = ${formatRentalMinutes(r.reward_seconds / 60)}</span>
+          <button class="btn btn-secondary" onclick="deleteRentalRedeemRate(${r.id})"><i class="fas fa-trash"></i></button>
+        </div>
+      `).join('')
+    : '<div style="text-align:center;color:var(--text-muted);padding:24px;font-size:13px;">No redeem rates yet</div>';
+}
+
+async function addRentalRedeemRate() {
+  const points = document.getElementById('rentalRedeemPoints').value;
+  const minutes = document.getElementById('rentalRedeemMinutes').value;
+  const rewardSeconds = Math.round(parseFloat(minutes) * 60);
+  const data = await apiCall('POST', '/api/admin/rental/redeem-rates', { points, reward_seconds: rewardSeconds });
+  if (!data.success) {
+    alert(data.message || 'Could not add redeem rate');
+    return;
+  }
+  document.getElementById('rentalRedeemPoints').value = '';
+  document.getElementById('rentalRedeemMinutes').value = '';
+  refreshRentalRedeemRates();
+}
+
+async function deleteRentalRedeemRate(id) {
+  await apiCall('DELETE', `/api/admin/rental/redeem-rates/${id}`);
+  refreshRentalRedeemRates();
+}
+
+let rentalRedeemTargetMemberId = null;
+
+function openRentalRedeemModal(memberId, name) {
+  rentalRedeemTargetMemberId = memberId;
+  document.getElementById('rentalRedeemMemberTitle').textContent = `Redeem points - ${name}`;
+  const select = document.getElementById('rentalRedeemRateSelect');
+  select.innerHTML = rentalRedeemRatesCache.length
+    ? rentalRedeemRatesCache.map((r) => `<option value="${r.id}">${r.points} pts = ${formatRentalMinutes(r.reward_seconds / 60)}</option>`).join('')
+    : '<option value="">No redeem rates configured</option>';
+  document.getElementById('rentalRedeemModal').classList.add('show');
+}
+
+function closeRentalRedeemModal() {
+  document.getElementById('rentalRedeemModal').classList.remove('show');
+}
+
+async function confirmRentalRedeem() {
+  const redeemRateId = document.getElementById('rentalRedeemRateSelect').value;
+  if (!redeemRateId) return;
+  const data = await apiCall('POST', `/api/admin/rental/members/${rentalRedeemTargetMemberId}/redeem`, { redeem_rate_id: redeemRateId });
+  closeRentalRedeemModal();
+  if (!data.success) alert(data.message || 'Could not redeem');
+  refreshRentalMembers();
+  refreshRentalRedemptions();
+}
+
+// ===== REDEEM HISTORY =====
+async function refreshRentalRedemptions() {
+  const el = document.getElementById('rentalRedemptionsList');
+  if (!el) return;
+  const data = await apiCall('GET', '/api/admin/rental/redemptions');
+  const rows = data.redemptions || [];
+  el.innerHTML = rows.length
+    ? rows.map((r) => `
+        <div class="rental-pc-row">
+          <div class="rental-pc-info">
+            <div class="rental-pc-name">${escapeHtmlRental(r.username)}</div>
+            <div class="rental-pc-meta">${r.points_spent} pts &rarr; ${formatRentalMinutes(r.reward_seconds / 60)} &middot; ${r.remaining_points} pts remaining &middot; ${new Date(r.redeemed_at).toLocaleString()}</div>
+          </div>
+        </div>
+      `).join('')
+    : '<div style="text-align:center;color:var(--text-muted);padding:24px;font-size:13px;">No redemptions yet</div>';
+}
+
+// ===== REPORTS =====
+async function refreshRentalReports() {
+  const el = document.getElementById('rentalReportsStats');
+  if (!el) return;
+  const data = await apiCall('GET', '/api/admin/rental/reports/summary');
+  if (!data.success) return;
+  const stats = [
+    ['Today\'s Sales', data.today], ['Weekly Sales', data.weekly],
+    ['Monthly Sales', data.monthly], ['Yearly Sales', data.yearly]
+  ];
+  el.innerHTML = stats.map(([label, value]) => `
+    <div class="rental-stat-card">
+      <div class="rental-stat-label">${label}</div>
+      <div class="rental-stat-value">₱${value}</div>
+    </div>
+  `).join('');
 }
 
 function destroyRental() {

@@ -467,11 +467,58 @@ db.exec(`
   );
 
   -- Separate pricing from WiFi's own rates table - PC rental time is
-  -- priced independently.
+  -- priced independently. tier splits pricing the way the reference
+  -- system does (NON-VIP/VIP/VVIP get different time-per-coin), points
+  -- is how many loyalty points a member earns for redeeming this rate
+  -- (0 for guest/walk-in credit, which earns no points).
   CREATE TABLE IF NOT EXISTS rental_rates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     coin_value INTEGER NOT NULL,
-    minutes REAL NOT NULL
+    minutes REAL NOT NULL,
+    tier TEXT NOT NULL DEFAULT 'non_vip', -- 'non_vip' | 'vip' | 'vvip'
+    points INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- A member account, separate from the anonymous per-PC guest model
+  -- (rental_pcs/rental_sessions) - a member's time follows THEM across
+  -- whichever PC they log into, tracked as three independent balances
+  -- (one per tier) rather than one pooled number, matching the reference
+  -- system exactly (a member can hold NON-VIP time from cheap coins and
+  -- VIP time redeemed from points at the same time).
+  CREATE TABLE IF NOT EXISTS rental_members (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    name TEXT,
+    non_vip_seconds INTEGER NOT NULL DEFAULT 0,
+    vip_seconds INTEGER NOT NULL DEFAULT 0,
+    vvip_seconds INTEGER NOT NULL DEFAULT 0,
+    credit_pesos INTEGER NOT NULL DEFAULT 0,
+    points INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_active DATETIME
+  );
+
+  -- Points -> time conversion menu (Redeem Rates page). Independent of
+  -- rental_rates (coin -> time) - this is the points economy's own
+  -- pricing.
+  CREATE TABLE IF NOT EXISTS rental_redeem_rates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    points INTEGER NOT NULL,
+    reward_seconds INTEGER NOT NULL
+  );
+
+  -- One row per redemption (Redeem History page) - a real, permanent log,
+  -- not derived/recomputed, since rental_members.points is mutated in
+  -- place and this is the only record of what a member actually redeemed
+  -- and when.
+  CREATE TABLE IF NOT EXISTS rental_redemptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    member_id INTEGER NOT NULL REFERENCES rental_members(id),
+    points_spent INTEGER NOT NULL,
+    reward_seconds INTEGER NOT NULL,
+    remaining_points INTEGER NOT NULL,
+    redeemed_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   -- Cash reconciliation: an operator's own physical coin count for a

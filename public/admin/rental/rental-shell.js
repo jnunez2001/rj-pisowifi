@@ -45,13 +45,24 @@ const RENTAL_PANEL_TITLES = {
 
 // Panels not built yet render an honest placeholder instead of pretending
 // - same pattern the main admin uses for its own not-yet-built roadmap
-// tabs (app.js's COMING_SOON_PAGES).
+// tabs (app.js's COMING_SOON_PAGES). Members/Redeem Rates/Redeem History/
+// Reports are real now (see js/rental.js) - only Sub-Coinslot (per-PC
+// dedicated hardware, not built - v1 is a single shared coin box) and
+// PC Performance/Spectate (deferred, need a system-stats/screen-streaming
+// agent on the Windows client) stay placeholders.
 const RENTAL_COMING_SOON = {
-  members: 'Member accounts and loyalty tracking',
-  redeemrates: 'Points-based reward redemption tiers',
-  redeemhistory: 'History of redeemed rewards',
-  reports: 'Dedicated PC rental revenue reports',
   subcoinslot: 'Per-PC dedicated coin acceptor configuration'
+};
+
+// Real panels load their content once, on first switch to them, rather
+// than all up front - same lazy-load reasoning as the main admin's SPA
+// page loader.
+const RENTAL_PANEL_LOADERS = {
+  members: refreshRentalMembers,
+  timerrates: refreshRentalRates,
+  redeemrates: refreshRentalRedeemRates,
+  redeemhistory: refreshRentalRedemptions,
+  reports: refreshRentalReports
 };
 
 function switchRentalPanel(panel) {
@@ -70,6 +81,8 @@ function switchRentalPanel(panel) {
           <div style="font-weight:700;margin-bottom:4px;">Coming soon</div>
           <div>${RENTAL_COMING_SOON[panel]}</div>
         </div>`;
+    } else if (RENTAL_PANEL_LOADERS[panel]) {
+      RENTAL_PANEL_LOADERS[panel]();
     }
   }
   document.getElementById('rentalPanelTitle').textContent = RENTAL_PANEL_TITLES[panel] || panel;

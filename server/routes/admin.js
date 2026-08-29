@@ -5165,11 +5165,17 @@ function rentalStatusFor(pc) {
   const session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
   const remainingMs = session?.hard_expires_at ? new Date(session.hard_expires_at).getTime() - Date.now() : 0;
   const remainingMinutes = Math.max(0, remainingMs / 60000);
+  const todaySales = db.prepare(`
+    SELECT COALESCE(SUM(coin_value), 0) AS total FROM rental_transactions
+    WHERE pc_id = ? AND type = 'coin' AND created_at >= datetime('now', 'start of day')
+  `).get(pc.id).total;
   return {
     ...pc,
     minutes_remaining: Math.round(remainingMinutes * 10) / 10,
     is_paused: session ? !!session.is_paused : false,
-    locked: !(pc.status === 'adopted' && session && !session.is_paused && remainingMinutes > 0)
+    locked: !(pc.status === 'adopted' && session && !session.is_paused && remainingMinutes > 0),
+    today_sales: todaySales,
+    last_insert: session?.updated_at || null
   };
 }
 
@@ -5268,13 +5274,15 @@ router.post('/rental/rates', adminAuth, (req, res) => {
   try {
     const coinValue = parseInt(req.body?.coin_value, 10);
     const minutes = parseFloat(req.body?.minutes);
+    const tier = ['non_vip', 'vip', 'vvip'].includes(req.body?.tier) ? req.body.tier : 'non_vip';
+    const points = parseInt(req.body?.points, 10) || 0;
     if (!Number.isFinite(coinValue) || coinValue <= 0) {
       return res.status(400).json({ success: false, message: 'coin_value must be a positive number' });
     }
     if (!Number.isFinite(minutes) || minutes <= 0) {
       return res.status(400).json({ success: false, message: 'minutes must be a positive number' });
     }
-    db.prepare('INSERT INTO rental_rates (coin_value, minutes) VALUES (?, ?)').run(coinValue, minutes);
+    db.prepare('INSERT INTO rental_rates (coin_value, minutes, tier, points) VALUES (?, ?, ?, ?)').run(coinValue, minutes, tier, points);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -5285,6 +5293,169 @@ router.delete('/rental/rates/:id', adminAuth, (req, res) => {
   try {
     db.prepare('DELETE FROM rental_rates WHERE id = ?').run(req.params.id);
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── PC Rental: Members (login accounts, separate from anonymous guest
+// PCs) ───────────────────────────────────────────────────────────────
+router.get('/rental/members', adminAuth, (req, res) => {
+  try {
+    const members = db.prepare('SELECT id, username, name, non_vip_seconds, vip_seconds, vvip_seconds, credit_pesos, points, created_at, last_active FROM rental_members ORDER BY created_at DESC').all();
+    res.json({ success: true, members });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/rental/members', adminAuth, (req, res) => {
+  try {
+    const username = String(req.body?.username || '').trim();
+    const password = String(req.body?.password || '');
+    const name = String(req.body?.name || '').trim();
+    if (!username || !password) {
+      return res.status(400).json({ success: false, message: 'Username and password required' });
+    }
+    db.prepare('INSERT INTO rental_members (username, password_hash, name) VALUES (?, ?, ?)')
+      .run(username, hashPassword(password), name || username);
+    res.json({ success: true });
+  } catch (err) {
+    if (String(err.message).includes('UNIQUE')) {
+      return res.status(400).json({ success: false, message: 'Username already taken' });
+    }
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/rental/members/:id', adminAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM rental_members WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/rental/members/:id/manage-time - staff directly
+// adjusts one of a member's three tier balances, or their credit/points,
+// same "manual override" role as rental_pcs' own addtime route.
+router.post('/rental/members/:id/manage-time', adminAuth, (req, res) => {
+  try {
+    const field = req.body?.field;
+    const validFields = ['non_vip_seconds', 'vip_seconds', 'vvip_seconds', 'credit_pesos', 'points'];
+    if (!validFields.includes(field)) {
+      return res.status(400).json({ success: false, message: 'Invalid field' });
+    }
+    const delta = parseInt(req.body?.delta, 10);
+    if (!Number.isFinite(delta)) {
+      return res.status(400).json({ success: false, message: 'delta must be a number' });
+    }
+    db.prepare(`UPDATE rental_members SET ${field} = MAX(0, ${field} + ?) WHERE id = ?`).run(delta, req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// ── PC Rental: Redeem Rates + History (points economy) ─────────────────
+router.get('/rental/redeem-rates', adminAuth, (req, res) => {
+  try {
+    const rates = db.prepare('SELECT * FROM rental_redeem_rates ORDER BY points ASC').all();
+    res.json({ success: true, rates });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/rental/redeem-rates', adminAuth, (req, res) => {
+  try {
+    const points = parseInt(req.body?.points, 10);
+    const rewardSeconds = parseInt(req.body?.reward_seconds, 10);
+    if (!Number.isFinite(points) || points <= 0) {
+      return res.status(400).json({ success: false, message: 'points must be a positive number' });
+    }
+    if (!Number.isFinite(rewardSeconds) || rewardSeconds <= 0) {
+      return res.status(400).json({ success: false, message: 'reward_seconds must be a positive number' });
+    }
+    db.prepare('INSERT INTO rental_redeem_rates (points, reward_seconds) VALUES (?, ?)').run(points, rewardSeconds);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/rental/redeem-rates/:id', adminAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM rental_redeem_rates WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.get('/rental/redemptions', adminAuth, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT r.id, r.points_spent, r.reward_seconds, r.remaining_points, r.redeemed_at, m.username
+      FROM rental_redemptions r JOIN rental_members m ON m.id = r.member_id
+      ORDER BY r.redeemed_at DESC LIMIT 200
+    `).all();
+    res.json({ success: true, redemptions: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/rental/members/:id/redeem - staff-triggered redemption
+// (the member's own self-service redemption happens from the Windows
+// client login screen once that ships - not built yet, so this is the
+// only way to redeem for now). Adds the reward seconds to non_vip_seconds
+// (redeemed time defaults to the base tier - an operator can manually
+// move it to vip_seconds/vvip_seconds via manage-time if they want it
+// credited at a higher tier instead).
+router.post('/rental/members/:id/redeem', adminAuth, (req, res) => {
+  try {
+    const redeemRateId = parseInt(req.body?.redeem_rate_id, 10);
+    const rate = db.prepare('SELECT * FROM rental_redeem_rates WHERE id = ?').get(redeemRateId);
+    if (!rate) return res.status(404).json({ success: false, message: 'Redeem rate not found' });
+
+    const member = db.prepare('SELECT * FROM rental_members WHERE id = ?').get(req.params.id);
+    if (!member) return res.status(404).json({ success: false, message: 'Member not found' });
+    if (member.points < rate.points) {
+      return res.status(400).json({ success: false, message: 'Not enough points' });
+    }
+
+    const remainingPoints = member.points - rate.points;
+    db.prepare('UPDATE rental_members SET points = ?, non_vip_seconds = non_vip_seconds + ? WHERE id = ?')
+      .run(remainingPoints, rate.reward_seconds, member.id);
+    db.prepare('INSERT INTO rental_redemptions (member_id, points_spent, reward_seconds, remaining_points) VALUES (?, ?, ?, ?)')
+      .run(member.id, rate.points, rate.reward_seconds, remainingPoints);
+
+    res.json({ success: true, remaining_points: remainingPoints });
+  } catch (err) {
+    console.error('Rental redeem error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/rental/reports/summary - the Dashboard's stat cards and
+// the Reports tab's revenue cards, both real sums over rental_transactions
+// (coin_value only, so admin_credit rows don't inflate "sales").
+router.get('/rental/reports/summary', adminAuth, (req, res) => {
+  try {
+    const sumSince = (sqliteModifier) => db.prepare(`
+      SELECT COALESCE(SUM(coin_value), 0) AS total FROM rental_transactions
+      WHERE type = 'coin' AND created_at >= datetime('now', ?)
+    `).get(sqliteModifier).total;
+
+    res.json({
+      success: true,
+      today: sumSince('start of day'),
+      weekly: sumSince('-7 days'),
+      monthly: sumSince('-30 days'),
+      yearly: sumSince('-365 days')
+    });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
   }
