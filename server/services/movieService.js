@@ -119,7 +119,12 @@ function ensureTranscoded(id) {
 
     const ffmpeg = spawn('ffmpeg', [
       '-i', inputPath,
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+      // ultrafast trades a somewhat larger output file for much lower
+      // CPU/RAM pressure during encoding - the right call on weak
+      // hardware (e.g. a Celeron N4000/N4100), where this is a one-time
+      // per-movie cost anyway (cached after), not something that needs
+      // to be fast, just something that needs to not choke the box.
+      '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23',
       '-vf', 'scale=-2:720',
       '-c:a', 'aac', '-b:a', '128k',
       '-hls_time', '6', '-hls_playlist_type', 'vod',
