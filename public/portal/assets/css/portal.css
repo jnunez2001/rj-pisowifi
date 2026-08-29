@@ -641,6 +641,33 @@ body {
   box-shadow: var(--shadow-sm);
 }
 
+/* Always-visible entry point to the movie library - a link buried at the
+   bottom of the page (below the session card/footer) went unnoticed, so
+   this sits fixed opposite the sound toggle, visible immediately on load
+   without any scrolling. */
+.movies-btn {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  background: var(--brand-teal);
+  border: none;
+  border-radius: 20px;
+  height: 40px;
+  padding: 0 16px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+}
+.movies-btn:hover { background: var(--brand-teal-dark); }
+
 /* ===== CONNECTION LOST BANNER ===== */
 .connection-lost-banner {
   display: none;
