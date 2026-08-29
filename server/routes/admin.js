@@ -857,20 +857,32 @@ router.get('/users/guests', adminAuth, (req, res) => {
     const parsedDays = parseInt(req.query.days, 10);
     const days = Math.min(Math.max(Number.isFinite(parsedDays) ? parsedDays : 7, 0), 90);
 
+    // Bug found live: a plain LEFT JOIN to transactions fans out one row
+    // PER TRANSACTION on that voucher_code, not one row per session/guest -
+    // a customer who topped up more than once (e.g. inserted coins in two
+    // separate batches) showed up as several duplicate "different guest
+    // sessions" in this list, even though Live Sessions correctly showed
+    // just the one real session. Correlated subqueries pick a single
+    // representative transaction (the most recent, non-convert one) per
+    // voucher_code instead, so this is back to one row per actual session.
     const active = db.prepare(`
       SELECT s.voucher_code, s.mac_address, s.ip_address, s.minutes_remaining,
         s.is_paused, s.created_at, s.hard_expires_at, s.redeemed_code,
-        t.type as source_type, t.coin_value
+        (SELECT t.type FROM transactions t WHERE t.voucher_code = s.voucher_code
+          AND t.type != 'convert' AND t.type != 'convert_down' ORDER BY t.id DESC LIMIT 1) as source_type,
+        (SELECT t.coin_value FROM transactions t WHERE t.voucher_code = s.voucher_code
+          AND t.type != 'convert' AND t.type != 'convert_down' ORDER BY t.id DESC LIMIT 1) as coin_value
       FROM sessions s
-      LEFT JOIN transactions t ON t.voucher_code = s.voucher_code
       ORDER BY s.created_at DESC
     `).all();
 
     const ended = db.prepare(`
       SELECT sh.voucher_code, sh.mac_address, sh.started_at, sh.ended_at, sh.duration_seconds,
-        t.type as source_type, t.coin_value
+        (SELECT t.type FROM transactions t WHERE t.voucher_code = sh.voucher_code
+          AND t.type != 'convert' AND t.type != 'convert_down' ORDER BY t.id DESC LIMIT 1) as source_type,
+        (SELECT t.coin_value FROM transactions t WHERE t.voucher_code = sh.voucher_code
+          AND t.type != 'convert' AND t.type != 'convert_down' ORDER BY t.id DESC LIMIT 1) as coin_value
       FROM session_history sh
-      LEFT JOIN transactions t ON t.voucher_code = sh.voucher_code
       WHERE date(sh.ended_at) >= date('now', '-' || ? || ' days')
       ORDER BY sh.ended_at DESC LIMIT 100
     `).all(days);
@@ -4916,6 +4928,120 @@ router.get('/reports/blocked-macs', adminAuth, (req, res) => {
     const rows = db.prepare('SELECT mac_address, blocked_at FROM report_blocked_macs ORDER BY blocked_at DESC').all();
     return res.json({ success: true, blocked: rows });
   } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/reports/:id/messages - the two-way thread under one
+// report (admin replies, customer follow-ups, system entries like an
+// approve-credit action).
+router.get('/reports/:id/messages', adminAuth, (req, res) => {
+  try {
+    const rows = db.prepare(
+      'SELECT * FROM report_messages WHERE report_id = ? ORDER BY created_at ASC'
+    ).all(req.params.id);
+    return res.json({ success: true, messages: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/reports/:id/reply', adminAuth, (req, res) => {
+  try {
+    const message = String(req.body?.message || '').trim().slice(0, 1000);
+    if (!message) return res.status(400).json({ success: false, message: 'Message required' });
+    db.prepare(
+      "INSERT INTO report_messages (report_id, sender, message) VALUES (?, 'admin', ?)"
+    ).run(req.params.id, message);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Report reply error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/coin-pulse-log?mac=xx&hours=24 - the "backup sensor"
+// proof for a disputed report: every raw coin pulse the server actually
+// received from that MAC's vendo in the given window, logged the instant
+// it arrived (coin.js's POST /), independent of whether it ended up
+// credited. Empty result for the disputed time window is itself real
+// evidence - it means the hardware never sent a signal at all.
+router.get('/coin-pulse-log', adminAuth, (req, res) => {
+  try {
+    const mac = String(req.query.mac || '').trim().toLowerCase();
+    if (!mac) return res.status(400).json({ success: false, message: 'mac required' });
+    const hours = Math.min(parseInt(req.query.hours, 10) || 24, 24 * 30);
+    const rows = db.prepare(`
+      SELECT coin_value, kiosk_id, received_at FROM coin_pulse_log
+      WHERE mac_address = ? AND received_at >= datetime('now', ?)
+      ORDER BY received_at DESC
+    `).all(mac, `-${hours} hours`);
+    return res.json({ success: true, pulses: rows });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/reports/:id/approve-credit - manually credits a
+// disputed peso amount to that report's MAC's currently active session,
+// reusing the exact same math as POST /session/:code/addtime. Leaves a
+// system message in the report's thread as a visible paper trail and
+// marks the report resolved.
+router.post('/reports/:id/approve-credit', adminAuth, async (req, res) => {
+  try {
+    const pesos = parseFloat(req.body?.pesos);
+    if (!Number.isFinite(pesos) || pesos <= 0) {
+      return res.status(400).json({ success: false, message: 'Enter a valid peso amount' });
+    }
+    const report = db.prepare('SELECT * FROM customer_reports WHERE id = ?').get(req.params.id);
+    if (!report || !report.mac_address) {
+      return res.status(404).json({ success: false, message: 'Report or device MAC not found' });
+    }
+    const session = db.prepare(
+      "SELECT * FROM sessions WHERE mac_address = ? ORDER BY id DESC LIMIT 1"
+    ).get(report.mac_address);
+    if (!session) {
+      return res.status(404).json({ success: false, message: 'No session found for this device' });
+    }
+
+    const { getMinutesForCoin } = require('../services/voucherService');
+    const minutes = getMinutesForCoin(pesos);
+    if (!minutes) {
+      return res.status(400).json({ success: false, message: `No rate configured for ₱${pesos}` });
+    }
+
+    const newMinutes = session.minutes_remaining + minutes;
+    const newExpiresAt = new Date(Date.now() + newMinutes * 60 * 1000).toISOString();
+    const currentHardExpires = new Date(session.hard_expires_at).getTime();
+    const newHardExpiresAt = new Date(
+      Math.max(currentHardExpires + minutes * 60 * 1000, new Date(newExpiresAt).getTime())
+    ).toISOString();
+
+    db.prepare(`
+      UPDATE sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ? WHERE voucher_code = ?
+    `).run(newMinutes, newExpiresAt, newHardExpiresAt, session.voucher_code);
+
+    db.prepare(`
+      INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, mac_address)
+      VALUES (?, ?, ?, 'admin_credit', ?)
+    `).run(session.voucher_code, pesos, minutes, report.mac_address);
+
+    db.prepare(`
+      UPDATE customer_reports SET status = 'resolved', resolved_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(req.params.id);
+
+    db.prepare(`
+      INSERT INTO report_messages (report_id, sender, message) VALUES (?, 'system', ?)
+    `).run(req.params.id, `Admin credited ₱${pesos} (${minutes} min) to this device.`);
+
+    try {
+      const { allowClient } = require('../services/networkService');
+      await allowClient(session.mac_address);
+    } catch (e) {}
+
+    return res.json({ success: true, minutes_remaining: newMinutes });
+  } catch (err) {
+    console.error('Report approve-credit error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
