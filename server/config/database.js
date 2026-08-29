@@ -840,6 +840,18 @@ try {
   db.exec("ALTER TABLE customer_reports ADD COLUMN category TEXT NOT NULL DEFAULT 'other'");
 } catch (e) { /* already applied */ }
 
+// rental_rates gained tier/points after some installs already had the
+// table (PC Rental's first pass, before the Members/points economy
+// existed) - same additive-migration pattern as above. Missing this
+// meant any install that created a rate before this commit would have
+// every subsequent rate insert fail with "no column named tier".
+try {
+  db.exec("ALTER TABLE rental_rates ADD COLUMN tier TEXT NOT NULL DEFAULT 'non_vip'");
+} catch (e) { /* already applied */ }
+try {
+  db.exec("ALTER TABLE rental_rates ADD COLUMN points INTEGER NOT NULL DEFAULT 0");
+} catch (e) { /* already applied */ }
+
 // Vendo Devices: satellite_kiosks extended in place rather than a separate
 // table - a Vendo IS a satellite kiosk (same device_key pairing, same
 // transactions.kiosk_id revenue attribution), just discovered automatically
@@ -1410,6 +1422,12 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('rental_schedule_before_close_time', '22:50');
   upsertIfMissing('rental_schedule_closed_time', '23:15');
   upsertIfMissing('rental_app_password', '');
+  // The physical coin acceptor is shared hardware, not duplicated per
+  // feature - this decides what it's allowed to be used for. Defaults to
+  // 'wifi' so every existing install keeps its current behavior until an
+  // operator deliberately opts a coinslot into PC Rental. See
+  // server/routes/coin.js's POST /pending enforcement.
+  upsertIfMissing('coinslot_purpose', 'wifi');
   // Telemetry (server/services/telemetryService.js) - off by default,
   // mechanism-only until a real Privacy Policy is published and a UI
   // toggle is exposed (see that file's header for the full reasoning).

@@ -58,8 +58,8 @@
     <div class="rental-shell-item" data-panel="reports" onclick="switchRentalPanel('reports')">
       <i class="fas fa-cash-register"></i> Reports
     </div>
-    <div class="rental-shell-item" data-panel="subcoinslot" onclick="switchRentalPanel('subcoinslot')">
-      <i class="fas fa-dice"></i> Sub-Coinslot
+    <div class="rental-shell-item" data-panel="coinslot" onclick="switchRentalPanel('coinslot')">
+      <i class="fas fa-dice"></i> Coinslot
     </div>
 
     <div class="rental-shell-title" style="margin-top:18px;">System Management</div>
@@ -68,15 +68,6 @@
     </div>
     <div class="rental-shell-item" data-panel="systeminfo" onclick="switchRentalPanel('systeminfo')">
       <i class="fas fa-circle-info"></i> System Info
-    </div>
-    <div class="rental-shell-item" data-panel="remote" onclick="switchRentalPanel('remote')">
-      <i class="fas fa-puzzle-piece"></i> Remote
-    </div>
-    <div class="rental-shell-item" data-panel="telegrambot" onclick="switchRentalPanel('telegrambot')">
-      <i class="fas fa-paper-plane"></i> Telegram Bot
-    </div>
-    <div class="rental-shell-item" data-panel="cronjobs" onclick="switchRentalPanel('cronjobs')">
-      <i class="fas fa-list-check"></i> Cron Jobs
     </div>
   </div>
 
@@ -169,7 +160,25 @@
       <div class="rental-dashboard-stats" id="rentalReportsStats"></div>
     </div>
 
-    <div id="rentalPanelSubcoinslot" class="rental-panel" style="display:none;"></div>
+    <div id="rentalPanelCoinslot" class="rental-panel" style="display:none;">
+      <div class="zf3-card">
+        <div class="rental-settings-title">Shared Coinslot</div>
+        <div style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">
+          This is the same physical coin acceptor WiFi vending already uses -
+          set what it's allowed to be used for. Existing installs default to
+          "WiFi only" so nothing changes until you deliberately turn PC
+          Rental on for it.
+        </div>
+        <label style="display:block;max-width:280px;">Coinslot purpose
+          <select id="rs_coinslot_purpose" style="width:100%;margin-top:6px;">
+            <option value="wifi">WiFi only</option>
+            <option value="pc">PC Rental only</option>
+            <option value="both">WiFi and PC Rental</option>
+          </select>
+        </label>
+        <button class="btn btn-primary" style="margin-top:14px;" onclick="saveRentalSettingsGroup(['coinslot_purpose'])">Save</button>
+      </div>
+    </div>
 
     <div id="rentalPanelSettings" class="rental-panel" style="display:none;">
       <div class="zf3-card" style="margin-bottom:16px;">
@@ -271,9 +280,6 @@
     </div>
 
     <div id="rentalPanelSysteminfo" class="rental-panel" style="display:none;"></div>
-    <div id="rentalPanelRemote" class="rental-panel" style="display:none;"></div>
-    <div id="rentalPanelTelegrambot" class="rental-panel" style="display:none;"></div>
-    <div id="rentalPanelCronjobs" class="rental-panel" style="display:none;"></div>
   </div>
 
   <!-- REDEEM FOR MEMBER MODAL -->

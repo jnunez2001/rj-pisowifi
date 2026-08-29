@@ -40,7 +40,8 @@ async function apiCall(method, endpoint, body = null) {
 const RENTAL_PANEL_TITLES = {
   dashboard: 'Dashboard', managepc: 'Manage PC', members: 'Members',
   timerrates: 'Timer Rates', redeemrates: 'Redeem Rates',
-  redeemhistory: 'Redeem History', reports: 'Reports', subcoinslot: 'Sub-Coinslot'
+  redeemhistory: 'Redeem History', reports: 'Reports', coinslot: 'Coinslot',
+  settings: 'Settings', systeminfo: 'System Info'
 };
 
 // Panels not built yet render an honest placeholder instead of pretending
@@ -51,11 +52,7 @@ const RENTAL_PANEL_TITLES = {
 // PC Performance/Spectate (deferred, need a system-stats/screen-streaming
 // agent on the Windows client) stay placeholders.
 const RENTAL_COMING_SOON = {
-  subcoinslot: 'Per-PC dedicated coin acceptor configuration',
-  systeminfo: 'Per-PC system information (CPU, RAM, disk) - needs a stats agent on the Windows client',
-  remote: 'Remote PC control',
-  telegrambot: 'Telegram notifications integration',
-  cronjobs: 'Scheduled maintenance jobs for PC rental'
+  systeminfo: 'Per-PC system information (CPU, RAM, disk) - needs a stats agent on the Windows client'
 };
 
 // Real panels load their content once, on first switch to them, rather
@@ -67,7 +64,8 @@ const RENTAL_PANEL_LOADERS = {
   redeemrates: refreshRentalRedeemRates,
   redeemhistory: refreshRentalRedemptions,
   reports: refreshRentalReports,
-  settings: loadRentalSettings
+  settings: loadRentalSettings,
+  coinslot: loadRentalCoinslotSettings
 };
 
 function switchRentalPanel(panel) {

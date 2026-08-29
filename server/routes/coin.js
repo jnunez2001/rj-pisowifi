@@ -229,6 +229,21 @@ router.post('/pending', (req, res) => {
   const resolvedMode = (mode === 'convert' || mode === 'convert_down' || mode === 'movie' || mode === 'pc_rental') ? mode
     : (mode === 'premium' || is_premium) ? 'premium' : 'regular';
 
+  // The coin acceptor is shared hardware, not duplicated per feature -
+  // settings.coinslot_purpose (admin panel's PC Rental > Coinslot page)
+  // decides which business line(s) it's allowed to serve. Defaults to
+  // 'wifi', so existing installs are unaffected until an operator
+  // deliberately opts in. 'movie' counts as a WiFi-side use (it's driven
+  // from the customer's own WiFi portal), not PC rental.
+  const coinslotPurpose = db.prepare("SELECT value FROM settings WHERE key = 'coinslot_purpose'").get()?.value || 'wifi';
+  const isPcRentalUse = resolvedMode === 'pc_rental';
+  if (isPcRentalUse && coinslotPurpose === 'wifi') {
+    return res.status(400).json({ success: false, message: 'This coin slot is set to WiFi only.' });
+  }
+  if (!isPcRentalUse && coinslotPurpose === 'pc') {
+    return res.status(400).json({ success: false, message: 'This coin slot is set to PC Rental only.' });
+  }
+
   if (resolvedMode === 'movie') {
     const movieId = parseInt(movie_id, 10);
     const movie = require('../services/movieService').getMovie(movieId);
