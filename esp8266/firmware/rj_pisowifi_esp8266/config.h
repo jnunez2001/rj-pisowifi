@@ -3,9 +3,10 @@
 
 #include <Arduino.h>
 #include <ESP8266WebServer.h>
+#include <DNSServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.20"
+#define FIRMWARE_VERSION "v1.0.21"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
@@ -203,6 +204,7 @@ struct Config {
 // ===== GLOBAL VARIABLES =====
 extern Config config;
 extern ESP8266WebServer server;
+extern DNSServer dnsServer;
 extern bool setupMode;
 extern bool relayActive;
 extern unsigned long relayActivatedAt;

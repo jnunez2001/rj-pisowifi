@@ -97,6 +97,7 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  if (setupMode) dnsServer.processNextRequest();
 
   // Plays one more decoded chunk of whatever sound is currently streaming
   // (if any) - never blocks for the whole file, safe to call every

@@ -48,6 +48,37 @@ void setupWebServer() {
     }
   });
 
+  // OS captive-portal auto-detection - Android/iOS/Windows each ping one
+  // of these the moment they join a WiFi network, specifically to decide
+  // whether to pop their own "Sign in to network" prompt. Combined with
+  // the DNS hijack in startSetupMode() (every hostname on this AP
+  // resolves to this device), any of these requests reaching this device
+  // at all is itself the signal something's gating the connection - so
+  // every one just serves the setup page directly, same server-side
+  // pattern already used for the main portal (server/app.js). Only
+  // registered/reachable in setup mode, like every other route here.
+  auto serveSetupPage = []() {
+    if (!rejectUnlessSetupMode()) return;
+    if (LittleFS.exists("/index.html")) {
+      File f = LittleFS.open("/index.html", "r");
+      server.streamFile(f, "text/html");
+      f.close();
+    } else {
+      server.send(200, "text/html", getFallbackHTML());
+    }
+  };
+  server.on("/generate_204", HTTP_GET, serveSetupPage);       // Android
+  server.on("/gen_204", HTTP_GET, serveSetupPage);            // Android (older)
+  server.on("/hotspot-detect.html", HTTP_GET, serveSetupPage); // iOS/macOS
+  server.on("/library/test/success.html", HTTP_GET, serveSetupPage); // iOS/macOS
+  server.on("/ncsi.txt", HTTP_GET, serveSetupPage);           // Windows
+  server.on("/connecttest.txt", HTTP_GET, serveSetupPage);    // Windows
+  server.on("/redirect", HTTP_GET, serveSetupPage);           // Some Android OEMs
+  // Any other path (a random domain the DNS hijack resolved here) - serve
+  // the setup page instead of ESP8266WebServer's default 404, so nothing
+  // a phone happens to load first dead-ends.
+  server.onNotFound(serveSetupPage);
+
   // GET config as JSON
   server.on("/config", HTTP_GET, []() {
     if (!rejectUnlessSetupMode()) return;
@@ -304,6 +335,18 @@ void startSetupMode() {
 
   IPAddress apIP = WiFi.softAPIP();
   Serial.println("AP IP: " + apIP.toString());
+
+  // Bug this fixes: without this, connecting to the setup AP just looked
+  // like "connected, no internet" - nothing prompted the phone/laptop to
+  // open the setup page, the operator had to already know to type
+  // 192.168.4.1 manually. Real captive portal instead: hijack ALL DNS
+  // lookups on this AP to resolve to this device's own IP ("*" wildcard),
+  // same standard trick used by every commercial hotspot/router setup
+  // flow. Combined with the OS captive-portal-detection routes below
+  // (server.on("/generate_204" etc), this makes the phone/laptop's OWN
+  // "Sign in to network" prompt open the setup page automatically the
+  // moment it connects - nothing for the operator to type.
+  dnsServer.start(53, "*", apIP);
 
   lcdClear();
   lcdPrint(0, "=== SETUP MODE ===");

@@ -4,6 +4,7 @@
 // ===== GLOBAL VARIABLE DEFINITIONS =====
 Config config;
 ESP8266WebServer server(80);
+DNSServer dnsServer;
 bool setupMode = false;
 bool relayActive = false;
 unsigned long relayActivatedAt = 0;
