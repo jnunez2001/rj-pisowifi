@@ -206,7 +206,9 @@ router.post('/relay/:action', async (req, res) => {
 // vendo device fetch/stream from anywhere. Add new prompts here as real
 // audio files land in public/audio/vendo/.
 const VENDO_SOUNDS = {
+  'welcome': 'welcome.wav',
   'insert-coin': 'insert-coin.wav',
+  'connected': 'connected.wav',
 };
 
 // POST /play-sound - tells the vendo to stream and play one of the named

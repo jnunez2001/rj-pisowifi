@@ -1,5 +1,6 @@
 const SERVER = '';
 let currentSession = null;
+let welcomeSoundPlayed = false;
 let timerInterval = null;
 let pollInterval = null;
 let soundEnabled = true;
@@ -1045,6 +1046,14 @@ function updateUI(session) {
       } else {
         welcomeMsg.textContent = portalSettings.welcome_message;
         welcomeMsg.style.color = '#888';
+        // First render since page load (prev is still null) - a genuine
+        // "just arrived" moment, not every time they cycle back through
+        // disconnected (e.g. after their session ends). Guarded so this
+        // can never repeat within the same page load.
+        if (!prev && !welcomeSoundPlayed) {
+          welcomeSoundPlayed = true;
+          playVendoSound('welcome');
+        }
       }
       welcomeMsg.style.display = 'block';
     }
@@ -1077,6 +1086,7 @@ function updateUI(session) {
     const coinModalOpen = document.getElementById('coinModal').classList.contains('show');
     if (!prev || !prev.active) {
       playSound('success');
+      playVendoSound('connected');
       if (coinModalOpen) {
         // Bug: this used to force-close the modal (and redirect) the instant
         // the first coin created a session, cutting the customer off mid
