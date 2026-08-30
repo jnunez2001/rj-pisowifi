@@ -88,3 +88,10 @@ public/movies_cache/
 # `dotnet build`/`dotnet publish`, never source.
 windows-rental-client/bin/
 windows-rental-client/obj/
+
+# Published rental-client exe served for download from public/downloads -
+# a ~70MB build artifact (self-contained single-file publish), never
+# source. Re-publish and copy it here after client changes; install.bat/
+# uninstall.bat alongside it ARE tracked (small, actual source).
+public/downloads/windows-rental-client/*.exe
+public/downloads/windows-rental-client/*.pdb
