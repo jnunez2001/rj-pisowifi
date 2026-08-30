@@ -102,7 +102,12 @@ async function loadDevicesData() {
     document.getElementById('usersDevicesCount').textContent = data.devices.length;
     renderDevicesTable();
   } catch (e) {
+    // Bug found live: a render-time error here (e.g. the parseSqlDate
+    // null crash) was silently swallowed with no UI feedback, leaving
+    // the "Loading..." spinner stuck forever - show something instead.
     console.error('Devices load error:', e);
+    const tbody = document.getElementById('devicesTable');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-danger,#c0392b);padding:24px;">Could not load devices - see console for details.</td></tr>';
   }
 }
 
@@ -134,8 +139,8 @@ function renderDevicesTable() {
         ${d.trusted ? '<span class="badge badge-blue" style="margin-left:6px;">Trusted</span>' : ''}
       </td>
       <td data-label="MAC Address" style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${d.mac_address}</td>
-      <td data-label="First Seen" style="font-size:12px;color:var(--text-muted);">${parseSqlDate(d.first_seen).toLocaleDateString()}</td>
-      <td data-label="Last Seen" style="font-size:12px;color:var(--text-muted);">${parseSqlDate(d.last_seen).toLocaleString()}</td>
+      <td data-label="First Seen" style="font-size:12px;color:var(--text-muted);">${parseSqlDate(d.first_seen)?.toLocaleDateString() || '—'}</td>
+      <td data-label="Last Seen" style="font-size:12px;color:var(--text-muted);">${parseSqlDate(d.last_seen)?.toLocaleString() || '—'}</td>
       <td data-label="Sessions" style="font-size:13px;color:var(--text-secondary);">${d.session_count}</td>
       <td data-label="Status">${d.online ? '<span class="badge badge-green"><span class="status-dot online"></span>Online</span>' : '<span class="badge badge-orange">Offline</span>'}</td>
       <td class="table-stack-full">

@@ -77,6 +77,11 @@ function formatSessionTime(minutes) {
 // those produced "Invalid Date" (a real bug caught live: the two
 // timestamp columns on the same `sessions` row use different formats).
 function parseSqlDate(value) {
+  // Bug found live: a null/undefined value (a device record missing
+  // first_seen/last_seen) threw here since `.includes` doesn't exist on
+  // null - uncaught, this broke the Users > Devices tab's render mid-map,
+  // leaving its "Loading..." spinner stuck forever with no error shown.
+  if (!value) return null;
   return value.includes('T') ? new Date(value) : new Date(value.replace(' ', 'T') + 'Z');
 }
 
