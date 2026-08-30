@@ -88,19 +88,41 @@ async function deleteMovieConfirm(id) {
 }
 
 async function scanMoviesFolder() {
+  // Bug found live: Scan only ever read the folder path from the saved
+  // DB setting, never the input field directly - if Save hadn't
+  // actually completed first (silent failure, or just never clicked),
+  // Scan reported "No movies folder configured" even with a path
+  // visibly typed in the box. Saving here first closes that gap - Scan
+  // now always reflects whatever's currently in the field.
+  const saved = await saveMoviesSettings();
+  if (!saved) return;
+
   const data = await apiCall('POST', '/api/admin/movies/scan');
   if (data.success) {
-    alert(`Found ${data.total} video file(s), added ${data.added} new.`);
+    showToast(`Found ${data.total} video file(s), added ${data.added} new.`, 'success');
     refreshMoviesGrid();
   } else {
-    alert(data.message || 'Scan failed');
+    showToast(data.message || 'Scan failed', 'error');
   }
 }
 
+// Returns true/false so scanMoviesFolder() can bail out before scanning
+// if the save itself failed, instead of scanning against a stale setting.
 async function saveMoviesSettings() {
   const dir = document.getElementById('moviesSourceDir').value.trim();
   const hours = document.getElementById('movieRentalHours').value;
-  await apiCall('POST', '/api/admin/settings', { movies_source_dir: dir, movie_rental_hours: String(hours) });
+  try {
+    const data = await apiCall('POST', '/api/admin/settings', { movies_source_dir: dir, movie_rental_hours: String(hours) });
+    if (data.success) {
+      showToast('Movies settings saved', 'success');
+      return true;
+    }
+    showToast(data.message || 'Could not save movies settings', 'error');
+    return false;
+  } catch (e) {
+    showToast('Server error saving movies settings', 'error');
+    return false;
+  }
 }
 
 function destroyMovies() {
