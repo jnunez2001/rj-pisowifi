@@ -89,7 +89,19 @@ router.get('/status', (req, res) => {
   let remainingMinutes;
   let loggedInUser = null;
 
-  if (session?.member_id) {
+  if (session?.is_paused) {
+    // Staff maintenance pause (POST /pause) - freeze everything exactly
+    // where it is. A logged-in member's balance must NOT keep draining
+    // while paused, so this skips the member-drain branch entirely
+    // instead of just hiding its effect - draining then discarding the
+    // result would still burn the balance for real.
+    remainingMinutes = session?.member_id
+      ? (db.prepare('SELECT seconds FROM rental_members WHERE id = ?').get(session.member_id)?.seconds || 0) / 60
+      : Math.max(0, (session?.hard_expires_at ? new Date(session.hard_expires_at).getTime() - Date.now() : 0) / 60000);
+    loggedInUser = session?.member_id
+      ? db.prepare('SELECT username FROM rental_members WHERE id = ?').get(session.member_id)?.username || null
+      : null;
+  } else if (session?.member_id) {
     // A logged-in member's time is a live-draining balance, not a fixed
     // expiry timestamp (unlike guest credit below) - it has to be, since
     // the same balance can be spent across different PCs on different
@@ -154,6 +166,7 @@ router.get('/status', (req, res) => {
   return res.json({
     success: true,
     locked: !active,
+    paused: !!session?.is_paused,
     pc_name: pc.name,
     minutes_remaining: Math.round(remainingMinutes * 10) / 10,
     adopted: pc.status === 'adopted',
@@ -228,6 +241,44 @@ router.post('/staff-override', (req, res) => {
   if (!req.body?.password || !verifyPassword(req.body.password, stored)) {
     return res.status(401).json({ success: false, message: 'Incorrect app password' });
   }
+  return res.json({ success: true });
+});
+
+// POST /api/rental/pause - {mac, device_secret, password}. Staff-
+// initiated maintenance pause, distinct from Staff Override above:
+// override is a short local unlock that never touches server state,
+// this suspends real enforcement (no lock screen, no member time drain)
+// until explicitly resumed. Reuses rental_sessions.is_paused - the same
+// field admin.js's Manage PC Lock/Unlock buttons already drive - so the
+// admin panel sees this as the same "Paused" status, not a second,
+// conflicting flag. Password-gated so a customer can't pause their own
+// lock; resuming isn't security-sensitive the same way, so /resume
+// doesn't require it.
+router.post('/pause', (req, res) => {
+  const auth = authenticatePc(req.body?.mac, req.body?.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const stored = db.prepare("SELECT value FROM settings WHERE key = 'rental_app_password'").get()?.value;
+  if (!stored) {
+    return res.status(400).json({ success: false, message: 'No app password has been set yet - set one in PC Rental > Settings' });
+  }
+  if (!req.body?.password || !verifyPassword(req.body.password, stored)) {
+    return res.status(401).json({ success: false, message: 'Incorrect app password' });
+  }
+
+  db.prepare('UPDATE rental_sessions SET is_paused = 1 WHERE pc_id = ?').run(auth.pc.id);
+  console.log(`⏸️ Rental PC "${auth.pc.name}" paused by staff`);
+  return res.json({ success: true });
+});
+
+// POST /api/rental/resume - {mac, device_secret}. No password required -
+// see comment above /pause.
+router.post('/resume', (req, res) => {
+  const auth = authenticatePc(req.body?.mac, req.body?.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  db.prepare('UPDATE rental_sessions SET is_paused = 0 WHERE pc_id = ?').run(auth.pc.id);
+  console.log(`▶️ Rental PC "${auth.pc.name}" resumed by staff`);
   return res.json({ success: true });
 });
 

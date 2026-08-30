@@ -20,7 +20,17 @@ public static class Program
         var config = ClientConfig.Load();
         if (config == null || string.IsNullOrEmpty(config.ServerUrl))
         {
-            var serverUrl = PromptDialog.Show("StarkFi Rental Setup", "Server address (e.g. http://192.168.1.10:3000):");
+            // Try to find the server automatically first (same UDP
+            // broadcast protocol ESP32 Vendos already use to find this
+            // box - see ServerDiscovery.cs) - manual entry stays
+            // available either way, just pre-filled when discovery
+            // succeeds so a tech can confirm with Enter or type a
+            // different address if this PC is on a different network.
+            var discovered = ServerDiscovery.TryDiscoverAsync().GetAwaiter().GetResult();
+            var promptLabel = discovered != null
+                ? "Found a StarkFi server automatically - press Enter to use it, or type a different address:"
+                : "Server address (e.g. http://192.168.1.10:3000):";
+            var serverUrl = PromptDialog.Show("StarkFi Rental Setup", promptLabel, defaultValue: discovered ?? "");
             if (string.IsNullOrWhiteSpace(serverUrl))
             {
                 MessageBox.Show("A server address is required to continue.", "StarkFi Rental", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -77,7 +87,17 @@ public static class Program
 
     private static void HandleStatus(StatusResponse status)
     {
-        if (status.Locked)
+        if (status.Paused)
+        {
+            // Staff maintenance pause - neither the full lock screen nor
+            // the normal countdown; reuse the countdown widget's corner
+            // window with paused content instead of a third window type.
+            _lockShowing = false;
+            _lockForm.HideLock();
+            _widget.ShowPaused();
+            if (!_widget.Visible) _widget.Show();
+        }
+        else if (status.Locked)
         {
             _widget.Hide();
             if (!_lockShowing)

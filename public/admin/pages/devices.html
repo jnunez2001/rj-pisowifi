@@ -190,6 +190,25 @@
     <button class="btn btn-secondary" onclick="saveVendoSchedule()">
       <i class="fas fa-clock"></i> Save Schedule
     </button>
+
+    <div class="card-title" style="margin:20px 0 10px;">Coinslot Purpose</div>
+    <div style="color:var(--text-muted);font-size:12px;margin-bottom:10px;">
+      What this device's coin acceptor is allowed to credit. Defaults to
+      WiFi only so nothing changes until you deliberately opt this
+      specific device into PC Rental.
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <select id="vdCoinslotPurpose" class="form-control">
+          <option value="wifi">WiFi only</option>
+          <option value="pc">PC Rental only</option>
+          <option value="both">WiFi and PC Rental</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn btn-secondary" onclick="saveVendoCoinslotPurpose()">
+      <i class="fas fa-coins"></i> Save Coinslot Purpose
+    </button>
   </div>
 </div>
 

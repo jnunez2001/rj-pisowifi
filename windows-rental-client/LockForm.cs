@@ -154,20 +154,40 @@ public class LockForm : Form
 
     private async Task OnStaffClicked()
     {
-        var password = PromptDialog.Show("Staff Override", "Enter the app password:", isPassword: true);
+        var password = PromptDialog.Show("Staff Access", "Enter the app password:", isPassword: true);
         if (string.IsNullOrEmpty(password)) return;
 
-        var result = await _api.StaffOverrideAsync(_config.Mac, _config.DeviceSecret, password);
-        if (result == null || !result.Success)
+        // Two different things staff might want, both gated by the same
+        // password: a quick unlock that never touches server state (Yes),
+        // or a real maintenance pause recorded server-side until someone
+        // explicitly resumes it (No) - see the doc comments on
+        // POST /staff-override vs POST /pause in server/routes/rental.js.
+        var choice = MessageBox.Show(
+            "Force Unlock now (temporary, re-locks on the next status check)?\n\nChoose No to Pause instead - suspends enforcement until resumed from here or from the admin panel.",
+            "Staff Access", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+        if (choice == DialogResult.Cancel) return;
+
+        if (choice == DialogResult.Yes)
         {
-            MessageBox.Show(result?.Message ?? "Override failed", "Staff Override", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            return;
+            var result = await _api.StaffOverrideAsync(_config.Mac, _config.DeviceSecret, password);
+            if (result == null || !result.Success)
+            {
+                MessageBox.Show(result?.Message ?? "Override failed", "Staff Access", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            HideLock();
         }
-        // Purely local, temporary unlock - server-side credit is
-        // untouched (see server/routes/rental.js's staff-override route
-        // comment). The very next status poll will re-lock it again
-        // unless real credit exists, which is the intended "quick peek/
-        // fix something" fail-safe, not a way to grant free time.
-        HideLock();
+        else
+        {
+            var result = await _api.PauseAsync(_config.Mac, _config.DeviceSecret, password);
+            if (result == null || !result.Success)
+            {
+                MessageBox.Show(result?.Message ?? "Pause failed", "Staff Access", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            // The next status poll picks up paused:true and Program.cs's
+            // HandleStatus swaps to the paused indicator - no need to
+            // duplicate that transition here.
+        }
     }
 }

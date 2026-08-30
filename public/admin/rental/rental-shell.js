@@ -40,7 +40,7 @@ async function apiCall(method, endpoint, body = null) {
 const RENTAL_PANEL_TITLES = {
   dashboard: 'Dashboard', managepc: 'Manage PC', members: 'Members',
   timerrates: 'Timer Rates', redeemrates: 'Redeem Rates',
-  redeemhistory: 'Redeem History', reports: 'Reports', coinslot: 'Coinslot',
+  redeemhistory: 'Redeem History', reports: 'Reports',
   settings: 'Settings', systeminfo: 'System Info'
 };
 
@@ -50,7 +50,9 @@ const RENTAL_PANEL_TITLES = {
 // Reports are real now (see js/rental.js) - only Sub-Coinslot (per-PC
 // dedicated hardware, not built - v1 is a single shared coin box) and
 // PC Performance/Spectate (deferred, need a system-stats/screen-streaming
-// agent on the Windows client) stay placeholders.
+// agent on the Windows client) stay placeholders. Coinslot purpose moved
+// to a per-device setting on the main admin's Devices page and no longer
+// lives here at all (see devices.html/devices.js).
 const RENTAL_COMING_SOON = {
   systeminfo: 'Per-PC system information (CPU, RAM, disk) - needs a stats agent on the Windows client'
 };
@@ -64,8 +66,7 @@ const RENTAL_PANEL_LOADERS = {
   redeemrates: refreshRentalRedeemRates,
   redeemhistory: refreshRentalRedemptions,
   reports: refreshRentalReports,
-  settings: loadRentalSettings,
-  coinslot: loadRentalCoinslotSettings
+  settings: loadRentalSettings
 };
 
 function switchRentalPanel(panel) {

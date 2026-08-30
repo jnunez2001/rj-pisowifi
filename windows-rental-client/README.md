@@ -47,60 +47,102 @@ SDK or separate runtime install needed there. It'll be roughly
 100-150MB (the runtime is baked in), which is normal for a
 self-contained single-file publish.
 
+## Installing (recommended path)
+
+After publishing (previous section), run `install.bat` from the same
+folder as the published `StarkFiRentalClient.exe` - **right-click, "Run
+as administrator"** (it writes to `%ProgramFiles%` and a registry
+policy, both need admin rights). It:
+
+- Copies the exe to `%ProgramFiles%\StarkFiRental\`
+- Adds a startup shortcut so it launches automatically at every login
+- Disables Task Manager (`DisableTaskMgr` policy) so "End Task" isn't
+  reachable even if someone gets to Ctrl+Alt+Del's screen
+
+`uninstall.bat` (also run as administrator) reverses all of that -
+removes the startup shortcut, re-enables Task Manager, removes the
+installed files, and reverts shell replacement (below) back to
+`explorer.exe` **only if** it's still pointed at this app, so it never
+clobbers an unrelated customization.
+
 ## First run
 
-Launch the exe. It'll ask for the server address once (e.g.
-`http://10.50.0.1:3000`), then registers itself with the server as a
-new, unapproved rental PC - **you still need to adopt it** from the
-admin panel's PC Rental > Manage PC page before it'll ever unlock,
-same as any new vendo device. Its config (server URL, device secret)
-is saved to `%ProgramData%\StarkFiRental\config.json`.
+Launch the exe (or let the startup shortcut do it). It first tries to
+find the StarkFi server automatically on the local network - the same
+broadcast discovery protocol ESP32 coin acceptors already use to find
+it, no manual IP typing required on a normal network. If it can't find
+one (different subnet, broadcast blocked, etc.) it falls back to asking
+for the server address by hand (e.g. `http://10.50.0.1:3000`), pre-
+filled with whatever it found so you can just press Enter to confirm or
+type a different address.
 
-## Running it every time Windows starts
+It then registers itself with the server as a new, unapproved rental
+PC - **you still need to adopt it** from the admin panel's PC Rental >
+Manage PC page before it'll ever unlock, same as any new vendo device.
+Its config (server URL, device secret) is saved to
+`%ProgramData%\StarkFiRental\config.json`.
 
-Simplest: put a shortcut to the exe in
-`shell:startup` (Win+R, type `shell:startup`, drop a shortcut in).
-That's enough for testing.
+## Making it survive Alt+F4 / a normal reboot into a real lock kiosk
 
-## Making it survive Alt+F4 / Task Manager / a normal reboot into a real lock kiosk
-
-The startup-folder approach above is easy to bypass (close the app,
-it's gone). A real kiosk deployment needs the app to run as the literal
+`install.bat` above covers startup + Task Manager, but the app can
+still be closed via Alt+F4 or a plain reboot back to the normal
+desktop. A real kiosk deployment needs the app to run as the literal
 Windows **shell**, replacing `explorer.exe`, so there's no normal
 desktop to fall back to at all. This is a genuinely consequential
-system change - do it deliberately, not as a default:
+system change - it's deliberately NOT part of `install.bat`, do it by
+hand:
 
 1. Open Registry Editor (`regedit`) as Administrator.
 2. Go to
    `HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon`
 3. Set the `Shell` value to the full path of
-   `StarkFiRentalClient.exe`.
+   `StarkFiRentalClient.exe` (e.g.
+   `%ProgramFiles%\StarkFiRental\StarkFiRentalClient.exe` if installed
+   via `install.bat`).
 4. Reboot to test.
 
-**To revert** (get the normal desktop back): change `Shell` back to
-`explorer.exe` in the same registry key, or boot into Safe Mode and
-edit it there if the machine is unusable otherwise.
+**To revert**: run `uninstall.bat` (it checks and reverts this
+automatically if it's still pointed at this app), or change `Shell`
+back to `explorer.exe` by hand in the same registry key, or boot into
+Safe Mode and edit it there if the machine is unusable otherwise.
 
 ## The one thing this app genuinely cannot block: Ctrl+Alt+Del
 
 Windows reserves Ctrl+Alt+Del as its own Secure Attention Sequence - by
 design, no application (this one included) can intercept it. A
-customer pressing it still reaches the real Windows security screen. Two
-real mitigations, both deliberate operator setup steps, not something
-this app applies for you:
+customer pressing it still reaches the real Windows security screen.
+Real mitigations, all deliberate operator setup steps, not something
+this app fully automates:
 
+- `install.bat`'s Task Manager lock closes the most-reachable escape
+  hatch from that screen ("End Task" won't work).
 - The shell-replacement above changes what's actually reachable *from*
   that screen (no normal desktop to switch to).
 - A Group Policy / Software Restriction Policy on the machine can
   further lock down what's launchable at all.
 
+## Staff pause vs Staff override
+
+The lock screen's "Staff" button (password-gated by the App Password
+set in PC Rental > Settings) offers two different things:
+
+- **Force Unlock** - a short, purely local unlock. Server-side credit
+  is untouched, so the very next status poll (~5s) re-locks it unless
+  real credit exists. Good for a quick peek/fix.
+- **Pause** - suspends enforcement server-side (no lock screen, no
+  member time drain) until explicitly resumed, either from the small
+  "Resume" button this app shows while paused, or from the admin
+  panel's Manage PC page (same underlying Lock/Unlock state). Good for
+  real maintenance work on the PC.
+
 ## What's built vs deferred
 
 Built: full lock/unlock enforcement (Alt+Tab/Win key/Ctrl+Esc blocked
-while locked), branded lock screen (logo/wallpaper/announcement from
-admin), member login/logout with live time drain, staff override
-(local fail-safe, doesn't touch server-side credit), a countdown widget
-while unlocked.
+while locked, Task Manager disabled via `install.bat`), branded lock
+screen (logo/wallpaper/announcement from admin), member login/logout
+with live time drain, staff override and staff pause, a countdown
+widget while unlocked, automatic server discovery with manual fallback,
+and install/uninstall scripts.
 
 Deferred (see the main plan): per-PC coin acceptor (credit is still
 admin/shared-box only), PC performance stats reporting, remote screen

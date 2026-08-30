@@ -3232,6 +3232,26 @@ router.put('/vendos/:id/restart-schedule', adminAuth, (req, res) => {
   }
 });
 
+// PATCH /api/admin/vendos/:id/coinslot-purpose, { purpose: 'wifi'|'pc'|'both' }
+// Read by coin.js's POST / (ESP32 coin-pulse handler) to decide which
+// business line this specific coin acceptor may credit.
+router.patch('/vendos/:id/coinslot-purpose', adminAuth, (req, res) => {
+  try {
+    const purpose = String(req.body.purpose || '').trim();
+    if (!['wifi', 'pc', 'both'].includes(purpose)) {
+      return res.status(400).json({ success: false, message: "purpose must be 'wifi', 'pc', or 'both'" });
+    }
+    const result = db.prepare('UPDATE vendos SET coinslot_purpose = ? WHERE id = ?').run(purpose, req.params.id);
+    if (result.changes === 0) {
+      return res.status(404).json({ success: false, message: 'Device not found' });
+    }
+    return res.json({ success: true, message: 'Coinslot purpose saved' });
+  } catch (err) {
+    console.error('Vendo coinslot-purpose error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // POST /api/admin/vendos/:id/adopt, approves a candidate device (a MAC
 // this box has never seen before, per POST /vendo/register above). Also
 // trusts it in the same step - a Vendo shares the customer WiFi/VLAN and

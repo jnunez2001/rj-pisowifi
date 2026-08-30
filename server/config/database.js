@@ -1129,6 +1129,21 @@ try {
 } catch (e) {
   // already applied
 }
+try {
+  // 'wifi'|'pc'|'both' - which business line this vendo's shared coin
+  // acceptor may credit. Per-device, not global: an operator running
+  // several coin boxes may want only some of them serving PC Rental.
+  // Defaults to 'wifi' so every existing install is unaffected until an
+  // operator deliberately opts a specific vendo in (see coin.js POST /).
+  db.exec("ALTER TABLE vendos ADD COLUMN coinslot_purpose TEXT DEFAULT 'wifi'");
+} catch (e) {
+  // already applied
+}
+// (No new pause column needed here - the Windows client's Staff pause/
+// resume reuses rental_sessions.is_paused, the same field admin.js's
+// existing Lock/Unlock buttons already drive, rather than adding a
+// second, conflicting pause flag. See POST /pause, /resume in
+// server/routes/rental.js.)
 
 const rateCount = db.prepare(
   'SELECT COUNT(*) as count FROM rates'

@@ -229,20 +229,13 @@ router.post('/pending', (req, res) => {
   const resolvedMode = (mode === 'convert' || mode === 'convert_down' || mode === 'movie' || mode === 'pc_rental') ? mode
     : (mode === 'premium' || is_premium) ? 'premium' : 'regular';
 
-  // The coin acceptor is shared hardware, not duplicated per feature -
-  // settings.coinslot_purpose (admin panel's PC Rental > Coinslot page)
-  // decides which business line(s) it's allowed to serve. Defaults to
-  // 'wifi', so existing installs are unaffected until an operator
-  // deliberately opts in. 'movie' counts as a WiFi-side use (it's driven
-  // from the customer's own WiFi portal), not PC rental.
-  const coinslotPurpose = db.prepare("SELECT value FROM settings WHERE key = 'coinslot_purpose'").get()?.value || 'wifi';
-  const isPcRentalUse = resolvedMode === 'pc_rental';
-  if (isPcRentalUse && coinslotPurpose === 'wifi') {
-    return res.status(400).json({ success: false, message: 'This coin slot is set to WiFi only.' });
-  }
-  if (!isPcRentalUse && coinslotPurpose === 'pc') {
-    return res.status(400).json({ success: false, message: 'This coin slot is set to PC Rental only.' });
-  }
+  // Coinslot purpose (wifi/pc/both) is enforced per-vendo, not here -
+  // this request only carries whichever mac the coin credit should go
+  // to (the customer's phone for wifi, the rental PC's own mac for
+  // pc_rental), never the actual coin acceptor's mac, so there's no
+  // device to look a purpose up against at this point. The real gate is
+  // in POST / below, where the ESP32's own deviceMac genuinely
+  // identifies which physical vendo is about to receive the coin.
 
   if (resolvedMode === 'movie') {
     const movieId = parseInt(movie_id, 10);
@@ -392,6 +385,27 @@ router.post('/', async (req, res) => {
       });
     }
     mac = mac.toLowerCase();
+
+    // Per-vendo coinslot purpose gate. deviceMac (captured above, before
+    // the pendingCoinMac fallback overwrote `mac`) is genuinely this
+    // physical coin acceptor's own mac, unlike `mac` itself which may now
+    // be a customer's phone or a rental PC's mac - so this is the one
+    // place in the coin flow where "which vendo is this?" can actually be
+    // answered. A vendo not yet paired/adopted (not found) defaults to
+    // 'wifi', same fallback used everywhere else, so existing installs
+    // are unaffected until an operator opts a specific vendo into PC
+    // Rental via Devices > (device) > Coinslot Purpose.
+    if (deviceMac && isValidMac(deviceMac)) {
+      const vendo = db.prepare('SELECT coinslot_purpose FROM vendos WHERE mac_address = ?').get(String(deviceMac).toLowerCase());
+      const coinslotPurpose = vendo?.coinslot_purpose || 'wifi';
+      const isPcRentalUse = pendingValid && pendingMode === 'pc_rental';
+      if (isPcRentalUse && coinslotPurpose === 'wifi') {
+        return res.status(400).json({ success: false, message: 'This coin slot is set to WiFi only.' });
+      }
+      if (!isPcRentalUse && coinslotPurpose === 'pc') {
+        return res.status(400).json({ success: false, message: 'This coin slot is set to PC Rental only.' });
+      }
+    }
 
     // Raw receipt proof, logged before spam-blocking/pending-accumulation
     // decide what happens to this pulse - see CREATE TABLE coin_pulse_log

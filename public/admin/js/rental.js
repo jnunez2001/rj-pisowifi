@@ -356,12 +356,6 @@ const RENTAL_SETTINGS_FIELDS = [
   'rental_schedule_closed_time'
 ];
 
-async function loadRentalCoinslotSettings() {
-  const data = await apiCall('GET', '/api/admin/settings');
-  const el = document.getElementById('rs_coinslot_purpose');
-  if (data.success && el) el.value = data.settings.coinslot_purpose || 'wifi';
-}
-
 async function loadRentalSettings() {
   const data = await apiCall('GET', '/api/admin/settings');
   if (!data.success) return;

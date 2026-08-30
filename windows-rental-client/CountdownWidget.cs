@@ -12,6 +12,7 @@ public class CountdownWidget : Form
     private readonly Label _timeLabel;
     private readonly Label _userLabel;
     private readonly Button _logoutButton;
+    private readonly Button _resumeButton;
 
     public CountdownWidget(RentalApiClient api, ClientConfig config)
     {
@@ -32,10 +33,16 @@ public class CountdownWidget : Form
         _userLabel = new Label { ForeColor = Color.Gainsboro, Font = new Font("Segoe UI", 8), Left = 10, Top = 34, Width = 130, Height = 18 };
         _logoutButton = new Button { Text = "Logout", Width = 70, Height = 22, Left = 138, Top = 34, BackColor = Color.FromArgb(60, 60, 60), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
         _logoutButton.Click += async (_, _) => await OnLogoutClicked();
+        // Shown instead of the countdown while a staff pause is active -
+        // this same corner window is reused rather than a third window
+        // type, just with different content (see ShowPaused below).
+        _resumeButton = new Button { Text = "Resume", Width = 200, Height = 26, Left = 10, Top = 34, BackColor = Color.FromArgb(12, 143, 109), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
+        _resumeButton.Click += async (_, _) => await OnResumeClicked();
 
         Controls.Add(_timeLabel);
         Controls.Add(_userLabel);
         Controls.Add(_logoutButton);
+        Controls.Add(_resumeButton);
     }
 
     public void UpdateFromStatus(StatusResponse status)
@@ -46,6 +53,17 @@ public class CountdownWidget : Form
         var isMember = !string.IsNullOrEmpty(status.LoggedInUser);
         _userLabel.Text = isMember ? status.LoggedInUser : "Guest session";
         _logoutButton.Visible = isMember;
+        _resumeButton.Visible = false;
+    }
+
+    // Staff paused this PC (POST /pause) - freeze the countdown display
+    // and offer the one action that matters here: resuming it.
+    public void ShowPaused()
+    {
+        _timeLabel.Text = "Paused";
+        _userLabel.Text = "Enforcement suspended by staff";
+        _logoutButton.Visible = false;
+        _resumeButton.Visible = true;
     }
 
     private async Task OnLogoutClicked()
@@ -60,6 +78,21 @@ public class CountdownWidget : Form
         finally
         {
             _logoutButton.Enabled = true;
+        }
+    }
+
+    private async Task OnResumeClicked()
+    {
+        _resumeButton.Enabled = false;
+        try
+        {
+            await _api.ResumeAsync(_config.Mac, _config.DeviceSecret);
+            // Next poll picks up paused:false and Program.cs's HandleStatus
+            // swaps back to the normal locked/unlocked flow.
+        }
+        finally
+        {
+            _resumeButton.Enabled = true;
         }
     }
 }

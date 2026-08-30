@@ -244,7 +244,7 @@ async function loadDevices() {
                 <i class="fas fa-check"></i> Adopt
               </button>
             ` : `
-              <button class="btn btn-sm btn-secondary" onclick="openVendoDetails(${v.id}, '${escapeHtml(v.name)}', '${escapeHtml(v.restart_schedule || '')}')" title="Device details">
+              <button class="btn btn-sm btn-secondary" onclick="openVendoDetails(${v.id}, '${escapeHtml(v.name)}', '${escapeHtml(v.restart_schedule || '')}', '${escapeHtml(v.coinslot_purpose || 'wifi')}')" title="Device details">
                 <i class="fas fa-gear"></i>
               </button>
               <button class="btn btn-sm btn-secondary" onclick="restartVendo(${v.id}, '${escapeHtml(v.name)}')" title="Restart device">
@@ -323,10 +323,11 @@ function formatUptime(seconds) {
   return `${m}m`;
 }
 
-function openVendoDetails(id, name, restartSchedule) {
+function openVendoDetails(id, name, restartSchedule, coinslotPurpose) {
   vdCurrentId = id;
   document.getElementById('vdName').value = name;
   document.getElementById('vdRestartSchedule').value = restartSchedule || '';
+  document.getElementById('vdCoinslotPurpose').value = coinslotPurpose || 'wifi';
   document.getElementById('vdUptime').textContent = 'Loading...';
   document.getElementById('vdWifi').textContent = '--';
   document.getElementById('vdRelay').textContent = '--';
@@ -425,6 +426,22 @@ async function saveVendoSchedule() {
       loadDevices();
     } else {
       showToast(data.message || 'Failed to save schedule', 'error');
+    }
+  } catch (e) {
+    showToast('Server error', 'error');
+  }
+}
+
+async function saveVendoCoinslotPurpose() {
+  if (!vdCurrentId) return;
+  const purpose = document.getElementById('vdCoinslotPurpose').value;
+  try {
+    const data = await apiCall('PATCH', `/api/admin/vendos/${vdCurrentId}/coinslot-purpose`, { purpose });
+    if (data.success) {
+      showToast(data.message || 'Coinslot purpose saved', 'success');
+      loadDevices();
+    } else {
+      showToast(data.message || 'Failed to save coinslot purpose', 'error');
     }
   } catch (e) {
     showToast('Server error', 'error');

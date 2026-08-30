@@ -7,6 +7,7 @@ public class StatusResponse
 {
     [JsonPropertyName("success")] public bool Success { get; set; }
     [JsonPropertyName("locked")] public bool Locked { get; set; }
+    [JsonPropertyName("paused")] public bool Paused { get; set; }
     [JsonPropertyName("pc_name")] public string PcName { get; set; } = "";
     [JsonPropertyName("minutes_remaining")] public double MinutesRemaining { get; set; }
     [JsonPropertyName("adopted")] public bool Adopted { get; set; }
@@ -83,6 +84,21 @@ public class RentalApiClient
     public async Task<ApiResult?> StaffOverrideAsync(string mac, string deviceSecret, string password)
     {
         var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/staff-override", new { mac, device_secret = deviceSecret, password });
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    // Maintenance pause - distinct from StaffOverrideAsync above: override
+    // is a short local-only unlock that never touches server state, this
+    // suspends real enforcement (server-side) until ResumeAsync is called.
+    public async Task<ApiResult?> PauseAsync(string mac, string deviceSecret, string password)
+    {
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/pause", new { mac, device_secret = deviceSecret, password });
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    public async Task<ApiResult?> ResumeAsync(string mac, string deviceSecret)
+    {
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/resume", new { mac, device_secret = deviceSecret });
         return await res.Content.ReadFromJsonAsync<ApiResult>();
     }
 
