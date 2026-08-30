@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const crypto = require('crypto');
-const { verifyPassword } = require('../utils/passwordHash');
+const { verifyPassword, hashPassword } = require('../utils/passwordHash');
 
 // Every device-facing route here (register/status/member-login/logout/
 // staff-override) authenticates the CALLING PC via its own device_secret
@@ -113,7 +113,15 @@ router.get('/status', (req, res) => {
     // timestamp the way a single PC's guest session can.
     const member = db.prepare('SELECT * FROM rental_members WHERE id = ?').get(session.member_id);
     if (member) {
-      const elapsedSeconds = Math.max(0, (Date.now() - new Date(session.updated_at).getTime()) / 1000);
+      const realElapsedSeconds = Math.max(0, (Date.now() - new Date(session.updated_at).getTime()) / 1000);
+      // rental_speed_timer_secs is how many real milliseconds count as
+      // one billed second (1000 = real-time, lower = drains faster) -
+      // see the guarded migration in database.js for why the default
+      // isn't just always 1000. Invalid/zero/missing falls back to
+      // real-time rather than dividing by zero or silently freezing
+      // billing.
+      const speedMs = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'rental_speed_timer_secs'").get()?.value, 10) || 1000;
+      const elapsedSeconds = realElapsedSeconds * (1000 / speedMs);
       const newSeconds = Math.max(0, member.seconds - elapsedSeconds);
       db.prepare('UPDATE rental_members SET seconds = ?, last_active = CURRENT_TIMESTAMP WHERE id = ?').run(Math.round(newSeconds), member.id);
 
@@ -279,6 +287,78 @@ router.post('/resume', (req, res) => {
 
   db.prepare('UPDATE rental_sessions SET is_paused = 0 WHERE pc_id = ?').run(auth.pc.id);
   console.log(`▶️ Rental PC "${auth.pc.name}" resumed by staff`);
+  return res.json({ success: true });
+});
+
+// Shared by /member-points, /redeem, /change-password - all three only
+// make sense for whichever member is currently logged into the calling
+// PC, derived from its session rather than an admin-supplied :id.
+function requireLoggedInMember(pcId) {
+  const session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pcId);
+  if (!session?.member_id) return null;
+  return db.prepare('SELECT * FROM rental_members WHERE id = ?').get(session.member_id);
+}
+
+// GET /api/rental/member-points?mac=&device_secret= - the claim panel's
+// data source: current points balance plus every active redeem rate.
+router.get('/member-points', (req, res) => {
+  const auth = authenticatePc(req.query.mac, req.query.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const member = requireLoggedInMember(auth.pc.id);
+  if (!member) return res.status(400).json({ success: false, message: 'No member logged in on this PC' });
+
+  const rates = db.prepare('SELECT id, points, reward_seconds FROM rental_redeem_rates ORDER BY points ASC').all();
+  return res.json({ success: true, points: member.points, redeem_rates: rates });
+});
+
+// POST /api/rental/redeem - {mac, device_secret, redeem_rate_id}. Mirrors
+// POST /admin/rental/members/:id/redeem exactly, just deriving the member
+// from the calling PC's session instead of an admin-supplied :id.
+router.post('/redeem', (req, res) => {
+  const auth = authenticatePc(req.body?.mac, req.body?.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const member = requireLoggedInMember(auth.pc.id);
+  if (!member) return res.status(400).json({ success: false, message: 'No member logged in on this PC' });
+
+  const redeemRateId = parseInt(req.body?.redeem_rate_id, 10);
+  const rate = db.prepare('SELECT * FROM rental_redeem_rates WHERE id = ?').get(redeemRateId);
+  if (!rate) return res.status(404).json({ success: false, message: 'Redeem rate not found' });
+  if (member.points < rate.points) {
+    return res.status(400).json({ success: false, message: 'Not enough points' });
+  }
+
+  const remainingPoints = member.points - rate.points;
+  db.prepare('UPDATE rental_members SET points = ?, seconds = seconds + ? WHERE id = ?')
+    .run(remainingPoints, rate.reward_seconds, member.id);
+  db.prepare('INSERT INTO rental_redemptions (member_id, points_spent, reward_seconds, remaining_points) VALUES (?, ?, ?, ?)')
+    .run(member.id, rate.points, rate.reward_seconds, remainingPoints);
+
+  console.log(`🎁 Member "${member.username}" redeemed ${rate.points} points for ${rate.reward_seconds}s on PC "${auth.pc.name}"`);
+  return res.json({ success: true, remaining_points: remainingPoints, seconds_added: rate.reward_seconds });
+});
+
+// POST /api/rental/change-password - {mac, device_secret, current_password,
+// new_password}. The logged-in member changing their own password from
+// the widget's Account panel.
+router.post('/change-password', (req, res) => {
+  const auth = authenticatePc(req.body?.mac, req.body?.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const member = requireLoggedInMember(auth.pc.id);
+  if (!member) return res.status(400).json({ success: false, message: 'No member logged in on this PC' });
+
+  const { current_password, new_password } = req.body || {};
+  if (!verifyPassword(current_password, member.password_hash)) {
+    return res.status(401).json({ success: false, message: 'Current password is incorrect' });
+  }
+  if (!new_password || String(new_password).length < 4) {
+    return res.status(400).json({ success: false, message: 'New password must be at least 4 characters' });
+  }
+
+  db.prepare('UPDATE rental_members SET password_hash = ? WHERE id = ?').run(hashPassword(String(new_password)), member.id);
+  console.log(`🔑 Member "${member.username}" changed their password`);
   return res.json({ success: true });
 });
 

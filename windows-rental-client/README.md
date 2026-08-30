@@ -135,14 +135,54 @@ set in PC Rental > Settings) offers two different things:
   panel's Manage PC page (same underlying Lock/Unlock state). Good for
   real maintenance work on the PC.
 
+## The lock screen's three buttons
+
+Default view is a 3-button menu, not just a login form:
+
+- **Insert Coins** - opens a running-total view (same coin-insert flow
+  the WiFi portal itself uses) with **Done** (finalizes now) and
+  **Cancel** (goes back to the menu - if coins were already inserted,
+  says so plainly; real coins can't be refunded by software, they'll
+  still be credited via the server's own timeout).
+- **Create Account** - username/password first, then the same
+  coin-insert view. Needs the admin's configured minimum
+  (`rental_create_account_min_credit`, PC Rental > Settings) - the
+  inserted credit becomes the new account's starting time balance
+  (converted through the normal rate table), not a separate signup fee.
+  If the chosen username gets taken by someone else in the meantime,
+  the coins are still credited as guest time rather than lost.
+- **Log In** - existing member login, unchanged.
+
+## The countdown widget's minimize/expand
+
+Starts minimized (today's compact corner view). The small arrow button
+expands it to reveal four more actions, hidden entirely for a guest
+session (nothing to manage without an account, same as Logout already
+was):
+
+- **Add Time** - the same Insert Coins flow as the lock screen, without
+  having to log out first.
+- **Account** - change the current member's password.
+- **Points** - shows the member's points balance and every active
+  redeem rate (admin-configured on PC Rental > Redeem Rates) with a
+  Claim button, e.g. "100 points -> 60 minutes." Claiming adds the
+  reward straight to the member's time balance.
+- **Cancel** - collapses back to minimized.
+
+Points are earned automatically: any coin credit while a member is
+logged in on that PC also awards that rate's points value (set per
+rate on PC Rental > Timer Rates) - a guest walk-in earns nothing, since
+there's no account to hold a balance.
+
 ## What's built vs deferred
 
 Built: full lock/unlock enforcement (Alt+Tab/Win key/Ctrl+Esc blocked
 while locked, Task Manager disabled via `install.bat`), branded lock
-screen (logo/wallpaper/announcement from admin), member login/logout
-with live time drain, staff override and staff pause, a countdown
-widget while unlocked, automatic server discovery with manual fallback,
-and install/uninstall scripts.
+screen (logo/wallpaper/announcement from admin) with Insert Coins/
+Create Account/Log In, member login/logout with live time drain, an
+expandable countdown widget (Add Time/Account/Points), automatic points
+earning and claiming, staff override and staff pause, automatic server
+discovery with manual fallback, and install/uninstall scripts.
 
 Deferred (see the main plan): per-PC coin acceptor (credit is still
 admin/shared-box only), PC performance stats reporting, remote screen

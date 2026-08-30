@@ -25,6 +25,33 @@ public class ApiResult
     [JsonPropertyName("minutes_remaining")] public double MinutesRemaining { get; set; }
     [JsonPropertyName("pc_id")] public int PcId { get; set; }
     [JsonPropertyName("device_secret")] public string? DeviceSecret { get; set; }
+    [JsonPropertyName("reason")] public string? Reason { get; set; }
+    [JsonPropertyName("needed")] public int Needed { get; set; }
+    [JsonPropertyName("total")] public int Total { get; set; }
+    [JsonPropertyName("account_created")] public bool AccountCreated { get; set; }
+    [JsonPropertyName("username")] public string? Username { get; set; }
+    [JsonPropertyName("seconds")] public int Seconds { get; set; }
+    [JsonPropertyName("points")] public int Points { get; set; }
+    [JsonPropertyName("redeem_rates")] public List<RedeemRate>? RedeemRates { get; set; }
+    [JsonPropertyName("remaining_points")] public int RemainingPoints { get; set; }
+    [JsonPropertyName("seconds_added")] public int SecondsAdded { get; set; }
+}
+
+public class RedeemRate
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("points")] public int Points { get; set; }
+    [JsonPropertyName("reward_seconds")] public int RewardSeconds { get; set; }
+}
+
+// GET /api/coin/pending/:mac response - a plain running-total poll, not
+// mac+device_secret gated (matches how the WiFi portal itself uses this
+// same endpoint).
+public class PendingCoinStatus
+{
+    [JsonPropertyName("success")] public bool Success { get; set; }
+    [JsonPropertyName("pending")] public bool Pending { get; set; }
+    [JsonPropertyName("total")] public int Total { get; set; }
 }
 
 // Thin wrapper over the device-facing endpoints in server/routes/
@@ -99,6 +126,52 @@ public class RentalApiClient
     public async Task<ApiResult?> ResumeAsync(string mac, string deviceSecret)
     {
         var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/resume", new { mac, device_secret = deviceSecret });
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    // --- Coin insert flow (server/routes/coin.js, not rental.js - a
+    // different base path, and not mac+device_secret gated the way
+    // everything else here is; matches how the WiFi portal itself talks
+    // to these same three endpoints). Shared by Insert Coins, Create
+    // Account, and Add Time in the UI - see CoinInsertPanel.cs.
+
+    // mode: 'pc_rental' (guest credit) or 'pc_rental_create_account'
+    // (username/password required for the latter).
+    public async Task<ApiResult?> OpenCoinPendingAsync(string mac, string mode, string? username = null, string? password = null)
+    {
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/coin/pending", new { mac, mode, username, password });
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    public async Task<PendingCoinStatus?> GetPendingCoinStatusAsync(string mac)
+    {
+        var res = await _http.GetAsync($"{_baseUrl}/api/coin/pending/{Uri.EscapeDataString(mac)}");
+        return await res.Content.ReadFromJsonAsync<PendingCoinStatus>();
+    }
+
+    public async Task<ApiResult?> FinalizeCoinsAsync(string mac)
+    {
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/coin/finalize", new { mac });
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    // --- Points / account (server/routes/rental.js) ---
+
+    public async Task<ApiResult?> GetMemberPointsAsync(string mac, string deviceSecret)
+    {
+        var res = await _http.GetAsync($"{_baseUrl}/api/rental/member-points?mac={Uri.EscapeDataString(mac)}&device_secret={Uri.EscapeDataString(deviceSecret)}");
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    public async Task<ApiResult?> RedeemAsync(string mac, string deviceSecret, int redeemRateId)
+    {
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/redeem", new { mac, device_secret = deviceSecret, redeem_rate_id = redeemRateId });
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    public async Task<ApiResult?> ChangePasswordAsync(string mac, string deviceSecret, string currentPassword, string newPassword)
+    {
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/change-password", new { mac, device_secret = deviceSecret, current_password = currentPassword, new_password = newPassword });
         return await res.Content.ReadFromJsonAsync<ApiResult>();
     }
 

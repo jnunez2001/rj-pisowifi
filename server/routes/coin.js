@@ -38,6 +38,12 @@ let pendingMode = 'regular';
 // completely separate real-coin payment from WiFi time (see
 // finalizePendingCoins()'s 'movie' branch below).
 let pendingMovieId = null;
+// Only set/used when pendingMode === 'pc_rental_create_account' - the
+// desired username/hashed password for the new rental_members account
+// this coin window is funding, captured at open time (POST /pending) so
+// finalize doesn't need a second round trip once enough credit is in.
+let pendingCreateUsername = null;
+let pendingCreatePasswordHash = null;
 const PENDING_TIMEOUT_MS = 40000; // must match/slightly exceed portal's 30s coin timer
 
 // Bug found live: crediting each coin the instant it was detected meant a
@@ -69,6 +75,8 @@ async function finalizePendingCoins(mac) {
   const kioskId = pendingKioskId;
   const mode = pendingMode;
   const movieId = pendingMovieId;
+  const createUsername = pendingCreateUsername;
+  const createPasswordHash = pendingCreatePasswordHash;
 
   // pendingIp only ever held whatever the coin-relay device (ESP32) self-
   // reported as its OWN WiFi IP, not the paying customer's - a physical
@@ -94,6 +102,8 @@ async function finalizePendingCoins(mac) {
   pendingKioskId = null;
   pendingMode = 'regular';
   pendingMovieId = null;
+  pendingCreateUsername = null;
+  pendingCreatePasswordHash = null;
   if (pendingFinalizeTimer) clearTimeout(pendingFinalizeTimer);
   pendingFinalizeTimer = null;
 
@@ -111,12 +121,73 @@ async function finalizePendingCoins(mac) {
   // minutes AND from movie rentals - never touches sessions or
   // movie_rentals. Same "full price or nothing" rule as movie rentals -
   // the shared box can't give change either.
+  // PC rental self-serve account creation: same shared coin box, same
+  // "full price or nothing" rule, but instead of crediting the PC's
+  // guest session, the inserted total becomes the new account's
+  // starting time balance (converted through the same rental_rates
+  // coin_value -> minutes lookup a guest insert uses, not a separate
+  // signup fee that's discarded) and the account is created here, once
+  // the minimum is actually met. username/passwordHash were captured at
+  // POST /pending open time (see pendingCreateUsername above).
+  if (mode === 'pc_rental_create_account') {
+    const pc = db.prepare('SELECT * FROM rental_pcs WHERE mac_address = ?').get(mac);
+    if (!pc) {
+      return { success: false, reason: 'pc_not_found' };
+    }
+    const minCredit = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'rental_create_account_min_credit'").get()?.value, 10) || 0;
+    if (total < minCredit) {
+      console.error(`⚠️ Create-account coin window for "${pc.name}" closed with ₱${total}, needed ₱${minCredit} - not created.`);
+      return { success: false, reason: 'insufficient_amount', total, needed: minCredit };
+    }
+    const rate = db.prepare('SELECT minutes FROM rental_rates WHERE coin_value = ?').get(total);
+    if (!rate) {
+      console.error(`⚠️ Create-account coin window for "${pc.name}" closed with ₱${total}, no matching rate - not created.`);
+      return { success: false, reason: 'no_matching_rate', total };
+    }
+    if (!createUsername || !createPasswordHash) {
+      return { success: false, reason: 'server_error' };
+    }
+    // Username could have been taken by someone else in the time between
+    // opening the window and finishing the insert - check again here,
+    // same defensive re-check pattern as any create-under-contention flow.
+    const taken = db.prepare('SELECT id FROM rental_members WHERE username = ?').get(createUsername);
+    if (taken) {
+      // Real money was already inserted for this - falling back to
+      // crediting the PC's own guest session (same math the plain
+      // 'pc_rental' branch below uses) rather than just failing and
+      // losing it, since physical coins can't be refunded by software.
+      const speedMsFallback = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'rental_speed_timer_secs'").get()?.value, 10) || 1000;
+      const grantedMsFallback = rate.minutes * 60000 * (speedMsFallback / 1000);
+      const existingSessionFallback = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
+      const currentRemainingMsFallback = existingSessionFallback?.hard_expires_at
+        ? Math.max(0, new Date(existingSessionFallback.hard_expires_at).getTime() - Date.now()) : 0;
+      const newExpiresAtFallback = new Date(Date.now() + currentRemainingMsFallback + grantedMsFallback).toISOString();
+      if (existingSessionFallback) {
+        db.prepare('UPDATE rental_sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE pc_id = ?')
+          .run(rate.minutes, newExpiresAtFallback, newExpiresAtFallback, pc.id);
+      } else {
+        db.prepare('INSERT INTO rental_sessions (pc_id, minutes_remaining, expires_at, hard_expires_at) VALUES (?, ?, ?, ?)')
+          .run(pc.id, rate.minutes, newExpiresAtFallback, newExpiresAtFallback);
+      }
+      db.prepare("INSERT INTO rental_transactions (pc_id, coin_value, minutes_added, type) VALUES (?, ?, ?, 'coin')")
+        .run(pc.id, total, rate.minutes);
+      console.log(`⚠️ Create-account username "${createUsername}" taken - credited "${pc.name}" as guest time instead (₱${total}, ${rate.minutes} min)`);
+      return { success: false, reason: 'username_taken', total, result: { pc_credited: true, pc_id: pc.id, minutes_added: rate.minutes } };
+    }
+    const seconds = rate.minutes * 60;
+    db.prepare('INSERT INTO rental_members (username, password_hash, seconds) VALUES (?, ?, ?)')
+      .run(createUsername, createPasswordHash, seconds);
+    db.prepare("INSERT INTO rental_transactions (pc_id, coin_value, minutes_added, type) VALUES (?, ?, ?, 'coin')")
+      .run(pc.id, total, rate.minutes);
+    console.log(`✅ Rental account "${createUsername}" created from PC "${pc.name}": ₱${total} (${rate.minutes} min)`);
+    return { success: true, result: { account_created: true, username: createUsername, seconds } };
+  }
   if (mode === 'pc_rental') {
     const pc = db.prepare('SELECT * FROM rental_pcs WHERE mac_address = ?').get(mac);
     if (!pc) {
       return { success: false, reason: 'pc_not_found' };
     }
-    const rate = db.prepare('SELECT minutes FROM rental_rates WHERE coin_value = ?').get(total);
+    const rate = db.prepare('SELECT minutes, points FROM rental_rates WHERE coin_value = ?').get(total);
     const minutes = rate ? rate.minutes : null;
     if (!minutes) {
       console.error(`⚠️ PC rental coin window for "${pc.name}" closed with ₱${total}, no matching rate - not credited.`);
@@ -125,7 +196,16 @@ async function finalizePendingCoins(mac) {
     const existingSession = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
     const currentRemainingMs = existingSession?.hard_expires_at
       ? Math.max(0, new Date(existingSession.hard_expires_at).getTime() - Date.now()) : 0;
-    const newExpiresAt = new Date(Date.now() + currentRemainingMs + minutes * 60000).toISOString();
+    // rental_speed_timer_secs applies to real, coin-purchased guest time
+    // (this branch) same as it does to a logged-in member's live drain in
+    // GET /status - but NOT to admin's manual Add Time button
+    // (admin.js POST /rental/pcs/:id/addtime), where an admin typing "60
+    // minutes" should get literally 60 real minutes, not a compressed
+    // amount. 1000 = real-time, lower = the granted time expires sooner
+    // in real wall-clock terms than its nominal minutes would suggest.
+    const speedMs = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'rental_speed_timer_secs'").get()?.value, 10) || 1000;
+    const grantedMs = minutes * 60000 * (speedMs / 1000);
+    const newExpiresAt = new Date(Date.now() + currentRemainingMs + grantedMs).toISOString();
 
     if (existingSession) {
       db.prepare('UPDATE rental_sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE pc_id = ?')
@@ -136,6 +216,15 @@ async function finalizePendingCoins(mac) {
     }
     db.prepare("INSERT INTO rental_transactions (pc_id, coin_value, minutes_added, type) VALUES (?, ?, ?, 'coin')")
       .run(pc.id, total, minutes);
+
+    // Loyalty points, per-rate (rental_rates.points, set by the admin on
+    // Timer Rates) - only awarded when a member is actually logged in on
+    // this PC to receive them; a guest walk-in has no account to hold a
+    // balance, same "earns nothing" behavior the rate's own points field
+    // already implies when an admin sets it to 0 for a guest-facing tier.
+    if (existingSession?.member_id && rate.points > 0) {
+      db.prepare('UPDATE rental_members SET points = points + ? WHERE id = ?').run(rate.points, existingSession.member_id);
+    }
 
     console.log(`✅ PC rental credited for "${pc.name}": ₱${total} (${minutes} min)`);
     return { success: true, result: { pc_credited: true, pc_id: pc.id, minutes_added: minutes } };
@@ -219,14 +308,15 @@ function pruneCoinEventCache() {
 
 // POST /api/coin/pending, portal calls this right when INSERT COIN modal opens
 router.post('/pending', (req, res) => {
-  const { mac, is_premium, mode, movie_id } = req.body;
+  const { mac, is_premium, mode, movie_id, username, password } = req.body;
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
   // mode is the current contract ('regular'|'premium'|'convert'|'movie'|
-  // 'pc_rental'); is_premium is kept working for older portal.js builds
-  // still sending the plain boolean, mapped onto the same 'premium' mode.
-  const resolvedMode = (mode === 'convert' || mode === 'convert_down' || mode === 'movie' || mode === 'pc_rental') ? mode
+  // 'pc_rental'|'pc_rental_create_account'); is_premium is kept working
+  // for older portal.js builds still sending the plain boolean, mapped
+  // onto the same 'premium' mode.
+  const resolvedMode = (mode === 'convert' || mode === 'convert_down' || mode === 'movie' || mode === 'pc_rental' || mode === 'pc_rental_create_account') ? mode
     : (mode === 'premium' || is_premium) ? 'premium' : 'regular';
 
   // Coinslot purpose (wifi/pc/both) is enforced per-vendo, not here -
@@ -253,6 +343,26 @@ router.post('/pending', (req, res) => {
       return res.status(400).json({ success: false, message: 'Not an adopted rental PC' });
     }
   }
+  let createUsername = null;
+  let createPasswordHash = null;
+  if (resolvedMode === 'pc_rental_create_account') {
+    const pc = db.prepare("SELECT status FROM rental_pcs WHERE mac_address = ?").get(mac.toLowerCase());
+    if (!pc || pc.status !== 'adopted') {
+      return res.status(400).json({ success: false, message: 'Not an adopted rental PC' });
+    }
+    const enabled = db.prepare("SELECT value FROM settings WHERE key = 'rental_enable_create_account'").get()?.value !== '0';
+    if (!enabled) {
+      return res.status(400).json({ success: false, message: 'Account creation is disabled' });
+    }
+    createUsername = String(username || '').trim();
+    if (!createUsername || !password) {
+      return res.status(400).json({ success: false, message: 'Username and password required' });
+    }
+    if (db.prepare('SELECT id FROM rental_members WHERE username = ?').get(createUsername)) {
+      return res.status(400).json({ success: false, message: 'That username is already taken' });
+    }
+    createPasswordHash = require('../utils/passwordHash').hashPassword(String(password));
+  }
   const normalizedMac = mac.toLowerCase();
 
   // Single physical coin acceptor: only one customer can actually be
@@ -274,6 +384,8 @@ router.post('/pending', (req, res) => {
   pendingSetAt = Date.now();
   pendingTotal = 0;
   pendingMovieId = resolvedMode === 'movie' ? parseInt(movie_id, 10) : null;
+  pendingCreateUsername = createUsername;
+  pendingCreatePasswordHash = createPasswordHash;
   pendingIp = '';
   pendingKioskId = null;
   pendingMode = resolvedMode;
@@ -324,6 +436,20 @@ router.post('/finalize', async (req, res) => {
         success: false,
         reason: outcome.reason,
         message: 'Something went wrong crediting your coins, please try again.'
+      });
+    }
+    if (outcome.reason === 'insufficient_amount') {
+      return res.status(400).json({
+        success: false,
+        reason: outcome.reason,
+        message: `Insert at least ₱${outcome.needed} to continue (₱${outcome.total} so far).`
+      });
+    }
+    if (outcome.reason === 'username_taken') {
+      return res.status(400).json({
+        success: false,
+        reason: outcome.reason,
+        message: 'That username was just taken - your coins were credited as guest time instead. Try a different username next time.'
       });
     }
     return res.json({ ...outcome, message: outcome.message || 'No coins detected yet, insert one first.' });
@@ -398,7 +524,7 @@ router.post('/', async (req, res) => {
     if (deviceMac && isValidMac(deviceMac)) {
       const vendo = db.prepare('SELECT coinslot_purpose FROM vendos WHERE mac_address = ?').get(String(deviceMac).toLowerCase());
       const coinslotPurpose = vendo?.coinslot_purpose || 'wifi';
-      const isPcRentalUse = pendingValid && pendingMode === 'pc_rental';
+      const isPcRentalUse = pendingValid && (pendingMode === 'pc_rental' || pendingMode === 'pc_rental_create_account');
       if (isPcRentalUse && coinslotPurpose === 'wifi') {
         return res.status(400).json({ success: false, message: 'This coin slot is set to WiFi only.' });
       }

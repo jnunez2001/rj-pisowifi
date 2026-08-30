@@ -1455,6 +1455,21 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('rental_schedule_before_close_time', '22:50');
   upsertIfMissing('rental_schedule_closed_time', '23:15');
   upsertIfMissing('rental_app_password', '');
+
+  // rental_speed_timer_secs was stored from the start (default '600')
+  // but never actually read anywhere - wiring it up now (GET /status's
+  // member live-drain) means every existing install would suddenly
+  // drain member time ~1.67x faster than real time the moment this
+  // ships, an unannounced billing change nobody asked for. Guarded the
+  // same way the ZenFi->StarkFi cafe_name migration guards its own
+  // default-value change: only resets it to '1000' (true real-time) if
+  // it's still exactly the untouched original default, never overwrites
+  // a value an operator has already deliberately set.
+  const speedTimerRow = db.prepare("SELECT value FROM settings WHERE key = 'rental_speed_timer_secs'").get();
+  if (speedTimerRow && speedTimerRow.value === '600') {
+    db.prepare("UPDATE settings SET value = '1000' WHERE key = 'rental_speed_timer_secs'").run();
+  }
+
   // The physical coin acceptor is shared hardware, not duplicated per
   // feature - this decides what it's allowed to be used for. Defaults to
   // 'wifi' so every existing install keeps its current behavior until an
