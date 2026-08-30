@@ -40,19 +40,21 @@ async function apiCall(method, endpoint, body = null) {
 const RENTAL_PANEL_TITLES = {
   dashboard: 'Dashboard', managepc: 'Manage PC', members: 'Members',
   timerrates: 'Timer Rates', redeemrates: 'Redeem Rates',
-  redeemhistory: 'Redeem History', reports: 'Reports',
+  redeemhistory: 'Redeem History', reports: 'Reports', coinslot: 'Coinslot',
   settings: 'Settings', systeminfo: 'System Info'
 };
 
 // Panels not built yet render an honest placeholder instead of pretending
 // - same pattern the main admin uses for its own not-yet-built roadmap
 // tabs (app.js's COMING_SOON_PAGES). Members/Redeem Rates/Redeem History/
-// Reports are real now (see js/rental.js) - only Sub-Coinslot (per-PC
-// dedicated hardware, not built - v1 is a single shared coin box) and
-// PC Performance/Spectate (deferred, need a system-stats/screen-streaming
-// agent on the Windows client) stay placeholders. Coinslot purpose moved
-// to a per-device setting on the main admin's Devices page and no longer
-// lives here at all (see devices.html/devices.js).
+// Reports/Coinslot are real now (see js/rental.js) - only PC
+// Performance/Spectate (deferred, need a system-stats/screen-streaming
+// agent on the Windows client) stay placeholders. Coinslot purpose is
+// still stored per-vendo-device (server/config/database.js's
+// vendos.coinslot_purpose, same PATCH /api/admin/vendos/:id/coinslot-
+// purpose route the Devices page itself uses) - this panel is just a
+// second, more convenient place to reach the same setting, not a
+// separate PC-Rental-only mechanism.
 const RENTAL_COMING_SOON = {
   systeminfo: 'Per-PC system information (CPU, RAM, disk) - needs a stats agent on the Windows client'
 };
@@ -66,6 +68,7 @@ const RENTAL_PANEL_LOADERS = {
   redeemrates: refreshRentalRedeemRates,
   redeemhistory: refreshRentalRedemptions,
   reports: refreshRentalReports,
+  coinslot: loadRentalCoinslotDevices,
   settings: loadRentalSettings
 };
 

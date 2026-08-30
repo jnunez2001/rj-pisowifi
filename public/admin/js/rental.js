@@ -474,6 +474,46 @@ async function saveRentalAppPassword() {
   }
 }
 
+// Coinslot Purpose is stored per-vendo-device (vendos.coinslot_purpose),
+// same table/route the main admin's Devices page uses
+// (PATCH /api/admin/vendos/:id/coinslot-purpose) - this panel is just a
+// second, more convenient place to reach that same per-device setting
+// from inside PC Rental, not a separate mechanism.
+async function loadRentalCoinslotDevices() {
+  const el = document.getElementById('rentalCoinslotList');
+  if (!el) return;
+  const data = await apiCall('GET', '/api/admin/vendos');
+  if (!data.success || !data.vendos || data.vendos.length === 0) {
+    el.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No coin acceptor devices found. Pair one from the main admin\'s Devices page first.</div>';
+    return;
+  }
+  el.innerHTML = data.vendos.map((v) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--border,#eee);">
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:500;">${escapeHtmlRental(v.name)}</div>
+        <div style="font-size:11px;color:var(--text-muted);font-family:monospace;">${escapeHtmlRental(v.mac_address)}</div>
+      </div>
+      <select id="rc_purpose_${v.id}" style="min-width:180px;">
+        <option value="wifi" ${v.coinslot_purpose === 'wifi' || !v.coinslot_purpose ? 'selected' : ''}>WiFi only</option>
+        <option value="pc" ${v.coinslot_purpose === 'pc' ? 'selected' : ''}>PC Rental only</option>
+        <option value="both" ${v.coinslot_purpose === 'both' ? 'selected' : ''}>WiFi and PC Rental</option>
+      </select>
+      <button class="btn btn-sm btn-secondary" onclick="saveRentalCoinslotPurpose(${v.id})">Save</button>
+    </div>
+  `).join('');
+}
+
+async function saveRentalCoinslotPurpose(vendoId) {
+  const select = document.getElementById(`rc_purpose_${vendoId}`);
+  if (!select) return;
+  const data = await apiCall('PATCH', `/api/admin/vendos/${vendoId}/coinslot-purpose`, { purpose: select.value });
+  if (data.success) {
+    alert(data.message || 'Coinslot purpose saved');
+  } else {
+    alert(data.message || 'Could not save coinslot purpose');
+  }
+}
+
 function destroyRental() {
   clearInterval(rentalPollInterval);
   clearInterval(rentalCoinPollInterval);

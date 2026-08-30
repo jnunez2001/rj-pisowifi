@@ -58,6 +58,9 @@
     <div class="rental-shell-item" data-panel="reports" onclick="switchRentalPanel('reports')">
       <i class="fas fa-cash-register"></i> Reports
     </div>
+    <div class="rental-shell-item" data-panel="coinslot" onclick="switchRentalPanel('coinslot')">
+      <i class="fas fa-coins"></i> Coinslot
+    </div>
     <div class="rental-shell-title" style="margin-top:18px;">System Management</div>
     <div class="rental-shell-item" data-panel="settings" onclick="switchRentalPanel('settings')">
       <i class="fas fa-gear"></i> Settings
@@ -149,6 +152,21 @@
 
     <div id="rentalPanelReports" class="rental-panel" style="display:none;">
       <div class="rental-dashboard-stats" id="rentalReportsStats"></div>
+    </div>
+
+    <div id="rentalPanelCoinslot" class="rental-panel" style="display:none;">
+      <div class="zf3-card">
+        <div class="rental-settings-title">Coinslot Purpose</div>
+        <div style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">
+          Each coin acceptor is shared hardware, not duplicated per feature -
+          set per-device what it's allowed to be used for. Existing devices
+          default to "WiFi only" so nothing changes until you deliberately
+          turn PC Rental on for a specific one. This is the same setting as
+          Devices &gt; (device) &gt; Coinslot Purpose in the main admin, just
+          reachable from here too.
+        </div>
+        <div id="rentalCoinslotList"></div>
+      </div>
     </div>
 
     <div id="rentalPanelSettings" class="rental-panel" style="display:none;">
