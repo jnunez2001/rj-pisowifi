@@ -300,6 +300,11 @@
       <input type="number" id="gracePeriodMinutes" class="form-control" placeholder="0" min="0" max="60">
       <small style="color:var(--text-muted);">Extra time before disconnecting after session ends.</small>
     </div>
+    <div class="form-group">
+      <label class="form-label">Countdown Speed (ms per second)</label>
+      <input type="number" id="wifiSpeedTimerMs" class="form-control" placeholder="1000" min="1" max="10000">
+      <small style="color:var(--text-muted);">1000 = normal real-time speed. Lower drains a session's time faster than the clock, higher slower. Applies to coin credit, voucher redemption, and free-minute claims - not to an admin's own manual Add Time.</small>
+    </div>
   </div>
   <button class="btn btn-primary" onclick="saveSessionSettings()">
     <i class="fas fa-save"></i> Save Session Settings

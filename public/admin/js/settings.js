@@ -74,6 +74,7 @@ async function loadSettings() {
     document.getElementById('maxPauseMinutes').value = s.max_pause_minutes || 30;
     document.getElementById('maxPauses').value = s.max_pauses || 0;
     document.getElementById('gracePeriodMinutes').value = s.grace_period_minutes || 0;
+    document.getElementById('wifiSpeedTimerMs').value = s.wifi_speed_timer_ms || 1000;
     setToggle('allowPremiumToRegularConvert', 'allowPremiumToRegularConvertLabel', s.allow_premium_to_regular_convert === '1');
 
     // Coin Slot Settings
@@ -158,6 +159,7 @@ async function saveSessionSettings() {
       max_pause_minutes: document.getElementById('maxPauseMinutes').value,
       max_pauses: document.getElementById('maxPauses').value,
       grace_period_minutes: document.getElementById('gracePeriodMinutes').value,
+      wifi_speed_timer_ms: document.getElementById('wifiSpeedTimerMs').value,
       allow_premium_to_regular_convert: document.getElementById('allowPremiumToRegularConvert').checked ? '1' : '0',
     });
     if (data.success) showToast('Session settings saved!');

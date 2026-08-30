@@ -81,6 +81,18 @@ function getBurstConfig() {
     : null;
 }
 
+// settings.wifi_speed_timer_ms - same "milliseconds per billed second"
+// speed setting built for PC Rental (rental_speed_timer_secs). 1000 =
+// real-time, lower = drains faster. Returns the real-ms duration to
+// actually grant for a given number of nominal minutes - called only
+// from createSession/addTimeToSession below (real, customer-earned
+// time), never from admin's own manual "Add Time" math in admin.js,
+// which stays a literal grant regardless of this setting.
+function grantedMsForMinutes(minutes) {
+  const speedMs = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'wifi_speed_timer_ms'").get()?.value, 10) || 1000;
+  return minutes * 60 * 1000 * (speedMs / 1000);
+}
+
 // Bug: mac_address is looked up with a case-sensitive exact match, but
 // callers were inconsistent about casing, coin.js lowercased before
 // storing, while promo.js/session.js and the portal's own MAC
@@ -210,11 +222,11 @@ async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverr
   const expMins = Math.floor(parseFloat(expirationMinutes) || mins);
 
   const expiresAt = new Date(
-    now + mins * 60 * 1000
+    now + grantedMsForMinutes(mins)
   ).toISOString();
 
   const hardExpiresAt = new Date(
-    now + expMins * 60 * 1000
+    now + grantedMsForMinutes(expMins)
   ).toISOString();
 
   console.log(`Creating session: ${mins} mins, expires: ${expiresAt}, hard: ${hardExpiresAt}`);
@@ -281,8 +293,16 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
   const now = Date.now();
   const newMinutes = session.minutes_remaining + minutes;
 
+  // Scaling newMinutes (existing + new) as one lump sum would re-scale
+  // the ALREADY-elapsed-adjusted remaining portion a second time on every
+  // top-up, compounding the speed multiplier - so only the newly-added
+  // `minutes` gets scaled here, added on top of the session's REAL
+  // current remaining wall-clock time (from expires_at, not the cached
+  // minutes_remaining column), same pattern as coin.js's PC Rental
+  // guest-credit branch.
+  const currentRemainingMs = session.expires_at ? Math.max(0, new Date(session.expires_at).getTime() - now) : 0;
   const newExpiresAt = new Date(
-    now + newMinutes * 60 * 1000
+    now + currentRemainingMs + grantedMsForMinutes(minutes)
   ).toISOString();
 
   // Bug found live: this used to be JUST now + this top-up's own
@@ -295,7 +315,7 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
   // they'd already made and had every right to keep. Taking the later of
   // the two means a top-up can only ever extend how long the session stays
   // resumable, never shrink it.
-  const topUpHardExpiresAtMs = now + expirationMinutes * 60 * 1000;
+  const topUpHardExpiresAtMs = now + grantedMsForMinutes(expirationMinutes);
   const existingHardExpiresAtMs = session.hard_expires_at ? new Date(session.hard_expires_at).getTime() : 0;
   const newHardExpiresAt = new Date(
     Math.max(topUpHardExpiresAtMs, existingHardExpiresAtMs)

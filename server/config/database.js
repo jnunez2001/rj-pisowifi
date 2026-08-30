@@ -1476,6 +1476,14 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // operator deliberately opts a coinslot into PC Rental. See
   // server/routes/coin.js's POST /pending enforcement.
   upsertIfMissing('coinslot_purpose', 'wifi');
+  // Same "milliseconds per billed second" speed setting built for PC
+  // Rental (rental_speed_timer_secs above), mirrored for the main WiFi
+  // hotspot's own countdown. 1000 = real-time, lower = drains faster.
+  // Applied only where real, customer-earned time gets granted
+  // (sessionService.js's createSession/addTimeToSession, used by coin
+  // credit, voucher redemption, and free-minute claims) - never to an
+  // admin's manual "Add Time" on a session, which stays a literal grant.
+  upsertIfMissing('wifi_speed_timer_ms', '1000');
   // Telemetry (server/services/telemetryService.js) - off by default,
   // mechanism-only until a real Privacy Policy is published and a UI
   // toggle is exposed (see that file's header for the full reasoning).
