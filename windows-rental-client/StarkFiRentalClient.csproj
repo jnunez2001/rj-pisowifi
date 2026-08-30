@@ -8,6 +8,10 @@
     <Nullable>enable</Nullable>
     <ApplicationIcon></ApplicationIcon>
     <AssemblyName>StarkFiRentalClient</AssemblyName>
+    <!-- Lets the SDK build a Windows-targeted (net8.0-windows) app from a
+         non-Windows build machine, like the macOS box this is cross-
+         compiled from. Has no effect once actually building on Windows. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <!-- Runs continuously as the machine's lock enforcement - shouldn't
          need a console window ever, including during development. -->
     <StartupObject>StarkFiRentalClient.Program</StartupObject>
