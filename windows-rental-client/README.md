@@ -25,6 +25,27 @@ dotnet build -c Release
 ```
 
 Output lands in `bin\Release\net8.0-windows\StarkFiRentalClient.exe`.
+Note: a plain `dotnet build` still produces a "framework-dependent" exe -
+it needs the .NET 8 Desktop Runtime installed on whatever PC runs it.
+
+## Publishing a single, self-contained .exe (for deploying to other PCs)
+
+If you're setting up more than one rental PC, you don't want to install
+the .NET SDK on every single one. Instead, build once on any Windows
+machine with the SDK, then copy one file everywhere else:
+
+```
+cd windows-rental-client
+dotnet publish -c Release -r win-x64
+```
+
+Output lands in
+`bin\Release\net8.0-windows\win-x64\publish\StarkFiRentalClient.exe`.
+This single file has the .NET runtime bundled inside it - copy just this
+one exe to any other Windows 10/11 64-bit PC and run it directly, no
+SDK or separate runtime install needed there. It'll be roughly
+100-150MB (the runtime is baked in), which is normal for a
+self-contained single-file publish.
 
 ## First run
 

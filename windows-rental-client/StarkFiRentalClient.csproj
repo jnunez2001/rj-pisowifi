@@ -11,6 +11,16 @@
     <!-- Runs continuously as the machine's lock enforcement - shouldn't
          need a console window ever, including during development. -->
     <StartupObject>StarkFiRentalClient.Program</StartupObject>
+
+    <!-- Lets `dotnet publish` produce one self-contained .exe with no
+         separate .NET runtime install needed on the rental PC. Doesn't
+         affect a plain `dotnet build` - these only kick in when the
+         matching publish switches are passed (see README). -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
 </Project>
