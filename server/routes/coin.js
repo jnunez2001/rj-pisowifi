@@ -11,6 +11,18 @@ function isValidMac(mac) {
   return /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(String(mac || '').trim());
 }
 
+// Movie-credit balance (database.js's movie_credits table) - see the
+// 'online_movie' branch of finalizePendingCoins() below and
+// GET/POST /api/portal/credit/* in server/routes/portal.js, which is what
+// actually lets a customer spend this back as WiFi time.
+function addMovieCredit(mac, amountPesos) {
+  if (amountPesos <= 0) return;
+  db.prepare(`
+    INSERT INTO movie_credits (mac_address, balance_pesos, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(mac_address) DO UPDATE SET balance_pesos = balance_pesos + excluded.balance_pesos, updated_at = CURRENT_TIMESTAMP
+  `).run(mac, amountPesos);
+}
+
 // In-memory store of which MAC is currently "pending" a coin insertion.
 // Single-vendo setup: only one pending slot needed at a time.
 let pendingCoinMac = null;
@@ -38,6 +50,12 @@ let pendingMode = 'regular';
 // completely separate real-coin payment from WiFi time (see
 // finalizePendingCoins()'s 'movie' branch below).
 let pendingMovieId = null;
+// Only set/used when pendingMode === 'online_movie' - the vidrock.ru TMDb
+// id being unlocked (server/services/onlineMovieCatalog.js). Separate
+// variable from pendingMovieId on purpose: online ids are TMDb ids, local
+// ids are the `movies` table's own autoincrement ids, and the two spaces
+// can overlap by coincidence, so they must never be conflated.
+let pendingOnlineMovieId = null;
 // Only set/used when pendingMode === 'pc_rental_create_account' - the
 // desired username/hashed password for the new rental_members account
 // this coin window is funding, captured at open time (POST /pending) so
@@ -75,6 +93,7 @@ async function finalizePendingCoins(mac) {
   const kioskId = pendingKioskId;
   const mode = pendingMode;
   const movieId = pendingMovieId;
+  const onlineMovieId = pendingOnlineMovieId;
   const createUsername = pendingCreateUsername;
   const createPasswordHash = pendingCreatePasswordHash;
 
@@ -102,6 +121,7 @@ async function finalizePendingCoins(mac) {
   pendingKioskId = null;
   pendingMode = 'regular';
   pendingMovieId = null;
+  pendingOnlineMovieId = null;
   pendingCreateUsername = null;
   pendingCreatePasswordHash = null;
   if (pendingFinalizeTimer) clearTimeout(pendingFinalizeTimer);
@@ -252,6 +272,41 @@ async function finalizePendingCoins(mac) {
     return { success: true, result: { movie_unlocked: true, movie_id: movie.id, expires_at: expiresAt } };
   }
 
+  // Online movie rental (vidrock.ru embed catalog): against
+  // onlineMovieCatalog + online_movie_rentals instead of movieService +
+  // movie_rentals, so the two catalogs' id spaces never mix (see
+  // database.js's online_movie_rentals comment). Unlike the local 'movie'
+  // branch above, a short or long insert here is never just lost - the
+  // difference is banked per-MAC in movie_credits (database.js), spendable
+  // later as WiFi time via POST /api/portal/credit/use.
+  if (mode === 'online_movie') {
+    const onlineMovieCatalog = require('../services/onlineMovieCatalog');
+    const movie = onlineMovieCatalog.getById(onlineMovieId);
+    if (!movie) {
+      return { success: false, reason: 'movie_not_found' };
+    }
+
+    if (total < movie.price_pesos) {
+      addMovieCredit(mac, total);
+      console.log(`⚠️ Online movie rental window for ${mac} closed with ₱${total}, needed ₱${movie.price_pesos} - not unlocked, ₱${total} credited to their balance instead.`);
+      return { success: false, reason: 'insufficient_amount', total, needed: movie.price_pesos, credited_to_balance: total };
+    }
+
+    const changeCredited = total - movie.price_pesos;
+    if (changeCredited > 0) addMovieCredit(mac, changeCredited);
+
+    const rentalHours = parseFloat(db.prepare("SELECT value FROM settings WHERE key = 'movie_rental_hours'").get()?.value || '48');
+    const expiresAt = new Date(Date.now() + rentalHours * 60 * 60 * 1000).toISOString();
+    db.prepare('INSERT INTO online_movie_rentals (movie_id, mac_address, expires_at) VALUES (?, ?, ?)').run(movie.id, mac, expiresAt);
+    db.prepare(`
+      INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, mac_address)
+      VALUES (?, ?, 0, 'online_movie_rental', ?)
+    `).run(`ONLINE-MOVIE-${movie.id}`, movie.price_pesos, mac);
+    console.log(`✅ Online movie rental unlocked for ${mac}: "${movie.title}" (₱${movie.price_pesos})` + (changeCredited > 0 ? ` + ₱${changeCredited} credited to their balance` : ''));
+    require('../services/vendoAudioService').playVendoAmount(total).catch(() => {});
+    return { success: true, result: { movie_unlocked: true, movie_id: movie.id, expires_at: expiresAt, change_credited: changeCredited } };
+  }
+
   try {
     let result;
     if (mode === 'convert') result = await convertCoinValue(mac, total, ip, kioskId);
@@ -308,15 +363,15 @@ function pruneCoinEventCache() {
 
 // POST /api/coin/pending, portal calls this right when INSERT COIN modal opens
 router.post('/pending', (req, res) => {
-  const { mac, is_premium, mode, movie_id, username, password } = req.body;
+  const { mac, is_premium, mode, movie_id, online_movie_id, username, password } = req.body;
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
   // mode is the current contract ('regular'|'premium'|'convert'|'movie'|
-  // 'pc_rental'|'pc_rental_create_account'); is_premium is kept working
-  // for older portal.js builds still sending the plain boolean, mapped
-  // onto the same 'premium' mode.
-  const resolvedMode = (mode === 'convert' || mode === 'convert_down' || mode === 'movie' || mode === 'pc_rental' || mode === 'pc_rental_create_account') ? mode
+  // 'online_movie'|'pc_rental'|'pc_rental_create_account'); is_premium is
+  // kept working for older portal.js builds still sending the plain
+  // boolean, mapped onto the same 'premium' mode.
+  const resolvedMode = (mode === 'convert' || mode === 'convert_down' || mode === 'movie' || mode === 'online_movie' || mode === 'pc_rental' || mode === 'pc_rental_create_account') ? mode
     : (mode === 'premium' || is_premium) ? 'premium' : 'regular';
 
   // Coinslot purpose (wifi/pc/both) is enforced per-vendo, not here -
@@ -332,6 +387,13 @@ router.post('/pending', (req, res) => {
     const movie = require('../services/movieService').getMovie(movieId);
     if (!movie || movie.tier !== 'premium') {
       return res.status(400).json({ success: false, message: 'Not a rentable movie' });
+    }
+  }
+  if (resolvedMode === 'online_movie') {
+    const onlineMovieCatalog = require('../services/onlineMovieCatalog');
+    const movie = onlineMovieCatalog.getById(parseInt(online_movie_id, 10));
+    if (!movie || movie.tier === 'free') {
+      return res.status(400).json({ success: false, message: 'Not a rentable online movie' });
     }
   }
   if (resolvedMode === 'pc_rental') {
@@ -384,6 +446,7 @@ router.post('/pending', (req, res) => {
   pendingSetAt = Date.now();
   pendingTotal = 0;
   pendingMovieId = resolvedMode === 'movie' ? parseInt(movie_id, 10) : null;
+  pendingOnlineMovieId = resolvedMode === 'online_movie' ? parseInt(online_movie_id, 10) : null;
   pendingCreateUsername = createUsername;
   pendingCreatePasswordHash = createPasswordHash;
   pendingIp = '';

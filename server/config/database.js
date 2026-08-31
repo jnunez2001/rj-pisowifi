@@ -410,6 +410,59 @@ db.exec(`
     expires_at DATETIME NOT NULL
   );
 
+  -- Separate ledger for the ONLINE (vidrock.ru embed) movie catalog - see
+  -- server/services/onlineMovieCatalog.js. movie_id here is a TMDb id, NOT
+  -- a foreign key into the local movies table above; kept in its own
+  -- table specifically so an online TMDb id can never collide with a local
+  -- movies.id (both are small integers and could otherwise overlap).
+  CREATE TABLE IF NOT EXISTS online_movie_rentals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    movie_id INTEGER NOT NULL,
+    mac_address TEXT NOT NULL,
+    rented_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL
+  );
+
+  -- A real vending machine can't make change, so an online-movie coin
+  -- window that closes short of the price (or over it) used to just keep
+  -- the money with nothing to show for it - same as local movie rentals.
+  -- This table gives that leftover a home instead: it accumulates per MAC
+  -- (both underpaid and overpaid amounts land here) and the customer can
+  -- spend it later as regular WiFi coin credit (POST /api/portal/credit/use,
+  -- which runs the balance through the same rate-matching creditCoinValue()
+  -- already uses for a normal coin insert). One row per device.
+  CREATE TABLE IF NOT EXISTS movie_credits (
+    mac_address TEXT PRIMARY KEY,
+    balance_pesos INTEGER NOT NULL DEFAULT 0,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- One-time metadata lookup cache for the online movie catalog (see
+  -- server/services/tmdbService.js) - keyed by the same TMDb id used
+  -- everywhere else for these titles. poster_path is null when TMDb has no
+  -- poster for that id; genres is a JSON array of genre name strings (e.g.
+  -- '["Action","Science Fiction"]'), captured from the SAME API response as
+  -- the poster lookup - no extra request. Used to group the Online tab into
+  -- Netflix-style genre rows instead of one giant tier row. NULL
+  -- fetched_at means "never looked up yet".
+  CREATE TABLE IF NOT EXISTS tmdb_poster_cache (
+    tmdb_id INTEGER PRIMARY KEY,
+    poster_path TEXT,
+    genres TEXT,
+    fetched_at DATETIME
+  );
+
+  -- Real per-title play counts for the online catalog, incremented once per
+  -- successful GET /online-movies/:id/embed (server/routes/portal.js) - i.e.
+  -- every time a customer actually presses play and the movie was unlocked,
+  -- not just every page view. Drives the client's "Top 10 Most Watched" row
+  -- (public/portal/assets/js/movies-online.js) - a real, live ranking, not a
+  -- hand-picked/fake one.
+  CREATE TABLE IF NOT EXISTS online_movie_views (
+    movie_id INTEGER PRIMARY KEY,
+    views INTEGER NOT NULL DEFAULT 0
+  );
+
   -- Portal ad/promo carousel (new movies, promos, whatever the operator
   -- wants customers to see the moment they connect) - a list of images
   -- shown above the STARKFI banner text, distinct from the existing

@@ -405,6 +405,117 @@ router.get('/movies/:id/play', (req, res) => {
   return res.json({ success: true, status: 'ready', hls_url: `/movies_cache/${movie.id}/master.m3u8` });
 });
 
+// ── Online Movies (vidrock.ru embed catalog) ────────────────────────────
+// Fully separate from the local movie routes above: separate catalog
+// (server/services/onlineMovieCatalog.js), separate ledger
+// (online_movie_rentals), separate coin mode ('online_movie' in
+// server/routes/coin.js). Free tier reuses the exact same hasActiveSession
+// gate as a local free movie; paid tiers need their own online_movie_rentals
+// row, same "separate real coin payment" rule as a local premium rental.
+const onlineMovieCatalog = require('../services/onlineMovieCatalog');
+
+function hasActiveOnlineRental(movieId, mac) {
+  return !!db.prepare(`
+    SELECT 1 FROM online_movie_rentals WHERE movie_id = ? AND mac_address = ? AND expires_at > datetime('now')
+  `).get(movieId, mac);
+}
+
+// GET /online-movies?mac=xx - catalog with per-device unlock state, same
+// shape/spirit as GET /movies above.
+router.get('/online-movies', (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  const sessionActive = mac ? hasActiveSession(mac) : false;
+  const tmdbService = require('../services/tmdbService');
+  const viewRows = db.prepare('SELECT movie_id, views FROM online_movie_views').all();
+  const viewsById = new Map(viewRows.map((r) => [r.movie_id, r.views]));
+  const movies = onlineMovieCatalog.getAll().map((m) => {
+    const unlocked = m.tier === 'free' ? sessionActive : (mac ? hasActiveOnlineRental(m.id, mac) : false);
+    // Synchronous cache read, no network call in this request's path - see
+    // tmdbService.js's warmCache() (kicked off in the background by
+    // server/app.js at startup) for what actually populates this.
+    return {
+      id: m.id, title: m.title, tier: m.tier, price_pesos: m.price_pesos,
+      poster: tmdbService.getCachedPosterUrl(m.id), genres: tmdbService.getCachedGenres(m.id), unlocked,
+      views: viewsById.get(m.id) || 0,
+    };
+  });
+  res.json({ success: true, movies, session_active: sessionActive });
+});
+
+// GET /online-movies/:id/embed?mac=xx - gate check, then hand back the
+// vidrock.ru embed URL built server-side (mirrors movies-online.js's own
+// buildOnlineMovieEmbedUrl so both stay in sync - if the embed URL/params
+// change, update both places).
+router.get('/online-movies/:id/embed', (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  const movie = onlineMovieCatalog.getById(req.params.id);
+  if (!movie) return res.status(404).json({ success: false, message: 'Movie not found' });
+
+  const unlocked = movie.tier === 'free' ? hasActiveSession(mac) : hasActiveOnlineRental(movie.id, mac);
+  if (!unlocked) {
+    return res.status(403).json({ success: false, message: 'Not unlocked for this device' });
+  }
+  const params = new URLSearchParams({
+    autoplay: 'true', autonext: 'false', theme: '0c8f6d',
+    download: 'false', nextbutton: 'true', episodeselector: 'true', lang: 'en'
+  });
+
+  // Real play count, feeds the client's "Top 10 Most Watched" row - counted
+  // here (not on page view) so browsing the grid doesn't inflate it, only
+  // an actual, unlocked play does.
+  db.prepare(`
+    INSERT INTO online_movie_views (movie_id, views) VALUES (?, 1)
+    ON CONFLICT(movie_id) DO UPDATE SET views = views + 1
+  `).run(movie.id);
+
+  return res.json({ success: true, embed_url: `https://vidrock.ru/movie/${movie.id}?${params.toString()}` });
+});
+
+// ── Movie Credit balance (database.js's movie_credits table) ───────────
+// Fed by server/routes/coin.js's 'online_movie' finalize branch whenever a
+// coin window over/undershoots a movie's price - see that file's
+// addMovieCredit(). This is where the customer actually gets it back.
+
+// GET /credit/:mac - the portal polls/reads this to show "You have ₱X
+// credit" if there's anything to show.
+router.get('/credit/:mac', (req, res) => {
+  const mac = String(req.params.mac || '').trim().toLowerCase();
+  const row = db.prepare('SELECT balance_pesos FROM movie_credits WHERE mac_address = ?').get(mac);
+  res.json({ success: true, balance_pesos: row?.balance_pesos || 0 });
+});
+
+// POST /credit/use { mac } - spends the ENTIRE current balance as regular
+// WiFi coin credit, through the exact same rate-matching creditCoinValue()
+// already uses for a normal coin insert. If the balance doesn't match any
+// configured rate yet (e.g. still just ₱2 and the cheapest rate is ₱5), it's
+// left alone rather than lost - same "can't make change" reality as the
+// rest of this coin system, just never destructive.
+router.post('/credit/use', async (req, res) => {
+  const mac = String(req.body.mac || '').trim().toLowerCase();
+  if (!mac) return res.status(400).json({ success: false, message: 'Valid MAC address required' });
+
+  const row = db.prepare('SELECT balance_pesos FROM movie_credits WHERE mac_address = ?').get(mac);
+  const balance = row?.balance_pesos || 0;
+  if (balance <= 0) {
+    return res.json({ success: false, message: 'No credit to use yet.' });
+  }
+
+  const { creditCoinValue, NoMatchingRateError } = require('../services/coinCreditService');
+  try {
+    const ip = (await require('../services/networkService').getIpFromMac(mac)) || '';
+    const result = await creditCoinValue(mac, balance, ip, null, false);
+    db.prepare('UPDATE movie_credits SET balance_pesos = 0, updated_at = CURRENT_TIMESTAMP WHERE mac_address = ?').run(mac);
+    console.log(`✅ Movie credit spent for ${mac}: ₱${balance} -> ${result.minutes_added} WiFi minutes`);
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    if (err instanceof NoMatchingRateError) {
+      return res.json({ success: false, message: `Your ₱${balance} credit doesn't match a WiFi rate yet - it's saved, keep adding to it.` });
+    }
+    console.error('Credit use error:', err);
+    return res.status(500).json({ success: false, message: 'Something went wrong, please try again.' });
+  }
+});
+
 // Premium movie unlocking is now a real, separate coin payment (see
 // server/routes/coin.js's 'movie' pendingMode branch in
 // finalizePendingCoins()) - deliberately NOT deducted from WiFi minutes,

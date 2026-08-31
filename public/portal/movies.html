@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/portal/assets/css/all.min.css">
   <link rel="stylesheet" href="/portal/assets/css/portal.css">
   <link rel="stylesheet" href="/portal/assets/css/movies.css">
+  <link rel="stylesheet" href="/portal/assets/css/movies-online.css">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 </head>
 <body class="movies-body">
@@ -18,20 +19,48 @@
     <div style="width:24px;"></div>
   </div>
 
-  <div class="movies-tabs">
-    <button class="movies-tab active" data-tier="" onclick="setMoviesTierFilter('')">All</button>
-    <button class="movies-tab" data-tier="free" onclick="setMoviesTierFilter('free')">Free</button>
-    <button class="movies-tab" data-tier="premium" onclick="setMoviesTierFilter('premium')">New / Premium</button>
+  <!-- Source toggle: Local (existing rental system, untouched below) vs
+       Online (public/portal/assets/js/movies-online.js — separate catalog
+       and player, does not touch the local movie flow at all).
+       HIDDEN FOR NOW per owner request - Local has no titles scanned yet,
+       so the portal goes straight to Online. Nothing below was deleted,
+       just hidden - flip these two display values (and the toggle) to
+       bring Local back once it has content. -->
+  <div class="movies-source-toggle" style="display:none;">
+    <button class="movies-source-btn" data-source="local" onclick="setMoviesSource('local')">Local</button>
+    <button class="movies-source-btn active" data-source="online" onclick="setMoviesSource('online')">Online</button>
   </div>
 
-  <div id="moviesEmptyState" class="movies-empty" style="display:none;">
-    <i class="fas fa-film"></i>
-    <p>No movies available yet.</p>
+  <div id="localMoviesSection" style="display:none;">
+    <div class="movies-tabs">
+      <button class="movies-tab active" data-tier="" onclick="setMoviesTierFilter('')">All</button>
+      <button class="movies-tab" data-tier="free" onclick="setMoviesTierFilter('free')">Free</button>
+      <button class="movies-tab" data-tier="premium" onclick="setMoviesTierFilter('premium')">New / Premium</button>
+    </div>
+
+    <div id="moviesEmptyState" class="movies-empty" style="display:none;">
+      <i class="fas fa-film"></i>
+      <p>No movies available yet.</p>
+    </div>
+
+    <div id="moviesGridPortal" class="movies-grid"></div>
   </div>
 
-  <div id="moviesGridPortal" class="movies-grid"></div>
+  <!-- ONLINE MOVIES (vidrock.ru embed catalog) - shown by default for now -->
+  <div id="onlineMoviesSection">
+    <!-- Movie Credit balance (server/routes/portal.js's /credit/*) - hidden
+         whenever the balance is ₱0, so it's invisible unless it matters. -->
+    <div id="movieCreditBanner" class="movie-credit-banner" style="display:none;">
+      <span>Movie Credit: <b id="movieCreditAmount">₱0</b></span>
+      <button id="movieCreditUseBtn" class="btn btn-activate" onclick="useMovieCredit()">Use for WiFi time</button>
+    </div>
+    <div class="movies-online-search">
+      <input type="text" id="onlineMoviesSearch" placeholder="Search online movies...">
+    </div>
+    <div id="onlineMoviesRows"></div>
+  </div>
 
-  <!-- PLAYER OVERLAY -->
+  <!-- PLAYER OVERLAY (local, HLS <video>) -->
   <div id="moviePlayerOverlay" class="movie-player-overlay">
     <div class="movie-player-topbar">
       <button class="movie-player-close" onclick="closeMoviePlayer()"><i class="fas fa-times"></i></button>
@@ -40,6 +69,18 @@
     <div id="moviePlayerBody" class="movie-player-body">
       <video id="moviePlayerVideo" class="movie-player-video" controls playsinline></video>
       <div id="moviePlayerStatus" class="movie-player-status"></div>
+    </div>
+  </div>
+
+  <!-- PLAYER OVERLAY (online, iframe embed) -->
+  <div id="onlineMoviePlayerOverlay" class="movie-player-overlay">
+    <div class="movie-player-topbar">
+      <button class="movie-player-close" onclick="closeOnlineMoviePlayer()"><i class="fas fa-times"></i></button>
+      <div id="onlineMoviePlayerTitle" class="movie-player-title"></div>
+    </div>
+    <div class="movie-player-body">
+      <iframe id="onlineMoviePlayerFrame" class="movie-player-iframe" src="" allowfullscreen
+        allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="origin"></iframe>
     </div>
   </div>
 
@@ -58,5 +99,6 @@
 
   <script src="/portal/assets/js/vendor/hls.min.js"></script>
   <script src="/portal/assets/js/movies.js"></script>
+  <script src="/portal/assets/js/movies-online.js"></script>
 </body>
 </html>

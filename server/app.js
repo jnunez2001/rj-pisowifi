@@ -60,7 +60,8 @@ app.use(helmet({
       styleSrcElem: CSP_STYLE_SOURCES,
       styleSrcAttr: ["'unsafe-inline'"],
       fontSrc: ["'self'", 'https://fonts.gstatic.com', 'https://cdnjs.cloudflare.com', 'data:'],
-      imgSrc: ["'self'", 'data:', 'blob:'],
+      // image.tmdb.org - online movie poster art (server/services/tmdbService.js)
+      imgSrc: ["'self'", 'data:', 'blob:', 'https://image.tmdb.org'],
       // hls.js (public/portal/movies.html's player) attaches video via a
       // MediaSource blob: URL, not a direct network request - without
       // 'blob:' here the browser silently refuses to play it, same CSP
@@ -71,6 +72,11 @@ app.use(helmet({
       // than failing outright, but there's no reason to pay that cost.
       workerSrc: ["'self'", 'blob:'],
       connectSrc: ["'self'"],
+      // public/portal/movies.html's "Online" tab embeds vidrock.ru movies
+      // in an <iframe> (public/portal/assets/js/movies-online.js) - without
+      // an explicit frame-src, CSP falls back to default-src 'self' and
+      // silently blocks the iframe from ever loading any content.
+      frameSrc: ["'self'", 'https://vidrock.ru'],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
       formAction: ["'self'"],
@@ -511,6 +517,22 @@ const server = app.listen(PORT, () => {
     require('./services/multiWanService').start();
   } catch (e) {
     console.warn('[Multi-WAN] Failed to start (non-fatal):', e.message);
+  }
+
+  // Online movie poster cache warm-up (server/services/tmdbService.js) -
+  // fire-and-forget, never awaited: the movies page already works with
+  // plain film-icon cards while this fills in, and each id is only ever
+  // fetched once (cached in tmdb_poster_cache) across the box's lifetime.
+  // No-ops immediately if no TMDb API key has been configured yet.
+  try {
+    const onlineMovieCatalog = require('./services/onlineMovieCatalog');
+    require('./services/tmdbService').warmCache(onlineMovieCatalog.getAll().map((m) => m.id))
+      .then((result) => {
+        if (!result.skipped) console.log(`🖼️  TMDb poster cache warm-up: fetched ${result.fetched} new id(s)`);
+      })
+      .catch((e) => console.warn('[TMDb] Poster warm-up failed (non-fatal):', e.message));
+  } catch (e) {
+    console.warn('[TMDb] Poster warm-up failed to start (non-fatal):', e.message);
   }
 
   // Data retention cleanup (privacy) - ages out old session_history/
