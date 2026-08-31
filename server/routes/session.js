@@ -8,6 +8,7 @@ const {
   expireSession
 } = require('../services/sessionService');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
+const { parseSqliteDate } = require('../utils/sqliteDate');
 const { logFinancialEvent } = require('../services/financialLogService');
 const sseService = require('../services/sseService');
 const db = require('../config/database');
@@ -105,7 +106,7 @@ router.get('/mac/:mac', async (req, res) => {
     // just sat frozen at 00:00:00 on the connected screen instead of
     // flipping to the disconnected/expired state, even though their
     // internet access was already gone.
-    const expires = new Date(session.expires_at);
+    const expires = parseSqliteDate(session.expires_at);
 
     if (now >= expires && session.is_paused === 0) {
       await expireSession(session.voucher_code);
@@ -118,7 +119,7 @@ router.get('/mac/:mac', async (req, res) => {
 
     const remaining = session.is_paused === 1
       ? session.minutes_remaining
-      : Math.max(0, (new Date(session.expires_at) - now) / 60000);
+      : Math.max(0, (parseSqliteDate(session.expires_at) - now) / 60000);
 
     // Latest coin credit for this session, so the portal can show "You
     // added ₱X" at the same moment the vendo speaker announces it -
@@ -180,7 +181,7 @@ router.get('/voucher/:code', (req, res) => {
 
     const remaining = session.is_paused === 1
       ? session.minutes_remaining
-      : Math.max(0, (new Date(session.expires_at) - new Date()) / 60000);
+      : Math.max(0, (parseSqliteDate(session.expires_at) - new Date()) / 60000);
 
     return res.json({
       success: true,

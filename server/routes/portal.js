@@ -4,6 +4,7 @@ const db = require('../config/database');
 const { getRates } = require('../services/voucherService');
 const { execSync } = require('child_process');
 const mikrotikService = require('../services/mikrotikService');
+const { parseSqliteDate } = require('../utils/sqliteDate');
 
 // Bug found live: this route used to read only the raw socket address,
 // which is correct when this server is reached directly - but a portal
@@ -358,7 +359,7 @@ function hasActiveSession(mac) {
   const session = db.prepare(
     "SELECT * FROM sessions WHERE mac_address = ? ORDER BY id DESC LIMIT 1"
   ).get(mac);
-  return !!(session && session.minutes_remaining > 0 && new Date(session.hard_expires_at) > new Date());
+  return !!(session && session.minutes_remaining > 0 && parseSqliteDate(session.hard_expires_at) > new Date());
 }
 
 function hasActiveRental(movieId, mac) {

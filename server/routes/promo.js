@@ -8,6 +8,7 @@ const {
   getBurstConfig
 } = require('../services/sessionService');
 const { setClientBandwidth } = require('../services/networkService');
+const { parseSqliteDate } = require('../utils/sqliteDate');
 const { logFinancialEvent } = require('../services/financialLogService');
 const { z, macAddress, validateBody } = require('../utils/validation');
 
@@ -76,7 +77,7 @@ router.post('/redeem', validateBody(redeemSchema), async (req, res) => {
 
     // Check if promo has expired
     if (promo.expires_at) {
-      const expiresAt = new Date(promo.expires_at);
+      const expiresAt = parseSqliteDate(promo.expires_at);
       if (new Date() >= expiresAt) {
         return res.status(404).json({
           success: false,

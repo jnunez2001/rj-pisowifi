@@ -3,6 +3,7 @@ const router = express.Router();
 const db = require('../config/database');
 const crypto = require('crypto');
 const { verifyPassword, hashPassword } = require('../utils/passwordHash');
+const { parseSqliteDate } = require('../utils/sqliteDate');
 
 // Every device-facing route here (register/status/member-login/logout/
 // staff-override) authenticates the CALLING PC via its own device_secret
@@ -97,7 +98,7 @@ router.get('/status', (req, res) => {
     // result would still burn the balance for real.
     remainingMinutes = session?.member_id
       ? (db.prepare('SELECT seconds FROM rental_members WHERE id = ?').get(session.member_id)?.seconds || 0) / 60
-      : Math.max(0, (session?.hard_expires_at ? new Date(session.hard_expires_at).getTime() - Date.now() : 0) / 60000);
+      : Math.max(0, (session?.hard_expires_at ? parseSqliteDate(session.hard_expires_at).getTime() - Date.now() : 0) / 60000);
     loggedInUser = session?.member_id
       ? db.prepare('SELECT username FROM rental_members WHERE id = ?').get(session.member_id)?.username || null
       : null;
@@ -113,7 +114,7 @@ router.get('/status', (req, res) => {
     // timestamp the way a single PC's guest session can.
     const member = db.prepare('SELECT * FROM rental_members WHERE id = ?').get(session.member_id);
     if (member) {
-      const realElapsedSeconds = Math.max(0, (Date.now() - new Date(session.updated_at).getTime()) / 1000);
+      const realElapsedSeconds = Math.max(0, (Date.now() - parseSqliteDate(session.updated_at).getTime()) / 1000);
       // rental_speed_timer_secs is how many real milliseconds count as
       // one billed second (1000 = real-time, lower = drains faster) -
       // see the guarded migration in database.js for why the default
@@ -158,7 +159,7 @@ router.get('/status', (req, res) => {
     // stored minutes_remaining counter, so "remaining" is always
     // computed live and can never go stale the way a periodically-
     // decremented field could.
-    const remainingMs = session?.hard_expires_at ? new Date(session.hard_expires_at).getTime() - Date.now() : 0;
+    const remainingMs = session?.hard_expires_at ? parseSqliteDate(session.hard_expires_at).getTime() - Date.now() : 0;
     remainingMinutes = Math.max(0, remainingMs / 60000);
   }
 
