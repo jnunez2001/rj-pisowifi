@@ -5304,6 +5304,7 @@ router.post('/movies/online-catalog/price', adminAuth, (req, res) => {
   if (!tmdbId || !title) {
     return res.status(400).json({ success: false, message: 'A movie and title are required.' });
   }
+  onlineMovieCatalog.unhide(tmdbId);
   db.prepare(`
     INSERT INTO online_movie_pricing (tmdb_id, title, tier, price_pesos, updated_at)
     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -5325,6 +5326,7 @@ router.post('/movies/online-catalog/add-by-id', adminAuth, async (req, res) => {
 
   try {
     const movie = await tmdbService.getMovieById(tmdbId);
+    onlineMovieCatalog.unhide(movie.id);
     db.prepare(`
       INSERT INTO online_movie_pricing (tmdb_id, title, tier, price_pesos, updated_at)
       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -5377,6 +5379,7 @@ router.post('/movies/online-catalog/import', adminAuth, idListUpload.single('fil
     const results = await Promise.allSettled(batch.map((id) => tmdbService.getMovieById(id)));
     for (const result of results) {
       if (result.status === 'fulfilled') {
+        onlineMovieCatalog.unhide(result.value.id);
         upsert.run(result.value.id, result.value.title);
         added++;
       } else {
@@ -5429,6 +5432,18 @@ router.post('/movies/online-catalog/bulk-price', adminAuth, (req, res) => {
 // title from the catalog itself.
 router.delete('/movies/online-catalog/price/:tmdbId', adminAuth, (req, res) => {
   db.prepare('DELETE FROM online_movie_pricing WHERE tmdb_id = ?').run(parseInt(req.params.tmdbId, 10));
+  res.json({ success: true });
+});
+
+// Fully removes a title from the Online Movies catalog (the Price Groups
+// table's Delete button) - for anything not appropriate for customers to
+// see. Unlike the /price/:tmdbId route above, this also records the id in
+// online_movie_hidden so it can't silently come back the next time an
+// admin clicks "Sync from TMDb" - see onlineMovieCatalog.js's hide().
+router.delete('/movies/online-catalog/:tmdbId', adminAuth, (req, res) => {
+  const tmdbId = parseInt(req.params.tmdbId, 10);
+  if (!tmdbId) return res.status(400).json({ success: false, message: 'Invalid movie id.' });
+  onlineMovieCatalog.hide(tmdbId);
   res.json({ success: true });
 });
 

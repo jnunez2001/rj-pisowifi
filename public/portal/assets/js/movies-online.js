@@ -115,6 +115,29 @@ function topWatchedRowHtml(list) {
   `;
 }
 
+// Sorted by actual release date, newest first - not by TMDb popularity/
+// rating like Top Rated is, which is why Top Rated alone skews toward
+// decades-old classics and never surfaces this year's titles. Limited to
+// the current and previous calendar year so this row doesn't just fill up
+// with "recent-ish" older movies once this year's list is thin. Server-side
+// filters this out of the sync entirely if release_date is missing (older
+// installs that haven't re-synced since this field was added), so this only
+// ever needs to check for its presence.
+function newReleasesRowHtml(list) {
+  const currentYear = new Date().getFullYear();
+  const ranked = list
+    .filter((m) => m.release_date && parseInt(m.release_date.slice(0, 4), 10) >= currentYear - 1)
+    .sort((a, b) => b.release_date.localeCompare(a.release_date))
+    .slice(0, 20);
+  if (ranked.length === 0) return '';
+  return `
+    <div class="movies-online-row">
+      <h3 class="movies-online-row-title">🆕 New in ${currentYear}</h3>
+      <div class="movies-online-row-track">${ranked.map(movieCardHtml).join('')}</div>
+    </div>
+  `;
+}
+
 // Genre rows are the default view; falls back to the old tier-based
 // grouping only while genres haven't finished warming yet (e.g. right after
 // a fresh install, before tmdbService's background fetch completes) so the
@@ -122,15 +145,16 @@ function topWatchedRowHtml(list) {
 function renderOnlineMoviesRows(list) {
   const el = document.getElementById('onlineMoviesRows');
   const top10 = topWatchedRowHtml(list);
+  const newReleases = newReleasesRowHtml(list);
   const genreRows = buildGenreRows(list);
   if (genreRows.length > 0) {
-    el.innerHTML = top10 + rowsHtml(genreRows);
+    el.innerHTML = top10 + newReleases + rowsHtml(genreRows);
     return;
   }
   const tierRows = TIER_ROWS
     .map(({ tier, label }) => [label, list.filter((m) => m.tier === tier)])
     .filter(([, items]) => items.length > 0);
-  el.innerHTML = top10 + rowsHtml(tierRows);
+  el.innerHTML = top10 + newReleases + rowsHtml(tierRows);
 }
 
 // Flat grid used only for search results, where tier grouping isn't useful.
@@ -172,6 +196,23 @@ let onlineMovieCoinPollInterval = null;
 async function beginOnlineMovieCoinInsertion() {
   const movie = onlineAllMovies.find((m) => m.id === onlinePendingRentMovieId);
   if (!movie) return;
+
+  // Bug found live: onlineCurrentMac was only ever detected once, when the
+  // Movies tab first loaded (loadOnlineMovies() above) - a single transient
+  // lookup miss there (e.g. the router's DHCP lease for this device not
+  // visible yet at that exact moment) left it blank for the rest of the
+  // session. Free movies never check the MAC at all, so this went unnoticed
+  // until a customer tried a paid one, and every attempt then failed with
+  // "Valid MAC address required" from the server even while genuinely
+  // connected through the portal. Re-detect right here, at the actual
+  // payment gate, instead of trusting a possibly-stale value from load time.
+  if (!onlineCurrentMac) {
+    onlineCurrentMac = await detectMacForMovies();
+  }
+  if (!onlineCurrentMac) {
+    alert('Could not identify your device on the network. Please reconnect to WiFi and try again.');
+    return;
+  }
 
   try {
     const res = await fetch('/api/coin/pending', {

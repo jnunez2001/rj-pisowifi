@@ -177,11 +177,12 @@ async function syncFeed(pages = 5) {
   if (!apiKey) return { skipped: true, reason: 'no_api_key' };
 
   const genreMap = await getGenreMap(apiKey);
+  const hiddenIds = new Set(db.prepare('SELECT tmdb_id FROM online_movie_hidden').all().map((r) => r.tmdb_id));
   const upsertFeed = db.prepare(`
-    INSERT INTO tmdb_movie_feed (tmdb_id, title, poster_path, genres, source, fetched_at)
-    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO tmdb_movie_feed (tmdb_id, title, poster_path, genres, source, release_date, fetched_at)
+    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(tmdb_id) DO UPDATE SET title = excluded.title, poster_path = excluded.poster_path,
-      genres = excluded.genres, fetched_at = excluded.fetched_at
+      genres = excluded.genres, release_date = excluded.release_date, fetched_at = excluded.fetched_at
   `);
 
   let total = 0;
@@ -200,8 +201,9 @@ async function syncFeed(pages = 5) {
       const results = data.results || [];
       if (results.length === 0) break;
       for (const m of results) {
+        if (hiddenIds.has(m.id)) continue;
         const genreNames = (m.genre_ids || []).map((id) => genreMap[id]).filter(Boolean);
-        upsertFeed.run(m.id, m.title, m.poster_path || null, JSON.stringify(genreNames), key);
+        upsertFeed.run(m.id, m.title, m.poster_path || null, JSON.stringify(genreNames), key, m.release_date || null);
         setCached(m.id, m.poster_path || null, genreNames);
         count++;
       }
@@ -210,6 +212,39 @@ async function syncFeed(pages = 5) {
     perList[key] = count;
     total += count;
   }
+
+  // Trending/Popular/Top Rated all skew toward long-standing hits (Top
+  // Rated especially - it's dominated by decades-old classics), so a
+  // recently-released title can be genuinely popular right now and still
+  // never surface in any of those three lists yet. This dedicated pass
+  // pulls TMDb's own "best of this year" ordering directly (Discover sorted
+  // by popularity, filtered to the current calendar year) so the client's
+  // "New Releases" row actually has this year's movies in it, not just
+  // whatever's popular overall.
+  const currentYear = new Date().getFullYear();
+  let newReleaseCount = 0;
+  for (let page = 1; page <= pages; page++) {
+    let res;
+    try {
+      res = await fetchWithTimeout(`${BASE_URL}/discover/movie?api_key=${apiKey}&sort_by=popularity.desc&primary_release_year=${currentYear}&page=${page}`);
+    } catch (e) {
+      break;
+    }
+    if (!res.ok) break;
+    const data = await res.json();
+    const results = data.results || [];
+    if (results.length === 0) break;
+    for (const m of results) {
+      if (hiddenIds.has(m.id)) continue;
+      const genreNames = (m.genre_ids || []).map((id) => genreMap[id]).filter(Boolean);
+      upsertFeed.run(m.id, m.title, m.poster_path || null, JSON.stringify(genreNames), 'new_release', m.release_date || null);
+      setCached(m.id, m.poster_path || null, genreNames);
+      newReleaseCount++;
+    }
+    if (page >= (data.total_pages || 1)) break;
+  }
+  perList.new_release = newReleaseCount;
+  total += newReleaseCount;
 
   return { skipped: false, total, perList };
 }

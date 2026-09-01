@@ -509,8 +509,22 @@ db.exec(`
     title TEXT NOT NULL,
     poster_path TEXT,
     genres TEXT, -- JSON array of genre name strings
-    source TEXT, -- 'trending' | 'popular' | 'top_rated', whichever it was first seen in
+    source TEXT, -- 'trending' | 'popular' | 'top_rated' | 'new_release', whichever it was first seen in
+    release_date TEXT, -- TMDb's 'YYYY-MM-DD', or NULL for rows synced before this column existed
     fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- A tmdb_id an admin has explicitly removed from the Online Movies catalog
+  -- (Movies > Online > Price Groups' Delete button) - e.g. a title that
+  -- isn't appropriate for customers to see. Separate from just deleting the
+  -- pricing/feed rows because tmdb-sync would otherwise just re-add it the
+  -- next time it's popular/trending; this is checked by both syncFeed() and
+  -- onlineMovieCatalog.getAll()/getById() so a hidden title is gone for good
+  -- until an admin explicitly un-hides it (not currently exposed in the UI -
+  -- re-adding by TMDb ID or search clears it, see onlineMovieCatalog.js).
+  CREATE TABLE IF NOT EXISTS online_movie_hidden (
+    tmdb_id INTEGER PRIMARY KEY,
+    hidden_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   -- Portal ad/promo carousel (new movies, promos, whatever the operator
@@ -2052,6 +2066,15 @@ try {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_session_history_date_ended ON session_history(date(ended_at))`);
 } catch (e) {
   console.error('⚠️ Index creation failed:', e.message);
+}
+
+try {
+  // Existing installs synced their feed before this column existed - those
+  // rows just stay NULL (no way to backfill without re-syncing) and simply
+  // won't show up in the client's "New Releases" row until the next sync.
+  db.exec('ALTER TABLE tmdb_movie_feed ADD COLUMN release_date TEXT');
+} catch (e) {
+  // already applied
 }
 
 // One-time migration for existing installs: movie_embed_url_template used

@@ -454,8 +454,9 @@ function omRenderCatalogRow(m) {
       <td class="om-price-cell">
         <input type="number" class="om-price-input" min="0" value="${m.price_pesos || 0}" style="width:60px;text-align:right;${priceInputStyle}">
       </td>
-      <td style="text-align:right;">
+      <td style="text-align:right;white-space:nowrap;">
         <button class="btn btn-secondary om-reset-btn" style="padding:4px 8px;font-size:11px;" title="Reset to Free"><i class="fas fa-rotate-left"></i></button>
+        <button class="btn btn-secondary om-delete-btn" style="padding:4px 8px;font-size:11px;color:var(--danger,#e74c3c);" title="Remove from catalog"><i class="fas fa-trash"></i></button>
       </td>
     </tr>
   `;
@@ -481,6 +482,21 @@ async function omResetToFree(tmdbId) {
   await apiCall('DELETE', `/api/admin/movies/online-catalog/price/${tmdbId}`);
   showToast('Reset to Free', 'success');
   omLoadCatalog();
+}
+
+// Fully removes a title (not appropriate for customers, etc.) - unlike the
+// reset button above, this also keeps it from silently coming back the next
+// time "Sync from TMDb" runs (see server/services/onlineMovieCatalog.js's
+// hide()). Re-adding it later by TMDb ID or search clears that block.
+async function omDeleteFromCatalog(tmdbId, title) {
+  if (!confirm(`Remove "${title}" from the Online Movies catalog? It won't reappear even after syncing from TMDb, until it's added back manually.`)) return;
+  const data = await apiCall('DELETE', `/api/admin/movies/online-catalog/${tmdbId}`);
+  if (data.success) {
+    showToast(`"${title}" removed`, 'success');
+    omLoadCatalog();
+  } else {
+    showToast(data.message || 'Could not remove', 'error');
+  }
 }
 
 function omToggleAll(cb) {
@@ -538,6 +554,12 @@ document.addEventListener('click', (e) => {
   if (resetBtn) {
     const row = resetBtn.closest('tr');
     if (row) omResetToFree(parseInt(row.dataset.id, 10));
+    return;
+  }
+  const deleteBtn = e.target.closest('.om-delete-btn');
+  if (deleteBtn) {
+    const row = deleteBtn.closest('tr');
+    if (row) omDeleteFromCatalog(parseInt(row.dataset.id, 10), row.dataset.title);
     return;
   }
   const star = e.target.closest('.om-default-star');

@@ -444,7 +444,7 @@ router.get('/online-movies', (req, res) => {
     // tmdbService.js's warmCache() (kicked off in the background by
     // server/app.js at startup) for what actually populates this.
     return {
-      id: m.id, title: m.title, tier: m.tier, price_pesos: m.price_pesos,
+      id: m.id, title: m.title, tier: m.tier, price_pesos: m.price_pesos, release_date: m.release_date || null,
       poster: tmdbService.getCachedPosterUrl(m.id), genres: tmdbService.getCachedGenres(m.id), unlocked,
       views: viewsById.get(m.id) || 0,
     };
