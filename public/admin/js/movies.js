@@ -21,6 +21,7 @@ async function loadMoviesPage() {
   } catch (e) {}
 
   await refreshMoviesGrid();
+  await omLoadRevenue();
   await omInit();
 
   clearInterval(moviesPollInterval);
@@ -670,6 +671,30 @@ async function omLoadTopSearches() {
       <td>${escapeHtml(r.query)}</td>
       <td style="text-align:right;">${r.hits}</td>
       <td>${new Date(r.last_searched.replace(' ', 'T') + 'Z').toLocaleString()}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Revenue ───────────────────────────────────────────────────────────────
+async function omLoadRevenue() {
+  const data = await apiCall('GET', '/api/admin/movies/revenue');
+  if (!data.success) return;
+  document.getElementById('omRevenueToday').textContent = `₱${data.today.total}`;
+  document.getElementById('omRevenueMonth').textContent = `₱${data.month.total}`;
+  document.getElementById('omRevenueAllTime').textContent = `₱${data.all_time.total}`;
+  document.getElementById('omRevenueSplit').textContent = `₱${data.all_time.local} / ₱${data.all_time.online}`;
+
+  const tbody = document.getElementById('omRevenueTopRows');
+  if (data.top_movies.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:20px;">No movie revenue yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = data.top_movies.map((m) => `
+    <tr>
+      <td>${escapeHtml(m.title)}</td>
+      <td><span class="om-tier-pill ${m.kind === 'local' ? 'free' : 'paid'}">${m.kind}</span></td>
+      <td style="text-align:right;">${m.rentals}</td>
+      <td style="text-align:right;">₱${m.revenue}</td>
     </tr>
   `).join('');
 }

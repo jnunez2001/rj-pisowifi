@@ -5628,6 +5628,67 @@ router.delete('/movies/online-rentals/:id', adminAuth, (req, res) => {
 // is what logs these) - real demand signal, separate from Most Watched
 // (which only reflects titles you already have) or TMDb's own popularity
 // ranking (which reflects the whole world, not your customers).
+// GET /movies/revenue - Movies tab's Revenue card. Sums real transactions
+// rows rather than re-deriving anything from movie_rentals/
+// online_movie_rentals (those are access-control state, not a ledger - a
+// rental row's existence says nothing about how much was actually paid,
+// and gets overwritten/expires independently of what was charged).
+// Covers both local ('movie_rental') and online ('online_movie_rental' -
+// coin-paid, and 'online_movie_rental_credit' - paid from a Movie Credit
+// balance) - see server/routes/coin.js and portal.js's
+// unlock-with-credit route for where these get written. Money that's
+// still sitting unspent in movie_credits (an over/underpay not yet
+// converted or applied) is deliberately NOT counted here - see the
+// comment on addMovieCredit() in coin.js: it was never logged as revenue
+// at collection time, only once it's actually earned via a completed
+// rental or a WiFi-time conversion, so this can't double-count it.
+router.get('/movies/revenue', adminAuth, (req, res) => {
+  const MOVIE_TYPES = ['movie_rental', 'online_movie_rental', 'online_movie_rental_credit'];
+  const placeholders = MOVIE_TYPES.map(() => '?').join(',');
+  const today = db.prepare("SELECT date('now', 'localtime') as d").get().d;
+
+  const sumFor = (whereClause, ...params) => db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN type = 'movie_rental' THEN coin_value ELSE 0 END), 0) as local,
+      COALESCE(SUM(CASE WHEN type != 'movie_rental' THEN coin_value ELSE 0 END), 0) as online,
+      COUNT(*) as rentals
+    FROM transactions WHERE type IN (${placeholders}) ${whereClause}
+  `).get(...MOVIE_TYPES, ...params);
+
+  const toTotals = (row) => ({ local: row.local, online: row.online, total: row.local + row.online, rentals: row.rentals });
+
+  const todayTotals = toTotals(sumFor("AND date(created_at, 'localtime') = ?", today));
+  const monthTotals = toTotals(sumFor("AND strftime('%Y-%m', created_at, 'localtime') = strftime('%Y-%m', 'now', 'localtime')"));
+  const allTimeTotals = toTotals(sumFor(''));
+
+  const topRows = db.prepare(`
+    SELECT voucher_code, SUM(coin_value) as revenue, COUNT(*) as rentals
+    FROM transactions WHERE type IN (${placeholders})
+    GROUP BY voucher_code ORDER BY revenue DESC LIMIT 10
+  `).all(...MOVIE_TYPES);
+
+  const topMovies = topRows.map((row) => {
+    const onlineMatch = row.voucher_code.match(/^ONLINE-MOVIE-(\d+)$/);
+    const localMatch = row.voucher_code.match(/^MOVIE-(\d+)$/);
+    let title = row.voucher_code;
+    let kind = 'unknown';
+    if (onlineMatch) {
+      kind = 'online';
+      const id = parseInt(onlineMatch[1], 10);
+      title = db.prepare('SELECT title FROM online_movie_pricing WHERE tmdb_id = ?').get(id)?.title
+        || db.prepare('SELECT title FROM tmdb_movie_feed WHERE tmdb_id = ?').get(id)?.title
+        || `TMDb #${id}`;
+    } else if (localMatch) {
+      kind = 'local';
+      const movie = movieService.getMovie(localMatch[1]);
+      title = movie?.title || `Movie #${localMatch[1]}`;
+    }
+    return { title, kind, revenue: row.revenue, rentals: row.rentals };
+  });
+
+  res.json({ success: true, today: todayTotals, month: monthTotals, all_time: allTimeTotals, top_movies: topMovies });
+});
+
 router.get('/movies/top-searches', adminAuth, (req, res) => {
   const rows = db.prepare(`
     SELECT query, COUNT(*) as hits, MAX(searched_at) as last_searched
