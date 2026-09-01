@@ -454,18 +454,22 @@ router.get('/online-movies', (req, res) => {
   res.json({ success: true, movies, session_active: true });
 });
 
-// GET /online-movies/:id/embed?mac=xx - hands back the vidrock.ru embed URL
-// built server-side (mirrors movies-online.js's own buildOnlineMovieEmbedUrl
-// so both stay in sync - if the embed URL/params change, update both
-// places). No unlock gate - see the comment on GET /online-movies above.
+// GET /online-movies/:id/embed?mac=xx - hands back an embed URL built from
+// settings.movie_embed_url_template, a provider-agnostic template
+// containing a literal "{tmdb_id}" placeholder (e.g.
+// "https://someprovider.com/embed/movie/{tmdb_id}"). Intentionally blank by
+// default - no vidrock.ru or any other provider baked in - until an admin
+// sets one (see PLAN.md / the Movies admin settings work still to be built:
+// this route already reads the settings key so that form has somewhere to
+// land). No unlock gate - see the comment on GET /online-movies above.
 router.get('/online-movies/:id/embed', (req, res) => {
   const movie = onlineMovieCatalog.getById(req.params.id);
   if (!movie) return res.status(404).json({ success: false, message: 'Movie not found' });
 
-  const params = new URLSearchParams({
-    autoplay: 'true', autonext: 'false', theme: '0c8f6d',
-    download: 'false', nextbutton: 'true', episodeselector: 'true', lang: 'en'
-  });
+  const template = db.prepare("SELECT value FROM settings WHERE key = 'movie_embed_url_template'").get()?.value || '';
+  if (!template || !template.includes('{tmdb_id}')) {
+    return res.status(503).json({ success: false, message: 'No movie source configured yet - set one in Settings > Movies.' });
+  }
 
   // Real play count, feeds the client's "Top 10 Most Watched" row - counted
   // here (not on page view) so browsing the grid doesn't inflate it, only
@@ -475,7 +479,7 @@ router.get('/online-movies/:id/embed', (req, res) => {
     ON CONFLICT(movie_id) DO UPDATE SET views = views + 1
   `).run(movie.id);
 
-  return res.json({ success: true, embed_url: `https://vidrock.ru/movie/${movie.id}?${params.toString()}` });
+  return res.json({ success: true, embed_url: template.replace('{tmdb_id}', movie.id) });
 });
 
 // ── Movie Credit balance (database.js's movie_credits table) ───────────
