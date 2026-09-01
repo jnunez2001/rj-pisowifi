@@ -597,11 +597,24 @@ router.post('/session/:code/resume', adminAuth, async (req, res) => {
 // GET /api/admin/sales
 router.get('/sales', adminAuth, (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    // Bug found live: "today" was computed via `new Date().toISOString()`,
+    // which is ALWAYS UTC in Node regardless of the server's own OS
+    // timezone - and created_at is stored as naive UTC too (SQLite's
+    // CURRENT_TIMESTAMP), so this "consistently UTC" pairing still
+    // disagreed with an operator's actual local calendar day. For roughly
+    // the first 8 hours of each Philippine (UTC+8) local day, this made
+    // "Today's Revenue" silently show the PREVIOUS day's total instead -
+    // real transactions from that morning were filtered out for still
+    // matching UTC's "yesterday". Computing `today` through SQLite's own
+    // 'localtime' modifier instead - the same "trust the server's OS
+    // timezone" convention already established in timerService.js - and
+    // using the identical modifier on every date(created_at) comparison
+    // below keeps both sides of every comparison in the same timezone.
+    const today = db.prepare("SELECT date('now', 'localtime') as d").get().d;
 
     const todaySales = db.prepare(`
       SELECT COUNT(*) as transaction_count, SUM(coin_value) as total_coins, SUM(minutes_added) as total_minutes
-      FROM transactions WHERE date(created_at) = ? AND type = 'coin'
+      FROM transactions WHERE date(created_at, 'localtime') = ? AND type = 'coin'
     `).get(today);
 
     // Main Kiosk (kiosk_id NULL) vs Satellite Kiosks (kiosk_id set) split -
@@ -610,16 +623,16 @@ router.get('/sales', adminAuth, (req, res) => {
     // kiosks) already has the per-kiosk breakdown for anyone who drills in.
     const todayMainKiosk = db.prepare(`
       SELECT COUNT(*) as count, SUM(coin_value) as income
-      FROM transactions WHERE date(created_at) = ? AND type = 'coin' AND kiosk_id IS NULL
+      FROM transactions WHERE date(created_at, 'localtime') = ? AND type = 'coin' AND kiosk_id IS NULL
     `).get(today);
     const todaySatelliteKiosks = db.prepare(`
       SELECT COUNT(*) as count, SUM(coin_value) as income
-      FROM transactions WHERE date(created_at) = ? AND type = 'coin' AND kiosk_id IS NOT NULL
+      FROM transactions WHERE date(created_at, 'localtime') = ? AND type = 'coin' AND kiosk_id IS NOT NULL
     `).get(today);
 
     const todayPromo = db.prepare(`
       SELECT COUNT(*) as promo_count, SUM(coin_value) as promo_income
-      FROM transactions WHERE date(created_at) = ? AND type = 'promo'
+      FROM transactions WHERE date(created_at, 'localtime') = ? AND type = 'promo'
     `).get(today);
 
     // Vouchers (printed batches, see the Move-log note in promo.js) are a
@@ -629,12 +642,12 @@ router.get('/sales', adminAuth, (req, res) => {
     // 'promo' and being indistinguishable in reporting.
     const todayVoucher = db.prepare(`
       SELECT COUNT(*) as voucher_count, SUM(coin_value) as voucher_income
-      FROM transactions WHERE date(created_at) = ? AND type = 'voucher'
+      FROM transactions WHERE date(created_at, 'localtime') = ? AND type = 'voucher'
     `).get(today);
 
     const todayFree = db.prepare(`
       SELECT COUNT(*) as free_count, SUM(minutes_added) as free_minutes
-      FROM transactions WHERE date(created_at) = ? AND type = 'free'
+      FROM transactions WHERE date(created_at, 'localtime') = ? AND type = 'free'
     `).get(today);
 
     // Real average session duration - see session_history's column comment
@@ -644,15 +657,15 @@ router.get('/sales', adminAuth, (req, res) => {
     // just wrapped up actually run").
     const todaySessionDuration = db.prepare(`
       SELECT AVG(duration_seconds) as avg_seconds, COUNT(*) as ended_count
-      FROM session_history WHERE date(ended_at) = ?
+      FROM session_history WHERE date(ended_at, 'localtime') = ?
     `).get(today);
 
     const weekSales = db.prepare(`
-      SELECT date(created_at) as date,
+      SELECT date(created_at, 'localtime') as date,
         SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as total,
         COUNT(*) as transactions
-      FROM transactions WHERE date(created_at) >= date('now', '-7 days')
-      GROUP BY date(created_at) ORDER BY date DESC
+      FROM transactions WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-7 days')
+      GROUP BY date(created_at, 'localtime') ORDER BY date DESC
     `).all();
 
     // Bug: the admin UI showed "Monthly Sales" as weekTotal * 4, a rough
@@ -661,7 +674,7 @@ router.get('/sales', adminAuth, (req, res) => {
     // Compute the real month-to-date total instead.
     const monthSales = db.prepare(`
       SELECT SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as total
-      FROM transactions WHERE date(created_at) >= date('now', 'start of month')
+      FROM transactions WHERE date(created_at, 'localtime') >= date('now', 'localtime', 'start of month')
     `).get();
 
     // Bug: the dashboard's Daily/Weekly/Monthly chart-range buttons never
@@ -673,20 +686,20 @@ router.get('/sales', adminAuth, (req, res) => {
     let chart, chartFormat;
     if (range === 'daily') {
       chart = db.prepare(`
-        SELECT strftime('%H:00', created_at) as label,
+        SELECT strftime('%H:00', created_at, 'localtime') as label,
           SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as total,
           COUNT(*) as transactions
-        FROM transactions WHERE date(created_at) = date('now')
-        GROUP BY strftime('%H', created_at) ORDER BY label ASC
+        FROM transactions WHERE date(created_at, 'localtime') = date('now', 'localtime')
+        GROUP BY strftime('%H', created_at, 'localtime') ORDER BY label ASC
       `).all();
       chartFormat = 'hour';
     } else if (range === 'monthly') {
       chart = db.prepare(`
-        SELECT date(created_at) as label,
+        SELECT date(created_at, 'localtime') as label,
           SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as total,
           COUNT(*) as transactions
-        FROM transactions WHERE date(created_at) >= date('now', '-30 days')
-        GROUP BY date(created_at) ORDER BY label ASC
+        FROM transactions WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-30 days')
+        GROUP BY date(created_at, 'localtime') ORDER BY label ASC
       `).all();
       chartFormat = 'date';
     } else {
@@ -702,20 +715,20 @@ router.get('/sales', adminAuth, (req, res) => {
     // (see the column comment in database.js) - rows from before that
     // migration are silently excluded, not miscounted.
     const firstSeenRows = db.prepare(`
-      SELECT mac_address, MIN(date(created_at)) as first_date
+      SELECT mac_address, MIN(date(created_at, 'localtime')) as first_date
       FROM transactions WHERE mac_address IS NOT NULL
       GROUP BY mac_address
     `).all();
     const firstSeenByMac = new Map(firstSeenRows.map(r => [r.mac_address, r.first_date]));
 
-    const rangeStartClause = range === 'daily' ? "date('now')"
-      : range === 'monthly' ? "date('now', '-30 days')"
-      : "date('now', '-7 days')";
+    const rangeStartClause = range === 'daily' ? "date('now', 'localtime')"
+      : range === 'monthly' ? "date('now', 'localtime', '-30 days')"
+      : "date('now', 'localtime', '-7 days')";
     const activityRows = db.prepare(`
-      SELECT mac_address, created_at,
-        ${range === 'daily' ? "strftime('%H:00', created_at)" : "date(created_at)"} as bucket
+      SELECT mac_address, created_at, date(created_at, 'localtime') as local_date,
+        ${range === 'daily' ? "strftime('%H:00', created_at, 'localtime')" : "date(created_at, 'localtime')"} as bucket
       FROM transactions
-      WHERE mac_address IS NOT NULL AND date(created_at) >= ${rangeStartClause}
+      WHERE mac_address IS NOT NULL AND date(created_at, 'localtime') >= ${rangeStartClause}
       ORDER BY created_at ASC
     `).all();
 
@@ -728,10 +741,14 @@ router.get('/sales', adminAuth, (req, res) => {
       const key = `${row.bucket}|${row.mac_address}`;
       if (seenInBucket.has(key)) continue;
       seenInBucket.add(key);
-      // created_at is stored as 'YYYY-MM-DD HH:MM:SS' (SQLite CURRENT_TIMESTAMP) -
-      // slicing is equivalent to date(created_at) without a second SQL call.
-      const txDate = row.created_at.slice(0, 10);
-      const isNew = firstSeenByMac.get(row.mac_address) === txDate;
+      // Bug found live: this used to slice the raw created_at string
+      // directly (a naive UTC value) while firstSeenByMac above is keyed
+      // by localtime dates - comparing a UTC date against a localtime
+      // date silently misclassified some transactions as "new" vs
+      // "returning" for the same few hours each day the dashboard's own
+      // revenue bug affected. Using the query's own local_date column
+      // keeps both sides of this comparison in the same timezone.
+      const isNew = firstSeenByMac.get(row.mac_address) === row.local_date;
       if (!bucketCounts.has(row.bucket)) bucketCounts.set(row.bucket, { new: 0, returning: 0 });
       const counts = bucketCounts.get(row.bucket);
       if (isNew) counts.new++; else counts.returning++;
@@ -755,6 +772,13 @@ router.get('/sales', adminAuth, (req, res) => {
     return res.json({
       success: true,
       today: {
+        // The server's own localtime-correct "today" date string, so the
+        // client never has to (mis)compute it independently via
+        // new Date().toISOString() (always UTC, regardless of the
+        // browser's timezone) - see the comment on this route's `today`
+        // variable above for the bug this caused in the "vs yesterday"
+        // trend calculation.
+        date: today,
         coin_income: todaySales.total_coins || 0,
         coin_transactions: todaySales.transaction_count || 0,
         main_kiosk_income: todayMainKiosk.income || 0,

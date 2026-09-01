@@ -433,7 +433,15 @@ async function loadSalesStats() {
     // comparison the data actually supports.
     const trendEl = document.getElementById('revenueTrend');
     if (trendEl && Array.isArray(data.week)) {
-      const todayStr = new Date().toISOString().split('T')[0];
+      // Bug found live: this used to compute "today" via
+      // new Date().toISOString() (always UTC, regardless of the admin's
+      // browser timezone), while data.week's dates are the server's own
+      // localtime-correct dates - during the same hours the dashboard's
+      // revenue bug affected, this mismatch made "today"'s own row fail
+      // to match todayStr, so it got mistaken for "yesterday" and
+      // compared against itself. Using the server's own date.today
+      // string keeps both sides in the same timezone.
+      const todayStr = data.today.date;
       const yesterday = data.week.find((d) => d.date !== todayStr);
       if (yesterday) {
         const diff = todayIncome - (yesterday.total || 0);
