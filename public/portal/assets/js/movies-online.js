@@ -466,13 +466,8 @@ async function refreshMovieCredit() {
     const res = await fetch(`/api/portal/credit/${encodeURIComponent(onlineCurrentMac)}`);
     const data = await res.json();
     moviesCreditBalance = data.balance_pesos || 0;
-    const badge = document.getElementById('moviesCreditBadge');
-    if (moviesCreditBalance > 0) {
-      document.getElementById('moviesCreditBadgeAmount').textContent = `₱${moviesCreditBalance}`;
-      badge.style.visibility = 'visible';
-    } else {
-      badge.style.visibility = 'hidden';
-    }
+    document.getElementById('moviesCreditBadgeAmount').textContent =
+      moviesCreditBalance > 0 ? `₱${moviesCreditBalance}` : '--';
   } catch (e) {}
 }
 

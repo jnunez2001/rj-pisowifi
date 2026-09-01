@@ -1260,23 +1260,22 @@ async function checkSession() {
 // customer doesn't have to go into Movies to notice or spend it. Polled on
 // the same 8s cadence as the rest of the session info (checkSession()
 // above calls this), not a separate timer.
+let homeMovieCreditBalance = 0;
 async function refreshMovieCreditCard(mac) {
   const card = document.getElementById('creditInfoCard');
   if (!card) return;
   try {
     const res = await fetch(`${SERVER}/api/portal/credit/${encodeURIComponent(mac)}`);
     const data = await res.json();
-    if (data.balance_pesos > 0) {
-      document.getElementById('creditInfoValue').textContent = `₱${data.balance_pesos}`;
-      card.style.display = '';
-    } else {
-      card.style.display = 'none';
-    }
+    homeMovieCreditBalance = data.balance_pesos || 0;
+    document.getElementById('creditInfoValue').textContent =
+      homeMovieCreditBalance > 0 ? `₱${homeMovieCreditBalance}` : '--';
   } catch (e) {}
 }
 
 function openMovieCreditModal() {
-  const amount = document.getElementById('creditInfoValue').textContent;
+  if (homeMovieCreditBalance <= 0) return;
+  const amount = `₱${homeMovieCreditBalance}`;
   document.getElementById('movieCreditModalAmount').textContent = amount;
   document.getElementById('movieCreditModalBody').innerHTML =
     `You have <b id="movieCreditModalAmount">${amount}</b> in Movie Credit. Convert it to WiFi time now, or use it toward a movie from the Movies tab.`;

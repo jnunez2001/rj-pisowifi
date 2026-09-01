@@ -86,13 +86,13 @@
         <div class="info-label">EXPIRY</div>
         <div class="info-value warning" id="expiryDisplay">--</div>
       </div>
-      <!-- Movie Credit (server/routes/portal.js's /credit/*) - hidden
-           whenever the balance is ₱0, same as the Movies tab's own banner.
-           Clicking opens a popup to convert it to WiFi time on the spot,
-           without having to go into the Movies tab at all. -->
-      <div class="info-card" id="creditInfoCard" style="display:none;cursor:pointer;" onclick="openMovieCreditModal()">
+      <!-- Movie Credit (server/routes/portal.js's /credit/*) - always
+           shown, "--" at ₱0, same convention as Expiry above rather than
+           appearing/disappearing. Clicking opens a popup to convert it to
+           WiFi time on the spot, without having to go into Movies at all. -->
+      <div class="info-card" id="creditInfoCard" style="cursor:pointer;" onclick="openMovieCreditModal()">
         <div class="info-label">CREDIT</div>
-        <div class="info-value" id="creditInfoValue">₱0</div>
+        <div class="info-value" id="creditInfoValue">--</div>
       </div>
     </div>
 

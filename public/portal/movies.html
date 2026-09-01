@@ -21,14 +21,15 @@
   <div class="movies-header">
     <a href="/portal/" class="movies-back"><i class="fas fa-arrow-left"></i></a>
     <div class="movies-header-title">Movies</div>
-    <!-- Hidden whenever balance is ₱0. Replaces the old full-width banner -
-         same balance, same server/routes/portal.js's /credit/* endpoints,
-         just moved into the header per owner request. -->
-    <!-- visibility (not display) so the header's space-between layout
-         stays balanced (back arrow / centered title) whether or not this
-         is showing - same trick the old plain spacer div relied on. -->
-    <div id="moviesCreditBadge" class="movies-credit-badge" style="visibility:hidden;" onclick="openMoviesCreditModal()">
-      <i class="fas fa-film"></i> <span id="moviesCreditBadgeAmount">₱0</span>
+    <!-- Always visible (shows "--" at ₱0, same convention as the home
+         page's Expiry box) rather than appearing/disappearing - keeps the
+         header's space-between layout balanced (back arrow / centered
+         title) consistently instead of depending on a visibility toggle.
+         Replaces the old full-width banner - same balance, same
+         server/routes/portal.js's /credit/* endpoints, just moved into
+         the header per owner request. -->
+    <div id="moviesCreditBadge" class="movies-credit-badge" onclick="openMoviesCreditModal()">
+      <i class="fas fa-film"></i> <span id="moviesCreditBadgeAmount">--</span>
     </div>
   </div>
 
@@ -165,6 +166,6 @@
 
   <script src="/portal/assets/js/vendor/hls.min.js"></script>
   <script src="/portal/assets/js/movies.js?v=5"></script>
-  <script src="/portal/assets/js/movies-online.js?v=14"></script>
+  <script src="/portal/assets/js/movies-online.js?v=15"></script>
 </body>
 </html>
