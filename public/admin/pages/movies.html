@@ -122,6 +122,17 @@
     <div class="om-search-dropdown" id="omSearchDropdown"></div>
   </div>
 
+  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+    <input type="file" id="omImportFile" accept=".txt" style="display:none;" onchange="omImportIds(this.files[0])">
+    <button class="btn btn-secondary" onclick="document.getElementById('omImportFile').click()">
+      <i class="fas fa-file-arrow-up"></i> Import .txt of TMDb IDs
+    </button>
+    <button class="btn btn-secondary" onclick="omExportIds()">
+      <i class="fas fa-file-arrow-down"></i> Export Catalog List
+    </button>
+  </div>
+  <div class="om-help">Import: a .txt file with one TMDb ID per line (extra text on the line, like a title or a <code>#</code> comment, is fine and ignored). New titles are added as Free - price them below afterward. Export downloads every title currently in the catalog as the same format, for backup or re-import elsewhere.</div>
+
   <div style="margin-top:10px;">
     <input type="text" id="omCatalogFilter" placeholder="Filter catalog below…" style="width:100%;" oninput="omFilterCatalog(this.value)">
   </div>

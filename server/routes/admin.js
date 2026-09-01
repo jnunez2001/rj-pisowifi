@@ -67,6 +67,19 @@ const firmwareUpload = multer({
   }
 });
 
+// Movies > Online's bulk TMDb-id import (a plain .txt list, one id per
+// line) - kept in memory only, never written to disk, since it's parsed
+// once and discarded (unlike the disk-backed uploads above, which are
+// long-lived assets).
+const idListUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 1 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (path.extname(file.originalname).toLowerCase() === '.txt') cb(null, true);
+    else cb(new Error('Please upload a .txt file'));
+  }
+});
+
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
@@ -5322,6 +5335,75 @@ router.post('/movies/online-catalog/add-by-id', adminAuth, async (req, res) => {
   } catch (err) {
     res.status(400).json({ success: false, message: err.message || 'Could not add that ID.' });
   }
+});
+
+// Bulk import from a plain .txt file - one TMDb ID per line (anything else
+// on the line, e.g. "634649 # Spider-Man" or "634649,Some Title", is
+// ignored; only the first number found on each line is used). Every valid,
+// not-already-in-the-catalog id gets looked up on TMDb and added as Free -
+// same defaults as adding one at a time, just in bulk. This is genuinely
+// the ONLY way an admin can add many titles at once without typing each id
+// individually, so it's worth being tolerant of messy input rather than
+// rejecting the whole file over one bad line.
+router.post('/movies/online-catalog/import', adminAuth, idListUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded.' });
+
+  const text = req.file.buffer.toString('utf8');
+  const ids = [...new Set(
+    text.split(/\r?\n/)
+      .map((line) => line.match(/\d+/))
+      .filter(Boolean)
+      .map((m) => parseInt(m[0], 10))
+  )];
+
+  if (ids.length === 0) {
+    return res.status(400).json({ success: false, message: 'No numeric TMDb IDs found in that file.' });
+  }
+
+  const existing = new Set(onlineMovieCatalog.getAll().map((m) => m.id));
+  const toFetch = ids.filter((id) => !existing.has(id));
+
+  const upsert = db.prepare(`
+    INSERT INTO online_movie_pricing (tmdb_id, title, tier, price_pesos, updated_at)
+    VALUES (?, ?, 'free', 0, CURRENT_TIMESTAMP)
+    ON CONFLICT(tmdb_id) DO UPDATE SET title = excluded.title, updated_at = CURRENT_TIMESTAMP
+  `);
+
+  let added = 0;
+  let failed = 0;
+  const CONCURRENCY = 5;
+  for (let i = 0; i < toFetch.length; i += CONCURRENCY) {
+    const batch = toFetch.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(batch.map((id) => tmdbService.getMovieById(id)));
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        upsert.run(result.value.id, result.value.title);
+        added++;
+      } else {
+        failed++;
+      }
+    }
+  }
+
+  res.json({
+    success: true,
+    total_lines_found: ids.length,
+    already_in_catalog: ids.length - toFetch.length,
+    added,
+    failed,
+  });
+});
+
+// Plain-text export of every TMDb ID currently in the catalog (starter
+// feed + admin pricing), one per line with the title as a trailing comment
+// for human readability - re-importable via the route above (it only reads
+// the leading number, ignoring everything after it).
+router.get('/movies/online-catalog/export', adminAuth, (req, res) => {
+  const movies = onlineMovieCatalog.getAll().slice().sort((a, b) => a.title.localeCompare(b.title));
+  const lines = movies.map((m) => `${m.id} # ${m.title}`);
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="online-movies-tmdb-ids.txt"');
+  res.send(lines.join('\n') + '\n');
 });
 
 router.post('/movies/online-catalog/bulk-price', adminAuth, (req, res) => {

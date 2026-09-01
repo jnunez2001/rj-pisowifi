@@ -341,6 +341,62 @@ async function omAddById() {
   }
 }
 
+// Bulk import (a .txt file, one TMDb ID per line) - uses a raw fetch with
+// FormData instead of apiCall() since apiCall always JSON-encodes the
+// body; a file upload needs multipart/form-data with the browser setting
+// its own boundary, which happens automatically as long as Content-Type
+// is left unset here.
+async function omImportIds(file) {
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  document.getElementById('omImportFile').value = '';
+
+  showToast('Importing… this can take a moment for a long list', 'info');
+  try {
+    const res = await fetch('/api/admin/movies/online-catalog/import', {
+      method: 'POST',
+      headers: { password: authToken },
+      body: formData,
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`Imported ${data.added} title(s) (${data.already_in_catalog} already in catalog, ${data.failed} failed)`, 'success');
+      omState.page = 1;
+      await omLoadCatalog();
+    } else {
+      showToast(data.message || 'Import failed', 'error');
+    }
+  } catch (e) {
+    showToast('Server error during import', 'error');
+  }
+}
+
+// Export fetched via JS (not a plain link) because adminAuth reads the
+// password from a custom header, which a browser navigation/download link
+// can't send - so the file is fetched authenticated, then handed to the
+// browser as a Blob download instead.
+async function omExportIds() {
+  try {
+    const res = await fetch('/api/admin/movies/online-catalog/export', {
+      headers: { password: authToken },
+    });
+    if (!res.ok) { showToast('Export failed', 'error'); return; }
+    const text = await res.text();
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'online-movies-tmdb-ids.txt';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showToast('Server error during export', 'error');
+  }
+}
+
 function omFilterCatalog(value) {
   clearTimeout(omFilterDebounce);
   omFilterDebounce = setTimeout(() => {

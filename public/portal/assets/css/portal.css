@@ -443,6 +443,32 @@ body {
 
 .btn-outline:hover { border-color: var(--brand-teal); color: var(--brand-teal-dark); }
 
+/* Movies - a cinema-style highlight button (same visual weight as
+   Premium/Insert Coin) rather than a plain utility button like WiFi Rates/
+   Vouchers, since it's a content destination customers actively want to
+   find, not a settings screen. */
+.btn-movies {
+  background: linear-gradient(135deg, #1b1b1f, #7a1338 55%, #c81846);
+  color: #fff;
+  font-size: 16px;
+  padding: 16px;
+  box-shadow: 0 4px 14px rgba(200,24,70,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.btn-movies i { font-size: 18px; }
+.btn-movies .btn-movies-sub {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  color: rgba(255,255,255,0.75);
+  margin-top: 2px;
+}
+.btn-movies:hover { background: linear-gradient(135deg, #232327, #8c1740 55%, #dd1c4f); }
+
 .rate-tab.active {
   background: var(--brand-teal);
   border-color: var(--brand-teal);
