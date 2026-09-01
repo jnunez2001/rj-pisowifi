@@ -4,17 +4,36 @@
 # night's network-stability fixes run proven-stable before adding new
 # moving parts; this is that add-on now that it's been asked for.
 #
-# Runs as an isolated Docker container bound to loopback only, it never
-# touches port 53/80 on any real interface, so it can't collide with this
-# app's own dnsmasq (which stays the only DNS/DHCP server customers ever
-# talk to) or its web admin panel. setup-network.sh points dnsmasq at this
-# container as its FIRST upstream resolver, with the existing public DNS
-# servers kept right behind it, if this container is down, dnsmasq just
-# uses the next upstream. No customer loses DNS because Pi-hole crashed.
+# Standalone mode: runs as an isolated Docker container bound to loopback
+# only, it never touches port 53/80 on any real interface, so it can't
+# collide with this app's own dnsmasq (which stays the only DNS/DHCP server
+# customers ever talk to) or its web admin panel. setup-network.sh points
+# dnsmasq at this container as its FIRST upstream resolver, with the
+# existing public DNS servers kept right behind it, if this container is
+# down, dnsmasq just uses the next upstream. No customer loses DNS because
+# Pi-hole crashed.
+#
+# Controller (MikroTik) mode: dnsmasq isn't running at all in this mode -
+# the DNS consumer is the physical MikroTik router itself, a SEPARATE
+# device on the LAN, not this box. Loopback-only would make it permanently
+# unreachable from the router (127.0.0.1 is only ever local to the machine
+# it's bound on) - server/services/mikrotikService.js's setDnsFilterServers()
+# could point the router at this box's real LAN IP all day and it would
+# still just be querying nothing, exactly the "toggle is on, real customer
+# traffic never shows up in the stats" bug found live. Bound additionally to
+# 0.0.0.0:53 in this mode instead (dnsmasq being stopped means nothing else
+# already owns that port), with an nftables rule right after, further down,
+# that drops any port 53 request arriving via a WAN interface specifically -
+# so this never becomes an open DNS resolver reachable from the public
+# internet on a box that also happens to have a WAN-facing interface.
 set -e
 LOG="/var/log/rj-pihole-install.log"
 DB="/var/lib/rj-pisowifi/database/rjpisowifi.db"
 APP_USER="rjcyberzone"
+
+NETWORK_MODE=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='network_mode';" 2>/dev/null)
+WAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='wan_interface';" 2>/dev/null)
+LAN_IF=$(sqlite3 "$DB" "SELECT value FROM settings WHERE key='lan_interface';" 2>/dev/null)
 
 echo "=== R&J Pi-hole Install $(date) ===" >> $LOG
 
@@ -62,11 +81,24 @@ if docker ps -a --format '{{.Names}}' | grep -qx rj-pihole; then
   fi
 else
   ADMIN_PASS=$(openssl rand -base64 18)
+
+  # Always keep the loopback:5335 mapping - Standalone mode's dnsmasq
+  # depends on it regardless of which mode is active right now (a mode
+  # switch later shouldn't require reinstalling this container). Only add
+  # the LAN-reachable standard-port-53 mapping when actually in Controller
+  # mode, since Standalone mode's own dnsmasq already legitimately owns
+  # port 53 on the LAN interface - binding Pi-hole there too would collide
+  # with it and fail the container start outright.
+  DOCKER_DNS_PORTS=(-p 127.0.0.1:5335:53/tcp -p 127.0.0.1:5335:53/udp)
+  if [ "$NETWORK_MODE" = "mikrotik" ]; then
+    DOCKER_DNS_PORTS+=(-p 0.0.0.0:53:53/tcp -p 0.0.0.0:53:53/udp)
+    echo "Controller mode detected - also binding port 53 for the MikroTik router to reach (firewall-restricted to the LAN interface below)" | tee -a $LOG
+  fi
+
   docker run -d \
     --name rj-pihole \
     --restart=unless-stopped \
-    -p 127.0.0.1:5335:53/tcp \
-    -p 127.0.0.1:5335:53/udp \
+    "${DOCKER_DNS_PORTS[@]}" \
     -p 127.0.0.1:8081:80/tcp \
     -e TZ="$(cat /etc/timezone 2>/dev/null || echo UTC)" \
     -e FTLCONF_webserver_api_password="$ADMIN_PASS" \
@@ -95,6 +127,34 @@ else
   else
     echo "WARNING: could not store the password for the app to use automatically - stats/status panel won't work until this is fixed" | tee -a $LOG
   fi
+fi
+
+# Controller mode's port-53 binding above is 0.0.0.0 (Docker doesn't bind
+# well to a LAN IP that can change on DHCP renewal), which by itself would
+# make Pi-hole reachable from EVERY interface on this box, including a WAN
+# one if this box happens to have a public-facing interface directly (as
+# opposed to sitting entirely behind the MikroTik router on the LAN side).
+# This rule is what actually enforces "LAN only": drop any port 53 request
+# arriving via the WAN interface specifically, independent of Docker's own
+# binding. Re-applied every run (not just on first install) so it can't
+# drift out of sync with whatever the current interface config is. A
+# separate nftables table of its own (not touching the existing rj_piso
+# table Standalone mode's client-access-control uses) so this can never
+# corrupt that unrelated ruleset.
+if [ "$NETWORK_MODE" = "mikrotik" ] && [ -n "$WAN_IF" ] && [ "$WAN_IF" != "$LAN_IF" ]; then
+  echo "Restricting port 53 to the LAN interface ($LAN_IF), blocking it on WAN ($WAN_IF)..." | tee -a $LOG
+  nft delete table inet rj_pihole_guard 2>/dev/null || true
+  nft -f - << NFTEOF 2>>"$LOG" || echo "WARNING: could not apply the WAN firewall guard for port 53 - fix this before relying on Controller-mode DNS filtering, or Pi-hole may be reachable from the internet" | tee -a $LOG
+table inet rj_pihole_guard {
+  chain input {
+    type filter hook input priority -1; policy accept;
+    iifname "$WAN_IF" udp dport 53 drop
+    iifname "$WAN_IF" tcp dport 53 drop
+  }
+}
+NFTEOF
+elif [ "$NETWORK_MODE" = "mikrotik" ]; then
+  echo "No separate WAN interface identified for this box - skipping the port 53 firewall guard (nothing to restrict against)." | tee -a $LOG
 fi
 
 echo "[3/3] Enabling Pi-hole in settings and re-applying network..." | tee -a $LOG
