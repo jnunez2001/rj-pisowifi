@@ -36,28 +36,50 @@ const TIER_ROWS = [
   { tier: 'paid', label: 'Paid' },
 ];
 
+// Takes onlineCurrentMac as already set by the unified init at the bottom
+// of this file - see the comment on movies.js's loadMovies() for why this
+// doesn't also detect here (a second near-simultaneous /detect call would
+// just hit the server's per-IP rate limit and come back blank anyway).
 async function loadOnlineMovies() {
-  onlineCurrentMac = await detectMacForMovies();
   try {
     const res = await fetch(`/api/portal/online-movies?mac=${encodeURIComponent(onlineCurrentMac)}`);
     const data = await res.json();
     onlineAllMovies = data.movies || [];
-    renderOnlineMoviesRows(onlineAllMovies);
     onlineMoviesRendered = true;
   } catch (e) {
-    document.getElementById('onlineMoviesRows').innerHTML = '';
+    onlineAllMovies = [];
   }
 }
 
+// Tags each item with which backend/player it came from - never shown to
+// the customer, purely internal so movieCardHtml/openMovie-vs-openOnlineMovie
+// dispatch knows which system a given card belongs to once both catalogs
+// are merged into one set of rows below.
+function tagKind(list, kind) {
+  list.forEach((m) => { m._kind = kind; });
+}
+
+// One shared card renderer for both catalogs, per owner request: the
+// customer should see one unified Movies experience, not a "Local" tab and
+// an "Online" tab - see the HD library row further down for the local
+// (self-hosted, no-ads) titles this also has to render. tier value differs
+// between the two ('premium' for local, see movies.js/movieService.js, vs
+// 'paid' for online, see onlineMovieCatalog.js) because they were built as
+// separate systems before this merge; normalized here rather than changing
+// either database schema.
 function movieCardHtml(m) {
-  const lock = (m.tier === 'paid' && !m.unlocked) ? '<div class="movie-card-lock"><i class="fas fa-lock"></i></div>' : '';
-  const priceTag = (m.tier === 'paid' && !m.unlocked) ? `<div class="movie-card-price">₱${m.price_pesos}</div>` : '';
-  const poster = m.poster
-    ? `<img src="${m.poster}" alt="${escapeHtmlMovies(m.title)}" loading="lazy" />`
-    : '<i class="fas fa-film" style="font-size:24px;"></i>';
+  const isLocal = m._kind === 'local';
+  const isPaidTier = isLocal ? m.tier === 'premium' : m.tier === 'paid';
+  const lock = (isPaidTier && !m.unlocked) ? '<div class="movie-card-lock"><i class="fas fa-lock"></i></div>' : '';
+  const priceTag = (isPaidTier && !m.unlocked) ? `<div class="movie-card-price">₱${m.price_pesos}</div>` : '';
+  const thumbStyle = isLocal && m.thumbnail_path ? ` style="background-image:url('${m.thumbnail_path}')"` : '';
+  const posterInner = isLocal
+    ? (m.thumbnail_path ? '' : '<i class="fas fa-film" style="font-size:24px;"></i>')
+    : (m.poster ? `<img src="${m.poster}" alt="${escapeHtmlMovies(m.title)}" loading="lazy" />` : '<i class="fas fa-film" style="font-size:24px;"></i>');
+  const onclick = isLocal ? `openMovie(${m.id})` : `openOnlineMovie(${m.id})`;
   return `
-    <div class="movie-card" onclick="openOnlineMovie(${m.id})">
-      <div class="movie-card-thumb">${poster}</div>
+    <div class="movie-card" onclick="${onclick}">
+      <div class="movie-card-thumb"${thumbStyle}>${posterInner}</div>
       ${lock}${priceTag}
       <div class="movie-card-title">${escapeHtmlMovies(m.title)}</div>
     </div>
@@ -138,23 +160,43 @@ function newReleasesRowHtml(list) {
   `;
 }
 
+// The local, self-hosted library (movies.js's allMovies - transcoded files
+// this box already has on disk) has no TMDb genre/release-date metadata to
+// group by, so it gets one dedicated shelf instead of being sorted into the
+// genre rows below. Labeled by what makes it different for the customer (no
+// ads, since it's not a third-party embed) rather than by which internal
+// system it came from - see the owner's request that drove this merge.
+function localLibraryRowHtml(list) {
+  if (!list || list.length === 0) return '';
+  return `
+    <div class="movies-online-row">
+      <h3 class="movies-online-row-title">🎬 HD Movies (No Ads)</h3>
+      <div class="movies-online-row-track">${list.map(movieCardHtml).join('')}</div>
+    </div>
+  `;
+}
+
 // Genre rows are the default view; falls back to the old tier-based
 // grouping only while genres haven't finished warming yet (e.g. right after
 // a fresh install, before tmdbService's background fetch completes) so the
-// page still has SOME organization instead of nothing.
-function renderOnlineMoviesRows(list) {
+// page still has SOME organization instead of nothing. Reads onlineAllMovies
+// and allMovies (movies.js) directly rather than taking a list argument, so
+// every caller (initial load, search-clear) redraws the exact same merged
+// view without needing to remember to pass both catalogs each time.
+function renderOnlineMoviesRows() {
   const el = document.getElementById('onlineMoviesRows');
-  const top10 = topWatchedRowHtml(list);
-  const newReleases = newReleasesRowHtml(list);
-  const genreRows = buildGenreRows(list);
+  const top10 = topWatchedRowHtml(onlineAllMovies);
+  const newReleases = newReleasesRowHtml(onlineAllMovies);
+  const localRow = localLibraryRowHtml(allMovies);
+  const genreRows = buildGenreRows(onlineAllMovies);
   if (genreRows.length > 0) {
-    el.innerHTML = top10 + newReleases + rowsHtml(genreRows);
+    el.innerHTML = top10 + newReleases + localRow + rowsHtml(genreRows);
     return;
   }
   const tierRows = TIER_ROWS
-    .map(({ tier, label }) => [label, list.filter((m) => m.tier === tier)])
+    .map(({ tier, label }) => [label, onlineAllMovies.filter((m) => m.tier === tier)])
     .filter(([, items]) => items.length > 0);
-  el.innerHTML = top10 + newReleases + rowsHtml(tierRows);
+  el.innerHTML = top10 + newReleases + localRow + rowsHtml(tierRows);
 }
 
 // Flat grid used only for search results, where tier grouping isn't useful.
@@ -416,12 +458,30 @@ function closeOnlineMoviePlayer() {
 document.getElementById('onlineMoviesSearch').addEventListener('input', (e) => {
   const q = e.target.value.toLowerCase();
   if (!q) {
-    renderOnlineMoviesRows(onlineAllMovies);
+    renderOnlineMoviesRows();
     return;
   }
-  renderOnlineMoviesFlat(onlineAllMovies.filter((m) => m.title.toLowerCase().includes(q)));
+  const combined = [...onlineAllMovies, ...allMovies];
+  renderOnlineMoviesFlat(combined.filter((m) => m.title.toLowerCase().includes(q)));
 });
 
-// Local tab is hidden for now (movies.html) - load Online straight away
-// instead of waiting for a tab click.
-loadOnlineMovies().then(refreshMovieCredit);
+// Local/Online source toggle is hidden (movies.html) - the two catalogs are
+// merged into one set of rows here instead, per owner request that
+// customers see a single Movies experience rather than separate tabs.
+// loadMovies() (movies.js) populates the local library; loadOnlineMovies()
+// above populates the TMDb-backed one. Detects the MAC exactly once here
+// and hands it to both (their own detectMacForMovies() calls are guarded
+// to skip re-detecting) - doing it twice in parallel used to fire two
+// near-simultaneous /api/portal/detect requests from the same device, and
+// the server's own per-IP rate limit silently blanked whichever one lost
+// the race, breaking either local or online paid rentals at random.
+detectMacForMovies().then((mac) => {
+  currentMac = mac;
+  onlineCurrentMac = mac;
+  return Promise.all([loadMovies(), loadOnlineMovies()]);
+}).then(() => {
+  tagKind(allMovies, 'local');
+  tagKind(onlineAllMovies, 'online');
+  renderOnlineMoviesRows();
+  refreshMovieCredit();
+});

@@ -24,8 +24,16 @@ async function detectMacForMovies() {
   }
 }
 
+// Takes currentMac as already set by movies-online.js's unified init (which
+// detects it once, shared with the online catalog) rather than detecting
+// again here - a second, near-simultaneous /api/portal/detect call from the
+// same device hits the server's own per-IP rate limit (5s) and comes back
+// blank, and retrying immediately at page-load is pointless anyway since
+// that same rate limit would just block the retry too. If the shared
+// detection genuinely came back empty, currentMac stays '' here - the
+// click-time retry in beginMovieCoinInsertion below is where a real retry
+// (after the customer has had time to browse) can actually succeed.
 async function loadMovies() {
-  currentMac = await detectMacForMovies();
   try {
     const res = await fetch(`/api/portal/movies?mac=${encodeURIComponent(currentMac)}`);
     const data = await res.json();
@@ -107,6 +115,19 @@ let movieCoinPollInterval = null;
 async function beginMovieCoinInsertion() {
   const movie = allMovies.find((m) => m.id === pendingRentMovieId);
   if (!movie) return;
+
+  // Same fallback as movies-online.js's beginOnlineMovieCoinInsertion(): a
+  // blank currentMac at this point (rare, but possible after a transient
+  // detect miss) would otherwise fail every attempt for the rest of the
+  // session with a confusing server-side error, even on a genuinely
+  // connected device.
+  if (!currentMac) {
+    currentMac = await detectMacForMovies();
+  }
+  if (!currentMac) {
+    alert('Could not identify your device on the network. Please reconnect to WiFi and try again.');
+    return;
+  }
 
   try {
     const res = await fetch('/api/coin/pending', {
@@ -259,4 +280,9 @@ function escapeHtmlMovies(str) {
   return div.innerHTML;
 }
 
-loadMovies();
+// No auto-call here anymore - movies-online.js's unified init (bottom of
+// that file) now owns calling loadMovies(), after detecting the MAC once
+// and sharing it with both catalogs. This used to auto-load here too,
+// which raced the unified init's own detect call and was the actual cause
+// of the double /api/portal/detect request (and its silent-blank-MAC
+// fallout) found while merging the two catalogs into one page.

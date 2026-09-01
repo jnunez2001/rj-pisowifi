@@ -24,13 +24,14 @@
     <div style="width:24px;"></div>
   </div>
 
-  <!-- Source toggle: Local (existing rental system, untouched below) vs
-       Online (public/portal/assets/js/movies-online.js — separate catalog
-       and player, does not touch the local movie flow at all).
-       HIDDEN FOR NOW per owner request - Local has no titles scanned yet,
-       so the portal goes straight to Online. Nothing below was deleted,
-       just hidden - flip these two display values (and the toggle) to
-       bring Local back once it has content. -->
+  <!-- Local (self-hosted, no ads) and Online (vidrock.ru embed) are two
+       separate backend systems (movies.js / movies-online.js), but per
+       owner request the CUSTOMER never sees that split - both catalogs are
+       merged into one set of rows inside #onlineMoviesRows below (see
+       movies-online.js's renderOnlineMoviesRows()/localLibraryRowHtml()).
+       This toggle and the grid below are dead UI kept only so movies.js's
+       existing loadMovies()/renderMoviesGrid() has somewhere harmless to
+       render into - never shown to a customer. -->
   <div class="movies-source-toggle" style="display:none;">
     <button class="movies-source-btn" data-source="local" onclick="setMoviesSource('local')">Local</button>
     <button class="movies-source-btn active" data-source="online" onclick="setMoviesSource('online')">Online</button>
@@ -51,7 +52,8 @@
     <div id="moviesGridPortal" class="movies-grid"></div>
   </div>
 
-  <!-- ONLINE MOVIES (vidrock.ru embed catalog) - shown by default for now -->
+  <!-- Unified Movies view - local library + online embed catalog merged,
+       see comment above. -->
   <div id="onlineMoviesSection">
     <!-- Movie Credit balance (server/routes/portal.js's /credit/*) - hidden
          whenever the balance is ₱0, so it's invisible unless it matters. -->
@@ -105,7 +107,7 @@
   </div>
 
   <script src="/portal/assets/js/vendor/hls.min.js"></script>
-  <script src="/portal/assets/js/movies.js?v=2"></script>
-  <script src="/portal/assets/js/movies-online.js?v=6"></script>
+  <script src="/portal/assets/js/movies.js?v=5"></script>
+  <script src="/portal/assets/js/movies-online.js?v=9"></script>
 </body>
 </html>
