@@ -476,6 +476,28 @@ router.post('/online-movies/search-hit', (req, res) => {
   res.json({ success: true });
 });
 
+// POST /movie-requests {mac, requester_name, title, year} - the Movies
+// tab's "Request a Movie" form. A device can submit many requests over
+// time, just not more than one in a rolling 24h - checked here rather than
+// by calendar day so it can't be gamed by submitting at 11:59pm and again
+// at 12:01am. Reviewed in the admin panel's Movies > Online > Movie
+// Requests panel (server/routes/admin.js).
+router.post('/movie-requests', (req, res) => {
+  const mac = String(req.body?.mac || '').trim().toLowerCase();
+  const requesterName = String(req.body?.requester_name || '').trim().slice(0, 60);
+  const title = String(req.body?.title || '').trim().slice(0, 150);
+  const year = String(req.body?.year || '').trim().slice(0, 10);
+  if (!mac || !requesterName || !title) {
+    return res.status(400).json({ success: false, message: 'Your name and the movie title are required.' });
+  }
+  const recent = db.prepare(`SELECT 1 FROM movie_requests WHERE mac_address = ? AND created_at > datetime('now', '-1 day')`).get(mac);
+  if (recent) {
+    return res.status(429).json({ success: false, message: 'You can only request one movie per day - try again tomorrow.' });
+  }
+  db.prepare('INSERT INTO movie_requests (mac_address, requester_name, title, year) VALUES (?, ?, ?, ?)').run(mac, requesterName, title, year);
+  res.json({ success: true });
+});
+
 // GET /online-movies/:id/embed?mac=xx - hands back an embed URL built from
 // settings.movie_embed_url_template, a provider-agnostic template
 // containing a literal "{tmdb_id}" placeholder (e.g.
@@ -516,6 +538,42 @@ router.get('/online-movies/:id/embed', (req, res) => {
   `).run(movie.id);
 
   return res.json({ success: true, source_id: source.id, embed_url: source.url_template.replace('{tmdb_id}', movie.id) });
+});
+
+// POST /online-movies/:id/unlock-with-credit {mac} - the no-coins-needed
+// path for when a device's existing Movie Credit balance already covers
+// the whole price (owner request: credit should be usable for movies, not
+// just WiFi time). Skips the coin-slot/relay hardware flow entirely rather
+// than routing a ₱0 "insertion" through it - this is a straight balance
+// deduction, re-validated server-side against the CURRENT balance (never
+// trusted from the client) so it can't be spoofed or double-spent.
+router.post('/online-movies/:id/unlock-with-credit', (req, res) => {
+  const mac = String(req.body?.mac || '').trim().toLowerCase();
+  if (!mac) return res.status(400).json({ success: false, message: 'Valid MAC address required' });
+  const movie = onlineMovieCatalog.getById(req.params.id);
+  if (!movie) return res.status(404).json({ success: false, message: 'Movie not found' });
+  if (movie.tier === 'free') return res.status(400).json({ success: false, message: 'This movie is already free.' });
+
+  const creditRow = db.prepare('SELECT balance_pesos FROM movie_credits WHERE mac_address = ?').get(mac);
+  const balance = creditRow?.balance_pesos || 0;
+  if (balance < movie.price_pesos) {
+    return res.status(400).json({ success: false, message: `Your ₱${balance} credit isn't enough - this movie is ₱${movie.price_pesos}.` });
+  }
+
+  db.prepare('UPDATE movie_credits SET balance_pesos = balance_pesos - ?, updated_at = CURRENT_TIMESTAMP WHERE mac_address = ?').run(movie.price_pesos, mac);
+
+  const rentalHours = movie.rental_hours > 0
+    ? movie.rental_hours
+    : parseFloat(db.prepare("SELECT value FROM settings WHERE key = 'movie_rental_hours'").get()?.value || '48');
+  const expiresAt = new Date(Date.now() + rentalHours * 60 * 60 * 1000).toISOString();
+  db.prepare('INSERT INTO online_movie_rentals (movie_id, mac_address, expires_at) VALUES (?, ?, ?)').run(movie.id, mac, expiresAt);
+  db.prepare(`
+    INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, mac_address)
+    VALUES (?, ?, 0, 'online_movie_rental_credit', ?)
+  `).run(`ONLINE-MOVIE-${movie.id}`, movie.price_pesos, mac);
+  console.log(`✅ Online movie rental unlocked for ${mac} using ₱${movie.price_pesos} credit: "${movie.title}"`);
+
+  res.json({ success: true, expires_at: expiresAt });
 });
 
 // ── Movie Credit balance (database.js's movie_credits table) ───────────

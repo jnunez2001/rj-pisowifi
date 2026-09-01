@@ -142,7 +142,7 @@ function escapeHtml(str) {
 // ===== ONLINE MOVIES (server/services/onlineMovieCatalog.js + tmdbService.js) =====
 // Purely additive to everything above - the local movie library's grid,
 // scan, and settings are untouched by any of this.
-const omState = { page: 1, limit: 30, filter: '', tier: '', total: 0 };
+const omState = { page: 1, limit: 30, filter: '', sort: 'title', dir: 'asc', total: 0 };
 let omSearchDebounce = null;
 let omFilterDebounce = null;
 
@@ -156,9 +156,11 @@ async function omInit() {
   } catch (e) {}
   await omLoadSources();
   omState.page = 1;
+  omRenderSortHeaders();
   await omLoadCatalog();
   await omLoadRentals();
   await omLoadTopSearches();
+  await omLoadMovieRequests();
 }
 
 function omSetPill(elId, isSet) {
@@ -409,19 +411,34 @@ function omFilterCatalog(value) {
   }, 350);
 }
 
-// Free/Paid filter (owner request: finding paid titles shouldn't mean
-// scrolling the whole alphabetical catalog one by one) - the server also
-// switches to priority/price order instead of A-Z whenever this is set,
-// see GET /movies/online-catalog.
-function omFilterTier(value) {
-  omState.tier = value;
+// Click-to-sort table headers (owner request: finding paid titles, or
+// sorting by price/priority, shouldn't mean scrolling the whole
+// alphabetical catalog by hand). Clicking the already-active column
+// flips its direction instead of resetting to ascending, matching normal
+// spreadsheet/table sort behavior.
+function omSortBy(field) {
+  if (omState.sort === field) {
+    omState.dir = omState.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    omState.sort = field;
+    omState.dir = 'asc';
+  }
   omState.page = 1;
+  omRenderSortHeaders();
   omLoadCatalog();
+}
+
+function omRenderSortHeaders() {
+  document.querySelectorAll('.om-sortable').forEach((th) => {
+    const active = th.dataset.sort === omState.sort;
+    th.classList.toggle('om-sort-active', active);
+    th.classList.toggle('om-sort-desc', active && omState.dir === 'desc');
+  });
 }
 
 async function omLoadCatalog() {
   const tbody = document.getElementById('omCatalogRows');
-  const params = new URLSearchParams({ q: omState.filter, tier: omState.tier, page: omState.page, limit: omState.limit });
+  const params = new URLSearchParams({ q: omState.filter, sort: omState.sort, dir: omState.dir, page: omState.page, limit: omState.limit });
   const data = await apiCall('GET', `/api/admin/movies/online-catalog?${params.toString()}`);
   if (!data.success) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">Could not load catalog</td></tr>';
@@ -653,6 +670,45 @@ async function omLoadTopSearches() {
   `).join('');
 }
 
+// ── Movie Requests ────────────────────────────────────────────────────────
+async function omLoadMovieRequests() {
+  const tbody = document.getElementById('omRequestsRows');
+  if (!tbody) return;
+  const status = document.getElementById('omRequestsStatusFilter').value;
+  const params = new URLSearchParams(status ? { status } : {});
+  const data = await apiCall('GET', `/api/admin/movies/requests?${params.toString()}`);
+  const rows = data.success ? data.requests : [];
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">No requests match.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((r) => `
+    <tr data-request-id="${r.id}">
+      <td>${escapeHtml(r.requester_name)}</td>
+      <td>${escapeHtml(r.title)}</td>
+      <td>${escapeHtml(r.year || '—')}</td>
+      <td>${new Date(r.created_at.replace(' ', 'T') + 'Z').toLocaleString()}</td>
+      <td><span class="om-tier-pill ${r.status === 'added' ? 'free' : r.status === 'declined' ? 'paid' : ''}">${r.status}</span></td>
+      <td style="text-align:right;white-space:nowrap;">
+        <button class="btn btn-secondary om-request-added-btn" style="padding:4px 8px;font-size:11px;" title="Mark Added"><i class="fas fa-check"></i></button>
+        <button class="btn btn-secondary om-request-declined-btn" style="padding:4px 8px;font-size:11px;" title="Decline"><i class="fas fa-xmark"></i></button>
+        <button class="btn btn-secondary om-request-delete-btn" style="padding:4px 8px;font-size:11px;color:var(--danger,#e74c3c);" title="Delete"><i class="fas fa-trash"></i></button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function omSetRequestStatus(id, status) {
+  await apiCall('POST', `/api/admin/movies/requests/${id}/status`, { status });
+  omLoadMovieRequests();
+}
+
+async function omDeleteRequest(id) {
+  if (!confirm('Delete this request?')) return;
+  await apiCall('DELETE', `/api/admin/movies/requests/${id}`);
+  omLoadMovieRequests();
+}
+
 function omChangePage(delta) {
   const maxPage = Math.max(1, Math.ceil(omState.total / omState.limit));
   const next = omState.page + delta;
@@ -707,6 +763,24 @@ document.addEventListener('click', (e) => {
   if (revokeBtn) {
     const row = revokeBtn.closest('tr[data-rental-id]');
     if (row) omRevokeRental(parseInt(row.dataset.rentalId, 10));
+    return;
+  }
+  const requestAddedBtn = e.target.closest('.om-request-added-btn');
+  if (requestAddedBtn) {
+    const row = requestAddedBtn.closest('tr[data-request-id]');
+    if (row) omSetRequestStatus(parseInt(row.dataset.requestId, 10), 'added');
+    return;
+  }
+  const requestDeclinedBtn = e.target.closest('.om-request-declined-btn');
+  if (requestDeclinedBtn) {
+    const row = requestDeclinedBtn.closest('tr[data-request-id]');
+    if (row) omSetRequestStatus(parseInt(row.dataset.requestId, 10), 'declined');
+    return;
+  }
+  const requestDeleteBtn = e.target.closest('.om-request-delete-btn');
+  if (requestDeleteBtn) {
+    const row = requestDeleteBtn.closest('tr[data-request-id]');
+    if (row) omDeleteRequest(parseInt(row.dataset.requestId, 10));
   }
 });
 

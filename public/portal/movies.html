@@ -56,15 +56,49 @@
        see comment above. -->
   <div id="onlineMoviesSection">
     <!-- Movie Credit balance (server/routes/portal.js's /credit/*) - hidden
-         whenever the balance is ₱0, so it's invisible unless it matters. -->
+         whenever the balance is ₱0, so it's invisible unless it matters.
+         Spendable on a paid movie (applied automatically when renting one)
+         or converted to WiFi time here - but only while THIS WiFi session
+         lasts, it's forfeited when the session ends (owner's call: "use it
+         before there connection time ends or it will be lost"), so the
+         banner says so rather than implying it carries forward. -->
     <div id="movieCreditBanner" class="movie-credit-banner" style="display:none;">
-      <span>Movie Credit: <b id="movieCreditAmount">₱0</b></span>
+      <span>Movie Credit: <b id="movieCreditAmount">₱0</b> <small>(use before your WiFi time ends)</small></span>
       <button id="movieCreditUseBtn" class="btn btn-activate" onclick="useMovieCredit()">Use for WiFi time</button>
     </div>
-    <div class="movies-online-search">
-      <input type="text" id="onlineMoviesSearch" placeholder="Search online movies...">
+    <div class="movies-online-search" style="display:flex;gap:8px;align-items:center;">
+      <input type="text" id="onlineMoviesSearch" placeholder="Search online movies..." style="flex:1;">
+      <button class="btn btn-outline" style="white-space:nowrap;" onclick="openMovieRequestOverlay()"><i class="fas fa-plus"></i> Request a Movie</button>
     </div>
     <div id="onlineMoviesRows"></div>
+  </div>
+
+  <!-- REQUEST A MOVIE -->
+  <div id="movieRequestOverlay" class="movie-rent-overlay">
+    <div class="movie-rent-box">
+      <i class="fas fa-film" style="font-size:32px;color:var(--brand-teal);"></i>
+      <h3>Request a Movie</h3>
+      <p style="color:var(--text-secondary);font-size:14px;margin-bottom:4px;">Don't see it in our library? Let us know and we'll consider adding it.</p>
+      <div style="display:flex;flex-direction:column;gap:10px;text-align:left;margin-top:10px;">
+        <div>
+          <label style="font-size:12.5px;color:var(--text-secondary);">Your name</label>
+          <input type="text" id="movieRequestName" placeholder="e.g. Juan" style="width:100%;">
+        </div>
+        <div>
+          <label style="font-size:12.5px;color:var(--text-secondary);">Movie title</label>
+          <input type="text" id="movieRequestTitle" placeholder="e.g. Oppenheimer" style="width:100%;">
+        </div>
+        <div>
+          <label style="font-size:12.5px;color:var(--text-secondary);">Year (if you know it)</label>
+          <input type="text" id="movieRequestYear" placeholder="e.g. 2023" style="width:100%;">
+        </div>
+      </div>
+      <div id="movieRequestMsg" style="font-size:13px;margin-top:10px;display:none;"></div>
+      <div class="movie-rent-actions">
+        <button class="btn btn-outline" onclick="closeMovieRequestOverlay()">Cancel</button>
+        <button class="btn btn-activate" id="movieRequestSubmitBtn" onclick="submitMovieRequest()">Submit</button>
+      </div>
+    </div>
   </div>
 
   <!-- PLAYER OVERLAY (local, HLS <video>) -->
@@ -119,6 +153,6 @@
 
   <script src="/portal/assets/js/vendor/hls.min.js"></script>
   <script src="/portal/assets/js/movies.js?v=5"></script>
-  <script src="/portal/assets/js/movies-online.js?v=10"></script>
+  <script src="/portal/assets/js/movies-online.js?v=13"></script>
 </body>
 </html>

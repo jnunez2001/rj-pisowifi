@@ -96,12 +96,19 @@ function movieCardHtml(m) {
 const MIN_ROW_SIZE = 4;
 
 // Within-row order used to be whatever TMDb's list responses happened to
-// return (effectively TMDb's own popularity/rating ranking) - per owner
-// request, an admin-set priority (Movies > Online > Price Groups) now
-// decides it instead: higher priority first, real view count as a
-// tiebreaker (still real usage data, not a TMDb signal), title last so the
-// order is at least stable for anything untouched by an admin.
-function byPriorityThenViews(a, b) {
+// return (effectively TMDb's own popularity/rating ranking), then briefly
+// an admin-set priority number - per owner feedback that priority was
+// confusing and the page should "always show the latest" on its own, this
+// now sorts by real release year automatically: newest first, so old
+// titles naturally sink without anyone having to hand-rank anything.
+// Titles missing a release_date (not yet re-synced since that field was
+// added) sort as "oldest", to the bottom, rather than jumping to the top.
+// priority still works as a manual tie-breaker/boost for anyone who wants
+// one, it just no longer outranks actual recency.
+function bySmartOrder(a, b) {
+  const ad = a.release_date || '0000-00-00';
+  const bd = b.release_date || '0000-00-00';
+  if (ad !== bd) return bd.localeCompare(ad);
   return (b.priority || 0) - (a.priority || 0) || (b.views || 0) - (a.views || 0) || a.title.localeCompare(b.title);
 }
 
@@ -115,7 +122,7 @@ function buildGenreRows(list) {
   });
   return [...buckets.entries()]
     .filter(([, items]) => items.length >= MIN_ROW_SIZE)
-    .map(([label, items]) => [label, items.slice().sort(byPriorityThenViews)])
+    .map(([label, items]) => [label, items.slice().sort(bySmartOrder)])
     .sort((a, b) => b[1].length - a[1].length);
 }
 
@@ -131,12 +138,11 @@ function rowsHtml(rows) {
 // Paid titles pinned to the very top of the page (owner request: paid
 // movies should be the top priority on the Movies home) - labeled by
 // appeal, not by pricing tier, so it doesn't read as an upsell shelf.
-// Sorted by admin priority so the operator controls which paid titles lead,
-// not TMDb. Local (self-hosted) premium titles aren't included here yet -
-// see localLibraryRowHtml() below for those; folding them in would need a
-// priority field on the local catalog too, not built in this pass.
+// Sorted newest-first (see bySmartOrder above), same automatic recency
+// ordering as everywhere else. Local (self-hosted) premium titles aren't
+// included here yet - see localLibraryRowHtml() below for those.
 function exclusiveRowHtml(list) {
-  const ranked = list.filter((m) => m.tier === 'paid').sort(byPriorityThenViews).slice(0, 20);
+  const ranked = list.filter((m) => m.tier === 'paid').sort(bySmartOrder).slice(0, 20);
   if (ranked.length === 0) return '';
   return `
     <div class="movies-online-row">
@@ -272,18 +278,79 @@ function openOnlineMovie(id) {
   startOnlinePlayback(movie);
 }
 
-function showOnlineRentConfirmStep(movie) {
+// Owner request: Movie Credit (banked over/underpaid coins from earlier
+// rentals, see server/routes/coin.js) should be usable toward a movie's
+// price, not just WiFi time. Checked fresh here every time the confirm
+// step opens (never cached) since the balance can change between visits -
+// spent on WiFi time via the credit banner, forfeited if the customer's
+// session ended, etc. The server re-validates and re-applies this same
+// balance independently at unlock time either way (POST /coin/pending's
+// finalize, or /online-movies/:id/unlock-with-credit below), so a stale
+// read here can only ever under-promise, never over-promise, what a
+// customer actually gets charged.
+async function showOnlineRentConfirmStep(movie) {
+  let creditBalance = 0;
+  try {
+    const res = await fetch(`/api/portal/credit/${encodeURIComponent(onlineCurrentMac)}`);
+    const data = await res.json();
+    creditBalance = data.balance_pesos || 0;
+  } catch (e) {}
+  const amountToPay = Math.max(0, movie.price_pesos - creditBalance);
+
   document.getElementById('movieRentTitle').textContent = movie.title;
-  document.getElementById('movieRentDesc').textContent =
-    `Insert ₱${movie.price_pesos} in coins to unlock this movie. This is a separate payment from your WiFi time.`;
-  document.getElementById('movieRentConfirmBtn').textContent = `Insert ₱${movie.price_pesos} to unlock`;
-  document.getElementById('movieRentConfirmBtn').onclick = beginOnlineMovieCoinInsertion;
+  const btn = document.getElementById('movieRentConfirmBtn');
+  if (amountToPay === 0) {
+    document.getElementById('movieRentDesc').textContent =
+      `You have ₱${creditBalance} Movie Credit - enough to unlock this movie without inserting any coins.`;
+    btn.textContent = `Unlock with ₱${movie.price_pesos} Credit`;
+    btn.onclick = () => unlockOnlineMovieWithCredit(movie);
+  } else {
+    document.getElementById('movieRentDesc').textContent = creditBalance > 0
+      ? `You have ₱${creditBalance} Movie Credit applied. Insert ₱${amountToPay} more in coins to unlock this movie.`
+      : `Insert ₱${movie.price_pesos} in coins to unlock this movie. This is a separate payment from your WiFi time.`;
+    btn.textContent = `Insert ₱${amountToPay} to unlock`;
+    btn.onclick = () => beginOnlineMovieCoinInsertion(amountToPay);
+  }
   document.getElementById('movieRentOverlay').classList.add('show');
+}
+
+// No coin slot/relay involved at all - a straight balance deduction, see
+// the route's own comment for why this is a separate endpoint instead of
+// routing a ₱0 "insertion" through the normal coin hardware flow.
+async function unlockOnlineMovieWithCredit(movie) {
+  const btn = document.getElementById('movieRentConfirmBtn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/portal/online-movies/${movie.id}/unlock-with-credit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac: onlineCurrentMac }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.message || 'Could not unlock with credit.');
+      return;
+    }
+    closeOnlineRentOverlay();
+    await loadOnlineMovies();
+    await refreshMovieCredit();
+    const refreshed = onlineAllMovies.find((m) => m.id === movie.id);
+    if (refreshed) startOnlinePlayback(refreshed);
+  } catch (e) {
+    alert('Could not reach the server, please try again.');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 let onlineMovieCoinPollInterval = null;
 
-async function beginOnlineMovieCoinInsertion() {
+// amountToPay is the credit-adjusted amount (see showOnlineRentConfirmStep
+// above) - display only, purely so the customer sees the right target;
+// server/routes/coin.js's finalize recalculates the real required amount
+// itself from the current balance, so this can't be tampered with to pay
+// less than actually owed.
+async function beginOnlineMovieCoinInsertion(amountToPay) {
   const movie = onlineAllMovies.find((m) => m.id === onlinePendingRentMovieId);
   if (!movie) return;
 
@@ -325,12 +392,12 @@ async function beginOnlineMovieCoinInsertion() {
   }
 
   await fetch('/api/portal/relay/on', { method: 'POST' }).catch(() => {});
-  showOnlineRentInsertingStep(movie);
+  showOnlineRentInsertingStep(movie, amountToPay);
 }
 
-function showOnlineRentInsertingStep(movie) {
+function showOnlineRentInsertingStep(movie, amountToPay) {
   document.getElementById('movieRentDesc').innerHTML =
-    `Inserted so far: <b id="onlineMovieRentRunningTotal">₱0</b> of ₱${movie.price_pesos}`;
+    `Inserted so far: <b id="onlineMovieRentRunningTotal">₱0</b> of ₱${amountToPay}`;
   document.getElementById('movieRentTitle').textContent = 'Insert coins now';
   document.getElementById('movieRentConfirmBtn').textContent = 'Done';
   document.getElementById('movieRentConfirmBtn').onclick = () => finishOnlineMovieCoinInsertion(movie.id);
@@ -501,6 +568,73 @@ function closeOnlineMoviePlayer() {
   document.getElementById('onlineMoviePlayerOverlay').classList.remove('show');
   document.getElementById('onlineSourceTabs').classList.remove('show');
   onlineCurrentMovie = null;
+}
+
+// ===== REQUEST A MOVIE =====
+// Reuses the same overlay box styling as the rent-confirm overlay
+// (movies.css's .movie-rent-overlay/.movie-rent-box) but is otherwise
+// entirely separate - no coin flow, no unlock, just a submission to
+// server/routes/portal.js's POST /movie-requests, reviewed later in the
+// admin panel's Movies > Online > Movie Requests panel. Rate-limited
+// server-side to one request per device per rolling 24h (see that route) -
+// this file never enforces that itself, it just surfaces whatever message
+// the server sends back if a customer tries again too soon.
+function openMovieRequestOverlay() {
+  // Remembers the customer's name locally (per-device, never sent anywhere
+  // but this same form) so a repeat requester doesn't have to retype it -
+  // purely a convenience, not an identity system.
+  const savedName = localStorage.getItem('movieRequestName');
+  if (savedName) document.getElementById('movieRequestName').value = savedName;
+  document.getElementById('movieRequestTitle').value = '';
+  document.getElementById('movieRequestYear').value = '';
+  document.getElementById('movieRequestMsg').style.display = 'none';
+  document.getElementById('movieRequestOverlay').classList.add('show');
+}
+
+function closeMovieRequestOverlay() {
+  document.getElementById('movieRequestOverlay').classList.remove('show');
+}
+
+async function submitMovieRequest() {
+  const name = document.getElementById('movieRequestName').value.trim();
+  const title = document.getElementById('movieRequestTitle').value.trim();
+  const year = document.getElementById('movieRequestYear').value.trim();
+  const msgEl = document.getElementById('movieRequestMsg');
+
+  if (!name || !title) {
+    msgEl.textContent = 'Please enter your name and the movie title.';
+    msgEl.style.color = 'var(--accent-red, #ef4444)';
+    msgEl.style.display = 'block';
+    return;
+  }
+
+  const btn = document.getElementById('movieRequestSubmitBtn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/portal/movie-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac: onlineCurrentMac, requester_name: name, title, year }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      localStorage.setItem('movieRequestName', name);
+      msgEl.textContent = 'Thanks! We\'ll take a look.';
+      msgEl.style.color = 'var(--brand-teal, #22c55e)';
+      msgEl.style.display = 'block';
+      setTimeout(closeMovieRequestOverlay, 1500);
+    } else {
+      msgEl.textContent = data.message || 'Could not submit your request.';
+      msgEl.style.color = 'var(--accent-red, #ef4444)';
+      msgEl.style.display = 'block';
+    }
+  } catch (e) {
+    msgEl.textContent = 'Could not reach the server, please try again.';
+    msgEl.style.color = 'var(--accent-red, #ef4444)';
+    msgEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 document.getElementById('onlineMoviesSearch').addEventListener('input', (e) => {

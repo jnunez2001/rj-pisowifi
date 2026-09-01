@@ -286,13 +286,28 @@ async function finalizePendingCoins(mac) {
       return { success: false, reason: 'movie_not_found' };
     }
 
-    if (total < movie.price_pesos) {
+    // Owner request: Movie Credit should be usable for movies too, not just
+    // WiFi time - applied automatically here rather than requiring a
+    // separate "use credit" step, and always recalculated from the real,
+    // current balance (never trusted from the client) so this can't be
+    // spoofed or drift out of sync with a balance spent elsewhere in the
+    // meantime. Capped at the price so a big balance can't go negative or
+    // leak into "change" on a cheap title - only the amount actually
+    // needed is deducted, the rest stays banked for next time.
+    const creditRow = db.prepare('SELECT balance_pesos FROM movie_credits WHERE mac_address = ?').get(mac);
+    const creditApplied = Math.min(creditRow?.balance_pesos || 0, movie.price_pesos);
+    const amountNeeded = movie.price_pesos - creditApplied;
+
+    if (total < amountNeeded) {
       addMovieCredit(mac, total);
-      console.log(`⚠️ Online movie rental window for ${mac} closed with ₱${total}, needed ₱${movie.price_pesos} - not unlocked, ₱${total} credited to their balance instead.`);
-      return { success: false, reason: 'insufficient_amount', total, needed: movie.price_pesos, credited_to_balance: total };
+      console.log(`⚠️ Online movie rental window for ${mac} closed with ₱${total}` + (creditApplied > 0 ? ` (+₱${creditApplied} credit not yet applied)` : '') + `, needed ₱${amountNeeded} more - not unlocked, ₱${total} credited to their balance instead.`);
+      return { success: false, reason: 'insufficient_amount', total, needed: amountNeeded, credited_to_balance: total };
     }
 
-    const changeCredited = total - movie.price_pesos;
+    if (creditApplied > 0) {
+      db.prepare('UPDATE movie_credits SET balance_pesos = balance_pesos - ?, updated_at = CURRENT_TIMESTAMP WHERE mac_address = ?').run(creditApplied, mac);
+    }
+    const changeCredited = total - amountNeeded;
     if (changeCredited > 0) addMovieCredit(mac, changeCredited);
 
     // 0 (the default) means "no per-movie override" - falls back to the
@@ -307,9 +322,9 @@ async function finalizePendingCoins(mac) {
       INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, mac_address)
       VALUES (?, ?, 0, 'online_movie_rental', ?)
     `).run(`ONLINE-MOVIE-${movie.id}`, movie.price_pesos, mac);
-    console.log(`✅ Online movie rental unlocked for ${mac}: "${movie.title}" (₱${movie.price_pesos})` + (changeCredited > 0 ? ` + ₱${changeCredited} credited to their balance` : ''));
+    console.log(`✅ Online movie rental unlocked for ${mac}: "${movie.title}" (₱${movie.price_pesos})` + (creditApplied > 0 ? `, ₱${creditApplied} from credit` : '') + (changeCredited > 0 ? ` + ₱${changeCredited} credited to their balance` : ''));
     require('../services/vendoAudioService').playVendoAmount(total).catch(() => {});
-    return { success: true, result: { movie_unlocked: true, movie_id: movie.id, expires_at: expiresAt, change_credited: changeCredited } };
+    return { success: true, result: { movie_unlocked: true, movie_id: movie.id, expires_at: expiresAt, credit_applied: creditApplied, change_credited: changeCredited } };
   }
 
   try {

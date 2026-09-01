@@ -5352,22 +5352,30 @@ router.post('/movies/tmdb-sync', adminAuth, async (req, res) => {
 // Search filters by title (case-insensitive substring); with no query,
 // paginates the full merged catalog (starter list + synced feed) so a
 // catalog of hundreds of titles doesn't have to render all at once.
+// Sort field -> comparator. Click-to-sort on the Price Groups table headers
+// (public/admin/pages/movies.html's om-sortable <th>s) instead of a
+// separate filter control - lets the owner find "just the paid ones" (or
+// sort by price/priority/rental hours) directly in the table they're
+// already looking at.
+const CATALOG_SORTERS = {
+  title: (a, b) => a.title.localeCompare(b.title),
+  tier: (a, b) => a.tier.localeCompare(b.tier) || a.title.localeCompare(b.title),
+  price: (a, b) => a.price_pesos - b.price_pesos || a.title.localeCompare(b.title),
+  priority: (a, b) => (a.priority || 0) - (b.priority || 0) || a.title.localeCompare(b.title),
+  rental_hours: (a, b) => (a.rental_hours || 0) - (b.rental_hours || 0) || a.title.localeCompare(b.title),
+};
+
 router.get('/movies/online-catalog', adminAuth, (req, res) => {
   const q = String(req.query.q || '').trim().toLowerCase();
-  const tier = req.query.tier === 'free' || req.query.tier === 'paid' ? req.query.tier : '';
+  const sortKey = CATALOG_SORTERS[req.query.sort] ? req.query.sort : 'title';
+  const dir = req.query.dir === 'desc' ? 'desc' : 'asc';
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
 
   let all = onlineMovieCatalog.getAll();
   if (q) all = all.filter((m) => m.title.toLowerCase().includes(q));
-  if (tier) all = all.filter((m) => m.tier === tier);
-  // Filtering to just Free or Paid is exactly when alphabetical order stops
-  // being useful (the owner's own words: "so I dont find the paid one by
-  // one") - sort by priority/price instead so the titles that actually
-  // matter (highest priority, then highest price) surface first instead of
-  // needing to hunt through the whole alphabet.
-  if (tier) all.sort((a, b) => (b.priority || 0) - (a.priority || 0) || b.price_pesos - a.price_pesos || a.title.localeCompare(b.title));
-  else all.sort((a, b) => a.title.localeCompare(b.title));
+  all.sort(CATALOG_SORTERS[sortKey]);
+  if (dir === 'desc') all.reverse();
 
   const total = all.length;
   const start = (page - 1) * limit;
@@ -5629,6 +5637,35 @@ router.get('/movies/top-searches', adminAuth, (req, res) => {
     LIMIT 20
   `).all();
   res.json({ success: true, searches: rows });
+});
+
+// GET /movies/requests?status= - the "Movie Requests" panel (Movies >
+// Online). Defaults to showing everything, newest first; ?status=pending
+// narrows to just what still needs a decision.
+router.get('/movies/requests', adminAuth, (req, res) => {
+  const status = ['pending', 'added', 'declined'].includes(req.query.status) ? req.query.status : '';
+  const rows = status
+    ? db.prepare('SELECT * FROM movie_requests WHERE status = ? ORDER BY created_at DESC').all(status)
+    : db.prepare('SELECT * FROM movie_requests ORDER BY created_at DESC').all();
+  res.json({ success: true, requests: rows });
+});
+
+// Marks a request reviewed (added to the catalog, or declined) - purely a
+// status label for the admin's own tracking, doesn't touch the catalog
+// itself (adding the actual title is still the normal TMDb search/add-by-id
+// flow above).
+router.post('/movies/requests/:id/status', adminAuth, (req, res) => {
+  const status = req.body?.status;
+  if (!['pending', 'added', 'declined'].includes(status)) {
+    return res.status(400).json({ success: false, message: 'Invalid status.' });
+  }
+  db.prepare('UPDATE movie_requests SET status = ? WHERE id = ?').run(status, parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+router.delete('/movies/requests/:id', adminAuth, (req, res) => {
+  db.prepare('DELETE FROM movie_requests WHERE id = ?').run(parseInt(req.params.id, 10));
+  res.json({ success: true });
 });
 
 router.post('/movies/:id', adminAuth, (req, res) => {

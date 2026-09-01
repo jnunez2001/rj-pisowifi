@@ -668,6 +668,24 @@ async function expireSession(voucherCode) {
     }
   }
 
+  // Owner's call: Movie Credit (banked over/underpaid movie-rental coins,
+  // database.js's movie_credits) is only meant to be spent DURING the WiFi
+  // time the customer already paid for - "use it before there connection
+  // time ends or it will be lost or not be refunded." Forfeited (not
+  // carried forward) the moment their session actually ends, through this
+  // same single choke-point every ending path already funnels through
+  // (timer expiry, admin cut, customer cancel - same reasoning as the
+  // promo_vouchers cleanup above). A customer who buys new WiFi time later
+  // starts that balance at ₱0 again, same as if they'd never had credit -
+  // this is deliberately NOT a persistent account, on purpose.
+  if (session && session.mac_address) {
+    try {
+      db.prepare('DELETE FROM movie_credits WHERE mac_address = ?').run(session.mac_address);
+    } catch (e) {
+      console.error(`[MovieCredit] Failed to forfeit balance for ${session.mac_address}:`, e.message);
+    }
+  }
+
   // Block internet access
   if (session && session.mac_address) {
     try {

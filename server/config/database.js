@@ -552,6 +552,23 @@ db.exec(`
     searched_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- "Request a Movie" form in the portal's Movies tab (public/portal/
+  -- assets/js/movies-online.js) - a customer asks for a title that isn't in
+  -- the catalog yet. One row per submission, rate-limited to one per
+  -- mac_address per rolling 24h (see POST /api/portal/movie-requests) so a
+  -- device can't spam the list, but a device CAN submit many different
+  -- requests over time (one a day, forever). Reviewed in the admin panel's
+  -- Movies > Online > Movie Requests panel.
+  CREATE TABLE IF NOT EXISTS movie_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac_address TEXT NOT NULL,
+    requester_name TEXT NOT NULL,
+    title TEXT NOT NULL,
+    year TEXT,
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'added' | 'declined'
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Portal ad/promo carousel (new movies, promos, whatever the operator
   -- wants customers to see the moment they connect) - a list of images
   -- shown above the STARKFI banner text, distinct from the existing
