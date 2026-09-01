@@ -6,7 +6,15 @@
     <div class="page-title">Dashboard</div>
   </div>
   <div class="zf3-header-right">
-    <div class="zf3-date-pill"><i class="fas fa-calendar-days"></i> <span id="dashboardDateRange">--</span></div>
+    <div style="position:relative;">
+      <div class="zf3-date-pill" style="cursor:pointer;" onclick="toggleDashboardDateMenu()"><i class="fas fa-calendar-days"></i> <span id="dashboardDateRange">--</span> <i class="fas fa-chevron-down" style="font-size:10px;margin-left:2px;"></i></div>
+      <div id="dashboardDateMenu" class="zf3-card" style="display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:50;width:220px;padding:8px;">
+        <div class="zf3-date-menu-item" onclick="setDashboardDays(7)">Last 7 days</div>
+        <div class="zf3-date-menu-item" onclick="setDashboardDays(14)">Last 14 days</div>
+        <div class="zf3-date-menu-item" onclick="setDashboardDays(30)">Last 30 days</div>
+        <div class="zf3-date-menu-item" onclick="setDashboardDays(90)">Last 90 days</div>
+      </div>
+    </div>
     <div class="zf3-icon-btn" onclick="loadDashboard()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
   </div>
 </div>

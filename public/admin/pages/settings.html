@@ -53,6 +53,38 @@
     <div id="networkStatus" style="display:none;margin-top:12px;padding:12px;border-radius:8px;font-size:13px;"></div>
   </div>
 
+  <!-- SERVER DATE & TIME -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <i class="fas fa-clock" style="margin-right:8px;color:var(--accent-blue);"></i>Date &amp; Time
+      </div>
+      <span id="currentServerTime" style="font-size:12px;font-weight:700;color:var(--text-muted);">Loading...</span>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Keep time synced automatically</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
+        <label class="toggle-switch">
+          <input type="checkbox" id="ntpEnabled" onchange="updateToggleLabel('ntpEnabled','ntpEnabledLabel')">
+          <span class="toggle-slider"></span>
+        </label>
+        <span id="ntpEnabledLabel" style="font-size:13px;color:var(--text-muted);">Disabled</span>
+      </div>
+      <small style="color:var(--text-muted);">Recommended - the clock corrects itself over the internet, so it's always right without needing to touch it again.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Timezone</label>
+      <select id="serverTimezone" class="form-control">
+        <option value="Asia/Manila">Asia/Manila (Philippines)</option>
+      </select>
+      <small style="color:var(--text-muted);">Affects every date/time shown across the admin panel and portal, including today's revenue and reports.</small>
+    </div>
+    <button class="btn btn-primary" onclick="saveDateTimeSettings()">
+      <i class="fas fa-save"></i> Save Date &amp; Time
+    </button>
+    <div id="dateTimeStatus" style="display:none;margin-top:12px;padding:12px;border-radius:8px;font-size:13px;"></div>
+  </div>
+
   <!-- SITE INFORMATION -->
   <div class="card">
     <div class="card-header">

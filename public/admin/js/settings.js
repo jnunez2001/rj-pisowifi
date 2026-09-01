@@ -31,6 +31,57 @@ async function loadScheduledBackups() {
   }
 }
 
+async function loadDateTimeSettings() {
+  const timeEl = document.getElementById('currentServerTime');
+  const tzSelect = document.getElementById('serverTimezone');
+  if (!timeEl || !tzSelect) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/system/datetime');
+    if (!data.success) {
+      timeEl.textContent = 'Unavailable';
+      return;
+    }
+    timeEl.textContent = new Date(data.current_time).toLocaleString();
+    setToggle('ntpEnabled', 'ntpEnabledLabel', data.ntp_enabled);
+
+    // Populate the real dropdown from the server's own valid timezone
+    // list rather than trusting only the hardcoded Asia/Manila option in
+    // the HTML - keeps the current value selectable even on an install
+    // set to something else, without needing to ship/maintain the full
+    // IANA list by hand in this file.
+    if (Array.isArray(data.timezones) && data.timezones.length > 0) {
+      const current = data.timezone;
+      tzSelect.innerHTML = data.timezones.map((tz) =>
+        `<option value="${tz}" ${tz === current ? 'selected' : ''}>${tz}</option>`
+      ).join('');
+    }
+  } catch (e) {
+    timeEl.textContent = 'Unavailable';
+  }
+}
+
+async function saveDateTimeSettings() {
+  const statusEl = document.getElementById('dateTimeStatus');
+  const ntpEnabled = document.getElementById('ntpEnabled').checked;
+  const timezone = document.getElementById('serverTimezone').value;
+  try {
+    const data = await apiCall('POST', '/api/admin/system/datetime', { ntp_enabled: ntpEnabled, timezone });
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.style.background = data.success ? 'var(--bg-primary)' : 'var(--bg-primary)';
+      statusEl.style.color = data.success ? 'var(--accent-green)' : 'var(--accent-red)';
+      statusEl.textContent = data.success ? 'Saved.' : (data.message || 'Could not save.');
+    }
+    if (data.success) loadDateTimeSettings();
+  } catch (e) {
+    if (statusEl) {
+      statusEl.style.display = 'block';
+      statusEl.style.color = 'var(--accent-red)';
+      statusEl.textContent = 'Server error.';
+    }
+  }
+}
+
 async function loadSettings() {
   try {
     const data = await apiCall('GET', '/api/admin/settings');
@@ -44,6 +95,9 @@ async function loadSettings() {
     updateDhcpControllerWarning();
     loadNetworkConfig();
     loadCurrentIp();
+
+    // Date & Time
+    loadDateTimeSettings();
 
     // Portal Addresses
     loadAdminHostname();

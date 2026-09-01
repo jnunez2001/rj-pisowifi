@@ -4,6 +4,55 @@ let currentChartRange = 'weekly';
 let networkChart = null;
 let networkStatsInterval = null;
 let uptimeInterval = null;
+// The date pill's actual selected window - persisted across a session so
+// switching pages and coming back doesn't silently reset it to 7.
+let currentDashboardDays = parseInt(sessionStorage.getItem('dashboardDays'), 10) || 7;
+
+function updateDashboardDateLabel() {
+  const rangeEl = document.getElementById('dashboardDateRange');
+  if (!rangeEl) return;
+  const end = new Date();
+  const start = new Date();
+  start.setDate(end.getDate() - (currentDashboardDays - 1));
+  const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  rangeEl.textContent = `${fmt(start)} - ${fmt(end)}`;
+}
+
+function toggleDashboardDateMenu() {
+  const menu = document.getElementById('dashboardDateMenu');
+  if (!menu) return;
+  const showing = menu.style.display === 'block';
+  menu.style.display = showing ? 'none' : 'block';
+  if (!showing) highlightActiveDashboardDays();
+}
+
+function highlightActiveDashboardDays() {
+  const menu = document.getElementById('dashboardDateMenu');
+  if (!menu) return;
+  menu.querySelectorAll('.zf3-date-menu-item').forEach((el, i) => {
+    const days = [7, 14, 30, 90][i];
+    el.classList.toggle('active', days === currentDashboardDays);
+  });
+}
+
+function setDashboardDays(days) {
+  currentDashboardDays = days;
+  sessionStorage.setItem('dashboardDays', String(days));
+  const menu = document.getElementById('dashboardDateMenu');
+  if (menu) menu.style.display = 'none';
+  loadSalesStats();
+}
+
+// Close the menu on an outside click, same convention as any other
+// dropdown in this admin (not wired to a global handler elsewhere, so
+// this attaches its own once).
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('dashboardDateMenu');
+  const pill = e.target.closest ? e.target.closest('.zf3-date-pill') : null;
+  if (menu && menu.style.display === 'block' && !menu.contains(e.target) && !pill) {
+    menu.style.display = 'none';
+  }
+});
 
 async function loadDashboard() {
   // Bug: initChart() used to run AFTER loadSalesStats(), so on every fresh
@@ -11,14 +60,7 @@ async function loadDashboard() {
   // was always false (the chart didn't exist yet). The revenue chart
   // always rendered as a flat zero line until an admin happened to click
   // one of the Daily/Weekly/Monthly buttons, easy to mistake for "no sales".
-  const rangeEl = document.getElementById('dashboardDateRange');
-  if (rangeEl) {
-    const end = new Date();
-    const start = new Date();
-    start.setDate(end.getDate() - 6);
-    const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    rangeEl.textContent = `${fmt(start)} - ${fmt(end)}`;
-  }
+  updateDashboardDateLabel();
   initChart();
   // These each hit their own endpoint and write to their own DOM elements,
   // no shared state between them, so they don't need to run one-at-a-time.
@@ -407,8 +449,10 @@ async function loadSystemVersion() {
 
 async function loadSalesStats() {
   try {
-    const data = await apiCall('GET', `/api/admin/sales?range=${currentChartRange}`);
+    const data = await apiCall('GET', `/api/admin/sales?range=${currentChartRange}&days=${currentDashboardDays}`);
     if (!data.success) return;
+    if (data.window_days) currentDashboardDays = data.window_days;
+    updateDashboardDateLabel();
 
     const todayIncome = data.today.total_income || 0;
     const todayTx = data.today.transactions || 0;

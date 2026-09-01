@@ -1330,6 +1330,9 @@ body {
 .zf3-date-pill { display:flex; align-items:center; gap:10px; padding:10px 16px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; font-size:13px; font-weight:600; color:var(--text-primary); }
 .zf3-icon-btn { width:40px; height:40px; display:flex; align-items:center; justify-content:center; background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; color:var(--text-muted); cursor:pointer; }
 .zf3-icon-btn:hover { color:var(--text-primary); }
+.zf3-date-menu-item { padding:8px 10px; border-radius:6px; font-size:13px; cursor:pointer; color:var(--text-primary); }
+.zf3-date-menu-item:hover { background:var(--bg-hover); }
+.zf3-date-menu-item.active { color:var(--brand-teal); font-weight:600; }
 .zf3-view-pill { display:flex; align-items:center; gap:8px; padding:10px 16px; background:var(--bg-card); border:1px solid var(--border-color); border-radius:10px; font-size:13px; font-weight:600; color:var(--text-primary); }
 
 .zf3-stat-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:16px; margin-bottom:16px; min-width:0; }
