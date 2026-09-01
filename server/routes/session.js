@@ -334,11 +334,19 @@ router.get('/free-claim/status/:mac', (req, res) => {
       return res.json({ success: true, eligible: false, reason: 'disabled' });
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    // Bug found live: computing "today" via new Date().toISOString() is
+    // always UTC, regardless of the server's own OS timezone, while
+    // operators are commonly Asia/Manila (UTC+8) - for ~8 hours every
+    // local day this let a customer's free claim from earlier that local
+    // day appear as "not claimed today" (or the reverse near midnight),
+    // same bug class already fixed on the Dashboard's Today's Revenue.
+    // SQLite's 'localtime' modifier matches this server's own OS
+    // timezone, same convention already used elsewhere (timerService.js).
+    const today = db.prepare("SELECT date('now', 'localtime') as d").get().d;
     const existing = db.prepare(`
       SELECT id FROM free_claims
       WHERE mac_address = ?
-      AND date(claimed_at) = ?
+      AND date(claimed_at, 'localtime') = ?
     `).get(mac, today);
 
     return res.json({
@@ -380,13 +388,14 @@ router.post('/free-claim', async (req, res) => {
       return res.status(403).json({ success: false, message: 'Free minutes not available' });
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    // Same UTC-vs-local timezone bug/fix as GET /free-claim/status above.
+    const today = db.prepare("SELECT date('now', 'localtime') as d").get().d;
 
     // Check MAC-based claim (Bug #7, primary check)
     const existingMac = db.prepare(`
       SELECT id FROM free_claims
       WHERE mac_address = ?
-      AND date(claimed_at) = ?
+      AND date(claimed_at, 'localtime') = ?
     `).get(mac, today);
 
     if (existingMac) {
@@ -406,7 +415,7 @@ router.post('/free-claim', async (req, res) => {
       const existingIp = db.prepare(`
         SELECT id FROM free_claims
         WHERE ip_address = ?
-        AND date(claimed_at) = ?
+        AND date(claimed_at, 'localtime') = ?
       `).get(ip, today);
 
       if (existingIp) {

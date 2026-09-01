@@ -26,7 +26,16 @@ const storage = multer.diskStorage({
     // (overwrite the one global image). Voucher-group logos are per-group,
     // so they need a unique filename or every group would overwrite the
     // same "voucher.png" and all print with whichever was uploaded last.
-    const suffix = type === 'voucher' ? `-${Date.now()}` : '';
+    // Bug found live: 'promo' and 'rental_wallpaper' are BOTH multi-item
+    // lists (promo_banner_images/rental_wallpapers tables can hold many
+    // rows) but were missing this same uniqueness suffix - every upload
+    // wrote to the identical "promo.jpg"/"rental_wallpaper.jpg" path,
+    // physically overwriting the previous image on disk. The DB ended up
+    // with N distinct rows that all pointed at the one most-recently-
+    // uploaded file, so the portal's carousel correctly rotated through
+    // N slots that were all visually identical - looked like "only 1
+    // image" even though the rotation logic itself was working fine.
+    const suffix = (type === 'voucher' || type === 'promo' || type === 'rental_wallpaper') ? `-${Date.now()}` : '';
     cb(null, `${type}${suffix}${ext}`);
   }
 });
@@ -920,13 +929,13 @@ router.get('/users/guests', adminAuth, (req, res) => {
         (SELECT t.coin_value FROM transactions t WHERE t.voucher_code = sh.voucher_code
           AND t.type != 'convert' AND t.type != 'convert_down' ORDER BY t.id DESC LIMIT 1) as coin_value
       FROM session_history sh
-      WHERE date(sh.ended_at) >= date('now', '-' || ? || ' days')
+      WHERE date(sh.ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
       ORDER BY sh.ended_at DESC LIMIT 100
     `).all(days);
 
     const kpiPeriod = db.prepare(`
       SELECT COUNT(*) as sessions, SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as revenue
-      FROM transactions WHERE date(created_at) >= date('now', '-' || ? || ' days')
+      FROM transactions WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
     `).get(days);
 
     return res.json({
@@ -969,14 +978,14 @@ router.get('/users/devices', adminAuth, (req, res) => {
         MAX(created_at) as last_seen,
         COUNT(*) as transaction_count
       FROM transactions
-      WHERE mac_address IS NOT NULL AND mac_address != '' AND date(created_at) >= date('now', '-' || ? || ' days')
+      WHERE mac_address IS NOT NULL AND mac_address != '' AND date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
       GROUP BY mac_address
     `).all(days);
 
     const sessionCounts = db.prepare(`
       SELECT mac_address, COUNT(*) as session_count, SUM(duration_seconds) as total_duration_seconds
       FROM session_history
-      WHERE mac_address IS NOT NULL AND date(ended_at) >= date('now', '-' || ? || ' days')
+      WHERE mac_address IS NOT NULL AND date(ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
       GROUP BY mac_address
     `).all(days);
     const sessionCountByMac = new Map(sessionCounts.map((r) => [r.mac_address, r]));
@@ -1042,7 +1051,7 @@ router.get('/analytics/summary', adminAuth, (req, res) => {
         COUNT(DISTINCT CASE WHEN mac_address IS NOT NULL THEN mac_address END) as users,
         COUNT(*) as transactions
       FROM transactions
-      WHERE date(created_at) >= date('now', '-' || ? || ' days')
+      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
     `).get(days);
 
     const prevPeriod = db.prepare(`
@@ -1051,16 +1060,16 @@ router.get('/analytics/summary', adminAuth, (req, res) => {
         COUNT(DISTINCT CASE WHEN mac_address IS NOT NULL THEN mac_address END) as users,
         COUNT(*) as transactions
       FROM transactions
-      WHERE date(created_at) >= date('now', '-' || ? || ' days') AND date(created_at) < date('now', '-' || ? || ' days')
+      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days') AND date(created_at, 'localtime') < date('now', 'localtime', '-' || ? || ' days')
     `).get(days * 2, days);
 
     const sessionsPeriod = db.prepare(`
       SELECT COUNT(*) as sessions, AVG(duration_seconds) as avg_duration
-      FROM session_history WHERE date(ended_at) >= date('now', '-' || ? || ' days')
+      FROM session_history WHERE date(ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
     `).get(days);
     const sessionsPrev = db.prepare(`
       SELECT COUNT(*) as sessions, AVG(duration_seconds) as avg_duration
-      FROM session_history WHERE date(ended_at) >= date('now', '-' || ? || ' days') AND date(ended_at) < date('now', '-' || ? || ' days')
+      FROM session_history WHERE date(ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days') AND date(ended_at, 'localtime') < date('now', 'localtime', '-' || ? || ' days')
     `).get(days * 2, days);
 
     const pctChange = (curr, prev) => {
@@ -1076,19 +1085,19 @@ router.get('/analytics/summary', adminAuth, (req, res) => {
 
     // Daily revenue+sessions series for the primary chart.
     const revenueSeries = db.prepare(`
-      SELECT date(created_at) as date,
+      SELECT date(created_at, 'localtime') as date,
         SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as revenue,
         COUNT(*) as sessions
       FROM transactions
-      WHERE date(created_at) >= date('now', '-' || ? || ' days')
-      GROUP BY date(created_at) ORDER BY date ASC
+      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
+      GROUP BY date(created_at, 'localtime') ORDER BY date ASC
     `).all(days);
 
     // Revenue breakdown by real transaction type.
     const breakdownRows = db.prepare(`
       SELECT type, SUM(coin_value) as amount
       FROM transactions
-      WHERE date(created_at) >= date('now', '-' || ? || ' days') AND type != 'free'
+      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days') AND type != 'free'
       GROUP BY type ORDER BY amount DESC
     `).all(days);
     const breakdownTotal = breakdownRows.reduce((sum, r) => sum + (r.amount || 0), 0);
@@ -1102,9 +1111,9 @@ router.get('/analytics/summary', adminAuth, (req, res) => {
 
     // Sessions by hour-of-day (0-23), real session_history rows in period.
     const hourRows = db.prepare(`
-      SELECT CAST(strftime('%H', started_at) as INTEGER) as hour, COUNT(*) as count
+      SELECT CAST(strftime('%H', started_at, 'localtime') as INTEGER) as hour, COUNT(*) as count
       FROM session_history
-      WHERE started_at IS NOT NULL AND date(ended_at) >= date('now', '-' || ? || ' days')
+      WHERE started_at IS NOT NULL AND date(ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
       GROUP BY hour
     `).all(days);
     const hourMap = new Map(hourRows.map((r) => [r.hour, r.count]));
@@ -1113,14 +1122,14 @@ router.get('/analytics/summary', adminAuth, (req, res) => {
     // New vs returning + repeat users, same "first-ever-transaction-date"
     // logic already proven in /sales, generalized to the selected period.
     const firstSeenRows = db.prepare(`
-      SELECT mac_address, MIN(date(created_at)) as first_date
+      SELECT mac_address, MIN(date(created_at, 'localtime')) as first_date
       FROM transactions WHERE mac_address IS NOT NULL GROUP BY mac_address
     `).all();
     const firstSeenByMac = new Map(firstSeenRows.map((r) => [r.mac_address, r.first_date]));
     const periodMacRows = db.prepare(`
-      SELECT mac_address, date(created_at) as tx_date, COUNT(*) as tx_count
+      SELECT mac_address, date(created_at, 'localtime') as tx_date, COUNT(*) as tx_count
       FROM transactions
-      WHERE mac_address IS NOT NULL AND date(created_at) >= date('now', '-' || ? || ' days')
+      WHERE mac_address IS NOT NULL AND date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
       GROUP BY mac_address, tx_date
     `).all(days);
     const macTxCounts = new Map();
@@ -1139,13 +1148,13 @@ router.get('/analytics/summary', adminAuth, (req, res) => {
     const topSpenders = db.prepare(`
       SELECT mac_address, SUM(coin_value) as total, COUNT(*) as transaction_count
       FROM transactions
-      WHERE date(created_at) >= date('now', '-' || ? || ' days') AND mac_address IS NOT NULL AND mac_address != ''
+      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days') AND mac_address IS NOT NULL AND mac_address != ''
       GROUP BY mac_address ORDER BY total DESC LIMIT 5
     `).all(days);
     const topSpenderDurations = db.prepare(`
       SELECT mac_address, AVG(duration_seconds) as avg_duration, COUNT(*) as session_count
       FROM session_history
-      WHERE date(ended_at) >= date('now', '-' || ? || ' days') AND mac_address IS NOT NULL
+      WHERE date(ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days') AND mac_address IS NOT NULL
       GROUP BY mac_address
     `).all(days);
     const durationByMac = new Map(topSpenderDurations.map((r) => [r.mac_address, r]));
@@ -1191,11 +1200,11 @@ router.get('/analytics/summary', adminAuth, (req, res) => {
 // from the same transactions table sales stats already use).
 router.get('/dashboard/top-spenders-today', adminAuth, (req, res) => {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    const today = db.prepare("SELECT date('now', 'localtime') as d").get().d;
     const rows = db.prepare(`
       SELECT mac_address, SUM(coin_value) as total, COUNT(*) as transaction_count
       FROM transactions
-      WHERE date(created_at) = ? AND mac_address IS NOT NULL AND mac_address != ''
+      WHERE date(created_at, 'localtime') = ? AND mac_address IS NOT NULL AND mac_address != ''
       GROUP BY mac_address
       ORDER BY total DESC
       LIMIT 5
@@ -1411,15 +1420,15 @@ router.get('/vouchers/redemption-summary', adminAuth, (req, res) => {
   try {
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
     const series = db.prepare(`
-      SELECT date(created_at) as date, COUNT(*) as redeemed, SUM(coin_value) as revenue
+      SELECT date(created_at, 'localtime') as date, COUNT(*) as redeemed, SUM(coin_value) as revenue
       FROM transactions
-      WHERE type IN ('voucher', 'promo') AND date(created_at) >= date('now', '-' || ? || ' days')
-      GROUP BY date(created_at) ORDER BY date ASC
+      WHERE type IN ('voucher', 'promo') AND date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
+      GROUP BY date(created_at, 'localtime') ORDER BY date ASC
     `).all(days);
     const totals = db.prepare(`
       SELECT COUNT(*) as redeemed, SUM(coin_value) as revenue
       FROM transactions
-      WHERE type IN ('voucher', 'promo') AND date(created_at) >= date('now', '-' || ? || ' days')
+      WHERE type IN ('voucher', 'promo') AND date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
     `).get(days);
     return res.json({
       success: true,
@@ -1689,7 +1698,7 @@ router.get('/plans', adminAuth, (req, res) => {
       FROM plans p
       LEFT JOIN (
         SELECT vg.plan_id as plan_id,
-          SUM(CASE WHEN date(sh.ended_at) = date('now') THEN 1 ELSE 0 END) as used_today,
+          SUM(CASE WHEN date(sh.ended_at, 'localtime') = date('now', 'localtime') THEN 1 ELSE 0 END) as used_today,
           COUNT(sh.id) as used_total
         FROM session_history sh
         JOIN promo_vouchers pv ON pv.code = sh.voucher_code
@@ -5526,7 +5535,7 @@ function rentalStatusFor(pc) {
     : Math.max(0, (session?.hard_expires_at ? new Date(session.hard_expires_at).getTime() - Date.now() : 0) / 60000);
   const todaySales = db.prepare(`
     SELECT COALESCE(SUM(coin_value), 0) AS total FROM rental_transactions
-    WHERE pc_id = ? AND type = 'coin' AND created_at >= datetime('now', 'start of day')
+    WHERE pc_id = ? AND type = 'coin' AND datetime(created_at, 'localtime') >= datetime('now', 'localtime', 'start of day')
   `).get(pc.id).total;
   return {
     ...pc,
@@ -5807,10 +5816,18 @@ router.get('/rental/reports/summary', adminAuth, (req, res) => {
       SELECT COALESCE(SUM(coin_value), 0) AS total FROM rental_transactions
       WHERE type = 'coin' AND created_at >= datetime('now', ?)
     `).get(sqliteModifier).total;
+    // 'start of day' is a real calendar-day boundary (needs both sides in
+    // the server's local timezone, same bug/fix as the WiFi Dashboard's
+    // Today's Revenue) - the others are rolling elapsed-time windows,
+    // correct as-is regardless of timezone.
+    const todaySince = db.prepare(`
+      SELECT COALESCE(SUM(coin_value), 0) AS total FROM rental_transactions
+      WHERE type = 'coin' AND datetime(created_at, 'localtime') >= datetime('now', 'localtime', 'start of day')
+    `).get().total;
 
     res.json({
       success: true,
-      today: sumSince('start of day'),
+      today: todaySince,
       weekly: sumSince('-7 days'),
       monthly: sumSince('-30 days'),
       yearly: sumSince('-365 days')

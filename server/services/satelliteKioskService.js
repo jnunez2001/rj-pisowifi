@@ -27,12 +27,18 @@ function isOnline(lastSeen) {
 // List every registered kiosk with today's revenue attributed to it and a
 // live online/offline read (not a stored, driftable status field).
 function listKiosks() {
-  const today = new Date().toISOString().split('T')[0];
+  // Bug found live: new Date().toISOString() is always UTC regardless of
+  // the server's own OS timezone, while operators are commonly
+  // Asia/Manila (UTC+8) - same "Today's Revenue" bug fixed on the main
+  // Dashboard, here attributing a satellite kiosk's revenue to the wrong
+  // calendar day for ~8 hours every local day. 'localtime' matches the
+  // server's own OS timezone, same convention used elsewhere (timerService.js).
+  const today = db.prepare("SELECT date('now', 'localtime') as d").get().d;
   const kiosks = db.prepare('SELECT * FROM satellite_kiosks ORDER BY created_at DESC').all();
 
   const revenueStmt = db.prepare(`
     SELECT COALESCE(SUM(coin_value), 0) as total, COUNT(*) as count
-    FROM transactions WHERE kiosk_id = ? AND date(created_at) = ?
+    FROM transactions WHERE kiosk_id = ? AND date(created_at, 'localtime') = ?
   `);
 
   return kiosks.map(k => {
