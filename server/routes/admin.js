@@ -5147,6 +5147,209 @@ router.post('/movies/scan', adminAuth, async (req, res) => {
   }
 });
 
+// ── Movies > Online (server/services/onlineMovieCatalog.js + tmdbService.js) ──
+// Everything here is additive to the LOCAL movie library routes above -
+// nothing there was changed. This is the admin-facing config for the
+// Online Movies tab: which streaming source to embed from, the TMDb key
+// that powers posters/search/feed-sync, and which titles carry a price.
+const onlineMovieCatalog = require('../services/onlineMovieCatalog');
+const tmdbService = require('../services/tmdbService');
+
+router.get('/movies/online-settings', adminAuth, (req, res) => {
+  const tmdbKeySet = !!db.prepare("SELECT value FROM settings WHERE key = 'tmdb_api_key'").get()?.value;
+  const feedStatus = tmdbService.getFeedStatus();
+  res.json({ success: true, tmdb_key_set: tmdbKeySet, feed: feedStatus });
+});
+
+// ── Streaming Sources (movie_streaming_sources) ─────────────────────────
+// Multiple named embed sources ("Server 1", "Server 2", ...) - a customer
+// can switch between them from the player overlay if one is slow/down/ad-
+// heavy (see GET /api/portal/online-movies/sources and the :id/embed
+// route's ?source_id= param).
+router.get('/movies/streaming-sources', adminAuth, (req, res) => {
+  const sources = db.prepare('SELECT * FROM movie_streaming_sources ORDER BY sort_order, id').all();
+  res.json({ success: true, sources });
+});
+
+router.post('/movies/streaming-sources', adminAuth, (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const template = String(req.body?.url_template || '').trim();
+  if (!name || !template) return res.status(400).json({ success: false, message: 'A name and URL template are required.' });
+  if (!template.includes('{tmdb_id}')) {
+    return res.status(400).json({ success: false, message: 'The URL must contain the literal {tmdb_id} placeholder.' });
+  }
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM movie_streaming_sources').get().m;
+  const isFirst = db.prepare('SELECT COUNT(*) as c FROM movie_streaming_sources').get().c === 0;
+  const result = db.prepare('INSERT INTO movie_streaming_sources (name, url_template, is_default, sort_order) VALUES (?, ?, ?, ?)')
+    .run(name, template, isFirst ? 1 : 0, maxOrder + 1);
+  res.json({ success: true, id: result.lastInsertRowid });
+});
+
+router.post('/movies/streaming-sources/:id', adminAuth, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { name, url_template, is_default } = req.body || {};
+  if (url_template !== undefined && !String(url_template).includes('{tmdb_id}')) {
+    return res.status(400).json({ success: false, message: 'The URL must contain the literal {tmdb_id} placeholder.' });
+  }
+  if (is_default) {
+    // Only one default at a time - clear the others first.
+    db.prepare('UPDATE movie_streaming_sources SET is_default = 0').run();
+  }
+  db.prepare(`
+    UPDATE movie_streaming_sources SET
+      name = COALESCE(?, name), url_template = COALESCE(?, url_template), is_default = COALESCE(?, is_default)
+    WHERE id = ?
+  `).run(name || null, url_template || null, is_default ? 1 : (is_default === false ? 0 : null), id);
+  res.json({ success: true });
+});
+
+router.delete('/movies/streaming-sources/:id', adminAuth, (req, res) => {
+  db.prepare('DELETE FROM movie_streaming_sources WHERE id = ?').run(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+router.post('/movies/tmdb-key', adminAuth, (req, res) => {
+  const apiKey = String(req.body?.api_key || '').trim();
+  if (!apiKey) return res.status(400).json({ success: false, message: 'Enter a key first.' });
+  const { encryptSecret } = require('../utils/secretCrypto');
+  db.prepare(`
+    INSERT INTO settings (key, value) VALUES ('tmdb_api_key', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `).run(encryptSecret(apiKey));
+  res.json({ success: true });
+});
+
+// Tests whatever key is passed in the body (so the admin can test BEFORE
+// saving), falling back to the already-saved key if the field was left
+// blank (re-verify an existing key). Same try/await/200-or-400 shape as
+// every other "Test Connection" route in this file (router/test-connection
+// etc.).
+router.post('/movies/tmdb-test', adminAuth, async (req, res) => {
+  try {
+    const apiKey = String(req.body?.api_key || '').trim() || null;
+    await tmdbService.testConnection(apiKey);
+    res.json({ success: true, message: 'Connected' });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || 'Connection failed' });
+  }
+});
+
+router.get('/movies/tmdb-search', adminAuth, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.json({ success: true, results: [] });
+    const results = await tmdbService.searchMovies(q);
+    res.json({ success: true, results });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || 'Search failed' });
+  }
+});
+
+// Pulls Trending/Popular/Top Rated from TMDb into tmdb_movie_feed - this is
+// what grows the catalog without anyone hand-typing ids. Admin-triggered
+// (button in the UI), not on any timer, so a slow TMDb response doesn't
+// hold up anything else - the admin sees a spinner and a result count.
+router.post('/movies/tmdb-sync', adminAuth, async (req, res) => {
+  try {
+    const result = await tmdbService.syncFeed();
+    if (result.skipped) return res.status(400).json({ success: false, message: 'Set a TMDb API key first.' });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('TMDb feed sync error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Sync failed' });
+  }
+});
+
+// GET /movies/online-catalog?q=&page=&limit= - the Price Groups table.
+// Search filters by title (case-insensitive substring); with no query,
+// paginates the full merged catalog (starter list + synced feed) so a
+// catalog of hundreds of titles doesn't have to render all at once.
+router.get('/movies/online-catalog', adminAuth, (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
+
+  let all = onlineMovieCatalog.getAll();
+  if (q) all = all.filter((m) => m.title.toLowerCase().includes(q));
+  all.sort((a, b) => a.title.localeCompare(b.title));
+
+  const total = all.length;
+  const start = (page - 1) * limit;
+  const pageItems = all.slice(start, start + limit).map((m) => ({
+    ...m,
+    poster: tmdbService.getCachedPosterUrl(m.id),
+  }));
+
+  res.json({ success: true, movies: pageItems, total, page, limit });
+});
+
+router.post('/movies/online-catalog/price', adminAuth, (req, res) => {
+  const tmdbId = parseInt(req.body?.tmdb_id, 10);
+  const title = String(req.body?.title || '').trim();
+  const tier = req.body?.tier === 'paid' ? 'paid' : 'free';
+  const pricePesos = tier === 'paid' ? Math.max(0, parseInt(req.body?.price_pesos, 10) || 0) : 0;
+  if (!tmdbId || !title) {
+    return res.status(400).json({ success: false, message: 'A movie and title are required.' });
+  }
+  db.prepare(`
+    INSERT INTO online_movie_pricing (tmdb_id, title, tier, price_pesos, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(tmdb_id) DO UPDATE SET title = excluded.title, tier = excluded.tier,
+      price_pesos = excluded.price_pesos, updated_at = CURRENT_TIMESTAMP
+  `).run(tmdbId, title, tier, pricePesos);
+  res.json({ success: true });
+});
+
+// Add a title by TMDb ID alone, no search needed - looks the title up from
+// TMDb automatically (so the catalog never shows a blank/wrong name) and
+// prices it in one step. Coin-gated the moment this returns, since a
+// tier:'paid' row is what hasActiveOnlineRental() checks against.
+router.post('/movies/online-catalog/add-by-id', adminAuth, async (req, res) => {
+  const tmdbId = parseInt(req.body?.tmdb_id, 10);
+  const tier = req.body?.tier === 'paid' ? 'paid' : 'free';
+  const pricePesos = tier === 'paid' ? Math.max(0, parseInt(req.body?.price_pesos, 10) || 0) : 0;
+  if (!tmdbId) return res.status(400).json({ success: false, message: 'Enter a TMDb ID first.' });
+
+  try {
+    const movie = await tmdbService.getMovieById(tmdbId);
+    db.prepare(`
+      INSERT INTO online_movie_pricing (tmdb_id, title, tier, price_pesos, updated_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(tmdb_id) DO UPDATE SET title = excluded.title, tier = excluded.tier,
+        price_pesos = excluded.price_pesos, updated_at = CURRENT_TIMESTAMP
+    `).run(movie.id, movie.title, tier, pricePesos);
+    res.json({ success: true, title: movie.title });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || 'Could not add that ID.' });
+  }
+});
+
+router.post('/movies/online-catalog/bulk-price', adminAuth, (req, res) => {
+  const ids = Array.isArray(req.body?.movies) ? req.body.movies : [];
+  const tier = req.body?.tier === 'paid' ? 'paid' : 'free';
+  const pricePesos = tier === 'paid' ? Math.max(0, parseInt(req.body?.price_pesos, 10) || 0) : 0;
+  if (ids.length === 0) return res.status(400).json({ success: false, message: 'No movies selected.' });
+
+  const upsert = db.prepare(`
+    INSERT INTO online_movie_pricing (tmdb_id, title, tier, price_pesos, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(tmdb_id) DO UPDATE SET tier = excluded.tier, price_pesos = excluded.price_pesos, updated_at = CURRENT_TIMESTAMP
+  `);
+  const applyAll = db.transaction((items) => {
+    for (const item of items) upsert.run(item.tmdb_id, item.title, tier, pricePesos);
+  });
+  applyAll(ids);
+  res.json({ success: true, updated: ids.length });
+});
+
+// Removing a pricing row just reverts that title to free (the starter
+// list / synced feed entry, if any, is untouched) - it does NOT delete the
+// title from the catalog itself.
+router.delete('/movies/online-catalog/price/:tmdbId', adminAuth, (req, res) => {
+  db.prepare('DELETE FROM online_movie_pricing WHERE tmdb_id = ?').run(parseInt(req.params.tmdbId, 10));
+  res.json({ success: true });
+});
+
 router.post('/movies/:id', adminAuth, (req, res) => {
   try {
     const { title, tier, price_pesos } = req.body || {};
@@ -5185,6 +5388,7 @@ router.delete('/movies/:id', adminAuth, (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
+
 
 // ── PC Rental ────────────────────────────────────────────────────────
 // Device pairing (register/status) lives in server/routes/rental.js -

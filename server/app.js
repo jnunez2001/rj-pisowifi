@@ -72,11 +72,14 @@ app.use(helmet({
       // than failing outright, but there's no reason to pay that cost.
       workerSrc: ["'self'", 'blob:'],
       connectSrc: ["'self'"],
-      // public/portal/movies.html's "Online" tab embeds vidrock.ru movies
-      // in an <iframe> (public/portal/assets/js/movies-online.js) - without
-      // an explicit frame-src, CSP falls back to default-src 'self' and
-      // silently blocks the iframe from ever loading any content.
-      frameSrc: ["'self'", 'https://vidrock.ru'],
+      // public/portal/movies.html's "Online" tab embeds a movie in an
+      // <iframe> - without an explicit frame-src, CSP falls back to
+      // default-src 'self' and silently blocks it from ever loading any
+      // content. This 'self'-only default is a fallback for every OTHER
+      // page; movies.html itself gets this rewritten per-request below to
+      // include whatever streaming source origins are actually configured
+      // (admin-editable, not fixed to any one provider).
+      frameSrc: ["'self'"],
       objectSrc: ["'none'"],
       baseUri: ["'self'"],
       formAction: ["'self'"],
@@ -100,6 +103,35 @@ app.use(helmet({
 app.use(['/admin', '/api/admin'], (req, res, next) => {
   const csp = res.getHeader('Content-Security-Policy');
   if (csp) res.setHeader('Content-Security-Policy', `${csp}; upgrade-insecure-requests`);
+  next();
+});
+
+// Bug found live during testing: frame-src above only ever allowed
+// vidrock.ru, but Movies > Online now lets an admin configure ANY
+// streaming source by URL (server/routes/admin.js's movie_streaming_sources
+// CRUD) - a second source on a different domain was silently blocked by
+// this app's OWN CSP with no visible error to the customer, just a black
+// player. Rewrites frame-src on the movies page specifically to the
+// origins of whatever sources are actually configured right now, so this
+// never needs a code change (or a restart) again when an admin adds one.
+app.use('/portal/movies.html', (req, res, next) => {
+  try {
+    const db = require('./config/database');
+    const sources = db.prepare('SELECT url_template FROM movie_streaming_sources').all();
+    const origins = new Set();
+    for (const { url_template } of sources) {
+      try { origins.add(new URL(url_template.replace('{tmdb_id}', '0')).origin); } catch (e) {}
+    }
+    if (origins.size > 0) {
+      const csp = res.getHeader('Content-Security-Policy');
+      if (csp) {
+        const updated = csp.replace(/frame-src[^;]*/, `frame-src 'self' ${[...origins].join(' ')}`);
+        res.setHeader('Content-Security-Policy', updated);
+      }
+    }
+  } catch (e) {
+    console.warn('[CSP] Could not compute dynamic frame-src for movies.html:', e.message);
+  }
   next();
 });
 

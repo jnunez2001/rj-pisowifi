@@ -1,4 +1,4 @@
-// ===== ONLINE MOVIES (vidrock.ru embed catalog) =====
+// ===== ONLINE MOVIES =====
 // Purely additive: does not touch loadMovies/renderMoviesGrid/openMovie/
 // startPlayback/showRentConfirmStep/etc. above (movies.js), the local
 // movie_rentals coin flow, or any existing server route. This talks to its
@@ -6,9 +6,9 @@
 // GET /api/portal/online-movies/:id/embed) and its own coin mode
 // ('online_movie' in server/routes/coin.js), backed by its own
 // online_movie_rentals table - see server/services/onlineMovieCatalog.js
-// for the actual, ENFORCED tier/price list. The TIER_LABELS/prices below
-// are for display only; the server is what actually decides what's
-// unlocked, so keep both in sync if the catalog changes.
+// for the actual, ENFORCED tier/price list (admin-managed, Movies > Online
+// in the admin panel). Every price shown here (₱${movie.price_pesos}) comes
+// straight from the server response, never hardcoded client-side.
 //
 // Reuses the SAME rent-confirm overlay DOM (movieRentOverlay/
 // movieRentTitle/movieRentDesc/movieRentConfirmBtn) that movies.js already
@@ -22,8 +22,6 @@ let onlineCurrentMac = '';
 let onlinePendingRentMovieId = null;
 let onlineMoviesRendered = false;
 
-const TIER_LABELS = { free: 'FREE', popular: '₱10', premium: '₱15', vip: '₱20' };
-
 // Kept working (unused while the source toggle is hidden - see
 // movies.html) so Local can come back later with a one-line change.
 async function setMoviesSource(source) {
@@ -35,9 +33,7 @@ async function setMoviesSource(source) {
 
 const TIER_ROWS = [
   { tier: 'free', label: 'Free' },
-  { tier: 'popular', label: 'Popular · ₱10' },
-  { tier: 'premium', label: 'Premium · ₱15' },
-  { tier: 'vip', label: 'VIP · ₱20' },
+  { tier: 'paid', label: 'Paid' },
 ];
 
 async function loadOnlineMovies() {
@@ -53,18 +49,16 @@ async function loadOnlineMovies() {
   }
 }
 
-// Lock icon / price tag UI removed for now while the owner re-plans the
-// paid mode (server/services/onlineMovieCatalog.js's tier/price data and
-// the whole coin-gate flow are untouched - this is a display-only change,
-// easy to bring back: just re-add the two lines that build `lock`/`priceTag`
-// and drop them back into the template below).
 function movieCardHtml(m) {
+  const lock = (m.tier === 'paid' && !m.unlocked) ? '<div class="movie-card-lock"><i class="fas fa-lock"></i></div>' : '';
+  const priceTag = (m.tier === 'paid' && !m.unlocked) ? `<div class="movie-card-price">₱${m.price_pesos}</div>` : '';
   const poster = m.poster
     ? `<img src="${m.poster}" alt="${escapeHtmlMovies(m.title)}" loading="lazy" />`
     : '<i class="fas fa-film" style="font-size:24px;"></i>';
   return `
     <div class="movie-card" onclick="openOnlineMovie(${m.id})">
       <div class="movie-card-thumb">${poster}</div>
+      ${lock}${priceTag}
       <div class="movie-card-title">${escapeHtmlMovies(m.title)}</div>
     </div>
   `;
@@ -154,14 +148,21 @@ function renderOnlineMoviesFlat(list) {
 function openOnlineMovie(id) {
   const movie = onlineAllMovies.find((m) => m.id === id);
   if (!movie) return;
+
+  if (movie.tier === 'paid' && !movie.unlocked) {
+    onlinePendingRentMovieId = id;
+    showOnlineRentConfirmStep(movie);
+    return;
+  }
+
   startOnlinePlayback(movie);
 }
 
 function showOnlineRentConfirmStep(movie) {
   document.getElementById('movieRentTitle').textContent = movie.title;
   document.getElementById('movieRentDesc').textContent =
-    `Insert ${TIER_LABELS[movie.tier]} in coins to unlock this movie. This is a separate payment from your WiFi time.`;
-  document.getElementById('movieRentConfirmBtn').textContent = `Insert ${TIER_LABELS[movie.tier]} to unlock`;
+    `Insert ₱${movie.price_pesos} in coins to unlock this movie. This is a separate payment from your WiFi time.`;
+  document.getElementById('movieRentConfirmBtn').textContent = `Insert ₱${movie.price_pesos} to unlock`;
   document.getElementById('movieRentConfirmBtn').onclick = beginOnlineMovieCoinInsertion;
   document.getElementById('movieRentOverlay').classList.add('show');
 }
@@ -198,7 +199,7 @@ async function beginOnlineMovieCoinInsertion() {
 
 function showOnlineRentInsertingStep(movie) {
   document.getElementById('movieRentDesc').innerHTML =
-    `Inserted so far: <b id="onlineMovieRentRunningTotal">₱0</b> of ${TIER_LABELS[movie.tier]}`;
+    `Inserted so far: <b id="onlineMovieRentRunningTotal">₱0</b> of ₱${movie.price_pesos}`;
   document.getElementById('movieRentTitle').textContent = 'Insert coins now';
   document.getElementById('movieRentConfirmBtn').textContent = 'Done';
   document.getElementById('movieRentConfirmBtn').onclick = () => finishOnlineMovieCoinInsertion(movie.id);
@@ -302,17 +303,55 @@ function closeOnlineRentOverlay() {
   onlinePendingRentMovieId = null;
 }
 
-async function startOnlinePlayback(movie) {
+// Streaming Sources (server/services list, admin panel's Movies > Online >
+// Streaming Sources) - fetched once and cached, since they rarely change
+// and every movie shares the same list of servers.
+let onlineSources = null;
+let onlineCurrentMovie = null;
+let onlineCurrentSourceId = null;
+
+async function getOnlineSources() {
+  if (onlineSources) return onlineSources;
+  try {
+    const res = await fetch('/api/portal/online-movies/sources');
+    const data = await res.json();
+    onlineSources = data.sources || [];
+  } catch (e) {
+    onlineSources = [];
+  }
+  return onlineSources;
+}
+
+function renderSourceTabs(sources, activeId) {
+  const el = document.getElementById('onlineSourceTabs');
+  if (sources.length <= 1) {
+    el.classList.remove('show');
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = sources.map((s) => `
+    <button class="online-source-tab ${s.id === activeId ? 'active' : ''}" data-source-id="${s.id}">${escapeHtmlMovies(s.name)}</button>
+  `).join('');
+  el.classList.add('show');
+}
+
+async function startOnlinePlayback(movie, sourceId) {
+  onlineCurrentMovie = movie;
   document.getElementById('onlineMoviePlayerTitle').textContent = movie.title;
   document.getElementById('onlineMoviePlayerOverlay').classList.add('show');
+
+  const sources = await getOnlineSources();
   try {
-    const res = await fetch(`/api/portal/online-movies/${movie.id}/embed?mac=${encodeURIComponent(onlineCurrentMac)}`);
+    const url = `/api/portal/online-movies/${movie.id}/embed?mac=${encodeURIComponent(onlineCurrentMac)}` + (sourceId ? `&source_id=${sourceId}` : '');
+    const res = await fetch(url);
     const data = await res.json();
     if (!data.success) {
       closeOnlineMoviePlayer();
       alert(data.message || 'Not available.');
       return;
     }
+    onlineCurrentSourceId = data.source_id;
+    renderSourceTabs(sources, data.source_id);
     document.getElementById('onlineMoviePlayerFrame').src = data.embed_url;
   } catch (e) {
     closeOnlineMoviePlayer();
@@ -320,9 +359,17 @@ async function startOnlinePlayback(movie) {
   }
 }
 
+document.getElementById('onlineSourceTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('.online-source-tab');
+  if (!btn || !onlineCurrentMovie) return;
+  startOnlinePlayback(onlineCurrentMovie, parseInt(btn.dataset.sourceId, 10));
+});
+
 function closeOnlineMoviePlayer() {
   document.getElementById('onlineMoviePlayerFrame').src = '';
   document.getElementById('onlineMoviePlayerOverlay').classList.remove('show');
+  document.getElementById('onlineSourceTabs').classList.remove('show');
+  onlineCurrentMovie = null;
 }
 
 document.getElementById('onlineMoviesSearch').addEventListener('input', (e) => {

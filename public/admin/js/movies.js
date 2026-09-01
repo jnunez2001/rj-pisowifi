@@ -20,6 +20,7 @@ async function loadMoviesPage() {
   } catch (e) {}
 
   await refreshMoviesGrid();
+  await omInit();
 
   clearInterval(moviesPollInterval);
   moviesPollInterval = setInterval(refreshMoviesGrid, 5000);
@@ -127,6 +128,8 @@ async function saveMoviesSettings() {
 
 function destroyMovies() {
   clearInterval(moviesPollInterval);
+  clearTimeout(omSearchDebounce);
+  clearTimeout(omFilterDebounce);
 }
 
 function escapeHtml(str) {
@@ -134,3 +137,373 @@ function escapeHtml(str) {
   div.textContent = str == null ? '' : String(str);
   return div.innerHTML;
 }
+
+// ===== ONLINE MOVIES (server/services/onlineMovieCatalog.js + tmdbService.js) =====
+// Purely additive to everything above - the local movie library's grid,
+// scan, and settings are untouched by any of this.
+const omState = { page: 1, limit: 30, filter: '', total: 0 };
+let omSearchDebounce = null;
+let omFilterDebounce = null;
+
+async function omInit() {
+  try {
+    const data = await apiCall('GET', '/api/admin/movies/online-settings');
+    if (data.success) {
+      omSetPill('omTmdbStatus', data.tmdb_key_set);
+      omRenderFeedStatus(data.feed);
+    }
+  } catch (e) {}
+  await omLoadSources();
+  omState.page = 1;
+  await omLoadCatalog();
+}
+
+function omSetPill(elId, isSet) {
+  const pill = document.getElementById(elId);
+  pill.textContent = isSet ? 'CONFIGURED' : 'NOT SET';
+  pill.className = 'om-status-pill' + (isSet ? ' set' : '');
+}
+
+function omRenderFeedStatus(feed) {
+  const el = document.getElementById('omFeedStatus');
+  if (!feed || !feed.count) { el.textContent = 'Not synced yet.'; return; }
+  const when = feed.last_synced ? new Date(feed.last_synced.replace(' ', 'T') + 'Z').toLocaleString() : 'unknown';
+  el.textContent = `${feed.count} titles synced · last run ${when}`;
+}
+
+// ── Streaming Sources ("Server 1", "Server 2", ...) ─────────────────────
+async function omLoadSources() {
+  const data = await apiCall('GET', '/api/admin/movies/streaming-sources');
+  const tbody = document.getElementById('omSourcesRows');
+  const sources = data.success ? data.sources : [];
+  omSetPill('omSourceStatus', sources.length > 0);
+  if (sources.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:16px;">No sources yet - add one below.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = sources.map((s) => `
+    <tr data-source-id="${s.id}">
+      <td style="text-align:center;">
+        <i class="fas fa-star om-default-star ${s.is_default ? 'active' : ''}" title="Default source" style="cursor:pointer;"></i>
+      </td>
+      <td><input type="text" class="om-source-name" value="${escapeHtml(s.name)}" style="width:100%;"></td>
+      <td><input type="text" class="om-source-url" value="${escapeHtml(s.url_template)}" style="width:100%;"></td>
+      <td style="text-align:right;">
+        <button class="btn btn-secondary om-source-remove" style="padding:4px 8px;font-size:11px;"><i class="fas fa-trash"></i></button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function omAddSource() {
+  const name = document.getElementById('omNewSourceName').value.trim();
+  const url_template = document.getElementById('omNewSourceUrl').value.trim();
+  if (!name || !url_template) { showToast('Enter both a name and a URL', 'error'); return; }
+  const data = await apiCall('POST', '/api/admin/movies/streaming-sources', { name, url_template });
+  if (data.success) {
+    showToast(`"${name}" added`, 'success');
+    document.getElementById('omNewSourceName').value = '';
+    document.getElementById('omNewSourceUrl').value = '';
+    omLoadSources();
+  } else {
+    showToast(data.message || 'Could not add source', 'error');
+  }
+}
+
+async function omSaveSourceRow(row) {
+  const id = row.dataset.sourceId;
+  const name = row.querySelector('.om-source-name').value.trim();
+  const url_template = row.querySelector('.om-source-url').value.trim();
+  const data = await apiCall('POST', `/api/admin/movies/streaming-sources/${id}`, { name, url_template });
+  if (data.success) showToast('Source updated', 'success');
+  else showToast(data.message || 'Could not save', 'error');
+}
+
+async function omSetDefaultSource(row) {
+  const id = row.dataset.sourceId;
+  await apiCall('POST', `/api/admin/movies/streaming-sources/${id}`, { is_default: true });
+  omLoadSources();
+}
+
+async function omRemoveSource(row) {
+  if (!confirm('Remove this streaming source?')) return;
+  await apiCall('DELETE', `/api/admin/movies/streaming-sources/${row.dataset.sourceId}`);
+  omLoadSources();
+}
+
+function omToggleReveal() {
+  const input = document.getElementById('omTmdbInput');
+  const btn = event.target;
+  if (input.type === 'password') { input.type = 'text'; btn.textContent = 'HIDE'; }
+  else { input.type = 'password'; btn.textContent = 'SHOW'; }
+}
+
+async function omSaveTmdb() {
+  const api_key = document.getElementById('omTmdbInput').value.trim();
+  if (!api_key) { showToast('Enter a key first', 'error'); return; }
+  const data = await apiCall('POST', '/api/admin/movies/tmdb-key', { api_key });
+  if (data.success) {
+    showToast('TMDb key saved', 'success');
+    omSetPill('omTmdbStatus', true);
+    document.getElementById('omTmdbInput').value = '';
+    document.getElementById('omTmdbInput').placeholder = 'Paste your TMDb API key (already set)';
+  } else {
+    showToast(data.message || 'Could not save', 'error');
+  }
+}
+
+async function omTestTmdb() {
+  const api_key = document.getElementById('omTmdbInput').value.trim();
+  const box = document.getElementById('omTestResult');
+  box.className = 'om-test-result show';
+  box.textContent = 'Testing…';
+  const data = await apiCall('POST', '/api/admin/movies/tmdb-test', api_key ? { api_key } : {});
+  box.className = 'om-test-result show ' + (data.success ? 'ok' : 'fail');
+  box.textContent = data.success ? '✓ Connected successfully.' : '✗ ' + (data.message || 'Connection failed.');
+}
+
+async function omSyncFeed() {
+  const btn = document.getElementById('omSyncBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Syncing…';
+  try {
+    const data = await apiCall('POST', '/api/admin/movies/tmdb-sync');
+    if (data.success) {
+      showToast(`Synced ${data.total} title(s) from TMDb`, 'success');
+      const settingsData = await apiCall('GET', '/api/admin/movies/online-settings');
+      if (settingsData.success) omRenderFeedStatus(settingsData.feed);
+      omState.page = 1;
+      await omLoadCatalog();
+    } else {
+      showToast(data.message || 'Sync failed', 'error');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-cloud-arrow-down"></i> Sync Trending / Popular / Top Rated';
+  }
+}
+
+function omSearchTmdb(query) {
+  clearTimeout(omSearchDebounce);
+  const dropdown = document.getElementById('omSearchDropdown');
+  if (!query.trim()) { dropdown.classList.remove('show'); return; }
+  omSearchDebounce = setTimeout(async () => {
+    const data = await apiCall('GET', `/api/admin/movies/tmdb-search?q=${encodeURIComponent(query)}`);
+    if (!data.success) { dropdown.innerHTML = `<div class="om-search-result">${escapeHtml(data.message || 'Search failed')}</div>`; dropdown.classList.add('show'); return; }
+    if (data.results.length === 0) { dropdown.innerHTML = '<div class="om-search-result">No matches</div>'; dropdown.classList.add('show'); return; }
+    // data-id/data-title instead of inline onclick("...'title'...") - a
+    // title containing a quote character would otherwise break out of the
+    // inline JS string literal or the HTML attribute itself. Click handled
+    // by the single delegated listener at the bottom of this file.
+    dropdown.innerHTML = data.results.map((m) => `
+      <div class="om-search-result" data-id="${m.id}" data-title="${escapeHtml(m.title).replace(/"/g, '&quot;')}">
+        <img src="${m.poster_path ? 'https://image.tmdb.org/t/p/w92' + m.poster_path : ''}" onerror="this.style.visibility='hidden'">
+        <span>${escapeHtml(m.title)}</span>
+        <span class="yr">${m.year || ''}</span>
+      </div>
+    `).join('');
+    dropdown.classList.add('show');
+  }, 350);
+}
+
+async function omAddFromSearch(tmdbId, title) {
+  document.getElementById('omSearchDropdown').classList.remove('show');
+  document.getElementById('omSearchInput').value = '';
+  const data = await apiCall('POST', '/api/admin/movies/online-catalog/price', { tmdb_id: tmdbId, title, tier: 'free', price_pesos: 0 });
+  if (data.success) {
+    showToast(`Added "${title}" (Free by default)`, 'success');
+    document.getElementById('omCatalogFilter').value = title;
+    omState.filter = title;
+    omState.page = 1;
+    await omLoadCatalog();
+  } else {
+    showToast(data.message || 'Could not add', 'error');
+  }
+}
+
+// Add a title directly by TMDb ID, no search needed - the server looks up
+// the real title from TMDb itself so the catalog never shows a blank or
+// wrong name for it.
+async function omAddById() {
+  const input = document.getElementById('omAddByIdInput');
+  const tmdbId = parseInt(input.value, 10);
+  if (!tmdbId) { showToast('Enter a numeric TMDb ID first', 'error'); return; }
+  const data = await apiCall('POST', '/api/admin/movies/online-catalog/add-by-id', { tmdb_id: tmdbId, tier: 'free', price_pesos: 0 });
+  if (data.success) {
+    showToast(`Added "${data.title}" (Free by default)`, 'success');
+    input.value = '';
+    document.getElementById('omCatalogFilter').value = data.title;
+    omState.filter = data.title;
+    omState.page = 1;
+    await omLoadCatalog();
+  } else {
+    showToast(data.message || 'Could not add that ID', 'error');
+  }
+}
+
+function omFilterCatalog(value) {
+  clearTimeout(omFilterDebounce);
+  omFilterDebounce = setTimeout(() => {
+    omState.filter = value.trim();
+    omState.page = 1;
+    omLoadCatalog();
+  }, 350);
+}
+
+async function omLoadCatalog() {
+  const tbody = document.getElementById('omCatalogRows');
+  const params = new URLSearchParams({ q: omState.filter, page: omState.page, limit: omState.limit });
+  const data = await apiCall('GET', `/api/admin/movies/online-catalog?${params.toString()}`);
+  if (!data.success) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">Could not load catalog</td></tr>';
+    return;
+  }
+  omState.total = data.total;
+  if (data.movies.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">No titles match.</td></tr>';
+  } else {
+    tbody.innerHTML = data.movies.map(omRenderCatalogRow).join('');
+  }
+  document.getElementById('omSelectAll').checked = false;
+  omUpdateBulkBar();
+  const start = data.total === 0 ? 0 : (omState.page - 1) * omState.limit + 1;
+  const end = Math.min(omState.page * omState.limit, data.total);
+  document.getElementById('omTableSummary').textContent = `${start}-${end} of ${data.total} titles`;
+}
+
+// No inline onchange/onclick carrying the title as a string literal here -
+// a title with a quote character would break either the HTML attribute or
+// the embedded JS string. The tier <select>, price <input>, and reset
+// button all just carry data-id (an event delegated at the bottom of this
+// file reads the title straight off the row's own data-title).
+function omRenderCatalogRow(m) {
+  const poster = m.poster ? `<img src="${m.poster}">` : '<img>';
+  const priceInputStyle = m.tier === 'paid' ? '' : 'display:none;';
+  const titleAttr = escapeHtml(m.title).replace(/"/g, '&quot;');
+  return `
+    <tr data-id="${m.id}" data-title="${titleAttr}">
+      <td><input type="checkbox" class="om-row-check" onclick="omUpdateBulkBar()"></td>
+      <td>
+        <div class="om-movie-cell">
+          ${poster}
+          <div><div>${escapeHtml(m.title)}</div><div class="om-movie-id">tmdb ${m.id}</div></div>
+        </div>
+      </td>
+      <td>
+        <select class="om-tier-select">
+          <option value="free" ${m.tier === 'free' ? 'selected' : ''}>Free</option>
+          <option value="paid" ${m.tier === 'paid' ? 'selected' : ''}>Paid</option>
+        </select>
+      </td>
+      <td class="om-price-cell">
+        <input type="number" class="om-price-input" min="0" value="${m.price_pesos || 0}" style="width:60px;text-align:right;${priceInputStyle}">
+      </td>
+      <td style="text-align:right;">
+        <button class="btn btn-secondary om-reset-btn" style="padding:4px 8px;font-size:11px;" title="Reset to Free"><i class="fas fa-rotate-left"></i></button>
+      </td>
+    </tr>
+  `;
+}
+
+function omInlineSave(row) {
+  const tmdbId = parseInt(row.dataset.id, 10);
+  const title = row.dataset.title;
+  const tier = row.querySelector('.om-tier-select').value;
+  const priceInput = row.querySelector('.om-price-input');
+  priceInput.style.display = tier === 'paid' ? 'inline-block' : 'none';
+  omSavePrice(tmdbId, title, tier, priceInput.value);
+}
+
+async function omSavePrice(tmdbId, title, tier, priceRaw) {
+  const price_pesos = tier === 'paid' ? Math.max(0, parseInt(priceRaw, 10) || 0) : 0;
+  const data = await apiCall('POST', '/api/admin/movies/online-catalog/price', { tmdb_id: tmdbId, title, tier, price_pesos });
+  if (data.success) showToast(`"${title}" updated`, 'success');
+  else showToast(data.message || 'Could not save', 'error');
+}
+
+async function omResetToFree(tmdbId) {
+  await apiCall('DELETE', `/api/admin/movies/online-catalog/price/${tmdbId}`);
+  showToast('Reset to Free', 'success');
+  omLoadCatalog();
+}
+
+function omToggleAll(cb) {
+  document.querySelectorAll('.om-row-check').forEach((c) => c.checked = cb.checked);
+  omUpdateBulkBar();
+}
+
+function omUpdateBulkBar() {
+  const n = document.querySelectorAll('.om-row-check:checked').length;
+  document.getElementById('omBulkCount').textContent = n;
+  document.getElementById('omBulkBar').classList.toggle('show', n > 0);
+}
+
+async function omApplyBulk() {
+  const rows = [...document.querySelectorAll('.om-row-check:checked')].map((cb) => cb.closest('tr'));
+  const movies = rows.map((r) => ({ tmdb_id: parseInt(r.dataset.id, 10), title: r.dataset.title }));
+  const tier = document.getElementById('omBulkTier').value;
+  const price_pesos = document.getElementById('omBulkPrice').value;
+  const data = await apiCall('POST', '/api/admin/movies/online-catalog/bulk-price', { movies, tier, price_pesos });
+  if (data.success) {
+    showToast(`Updated ${data.updated} title(s)`, 'success');
+    omLoadCatalog();
+  } else {
+    showToast(data.message || 'Could not apply', 'error');
+  }
+}
+
+function omChangePage(delta) {
+  const maxPage = Math.max(1, Math.ceil(omState.total / omState.limit));
+  const next = omState.page + delta;
+  if (next < 1 || next > maxPage) return;
+  omState.page = next;
+  omLoadCatalog();
+}
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#omSearchInput') && !e.target.closest('#omSearchDropdown')) {
+    const dd = document.getElementById('omSearchDropdown');
+    if (dd) dd.classList.remove('show');
+  }
+});
+
+// Delegated listeners (survive the table/dropdown being re-rendered on
+// every reload, unlike listeners attached directly to rows that would need
+// re-binding each time) - see the "no inline onclick with titles" comment
+// on omRenderCatalogRow above for why these read data-id/data-title
+// instead of taking arguments baked into the HTML string.
+document.addEventListener('click', (e) => {
+  const searchResult = e.target.closest('#omSearchDropdown .om-search-result');
+  if (searchResult && searchResult.dataset.id) {
+    omAddFromSearch(parseInt(searchResult.dataset.id, 10), searchResult.dataset.title);
+    return;
+  }
+  const resetBtn = e.target.closest('.om-reset-btn');
+  if (resetBtn) {
+    const row = resetBtn.closest('tr');
+    if (row) omResetToFree(parseInt(row.dataset.id, 10));
+    return;
+  }
+  const star = e.target.closest('.om-default-star');
+  if (star) {
+    const row = star.closest('tr[data-source-id]');
+    if (row) omSetDefaultSource(row);
+    return;
+  }
+  const removeSourceBtn = e.target.closest('.om-source-remove');
+  if (removeSourceBtn) {
+    const row = removeSourceBtn.closest('tr[data-source-id]');
+    if (row) omRemoveSource(row);
+  }
+});
+
+document.addEventListener('change', (e) => {
+  if (e.target.matches('.om-tier-select, .om-price-input')) {
+    const row = e.target.closest('#omCatalogRows tr');
+    if (row) omInlineSave(row);
+  }
+  if (e.target.matches('.om-source-name, .om-source-url')) {
+    const row = e.target.closest('tr[data-source-id]');
+    if (row) omSaveSourceRow(row);
+  }
+});

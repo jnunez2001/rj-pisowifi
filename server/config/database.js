@@ -463,6 +463,56 @@ db.exec(`
     views INTEGER NOT NULL DEFAULT 0
   );
 
+  -- Named embed sources for the Online Movies tab (admin panel's Movies >
+  -- Online > Streaming Sources). A customer sees these as "Server 1",
+  -- "Server 2", etc. and can switch between them from the player overlay if
+  -- one is slow/down/ad-heavy - see GET /api/portal/online-movies/sources
+  -- and GET /api/portal/online-movies/:id/embed?source_id=. url_template
+  -- must contain the literal "{tmdb_id}" placeholder, same rule as the
+  -- single-source version this replaced. is_default picks which one loads
+  -- first when a customer presses play, before they've chosen a server.
+  CREATE TABLE IF NOT EXISTS movie_streaming_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url_template TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Admin-managed price overrides/additions for the online catalog (see
+  -- server/services/onlineMovieCatalog.js). A tmdb_id with no row here is
+  -- 'free' by default - a row only needs to exist for something the admin
+  -- has deliberately priced, or a title added directly by TMDb ID or via
+  -- search that wasn't already in the synced feed. This table (+
+  -- tmdb_movie_feed) is the ENTIRE catalog now - there is no hardcoded
+  -- starter list anymore, on purpose (removed per owner request so nothing
+  -- ships in code that isn't visible/editable in the admin panel).
+  CREATE TABLE IF NOT EXISTS online_movie_pricing (
+    tmdb_id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    tier TEXT NOT NULL DEFAULT 'paid', -- 'free' | 'paid'
+    price_pesos INTEGER NOT NULL DEFAULT 0,
+    poster_path TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Auto-populated from TMDB's own Trending/Popular/Top Rated lists (admin
+  -- panel's Movies > Online > "Sync from TMDB" button, see
+  -- server/services/tmdbService.js's syncFeed()) so the browsable catalog
+  -- doesn't depend on anyone hand-typing TMDb ids. Merged with the hardcoded
+  -- starter CATALOG in onlineMovieCatalog.js - everything here is free by
+  -- default unless it also has a row in online_movie_pricing.
+  CREATE TABLE IF NOT EXISTS tmdb_movie_feed (
+    tmdb_id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    poster_path TEXT,
+    genres TEXT, -- JSON array of genre name strings
+    source TEXT, -- 'trending' | 'popular' | 'top_rated', whichever it was first seen in
+    fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Portal ad/promo carousel (new movies, promos, whatever the operator
   -- wants customers to see the moment they connect) - a list of images
   -- shown above the STARKFI banner text, distinct from the existing
@@ -2002,6 +2052,23 @@ try {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_session_history_date_ended ON session_history(date(ended_at))`);
 } catch (e) {
   console.error('⚠️ Index creation failed:', e.message);
+}
+
+// One-time migration for existing installs: movie_embed_url_template used
+// to be the only streaming source (a single settings row), before Movies >
+// Online supported multiple named servers. Carries that value forward as
+// "Server 1" instead of silently dropping it, then removes the old
+// setting so it can't drift out of sync with the new table.
+{
+  const old = db.prepare("SELECT value FROM settings WHERE key = 'movie_embed_url_template'").get();
+  if (old && old.value && old.value.includes('{tmdb_id}')) {
+    const alreadyMigrated = db.prepare('SELECT 1 FROM movie_streaming_sources WHERE url_template = ?').get(old.value);
+    if (!alreadyMigrated) {
+      db.prepare('INSERT INTO movie_streaming_sources (name, url_template, is_default, sort_order) VALUES (?, ?, 1, 0)')
+        .run('Server 1', old.value);
+    }
+  }
+  db.prepare("DELETE FROM settings WHERE key = 'movie_embed_url_template'").run();
 }
 
 console.log('✅ Database initialized successfully');

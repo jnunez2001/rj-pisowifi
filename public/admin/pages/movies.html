@@ -30,6 +30,140 @@
   <div id="moviesGrid" class="movies-admin-grid"></div>
 </div>
 
+<!-- ============================================================
+     ONLINE MOVIES - streaming source, TMDb, and price groups for the
+     portal's Online Movies tab. Fully separate from the local movie
+     library above (server/services/onlineMovieCatalog.js /
+     server/services/tmdbService.js) - nothing above this line was changed.
+     ============================================================ -->
+<div class="zf3-header" style="margin-top:28px;">
+  <div>
+    <div class="page-title" style="font-size:18px;">Online Movies</div>
+    <div class="page-subtitle">Streaming source, TMDb, and which titles carry a price</div>
+  </div>
+</div>
+
+<div class="zf3-card" style="margin-bottom:16px;">
+  <div class="om-card-header">
+    <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-red,#ef4444);"></span>Streaming Sources</div>
+      <div class="om-card-desc">One or more embed servers customers can switch between while watching.</div>
+    </div>
+    <span class="om-status-pill" id="omSourceStatus">NOT SET</span>
+  </div>
+
+  <table class="om-table" style="margin-top:14px;">
+    <thead>
+      <tr>
+        <th style="width:22px;"></th>
+        <th style="width:110px;">Name</th>
+        <th>URL Template</th>
+        <th style="width:70px;"></th>
+      </tr>
+    </thead>
+    <tbody id="omSourcesRows">
+      <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:16px;">Loading…</td></tr>
+    </tbody>
+  </table>
+
+  <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
+    <input type="text" id="omNewSourceName" placeholder="Name (e.g. Server 2)" style="width:150px;">
+    <input type="text" id="omNewSourceUrl" placeholder="https://provider.com/embed/movie/{tmdb_id}" style="flex:1;min-width:220px;">
+    <button class="btn btn-primary" onclick="omAddSource()"><i class="fas fa-plus"></i> Add Source</button>
+  </div>
+  <div class="om-help">Each URL must contain the literal token <code>{tmdb_id}</code>. The star marks which one loads first when a customer presses play; they can still switch servers from the player.</div>
+</div>
+
+<div class="zf3-card" style="margin-bottom:16px;">
+  <div class="om-card-header">
+    <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-blue,#2563eb);"></span>TMDb Integration</div>
+      <div class="om-card-desc">Powers poster art, genres, search, and the catalog sync below.</div>
+    </div>
+    <span class="om-status-pill" id="omTmdbStatus">NOT SET</span>
+  </div>
+  <div style="margin-top:12px;">
+    <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:4px;">API Key</label>
+    <div style="display:flex;gap:8px;">
+      <div style="position:relative;flex:1;">
+        <input type="password" id="omTmdbInput" placeholder="Paste your TMDb API key" style="width:100%;padding-right:52px;">
+        <button class="om-reveal-btn" onclick="omToggleReveal()">SHOW</button>
+      </div>
+      <button class="btn btn-secondary" onclick="omTestTmdb()"><i class="fas fa-plug"></i> Test</button>
+      <button class="btn btn-primary" onclick="omSaveTmdb()"><i class="fas fa-save"></i> Save</button>
+    </div>
+    <div class="om-help">Free at themoviedb.org &rarr; Settings &rarr; API. Used only for poster images, metadata, and search - never sent anywhere else.</div>
+    <div class="om-test-result" id="omTestResult"></div>
+  </div>
+  <div class="om-divider"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;">
+    <div>
+      <div style="font-weight:700;font-size:13px;">Catalog Sync</div>
+      <div class="om-help" id="omFeedStatus" style="margin-top:2px;">Not synced yet.</div>
+    </div>
+    <button class="btn btn-secondary" id="omSyncBtn" onclick="omSyncFeed()"><i class="fas fa-cloud-arrow-down"></i> Sync Trending / Popular / Top Rated</button>
+  </div>
+</div>
+
+<div class="zf3-card">
+  <div class="om-card-header">
+    <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-green,#22c55e);"></span>Price Groups</div>
+      <div class="om-card-desc">Search any movie and set it Free or a price. Anything not priced here is Free by default.</div>
+    </div>
+  </div>
+
+  <div style="position:relative;margin-top:12px;">
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="omSearchInput" placeholder="Search to add a movie by title…" style="flex:1;" oninput="omSearchTmdb(this.value)">
+      <input type="number" id="omAddByIdInput" placeholder="or TMDb ID" style="width:110px;">
+      <button class="btn btn-secondary" onclick="omAddById()"><i class="fas fa-plus"></i> Add</button>
+    </div>
+    <div class="om-search-dropdown" id="omSearchDropdown"></div>
+  </div>
+
+  <div style="margin-top:10px;">
+    <input type="text" id="omCatalogFilter" placeholder="Filter catalog below…" style="width:100%;" oninput="omFilterCatalog(this.value)">
+  </div>
+
+  <div class="om-bulk-bar" id="omBulkBar">
+    <span><strong id="omBulkCount">0</strong> selected</span>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="color:var(--text-muted);font-size:12.5px;">Set to:</span>
+      <select id="omBulkTier" class="om-tier-select" onchange="document.getElementById('omBulkPrice').style.display=this.value==='paid'?'inline-block':'none'">
+        <option value="free">Free</option>
+        <option value="paid">Paid — ₱</option>
+      </select>
+      <input type="number" id="omBulkPrice" min="0" placeholder="10" style="width:60px;display:none;padding:5px 8px;font-size:12.5px;">
+      <button class="btn btn-secondary" style="padding:6px 12px;font-size:12.5px;" onclick="omApplyBulk()">Apply</button>
+    </div>
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table class="om-table">
+      <thead>
+        <tr>
+          <th style="width:28px;"><input type="checkbox" id="omSelectAll" onclick="omToggleAll(this)"></th>
+          <th>Movie</th>
+          <th style="width:110px;">Tier</th>
+          <th style="width:90px;text-align:right;">Price</th>
+          <th style="width:70px;"></th>
+        </tr>
+      </thead>
+      <tbody id="omCatalogRows">
+        <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="om-table-footer">
+    <span id="omTableSummary"></span>
+    <div style="display:flex;gap:6px;">
+      <button class="btn btn-secondary" style="padding:5px 10px;font-size:12px;" onclick="omChangePage(-1)"><i class="fas fa-chevron-left"></i></button>
+      <button class="btn btn-secondary" style="padding:5px 10px;font-size:12px;" onclick="omChangePage(1)"><i class="fas fa-chevron-right"></i></button>
+    </div>
+  </div>
+</div>
+
 <style>
   .movies-admin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
   .movie-admin-card { border: 1px solid var(--border-color, #2a2a2a); border-radius: 12px; overflow: hidden; }
@@ -48,4 +182,45 @@
   .movie-admin-status.failed { color: var(--accent-red, #ef4444); }
   .movie-admin-actions { display: flex; gap: 6px; margin-top: 8px; }
   .movie-admin-actions .btn { flex: 1; padding: 5px; font-size: 11px; }
+
+  /* Online Movies (om-*) */
+  .om-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .om-card-title { font-size: 14px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .om-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+  .om-card-desc { font-size: 12.5px; color: var(--text-muted); margin-top: 2px; }
+  .om-status-pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--card-red-bg, #3a1f1f); color: var(--card-red-text, #ef4444); white-space: nowrap; }
+  .om-status-pill.set { background: var(--card-green-bg, #14301f); color: var(--card-green-text, #22c55e); }
+  .om-help { font-size: 12px; color: var(--text-muted); margin-top: 6px; line-height: 1.5; }
+  .om-help code { background: var(--bg-hover, #222); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+  .om-reveal-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 11px; font-weight: 700; padding: 4px 6px; }
+  .om-test-result { display: none; align-items: center; gap: 8px; font-size: 12.5px; margin-top: 10px; padding: 8px 10px; border-radius: 8px; }
+  .om-test-result.show { display: flex; }
+  .om-test-result.ok { background: var(--card-green-bg, #14301f); color: var(--card-green-text, #22c55e); }
+  .om-test-result.fail { background: var(--card-red-bg, #3a1f1f); color: var(--card-red-text, #ef4444); }
+  .om-divider { height: 1px; background: var(--border-color, #2a2a2a); margin: 16px 0; }
+
+  .om-search-dropdown { position: absolute; top: calc(100% + 4px); left: 0; width: calc(50% - 4px); background: var(--bg-secondary, #1a1a1a); border: 1px solid var(--border-color, #2a2a2a); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); z-index: 5; display: none; max-height: 260px; overflow-y: auto; }
+  .om-search-dropdown.show { display: block; }
+  .om-search-result { display: flex; align-items: center; gap: 8px; padding: 8px 10px; cursor: pointer; font-size: 13px; }
+  .om-search-result:hover { background: var(--bg-hover, #222); }
+  .om-search-result img { width: 24px; height: 35px; border-radius: 3px; object-fit: cover; background: var(--bg-hover, #222); flex-shrink: 0; }
+  .om-search-result .yr { color: var(--text-muted); font-size: 11.5px; margin-left: auto; }
+
+  .om-bulk-bar { display: none; align-items: center; justify-content: space-between; gap: 12px; background: var(--card-blue-bg, #1a2a3a); border: 1px solid var(--accent-blue, #2563eb); border-radius: 8px; padding: 9px 12px; margin-top: 14px; font-size: 12.5px; }
+  .om-bulk-bar.show { display: flex; }
+  .om-tier-select { padding: 5px 7px; border-radius: 6px; border: 1px solid var(--border-color, #2a2a2a); background: var(--bg-secondary, #1a1a1a); color: var(--text-primary); font-size: 12px; }
+
+  .om-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 14px; }
+  .om-table thead th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); font-weight: 700; padding: 0 8px 8px; border-bottom: 1px solid var(--border-color, #2a2a2a); }
+  .om-table tbody td { padding: 8px; border-bottom: 1px solid var(--border-color, #2a2a2a); vertical-align: middle; }
+  .om-movie-cell { display: flex; align-items: center; gap: 8px; }
+  .om-movie-cell img { width: 28px; height: 40px; border-radius: 3px; object-fit: cover; background: var(--bg-hover, #222); flex-shrink: 0; }
+  .om-movie-id { color: var(--text-muted); font-size: 11px; }
+  .om-tier-pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; display: inline-block; }
+  .om-tier-pill.free { background: var(--card-green-bg, #14301f); color: var(--card-green-text, #22c55e); }
+  .om-tier-pill.paid { background: var(--card-orange-bg, #3a2a14); color: var(--card-orange-text, #f59e0b); }
+  .om-price-cell { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+  .om-table-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; font-size: 12px; color: var(--text-muted); }
+  .om-default-star { color: var(--border-color, #444); }
+  .om-default-star.active { color: #f5b90d; }
 </style>

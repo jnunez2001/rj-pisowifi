@@ -13,7 +13,7 @@
        even after the server has a newer version, which silently breaks the
        page (mismatched element IDs between cached JS and fresh HTML) with
        no visible error. Bump the version string whenever this file changes. -->
-  <link rel="stylesheet" href="/portal/assets/css/movies-online.css?v=3">
+  <link rel="stylesheet" href="/portal/assets/css/movies-online.css?v=4">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 </head>
 <body class="movies-body">
@@ -83,6 +83,8 @@
       <button class="movie-player-close" onclick="closeOnlineMoviePlayer()"><i class="fas fa-times"></i></button>
       <div id="onlineMoviePlayerTitle" class="movie-player-title"></div>
     </div>
+    <!-- Server switcher - only shown once more than one source is configured -->
+    <div id="onlineSourceTabs" class="online-source-tabs"></div>
     <div class="movie-player-body">
       <iframe id="onlineMoviePlayerFrame" class="movie-player-iframe" src="" allowfullscreen
         allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="origin"></iframe>
@@ -104,6 +106,6 @@
 
   <script src="/portal/assets/js/vendor/hls.min.js"></script>
   <script src="/portal/assets/js/movies.js?v=2"></script>
-  <script src="/portal/assets/js/movies-online.js?v=3"></script>
+  <script src="/portal/assets/js/movies-online.js?v=4"></script>
 </body>
 </html>

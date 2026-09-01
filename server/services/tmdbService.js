@@ -100,4 +100,123 @@ async function warmCache(tmdbIds) {
   return { skipped: false, fetched: uncached.length };
 }
 
-module.exports = { getCachedPosterUrl, getCachedGenres, warmCache };
+// Test a key (either a freshly-typed one from the admin form, or whatever's
+// already saved) against a cheap, real TMDb call. Throws with a readable
+// message on failure - admin.js's route wraps this in try/catch and returns
+// { success:false, message } the same way every other "Test Connection"
+// button in this app does.
+async function testConnection(apiKeyOverride) {
+  const apiKey = apiKeyOverride || getApiKey();
+  if (!apiKey) throw new Error('No API key to test - paste one first.');
+  const res = await fetchWithTimeout(`${BASE_URL}/authentication?api_key=${apiKey}`);
+  if (res.status === 401) throw new Error('TMDb rejected this key - check it was copied correctly.');
+  if (!res.ok) throw new Error(`TMDb returned HTTP ${res.status}`);
+  const data = await res.json();
+  if (!data.success) throw new Error('TMDb did not confirm the key as valid.');
+  return true;
+}
+
+// Live title search for the admin's "add a movie" search box. Returns a
+// small, display-ready shape - never the full TMDb response.
+async function searchMovies(query) {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('No TMDb API key configured yet.');
+  const res = await fetchWithTimeout(`${BASE_URL}/search/movie?api_key=${apiKey}&query=${encodeURIComponent(query)}`);
+  if (!res.ok) throw new Error(`TMDb search failed (HTTP ${res.status})`);
+  const data = await res.json();
+  return (data.results || []).slice(0, 20).map((m) => ({
+    id: m.id,
+    title: m.title,
+    year: m.release_date ? m.release_date.slice(0, 4) : null,
+    poster_path: m.poster_path || null,
+  }));
+}
+
+// Looks up a single movie's title/poster by TMDb ID - what powers the
+// admin's "Add by TMDb ID" quick-add (paste an id you already know,
+// skip the search box entirely). Also warms tmdb_poster_cache for it,
+// same as any other lookup in this file.
+async function getMovieById(tmdbId) {
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('No TMDb API key configured yet.');
+  const res = await fetchWithTimeout(`${BASE_URL}/movie/${tmdbId}?api_key=${apiKey}`);
+  if (res.status === 404) throw new Error(`TMDb has no movie with ID ${tmdbId}.`);
+  if (!res.ok) throw new Error(`TMDb lookup failed (HTTP ${res.status})`);
+  const data = await res.json();
+  const genreNames = Array.isArray(data.genres) ? data.genres.map((g) => g.name) : [];
+  setCached(data.id, data.poster_path || null, genreNames);
+  return { id: data.id, title: data.title, poster_path: data.poster_path || null };
+}
+
+let genreMapCache = null;
+async function getGenreMap(apiKey) {
+  if (genreMapCache) return genreMapCache;
+  const res = await fetchWithTimeout(`${BASE_URL}/genre/movie/list?api_key=${apiKey}`);
+  if (!res.ok) return {};
+  const data = await res.json();
+  genreMapCache = Object.fromEntries((data.genres || []).map((g) => [g.id, g.name]));
+  return genreMapCache;
+}
+
+// Pulls TMDb's own Trending/Popular/Top Rated lists into tmdb_movie_feed -
+// this is what lets the catalog grow without anyone hand-typing ids. Each
+// list is capped at `pages` pages (20 titles/page) to keep this bounded and
+// fast rather than trying to mirror TMDb's entire catalog. Also warms
+// tmdb_poster_cache for every id it touches, from the SAME response (list
+// endpoints already include poster_path/genre_ids - no extra per-title
+// request needed here, unlike warmCache() above which is a per-id detail
+// lookup for ids that only exist in the hardcoded starter CATALOG).
+const FEED_LISTS = [
+  { key: 'trending', path: '/trending/movie/week' },
+  { key: 'popular', path: '/movie/popular' },
+  { key: 'top_rated', path: '/movie/top_rated' },
+];
+
+async function syncFeed(pages = 5) {
+  const apiKey = getApiKey();
+  if (!apiKey) return { skipped: true, reason: 'no_api_key' };
+
+  const genreMap = await getGenreMap(apiKey);
+  const upsertFeed = db.prepare(`
+    INSERT INTO tmdb_movie_feed (tmdb_id, title, poster_path, genres, source, fetched_at)
+    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(tmdb_id) DO UPDATE SET title = excluded.title, poster_path = excluded.poster_path,
+      genres = excluded.genres, fetched_at = excluded.fetched_at
+  `);
+
+  let total = 0;
+  const perList = {};
+  for (const { key, path } of FEED_LISTS) {
+    let count = 0;
+    for (let page = 1; page <= pages; page++) {
+      let res;
+      try {
+        res = await fetchWithTimeout(`${BASE_URL}${path}?api_key=${apiKey}&page=${page}`);
+      } catch (e) {
+        break;
+      }
+      if (!res.ok) break;
+      const data = await res.json();
+      const results = data.results || [];
+      if (results.length === 0) break;
+      for (const m of results) {
+        const genreNames = (m.genre_ids || []).map((id) => genreMap[id]).filter(Boolean);
+        upsertFeed.run(m.id, m.title, m.poster_path || null, JSON.stringify(genreNames), key);
+        setCached(m.id, m.poster_path || null, genreNames);
+        count++;
+      }
+      if (page >= (data.total_pages || 1)) break;
+    }
+    perList[key] = count;
+    total += count;
+  }
+
+  return { skipped: false, total, perList };
+}
+
+function getFeedStatus() {
+  const row = db.prepare('SELECT COUNT(*) as count, MAX(fetched_at) as last_synced FROM tmdb_movie_feed').get();
+  return { count: row?.count || 0, last_synced: row?.last_synced || null };
+}
+
+module.exports = { getCachedPosterUrl, getCachedGenres, warmCache, testConnection, searchMovies, getMovieById, syncFeed, getFeedStatus };

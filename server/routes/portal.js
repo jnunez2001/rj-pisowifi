@@ -424,62 +424,83 @@ function hasActiveOnlineRental(movieId, mac) {
 // GET /online-movies?mac=xx - catalog with per-device unlock state, same
 // shape/spirit as GET /movies above.
 //
-// Owner's call: no app-level gate on the Online catalog at all right now,
-// open whether or not the device has coin/voucher/free-claim time - the
-// real access control is the network-level firewall (nftables' allowed_macs
-// set, see standaloneDriver.js), which already blocks a device with no paid
-// session from reaching vidrock.ru (or anything else on the internet) in
-// the first place. The hasActiveSession()/hasActiveOnlineRental() checks
-// this used to layer on top were redundant with that and were the actual
-// source of live "movies won't open" reports (Countdown Speed compressing
-// a session's real duration to near-zero made the app-level check fail
-// even though the device's underlying WiFi access was fine). Removed, not
-// deleted-and-forgotten: hasActiveOnlineRental()/the coin-gate plumbing in
-// coin.js stays intact for whenever paid mode gets re-planned and re-wired
-// in on purpose.
+// Free titles are always open, no session check at all - the real access
+// control for a device with no paid WiFi time at all is the network-level
+// firewall (nftables' allowed_macs set), which already blocks it from
+// reaching any streaming source in the first place; an app-level WiFi-
+// session gate on top of that was a real source of live "movies won't
+// open" bugs (Countdown Speed compressing a session's real duration to
+// near-zero). Paid titles (set by an admin in Movies > Online) are gated
+// on their own dedicated online_movie_rentals row instead - a simple,
+// self-contained expiry check with no dependency on WiFi session state.
 router.get('/online-movies', (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
   const tmdbService = require('../services/tmdbService');
   const viewRows = db.prepare('SELECT movie_id, views FROM online_movie_views').all();
   const viewsById = new Map(viewRows.map((r) => [r.movie_id, r.views]));
   const movies = onlineMovieCatalog.getAll().map((m) => {
+    const unlocked = m.tier === 'free' ? true : (mac ? hasActiveOnlineRental(m.id, mac) : false);
     // Synchronous cache read, no network call in this request's path - see
     // tmdbService.js's warmCache() (kicked off in the background by
     // server/app.js at startup) for what actually populates this.
     return {
       id: m.id, title: m.title, tier: m.tier, price_pesos: m.price_pesos,
-      poster: tmdbService.getCachedPosterUrl(m.id), genres: tmdbService.getCachedGenres(m.id), unlocked: true,
+      poster: tmdbService.getCachedPosterUrl(m.id), genres: tmdbService.getCachedGenres(m.id), unlocked,
       views: viewsById.get(m.id) || 0,
     };
   });
   res.json({ success: true, movies, session_active: true });
 });
 
+// GET /online-movies/sources - the server-switcher tabs in the player
+// overlay (public/portal/assets/js/movies-online.js). Just names + ids,
+// never the actual URL template (no reason for that to reach the client
+// until a specific movie's embed is requested).
+router.get('/online-movies/sources', (req, res) => {
+  const sources = db.prepare('SELECT id, name, is_default FROM movie_streaming_sources ORDER BY sort_order, id').all();
+  res.json({ success: true, sources });
+});
+
 // GET /online-movies/:id/embed?mac=xx - hands back an embed URL built from
 // settings.movie_embed_url_template, a provider-agnostic template
 // containing a literal "{tmdb_id}" placeholder (e.g.
-// "https://someprovider.com/embed/movie/{tmdb_id}"). Intentionally blank by
-// default - no vidrock.ru or any other provider baked in - until an admin
-// sets one (see PLAN.md / the Movies admin settings work still to be built:
-// this route already reads the settings key so that form has somewhere to
-// land). No unlock gate - see the comment on GET /online-movies above.
+// "https://someprovider.com/embed/movie/{tmdb_id}"), from
+// movie_streaming_sources (admin panel's Movies > Online > Streaming
+// Sources - can be more than one, named "Server 1"/"Server 2"/etc., a
+// customer can switch between them from the player overlay). Optional
+// ?source_id= picks a specific one; with none given, the admin's chosen
+// default is used, or the first configured source if none is marked
+// default. No sources configured at all = movies stay disabled. Gate
+// check: free is always open, paid needs a live online_movie_rentals row
+// for this device (see the comment on GET /online-movies above for why
+// this doesn't touch WiFi session state at all).
 router.get('/online-movies/:id/embed', (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
   const movie = onlineMovieCatalog.getById(req.params.id);
   if (!movie) return res.status(404).json({ success: false, message: 'Movie not found' });
 
-  const template = db.prepare("SELECT value FROM settings WHERE key = 'movie_embed_url_template'").get()?.value || '';
-  if (!template || !template.includes('{tmdb_id}')) {
+  if (movie.tier !== 'free' && !hasActiveOnlineRental(movie.id, mac)) {
+    return res.status(403).json({ success: false, message: 'Not unlocked for this device' });
+  }
+
+  const sourceId = parseInt(req.query.source_id, 10);
+  const source = sourceId
+    ? db.prepare('SELECT * FROM movie_streaming_sources WHERE id = ?').get(sourceId)
+    : db.prepare('SELECT * FROM movie_streaming_sources ORDER BY is_default DESC, sort_order, id LIMIT 1').get();
+  if (!source) {
     return res.status(503).json({ success: false, message: 'No movie source configured yet - set one in Settings > Movies.' });
   }
 
   // Real play count, feeds the client's "Top 10 Most Watched" row - counted
   // here (not on page view) so browsing the grid doesn't inflate it, only
-  // an actual, unlocked play does.
+  // an actual, unlocked play does. Counted once per movie regardless of
+  // which server the customer picks, not once per source.
   db.prepare(`
     INSERT INTO online_movie_views (movie_id, views) VALUES (?, 1)
     ON CONFLICT(movie_id) DO UPDATE SET views = views + 1
   `).run(movie.id);
 
-  return res.json({ success: true, embed_url: template.replace('{tmdb_id}', movie.id) });
+  return res.json({ success: true, source_id: source.id, embed_url: source.url_template.replace('{tmdb_id}', movie.id) });
 });
 
 // ── Movie Credit balance (database.js's movie_credits table) ───────────
