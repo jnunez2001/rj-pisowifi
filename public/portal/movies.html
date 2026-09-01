@@ -13,7 +13,7 @@
        even after the server has a newer version, which silently breaks the
        page (mismatched element IDs between cached JS and fresh HTML) with
        no visible error. Bump the version string whenever this file changes. -->
-  <link rel="stylesheet" href="/portal/assets/css/movies-online.css?v=4">
+  <link rel="stylesheet" href="/portal/assets/css/movies-online.css?v=5">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 </head>
 <body class="movies-body">
@@ -21,7 +21,15 @@
   <div class="movies-header">
     <a href="/portal/" class="movies-back"><i class="fas fa-arrow-left"></i></a>
     <div class="movies-header-title">Movies</div>
-    <div style="width:24px;"></div>
+    <!-- Hidden whenever balance is ₱0. Replaces the old full-width banner -
+         same balance, same server/routes/portal.js's /credit/* endpoints,
+         just moved into the header per owner request. -->
+    <!-- visibility (not display) so the header's space-between layout
+         stays balanced (back arrow / centered title) whether or not this
+         is showing - same trick the old plain spacer div relied on. -->
+    <div id="moviesCreditBadge" class="movies-credit-badge" style="visibility:hidden;" onclick="openMoviesCreditModal()">
+      <i class="fas fa-film"></i> <span id="moviesCreditBadgeAmount">₱0</span>
+    </div>
   </div>
 
   <!-- Local (self-hosted, no ads) and Online (vidrock.ru embed) are two
@@ -55,22 +63,13 @@
   <!-- Unified Movies view - local library + online embed catalog merged,
        see comment above. -->
   <div id="onlineMoviesSection">
-    <!-- Movie Credit balance (server/routes/portal.js's /credit/*) - hidden
-         whenever the balance is ₱0, so it's invisible unless it matters.
-         Spendable on a paid movie (applied automatically when renting one)
-         or converted to WiFi time here - but only while THIS WiFi session
-         lasts, it's forfeited when the session ends (owner's call: "use it
-         before there connection time ends or it will be lost"), so the
-         banner says so rather than implying it carries forward. -->
-    <div id="movieCreditBanner" class="movie-credit-banner" style="display:none;">
-      <span>Movie Credit: <b id="movieCreditAmount">₱0</b> <small>(use before your WiFi time ends)</small></span>
-      <button id="movieCreditUseBtn" class="btn btn-activate" onclick="useMovieCredit()">Use for WiFi time</button>
-    </div>
-    <div class="movies-online-search" style="display:flex;gap:8px;align-items:center;">
-      <input type="text" id="onlineMoviesSearch" placeholder="Search online movies..." style="flex:1;">
-      <button class="btn btn-outline" style="white-space:nowrap;" onclick="openMovieRequestOverlay()"><i class="fas fa-plus"></i> Request a Movie</button>
+    <div class="movies-online-search">
+      <input type="text" id="onlineMoviesSearch" placeholder="Search online movies...">
     </div>
     <div id="onlineMoviesRows"></div>
+    <div style="text-align:center;padding:24px 0 32px;">
+      <a href="javascript:void(0)" onclick="openMovieRequestOverlay()" style="color:var(--text-secondary);font-size:13px;text-decoration:underline;">Don't see a movie you're looking for? Request it here</a>
+    </div>
   </div>
 
   <!-- REQUEST A MOVIE -->
@@ -97,6 +96,19 @@
       <div class="movie-rent-actions">
         <button class="btn btn-outline" onclick="closeMovieRequestOverlay()">Cancel</button>
         <button class="btn btn-activate" id="movieRequestSubmitBtn" onclick="submitMovieRequest()">Submit</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MOVIE CREDIT (header badge popup) -->
+  <div id="moviesCreditOverlay" class="movie-rent-overlay">
+    <div class="movie-rent-box">
+      <i class="fas fa-film" style="font-size:32px;color:var(--brand-teal);"></i>
+      <h3>Movie Credit</h3>
+      <p id="moviesCreditMsg" style="color:var(--text-secondary);font-size:14px;"></p>
+      <div class="movie-rent-actions" id="moviesCreditActions">
+        <button class="btn btn-outline" onclick="closeMoviesCreditModal()">Cancel</button>
+        <button class="btn btn-activate" id="moviesCreditConvertBtn" onclick="convertMoviesCreditModal()">Convert to Time</button>
       </div>
     </div>
   </div>
@@ -153,6 +165,6 @@
 
   <script src="/portal/assets/js/vendor/hls.min.js"></script>
   <script src="/portal/assets/js/movies.js?v=5"></script>
-  <script src="/portal/assets/js/movies-online.js?v=13"></script>
+  <script src="/portal/assets/js/movies-online.js?v=14"></script>
 </body>
 </html>

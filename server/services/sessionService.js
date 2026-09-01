@@ -528,13 +528,20 @@ async function convertToRegularSession(mac, newRegularMinutes, conversionRatio, 
 // literal string 'limit_reached' (distinct from null, which already
 // means "no session"/"already paused") so the route can tell the two
 // apart and answer with the right message.
-async function pauseSession(voucherCode) {
+// `reason` - 'manual' (customer tapped Pause) or 'idle' (timerService.js's
+// away detection). An idle pause deliberately does NOT call blockClient()
+// - staying connected is what lets real traffic auto-trigger resumeSession()
+// later, and it doesn't consume the customer's limited max_pauses
+// allowance, since it's a system action, not something they chose to use up.
+async function pauseSession(voucherCode, reason = 'manual') {
   const session = getSessionByVoucher(voucherCode);
   if (!session || session.is_paused === 1) return null;
 
-  const maxPauses = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'max_pauses'").get()?.value || '0', 10) || 0;
-  if (maxPauses > 0 && (session.pause_count || 0) >= maxPauses) {
-    return 'limit_reached';
+  if (reason === 'manual') {
+    const maxPauses = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'max_pauses'").get()?.value || '0', 10) || 0;
+    if (maxPauses > 0 && (session.pause_count || 0) >= maxPauses) {
+      return 'limit_reached';
+    }
   }
 
   const now = new Date().toISOString();
@@ -547,16 +554,21 @@ async function pauseSession(voucherCode) {
     SET is_paused = 1,
         paused_at = ?,
         minutes_remaining = ?,
-        pause_count = pause_count + 1
+        pause_count = pause_count + ?,
+        pause_reason = ?
     WHERE voucher_code = ?
-  `).run(now, Math.max(0, remaining), voucherCode);
+  `).run(now, Math.max(0, remaining), reason === 'manual' ? 1 : 0, reason, voucherCode);
 
-  // Block internet access when pausing
-  try {
-    await blockClient(session.mac_address);
-    console.log(`[Network] Internet blocked for ${session.mac_address} (paused)`);
-  } catch(e) {
-    console.error(`[Network] Failed to block ${session.mac_address} on pause:`, e.message);
+  if (reason === 'manual') {
+    // Block internet access when pausing
+    try {
+      await blockClient(session.mac_address);
+      console.log(`[Network] Internet blocked for ${session.mac_address} (paused)`);
+    } catch(e) {
+      console.error(`[Network] Failed to block ${session.mac_address} on pause:`, e.message);
+    }
+  } else {
+    console.log(`[Network] ${session.mac_address} auto-paused (idle) - connection left up so activity can auto-resume it`);
   }
 
   sseService.notify(session.mac_address);
@@ -585,27 +597,35 @@ async function resumeSession(voucherCode) {
     UPDATE sessions
     SET is_paused = 0,
         paused_at = NULL,
+        pause_reason = NULL,
         expires_at = ?
     WHERE voucher_code = ?
   `).run(newExpiresAt, voucherCode);
 
-  // Re-enable internet access when resuming
-  try {
-    await allowClient(session.mac_address);
-    console.log(`[Network] Internet unlocked for ${session.mac_address} (resumed)`);
-    // Same voucher-override bug as addTimeToSession() above.
-    if (session.download_mbps) {
-      const upMbps = session.upload_mbps || session.download_mbps;
-      await setClientBandwidth(session.mac_address, session.download_mbps, upMbps, getBurstConfig(), !!session.data_limit_mb);
-      console.log(`[Network] Voucher bandwidth reapplied to ${session.mac_address}: ${session.download_mbps}Mbps down / ${upMbps}Mbps up`);
-    } else if (isBandwidthCapEnabled()) {
-      await setClientBandwidth(session.mac_address, getMaxMbps(), getMaxUploadMbps(), getBurstConfig(), !!session.data_limit_mb);
-      console.log(`[Network] Bandwidth cap reapplied to ${session.mac_address}: ${getMaxMbps()}Mbps down / ${getMaxUploadMbps()}Mbps up`);
-    } else {
-      console.log(`[Network] Bandwidth cap disabled - allowing full speed for ${session.mac_address}`);
+  if (session.pause_reason === 'idle') {
+    // Nothing to restore - an idle pause never called blockClient(), the
+    // device stayed connected the whole time (that's what made this
+    // auto-resume possible in the first place).
+    console.log(`[Network] ${session.mac_address} auto-resumed (activity detected) - connection was never cut`);
+  } else {
+    // Re-enable internet access when resuming
+    try {
+      await allowClient(session.mac_address);
+      console.log(`[Network] Internet unlocked for ${session.mac_address} (resumed)`);
+      // Same voucher-override bug as addTimeToSession() above.
+      if (session.download_mbps) {
+        const upMbps = session.upload_mbps || session.download_mbps;
+        await setClientBandwidth(session.mac_address, session.download_mbps, upMbps, getBurstConfig(), !!session.data_limit_mb);
+        console.log(`[Network] Voucher bandwidth reapplied to ${session.mac_address}: ${session.download_mbps}Mbps down / ${upMbps}Mbps up`);
+      } else if (isBandwidthCapEnabled()) {
+        await setClientBandwidth(session.mac_address, getMaxMbps(), getMaxUploadMbps(), getBurstConfig(), !!session.data_limit_mb);
+        console.log(`[Network] Bandwidth cap reapplied to ${session.mac_address}: ${getMaxMbps()}Mbps down / ${getMaxUploadMbps()}Mbps up`);
+      } else {
+        console.log(`[Network] Bandwidth cap disabled - allowing full speed for ${session.mac_address}`);
+      }
+    } catch(e) {
+      console.error(`[Network] Failed to unlock ${session.mac_address} on resume:`, e.message);
     }
-  } catch(e) {
-    console.error(`[Network] Failed to unlock ${session.mac_address} on resume:`, e.message);
   }
 
   sseService.notify(session.mac_address);
@@ -668,21 +688,25 @@ async function expireSession(voucherCode) {
     }
   }
 
-  // Owner's call: Movie Credit (banked over/underpaid movie-rental coins,
-  // database.js's movie_credits) is only meant to be spent DURING the WiFi
-  // time the customer already paid for - "use it before there connection
-  // time ends or it will be lost or not be refunded." Forfeited (not
-  // carried forward) the moment their session actually ends, through this
-  // same single choke-point every ending path already funnels through
-  // (timer expiry, admin cut, customer cancel - same reasoning as the
-  // promo_vouchers cleanup above). A customer who buys new WiFi time later
-  // starts that balance at ₱0 again, same as if they'd never had credit -
-  // this is deliberately NOT a persistent account, on purpose.
+  // Owner's call, now switchable (Movies page toggle, settings.
+  // movie_credit_persists): by default Movie Credit (banked over/underpaid
+  // movie-rental coins, database.js's movie_credits) is only meant to be
+  // spent DURING the WiFi time the customer already paid for - "use it
+  // before there connection time ends or it will be lost or not be
+  // refunded." Forfeited (not carried forward) the moment their session
+  // actually ends, through this same single choke-point every ending path
+  // already funnels through (timer expiry, admin cut, customer cancel -
+  // same reasoning as the promo_vouchers cleanup above). With the toggle
+  // switched on, this step is simply skipped and the balance persists into
+  // the customer's next session instead, same as a real store credit.
   if (session && session.mac_address) {
-    try {
-      db.prepare('DELETE FROM movie_credits WHERE mac_address = ?').run(session.mac_address);
-    } catch (e) {
-      console.error(`[MovieCredit] Failed to forfeit balance for ${session.mac_address}:`, e.message);
+    const persists = db.prepare("SELECT value FROM settings WHERE key = 'movie_credit_persists'").get()?.value === '1';
+    if (!persists) {
+      try {
+        db.prepare('DELETE FROM movie_credits WHERE mac_address = ?').run(session.mac_address);
+      } catch (e) {
+        console.error(`[MovieCredit] Failed to forfeit balance for ${session.mac_address}:`, e.message);
+      }
     }
   }
 

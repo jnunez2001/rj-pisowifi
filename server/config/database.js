@@ -1577,6 +1577,12 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // unlock lasts once paid for.
   upsertIfMissing('movies_source_dir', '');
   upsertIfMissing('movie_rental_hours', '48');
+  // Movie Credit (banked over/underpaid movie-rental coins, database.js's
+  // movie_credits table) forfeits when a customer's WiFi session ends by
+  // default (server/services/sessionService.js's expireSession()) - '0'
+  // here means "forfeit as normal", '1' means the owner has switched it to
+  // persist across sessions instead (Movies page toggle).
+  upsertIfMissing('movie_credit_persists', '0');
   // PC Rental Settings (public/admin/rental) - all read/written through
   // the existing generic GET/POST /api/admin/settings, same as every
   // other operator-facing setting in this file. Defaults match the
@@ -1658,6 +1664,21 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // the Pause button stops working for it. 0 = unlimited, matches this
   // file's existing "0 = unlimited" convention elsewhere.
   upsertIfMissing('max_pauses', '0');
+  // Away/idle auto-pause - separate from the manual Pause button above.
+  // Reads real per-client traffic (already-sampled for data-cap
+  // tracking in timerService.js) to detect a customer who's stopped
+  // actually using their connection, freezing their billing clock
+  // without cutting their internet (unlike a manual pause) so it can
+  // auto-resume the instant real traffic returns, no action needed from
+  // them. Not available in OpenWRT mode, which has no per-client
+  // traffic counter today. Off by default.
+  upsertIfMissing('enable_auto_pause_idle', '0');
+  upsertIfMissing('auto_pause_idle_minutes', '10');
+  // Anti-tethering detection (server/services/ttlMonitorService.js) -
+  // standalone mode only (needs raw packet capture on the LAN
+  // interface), log/alert only for now, never blocks or throttles
+  // anyone automatically. Off by default.
+  upsertIfMissing('enable_tethering_detection', '0');
   // Whether a customer who used CONVERT to permanently switch to Premium
   // speed can later convert back down to a Regular rate (same "minutes
   // SET to the matched rate's own value" mechanic, in reverse). Off by
@@ -1806,6 +1827,18 @@ try {
 // "0 = unlimited" convention (see coinslot_gpio_max_empty_opens).
 try {
   db.exec('ALTER TABLE sessions ADD COLUMN pause_count INTEGER DEFAULT 0');
+} catch (e) {
+  // already applied
+}
+
+// 'manual' (customer tapped Pause) or 'idle' (auto-paused by
+// timerService.js's away detection) - lets resumeSession() know whether
+// to touch network access at all. An idle pause never called
+// blockClient() in the first place (the whole point is staying
+// connected so real traffic can trigger auto-resume), so resuming it
+// must not call allowClient() either - there's nothing to restore.
+try {
+  db.exec("ALTER TABLE sessions ADD COLUMN pause_reason TEXT DEFAULT NULL");
 } catch (e) {
   // already applied
 }

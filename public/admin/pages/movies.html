@@ -24,6 +24,16 @@
     <button class="btn btn-secondary" onclick="saveMoviesSettings()"><i class="fas fa-save"></i> Save</button>
     <button class="btn btn-primary" onclick="scanMoviesFolder()"><i class="fas fa-magnifying-glass"></i> Scan folder</button>
   </div>
+  <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-color,#2a2a2a);display:flex;align-items:center;gap:10px;">
+    <label class="toggle-switch">
+      <input type="checkbox" id="movieCreditPersists" onchange="saveMoviesSettings()">
+      <span class="toggle-slider"></span>
+    </label>
+    <div>
+      <div style="font-size:13px;font-weight:600;">Let Movie Credit carry over between WiFi sessions</div>
+      <div style="font-size:12px;color:var(--text-muted);">Off by default: any unused Movie Credit is forfeited the moment a customer's WiFi session ends. Turn this on to let it persist instead, like a permanent store credit tied to their device.</div>
+    </div>
+  </div>
 </div>
 
 <div class="zf3-card">

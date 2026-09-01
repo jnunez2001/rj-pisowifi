@@ -11,12 +11,11 @@
 }
 .movies-source-btn.active { background: var(--brand-teal); border-color: var(--brand-teal); color: #fff; }
 
-.movie-credit-banner {
-  display: flex; align-items: center; justify-content: space-between;
-  margin: 16px 20px 0; padding: 12px 16px; border-radius: 10px;
-  background: var(--brand-teal-light); color: var(--text-primary); font-size: 14px;
+.movies-credit-badge {
+  display: flex; align-items: center; gap: 6px; cursor: pointer;
+  padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 700;
+  background: var(--brand-teal-light); color: var(--text-primary); white-space: nowrap;
 }
-.movie-credit-banner .btn { padding: 8px 14px; font-size: 13px; }
 
 .movies-online-search { padding: 16px 20px 0; }
 .movies-online-search input {

@@ -457,23 +457,46 @@ async function finishOnlineMovieCoinInsertion(movieId) {
   }
 }
 
+// Header badge (movies.html) - visibility (not display) so the header's
+// space-between layout stays balanced whether or not this is showing, see
+// the badge's own HTML comment.
+let moviesCreditBalance = 0;
 async function refreshMovieCredit() {
   try {
     const res = await fetch(`/api/portal/credit/${encodeURIComponent(onlineCurrentMac)}`);
     const data = await res.json();
-    const banner = document.getElementById('movieCreditBanner');
-    if (data.balance_pesos > 0) {
-      document.getElementById('movieCreditAmount').textContent = `₱${data.balance_pesos}`;
-      banner.style.display = 'flex';
+    moviesCreditBalance = data.balance_pesos || 0;
+    const badge = document.getElementById('moviesCreditBadge');
+    if (moviesCreditBalance > 0) {
+      document.getElementById('moviesCreditBadgeAmount').textContent = `₱${moviesCreditBalance}`;
+      badge.style.visibility = 'visible';
     } else {
-      banner.style.display = 'none';
+      badge.style.visibility = 'hidden';
     }
   } catch (e) {}
 }
 
-async function useMovieCredit() {
-  const btn = document.getElementById('movieCreditUseBtn');
-  btn.disabled = true;
+// Cancel / Convert-to-Time / Done popup, opened from the header badge -
+// same server/routes/portal.js's /credit/* endpoints the home page's
+// equivalent popup (public/portal/assets/js/portal.js) uses.
+function openMoviesCreditModal() {
+  if (moviesCreditBalance <= 0) return;
+  document.getElementById('moviesCreditMsg').textContent =
+    `You have ₱${moviesCreditBalance} in Movie Credit. Convert it to WiFi time now, or use it toward a movie above.`;
+  document.getElementById('moviesCreditActions').innerHTML = `
+    <button class="btn btn-outline" onclick="closeMoviesCreditModal()">Cancel</button>
+    <button class="btn btn-activate" id="moviesCreditConvertBtn" onclick="convertMoviesCreditModal()">Convert to Time</button>
+  `;
+  document.getElementById('moviesCreditOverlay').classList.add('show');
+}
+
+function closeMoviesCreditModal() {
+  document.getElementById('moviesCreditOverlay').classList.remove('show');
+}
+
+async function convertMoviesCreditModal() {
+  const btn = document.getElementById('moviesCreditConvertBtn');
+  if (btn) btn.disabled = true;
   try {
     const res = await fetch('/api/portal/credit/use', {
       method: 'POST',
@@ -482,15 +505,19 @@ async function useMovieCredit() {
     });
     const data = await res.json();
     if (data.success) {
-      alert(`Added ${data.minutes_added} minutes of WiFi time from your Movie Credit!`);
+      document.getElementById('moviesCreditMsg').textContent = `Added ${data.minutes_added} minutes of WiFi time!`;
     } else {
-      alert(data.message || 'Could not use your credit right now.');
+      document.getElementById('moviesCreditMsg').textContent = data.message || 'Could not use your credit right now.';
     }
+    document.getElementById('moviesCreditActions').innerHTML =
+      `<button class="btn btn-activate" onclick="closeMoviesCreditModal()">Done</button>`;
     await refreshMovieCredit();
   } catch (e) {
-    alert('Could not reach the server, please try again.');
+    document.getElementById('moviesCreditMsg').textContent = 'Could not reach the server, please try again.';
+    document.getElementById('moviesCreditActions').innerHTML =
+      `<button class="btn btn-activate" onclick="closeMoviesCreditModal()">Done</button>`;
   } finally {
-    btn.disabled = false;
+    if (btn) btn.disabled = false;
   }
 }
 

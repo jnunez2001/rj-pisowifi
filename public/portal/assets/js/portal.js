@@ -1246,9 +1246,79 @@ async function checkSession() {
         showBlockUI(spamData.remaining);
       }
     }
+
+    refreshMovieCreditCard(mac);
   } catch(e) {
     console.error(e);
     updateConnectionBanner(true);
+  }
+}
+
+// ===== MOVIE CREDIT (home info-card) =====
+// Same balance/endpoints as the Movies tab's own banner (movies-online.js)
+// - this just surfaces it on the home screen too, next to Expiry, so a
+// customer doesn't have to go into Movies to notice or spend it. Polled on
+// the same 8s cadence as the rest of the session info (checkSession()
+// above calls this), not a separate timer.
+async function refreshMovieCreditCard(mac) {
+  const card = document.getElementById('creditInfoCard');
+  if (!card) return;
+  try {
+    const res = await fetch(`${SERVER}/api/portal/credit/${encodeURIComponent(mac)}`);
+    const data = await res.json();
+    if (data.balance_pesos > 0) {
+      document.getElementById('creditInfoValue').textContent = `₱${data.balance_pesos}`;
+      card.style.display = '';
+    } else {
+      card.style.display = 'none';
+    }
+  } catch (e) {}
+}
+
+function openMovieCreditModal() {
+  const amount = document.getElementById('creditInfoValue').textContent;
+  document.getElementById('movieCreditModalAmount').textContent = amount;
+  document.getElementById('movieCreditModalBody').innerHTML =
+    `You have <b id="movieCreditModalAmount">${amount}</b> in Movie Credit. Convert it to WiFi time now, or use it toward a movie from the Movies tab.`;
+  document.getElementById('movieCreditModalActions').innerHTML = `
+    <button class="btn btn-outline" onclick="closeMovieCreditModal()">Cancel</button>
+    <button class="btn btn-activate" id="movieCreditConvertBtn" onclick="convertMovieCreditFromHome()">Convert to Time</button>
+  `;
+  document.getElementById('movieCreditModal').classList.add('show');
+}
+
+function closeMovieCreditModal() {
+  document.getElementById('movieCreditModal').classList.remove('show');
+}
+
+async function convertMovieCreditFromHome() {
+  const mac = getMac();
+  const btn = document.getElementById('movieCreditConvertBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${SERVER}/api/portal/credit/use`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('movieCreditModalBody').textContent = `Added ${data.minutes_added} minutes of WiFi time!`;
+      document.getElementById('movieCreditModalActions').innerHTML =
+        `<button class="btn btn-activate" onclick="closeMovieCreditModal()">Done</button>`;
+      refreshMovieCreditCard(mac);
+      checkSession();
+    } else {
+      document.getElementById('movieCreditModalBody').textContent = data.message || 'Could not use your credit right now.';
+      document.getElementById('movieCreditModalActions').innerHTML =
+        `<button class="btn btn-activate" onclick="closeMovieCreditModal()">Done</button>`;
+    }
+  } catch (e) {
+    document.getElementById('movieCreditModalBody').textContent = 'Could not reach the server, please try again.';
+    document.getElementById('movieCreditModalActions').innerHTML =
+      `<button class="btn btn-activate" onclick="closeMovieCreditModal()">Done</button>`;
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 

@@ -86,6 +86,14 @@
         <div class="info-label">EXPIRY</div>
         <div class="info-value warning" id="expiryDisplay">--</div>
       </div>
+      <!-- Movie Credit (server/routes/portal.js's /credit/*) - hidden
+           whenever the balance is ₱0, same as the Movies tab's own banner.
+           Clicking opens a popup to convert it to WiFi time on the spot,
+           without having to go into the Movies tab at all. -->
+      <div class="info-card" id="creditInfoCard" style="display:none;cursor:pointer;" onclick="openMovieCreditModal()">
+        <div class="info-label">CREDIT</div>
+        <div class="info-value" id="creditInfoValue">₱0</div>
+      </div>
     </div>
 
     <!-- VOUCHER -->
@@ -276,6 +284,26 @@
 
       <div id="reportPaneMine" style="display:none;">
         <div id="myReportsList" style="max-height:340px;overflow-y:auto;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MOVIE CREDIT MODAL -->
+  <div class="modal-overlay" id="movieCreditModal">
+    <div class="modal-box">
+      <div class="modal-handle"></div>
+      <div class="modal-header">
+        <h3><i class="fas fa-film"></i>&nbsp; MOVIE CREDIT</h3>
+        <button class="modal-close" onclick="closeMovieCreditModal()">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <p id="movieCreditModalBody" style="color:var(--text-secondary);font-size:14px;margin:0 0 16px;">
+        You have <b id="movieCreditModalAmount">₱0</b> in Movie Credit. Convert it to WiFi time now, or use it toward a movie from the Movies tab.
+      </p>
+      <div style="display:flex;gap:8px;" id="movieCreditModalActions">
+        <button class="btn btn-outline" onclick="closeMovieCreditModal()">Cancel</button>
+        <button class="btn btn-activate" id="movieCreditConvertBtn" onclick="convertMovieCreditFromHome()">Convert to Time</button>
       </div>
     </div>
   </div>

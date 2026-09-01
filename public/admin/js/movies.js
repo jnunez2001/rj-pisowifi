@@ -16,6 +16,7 @@ async function loadMoviesPage() {
     if (settingsData.success) {
       document.getElementById('moviesSourceDir').value = settingsData.settings.movies_source_dir || '';
       document.getElementById('movieRentalHours').value = settingsData.settings.movie_rental_hours || '48';
+      document.getElementById('movieCreditPersists').checked = settingsData.settings.movie_credit_persists === '1';
     }
   } catch (e) {}
 
@@ -112,8 +113,11 @@ async function scanMoviesFolder() {
 async function saveMoviesSettings() {
   const dir = document.getElementById('moviesSourceDir').value.trim();
   const hours = document.getElementById('movieRentalHours').value;
+  const creditPersists = document.getElementById('movieCreditPersists').checked;
   try {
-    const data = await apiCall('POST', '/api/admin/settings', { movies_source_dir: dir, movie_rental_hours: String(hours) });
+    const data = await apiCall('POST', '/api/admin/settings', {
+      movies_source_dir: dir, movie_rental_hours: String(hours), movie_credit_persists: creditPersists ? '1' : '0',
+    });
     if (data.success) {
       showToast('Movies settings saved', 'success');
       return true;
