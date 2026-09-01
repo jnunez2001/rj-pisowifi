@@ -88,8 +88,19 @@
     <!-- Server switcher - only shown once more than one source is configured -->
     <div id="onlineSourceTabs" class="online-source-tabs"></div>
     <div class="movie-player-body">
+      <!-- sandbox deliberately omits allow-popups/allow-top-navigation* -
+           this is the real, working equivalent of a browser adblocker's
+           "block redirect ads" behavior for a THIRD-PARTY iframe we don't
+           control: it can't strip ads baked into the embed's own page, but
+           it does stop the embed's JS from hijacking the whole tab to a
+           different site or spawning a popup/pop-under, which is the part
+           that actually disrupts a customer mid-movie. allow-scripts +
+           allow-same-origin are both still needed for the video player
+           itself to function - they don't grant navigation/popup rights,
+           those are controlled independently by the tokens left out. -->
       <iframe id="onlineMoviePlayerFrame" class="movie-player-iframe" src="" allowfullscreen
-        allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="origin"></iframe>
+        allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="origin"
+        sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
     </div>
   </div>
 

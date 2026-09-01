@@ -111,26 +111,24 @@ app.use(['/admin', '/api/admin'], (req, res, next) => {
 // streaming source by URL (server/routes/admin.js's movie_streaming_sources
 // CRUD) - a second source on a different domain was silently blocked by
 // this app's OWN CSP with no visible error to the customer, just a black
-// player. Rewrites frame-src on the movies page specifically to the
-// origins of whatever sources are actually configured right now, so this
-// never needs a code change (or a restart) again when an admin adds one.
+// player. This used to try pinning frame-src to the exact origin of each
+// configured source, but a second bug found live during testing showed
+// that doesn't work either: vidrock.ru's own embed page internally loads
+// its REAL player from a different, seemingly-randomized domain (observed:
+// sbx-2dl.pages.dev, a Cloudflare Pages subdomain) rather than serving
+// video from vidrock.ru itself - almost certainly deliberate on their part
+// (rotating the real domain is a known anti-adblock/anti-allowlist tactic),
+// which means pinning specific domains here can never be stable and will
+// keep silently breaking playback again after any rotation. frame-src was
+// never a meaningful ad-blocking layer anyway (that's what Pi-hole/DNS
+// filtering and the iframe's sandbox attribute below are for) - allowing
+// any HTTPS origin here just lets the actual video load reliably, while
+// script-src/img-src etc. above stay exactly as strict as before.
 app.use('/portal/movies.html', (req, res, next) => {
-  try {
-    const db = require('./config/database');
-    const sources = db.prepare('SELECT url_template FROM movie_streaming_sources').all();
-    const origins = new Set();
-    for (const { url_template } of sources) {
-      try { origins.add(new URL(url_template.replace('{tmdb_id}', '0')).origin); } catch (e) {}
-    }
-    if (origins.size > 0) {
-      const csp = res.getHeader('Content-Security-Policy');
-      if (csp) {
-        const updated = csp.replace(/frame-src[^;]*/, `frame-src 'self' ${[...origins].join(' ')}`);
-        res.setHeader('Content-Security-Policy', updated);
-      }
-    }
-  } catch (e) {
-    console.warn('[CSP] Could not compute dynamic frame-src for movies.html:', e.message);
+  const csp = res.getHeader('Content-Security-Policy');
+  if (csp) {
+    const updated = csp.replace(/frame-src[^;]*/, `frame-src 'self' https:`);
+    res.setHeader('Content-Security-Policy', updated);
   }
   next();
 });
