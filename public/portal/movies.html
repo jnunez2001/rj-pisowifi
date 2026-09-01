@@ -8,7 +8,12 @@
   <link rel="stylesheet" href="/portal/assets/css/all.min.css">
   <link rel="stylesheet" href="/portal/assets/css/portal.css">
   <link rel="stylesheet" href="/portal/assets/css/movies.css">
-  <link rel="stylesheet" href="/portal/assets/css/movies-online.css">
+  <!-- Cache-busted (?v=) - this file is actively changing; without this,
+       some mobile browsers/carrier proxies keep serving a stale cached copy
+       even after the server has a newer version, which silently breaks the
+       page (mismatched element IDs between cached JS and fresh HTML) with
+       no visible error. Bump the version string whenever this file changes. -->
+  <link rel="stylesheet" href="/portal/assets/css/movies-online.css?v=3">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 </head>
 <body class="movies-body">
@@ -98,7 +103,7 @@
   </div>
 
   <script src="/portal/assets/js/vendor/hls.min.js"></script>
-  <script src="/portal/assets/js/movies.js"></script>
-  <script src="/portal/assets/js/movies-online.js"></script>
+  <script src="/portal/assets/js/movies.js?v=2"></script>
+  <script src="/portal/assets/js/movies-online.js?v=3"></script>
 </body>
 </html>
