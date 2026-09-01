@@ -317,6 +317,22 @@
       <small style="color:var(--text-muted);">How many times a customer can pause the same session. 0 = unlimited. The portal shows customers how many pauses they have left.</small>
     </div>
     <div class="form-group">
+      <label class="form-label">Auto-Pause When Away</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
+        <label class="toggle-switch">
+          <input type="checkbox" id="autoPauseIdle" onchange="updateToggleLabel('autoPauseIdle','autoPauseIdleLabel')">
+          <span class="toggle-slider"></span>
+        </label>
+        <span id="autoPauseIdleLabel" style="font-size:13px;color:var(--text-muted);">Disabled</span>
+      </div>
+      <small style="color:var(--text-muted);">Freezes a customer's billing clock if their device stops sending real traffic - resumes automatically the moment they're active again, no action needed from them. Their connection stays up the whole time. Not available in OpenWRT mode.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Away Threshold (minutes)</label>
+      <input type="number" id="autoPauseIdleMinutes" class="form-control" placeholder="10" min="1" max="180">
+      <small style="color:var(--text-muted);">How many minutes of near-zero traffic before a session is considered away.</small>
+    </div>
+    <div class="form-group">
       <label class="form-label">Allow Convert Premium Back to Regular</label>
       <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
         <label class="toggle-switch">
@@ -340,6 +356,29 @@
   </div>
   <button class="btn btn-primary" onclick="saveSessionSettings()">
     <i class="fas fa-save"></i> Save Session Settings
+  </button>
+</div>
+
+<!-- ANTI-TETHERING DETECTION (BETA) -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-shield-halved" style="margin-right:8px;color:var(--accent-orange);"></i>Anti-Tethering Detection (Beta)
+    </div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Detect Possible Tethering</label>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
+      <label class="toggle-switch">
+        <input type="checkbox" id="tetheringDetection" onchange="updateToggleLabel('tetheringDetection','tetheringDetectionLabel')">
+        <span class="toggle-slider"></span>
+      </label>
+      <span id="tetheringDetectionLabel" style="font-size:13px;color:var(--text-muted);">Disabled</span>
+    </div>
+    <small style="color:var(--text-muted);">Flags devices that look like they're sharing their connection to others, so you can review it - it does NOT block or slow anyone down automatically. This is a heuristic, not a guarantee, and only works when this box is running in Standalone mode.</small>
+  </div>
+  <button class="btn btn-primary" onclick="saveTetheringDetectionSetting()">
+    <i class="fas fa-save"></i> Save
   </button>
 </div>
 

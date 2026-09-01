@@ -6,6 +6,19 @@ const expiringNow = new Set();
 // Lock to prevent cron job overlap (Bug #39)
 let cronLock = false;
 
+// Away/idle auto-pause tracking (settings.enable_auto_pause_idle) -
+// in-memory only, resets harmlessly on a restart (worst case, one
+// session's idle clock restarts from zero). Keyed by voucher_code:
+// { lastBytes, idleMs } while active (accumulating idle time toward the
+// pause threshold), or { lastBytes } while idle-paused (a FIXED baseline
+// captured at the moment of pausing, compared against on every
+// subsequent tick to detect real activity returning - see the two call
+// sites below for why the byte-delta semantics differ between MikroTik
+// and Standalone in each phase).
+const idleTrackingState = new Map();
+const IDLE_BYTE_THRESHOLD = 10 * 1024; // ~10KB/tick floor - background OS chatter, not real use
+const TICK_MS = 30000; // must match this file's own cron.schedule interval below
+
 async function restoreActiveSessions() {
   try {
     const db = require('../config/database');
@@ -139,7 +152,7 @@ async function startTimer() {
     cronLock = true;
     try {
       const db = require('../config/database');
-      const { expireSession, resumeSession } = require('./sessionService');
+      const { expireSession, resumeSession, pauseSession } = require('./sessionService');
 
       const now = new Date().toISOString();
       const getSetting = (key, def) => parseInt(db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? def, 10) || def;
@@ -215,6 +228,54 @@ async function startTimer() {
         }
       }
 
+      // Away/idle auto-resume: an idle-paused session was never actually
+      // disconnected (see sessionService.js's pauseSession 'idle' branch),
+      // so real traffic can resume through it at any time - this is what
+      // notices that and auto-resumes immediately, no customer action
+      // needed. Separate from the max_pause_minutes safety-net above,
+      // which still applies to these too as a "never held forever even if
+      // activity never returns" backstop.
+      if (db.prepare("SELECT value FROM settings WHERE key = 'enable_auto_pause_idle'").get()?.value === '1') {
+        const idlePausedSessions = db.prepare(`
+          SELECT * FROM sessions WHERE is_paused = 1 AND pause_reason = 'idle'
+        `).all();
+        if (idlePausedSessions.length > 0) {
+          const mikrotikService = require('./mikrotikService');
+          const networkDevicesService = require('./networkDevicesService');
+          const { peekClassId } = require('./drivers/classIdAllocator');
+          const isMikrotik = mikrotikService.isMikrotikModeEnabled();
+
+          for (const session of idlePausedSessions) {
+            try {
+              const traffic = isMikrotik
+                ? await mikrotikService.getClientTraffic(session.mac_address)
+                : await networkDevicesService.getTcTraffic(peekClassId(session.mac_address));
+              if (!traffic) continue;
+
+              // The baseline is fixed at the moment pausing happened (set
+              // just before pauseSession() below) and deliberately never
+              // updated here - both drivers' counters are genuinely
+              // cumulative while paused (neither reasserts/recreates the
+              // queue/class for a paused session), so comparing against
+              // that one fixed point is what correctly measures "how much
+              // has this device sent since it went idle", not "since the
+              // last tick".
+              const state = idleTrackingState.get(session.voucher_code);
+              const baseline = state?.lastBytes ?? traffic.totalBytes;
+              const deltaSincePause = Math.max(0, traffic.totalBytes - baseline);
+
+              if (deltaSincePause >= IDLE_BYTE_THRESHOLD) {
+                console.log(`▶️ Auto-resuming ${session.voucher_code} (${session.mac_address}) - real activity detected while idle-paused`);
+                idleTrackingState.delete(session.voucher_code);
+                await resumeSession(session.voucher_code);
+              }
+            } catch (e) {
+              console.error(`Idle-resume check failed for ${session.mac_address}:`, e.message);
+            }
+          }
+        }
+      }
+
       // Update minutes_remaining for active sessions
       const activeSessions = db.prepare(`
         SELECT * FROM sessions
@@ -257,6 +318,19 @@ async function startTimer() {
       const networkDevicesService = require('./networkDevicesService');
       const { peekClassId } = require('./drivers/classIdAllocator');
       const isMikrotik = mikrotikService.isMikrotikModeEnabled();
+      // Away/idle auto-pause - see the matching auto-resume block above
+      // for how a paused-this-way session gets noticed and un-paused.
+      // Not offered in OpenWRT mode at all today (no per-client traffic
+      // counter exists for that driver, same gap the data-cap tracking
+      // above already has) - `isMikrotik` false there just means "use the
+      // Standalone tc path", which also doesn't apply to OpenWRT, so this
+      // silently no-ops for it rather than erroring, consistent with how
+      // data-cap tracking already behaves on that driver.
+      // getSetting() always parseInt()s (returns 0 for a non-numeric '0'/'1'
+      // flag, so `getSetting(...) === '1'` would always be false) - reading
+      // this one directly, same as enable_bandwidth_cap above.
+      const enableAutoPauseIdle = db.prepare("SELECT value FROM settings WHERE key = 'enable_auto_pause_idle'").get()?.value === '1';
+      const autoPauseIdleMs = getSetting('auto_pause_idle_minutes', 10) * 60000;
 
       for (const session of activeSessions) {
         const remaining = (
@@ -292,6 +366,51 @@ async function startTimer() {
               }
             } catch (e) {
               console.error(`Failed to track data usage for ${session.mac_address}:`, e.message);
+            }
+          }
+
+          // Away/idle auto-pause. Deliberately a SEPARATE traffic read from
+          // the data-cap block above rather than sharing its result - that
+          // one only runs when data_limit_mb is set, and the two features'
+          // byte-delta semantics diverge for MikroTik right after this
+          // (data-cap wants a running accumulated total; idle-detection
+          // just needs "how much moved this tick"), so merging them would
+          // tangle two independent features together for a minor
+          // efficiency gain on the rare session that has both.
+          if (enableAutoPauseIdle) {
+            try {
+              const traffic = isMikrotik
+                ? await mikrotikService.getClientTraffic(session.mac_address)
+                : await networkDevicesService.getTcTraffic(peekClassId(session.mac_address));
+              if (traffic) {
+                // MikroTik's queue is deleted/recreated by the bandwidth
+                // reassert further below on every tick, so totalBytes read
+                // here (before that reassert runs) IS this tick's delta
+                // already - same reasoning as the data-cap block's own
+                // comment above. Standalone's tc class persists across
+                // ticks instead, so it needs an explicit diff against the
+                // last reading.
+                const state = idleTrackingState.get(session.voucher_code) || { idleMs: 0 };
+                const deltaBytes = isMikrotik
+                  ? traffic.totalBytes
+                  : Math.max(0, traffic.totalBytes - (state.lastBytes ?? traffic.totalBytes));
+
+                state.idleMs = deltaBytes < IDLE_BYTE_THRESHOLD ? (state.idleMs || 0) + TICK_MS : 0;
+                state.lastBytes = traffic.totalBytes;
+
+                if (state.idleMs >= autoPauseIdleMs) {
+                  console.log(`💤 Auto-pausing ${session.voucher_code} (${session.mac_address}) - idle ${Math.round(autoPauseIdleMs / 60000)}+ min`);
+                  // Reset to a fresh baseline for the auto-resume check
+                  // above, which needs "bytes sent SINCE pausing", not
+                  // this feature's own idleMs bookkeeping.
+                  idleTrackingState.set(session.voucher_code, { lastBytes: traffic.totalBytes });
+                  await pauseSession(session.voucher_code, 'idle');
+                  continue; // now paused - nothing left to reassert below
+                }
+                idleTrackingState.set(session.voucher_code, state);
+              }
+            } catch (e) {
+              console.error(`Idle-pause check failed for ${session.mac_address}:`, e.message);
             }
           }
 

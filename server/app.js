@@ -549,6 +549,16 @@ const server = app.listen(PORT, () => {
     console.warn('[Multi-WAN] Failed to start (non-fatal):', e.message);
   }
 
+  // Anti-tethering detection (Standalone mode, log-only Beta) - the
+  // service itself no-ops on every check unless both
+  // settings.enable_tethering_detection and Standalone mode are true, so
+  // it's safe to always start; this just puts its interval on the clock.
+  try {
+    require('./services/ttlMonitorService').start();
+  } catch (e) {
+    console.warn('[Anti-Tethering] Failed to start (non-fatal):', e.message);
+  }
+
   // Online movie poster cache warm-up (server/services/tmdbService.js) -
   // fire-and-forget, never awaited: the movies page already works with
   // plain film-icon cards while this fills in, and each id is only ever

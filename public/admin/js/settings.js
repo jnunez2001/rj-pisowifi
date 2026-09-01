@@ -127,9 +127,14 @@ async function loadSettings() {
     setToggle('allowPause', 'allowPauseLabel', s.allow_pause === '1');
     document.getElementById('maxPauseMinutes').value = s.max_pause_minutes || 30;
     document.getElementById('maxPauses').value = s.max_pauses || 0;
+    setToggle('autoPauseIdle', 'autoPauseIdleLabel', s.enable_auto_pause_idle === '1');
+    document.getElementById('autoPauseIdleMinutes').value = s.auto_pause_idle_minutes || 10;
     document.getElementById('gracePeriodMinutes').value = s.grace_period_minutes || 0;
     document.getElementById('wifiSpeedTimerMs').value = s.wifi_speed_timer_ms || 1000;
     setToggle('allowPremiumToRegularConvert', 'allowPremiumToRegularConvertLabel', s.allow_premium_to_regular_convert === '1');
+
+    // Anti-Tethering Detection
+    setToggle('tetheringDetection', 'tetheringDetectionLabel', s.enable_tethering_detection === '1');
 
     // Coin Slot Settings
     document.getElementById('coinWaitMs').value = s.coin_wait_ms || 1500;
@@ -212,11 +217,23 @@ async function saveSessionSettings() {
       allow_pause: document.getElementById('allowPause').checked ? '1' : '0',
       max_pause_minutes: document.getElementById('maxPauseMinutes').value,
       max_pauses: document.getElementById('maxPauses').value,
+      enable_auto_pause_idle: document.getElementById('autoPauseIdle').checked ? '1' : '0',
+      auto_pause_idle_minutes: document.getElementById('autoPauseIdleMinutes').value,
       grace_period_minutes: document.getElementById('gracePeriodMinutes').value,
       wifi_speed_timer_ms: document.getElementById('wifiSpeedTimerMs').value,
       allow_premium_to_regular_convert: document.getElementById('allowPremiumToRegularConvert').checked ? '1' : '0',
     });
     if (data.success) showToast('Session settings saved!');
+    else showToast(data.message || 'Failed to save.', 'error');
+  } catch(e) { showToast('Server error.', 'error'); }
+}
+
+async function saveTetheringDetectionSetting() {
+  try {
+    const data = await apiCall('POST', '/api/admin/settings', {
+      enable_tethering_detection: document.getElementById('tetheringDetection').checked ? '1' : '0',
+    });
+    if (data.success) showToast('Saved!');
     else showToast(data.message || 'Failed to save.', 'error');
   } catch(e) { showToast('Server error.', 'error'); }
 }
