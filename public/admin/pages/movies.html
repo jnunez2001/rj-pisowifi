@@ -133,8 +133,13 @@
   </div>
   <div class="om-help">Import: a .txt file with one TMDb ID per line (extra text on the line, like a title or a <code>#</code> comment, is fine and ignored). New titles are added as Free - price them below afterward. Export downloads every title currently in the catalog as the same format, for backup or re-import elsewhere.</div>
 
-  <div style="margin-top:10px;">
-    <input type="text" id="omCatalogFilter" placeholder="Filter catalog below…" style="width:100%;" oninput="omFilterCatalog(this.value)">
+  <div style="margin-top:10px;display:flex;gap:8px;">
+    <input type="text" id="omCatalogFilter" placeholder="Filter catalog below…" style="flex:1;" oninput="omFilterCatalog(this.value)">
+    <select id="omTierFilter" class="om-tier-select" onchange="omFilterTier(this.value)" title="Show only Free or only Paid titles, sorted by priority instead of A-Z">
+      <option value="">All</option>
+      <option value="free">Free only</option>
+      <option value="paid">Paid only</option>
+    </select>
   </div>
 
   <div class="om-bulk-bar" id="omBulkBar">

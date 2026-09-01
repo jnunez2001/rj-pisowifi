@@ -142,7 +142,7 @@ function escapeHtml(str) {
 // ===== ONLINE MOVIES (server/services/onlineMovieCatalog.js + tmdbService.js) =====
 // Purely additive to everything above - the local movie library's grid,
 // scan, and settings are untouched by any of this.
-const omState = { page: 1, limit: 30, filter: '', total: 0 };
+const omState = { page: 1, limit: 30, filter: '', tier: '', total: 0 };
 let omSearchDebounce = null;
 let omFilterDebounce = null;
 
@@ -409,9 +409,19 @@ function omFilterCatalog(value) {
   }, 350);
 }
 
+// Free/Paid filter (owner request: finding paid titles shouldn't mean
+// scrolling the whole alphabetical catalog one by one) - the server also
+// switches to priority/price order instead of A-Z whenever this is set,
+// see GET /movies/online-catalog.
+function omFilterTier(value) {
+  omState.tier = value;
+  omState.page = 1;
+  omLoadCatalog();
+}
+
 async function omLoadCatalog() {
   const tbody = document.getElementById('omCatalogRows');
-  const params = new URLSearchParams({ q: omState.filter, page: omState.page, limit: omState.limit });
+  const params = new URLSearchParams({ q: omState.filter, tier: omState.tier, page: omState.page, limit: omState.limit });
   const data = await apiCall('GET', `/api/admin/movies/online-catalog?${params.toString()}`);
   if (!data.success) {
     tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">Could not load catalog</td></tr>';

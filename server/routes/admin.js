@@ -5354,12 +5354,20 @@ router.post('/movies/tmdb-sync', adminAuth, async (req, res) => {
 // catalog of hundreds of titles doesn't have to render all at once.
 router.get('/movies/online-catalog', adminAuth, (req, res) => {
   const q = String(req.query.q || '').trim().toLowerCase();
+  const tier = req.query.tier === 'free' || req.query.tier === 'paid' ? req.query.tier : '';
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
   const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
 
   let all = onlineMovieCatalog.getAll();
   if (q) all = all.filter((m) => m.title.toLowerCase().includes(q));
-  all.sort((a, b) => a.title.localeCompare(b.title));
+  if (tier) all = all.filter((m) => m.tier === tier);
+  // Filtering to just Free or Paid is exactly when alphabetical order stops
+  // being useful (the owner's own words: "so I dont find the paid one by
+  // one") - sort by priority/price instead so the titles that actually
+  // matter (highest priority, then highest price) surface first instead of
+  // needing to hunt through the whole alphabet.
+  if (tier) all.sort((a, b) => (b.priority || 0) - (a.priority || 0) || b.price_pesos - a.price_pesos || a.title.localeCompare(b.title));
+  else all.sort((a, b) => a.title.localeCompare(b.title));
 
   const total = all.length;
   const start = (page - 1) * limit;
