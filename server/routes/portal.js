@@ -423,39 +423,45 @@ function hasActiveOnlineRental(movieId, mac) {
 
 // GET /online-movies?mac=xx - catalog with per-device unlock state, same
 // shape/spirit as GET /movies above.
+//
+// Owner's call: no app-level gate on the Online catalog at all right now,
+// open whether or not the device has coin/voucher/free-claim time - the
+// real access control is the network-level firewall (nftables' allowed_macs
+// set, see standaloneDriver.js), which already blocks a device with no paid
+// session from reaching vidrock.ru (or anything else on the internet) in
+// the first place. The hasActiveSession()/hasActiveOnlineRental() checks
+// this used to layer on top were redundant with that and were the actual
+// source of live "movies won't open" reports (Countdown Speed compressing
+// a session's real duration to near-zero made the app-level check fail
+// even though the device's underlying WiFi access was fine). Removed, not
+// deleted-and-forgotten: hasActiveOnlineRental()/the coin-gate plumbing in
+// coin.js stays intact for whenever paid mode gets re-planned and re-wired
+// in on purpose.
 router.get('/online-movies', (req, res) => {
-  const mac = String(req.query.mac || '').trim().toLowerCase();
-  const sessionActive = mac ? hasActiveSession(mac) : false;
   const tmdbService = require('../services/tmdbService');
   const viewRows = db.prepare('SELECT movie_id, views FROM online_movie_views').all();
   const viewsById = new Map(viewRows.map((r) => [r.movie_id, r.views]));
   const movies = onlineMovieCatalog.getAll().map((m) => {
-    const unlocked = m.tier === 'free' ? sessionActive : (mac ? hasActiveOnlineRental(m.id, mac) : false);
     // Synchronous cache read, no network call in this request's path - see
     // tmdbService.js's warmCache() (kicked off in the background by
     // server/app.js at startup) for what actually populates this.
     return {
       id: m.id, title: m.title, tier: m.tier, price_pesos: m.price_pesos,
-      poster: tmdbService.getCachedPosterUrl(m.id), genres: tmdbService.getCachedGenres(m.id), unlocked,
+      poster: tmdbService.getCachedPosterUrl(m.id), genres: tmdbService.getCachedGenres(m.id), unlocked: true,
       views: viewsById.get(m.id) || 0,
     };
   });
-  res.json({ success: true, movies, session_active: sessionActive });
+  res.json({ success: true, movies, session_active: true });
 });
 
-// GET /online-movies/:id/embed?mac=xx - gate check, then hand back the
-// vidrock.ru embed URL built server-side (mirrors movies-online.js's own
-// buildOnlineMovieEmbedUrl so both stay in sync - if the embed URL/params
-// change, update both places).
+// GET /online-movies/:id/embed?mac=xx - hands back the vidrock.ru embed URL
+// built server-side (mirrors movies-online.js's own buildOnlineMovieEmbedUrl
+// so both stay in sync - if the embed URL/params change, update both
+// places). No unlock gate - see the comment on GET /online-movies above.
 router.get('/online-movies/:id/embed', (req, res) => {
-  const mac = String(req.query.mac || '').trim().toLowerCase();
   const movie = onlineMovieCatalog.getById(req.params.id);
   if (!movie) return res.status(404).json({ success: false, message: 'Movie not found' });
 
-  const unlocked = movie.tier === 'free' ? hasActiveSession(mac) : hasActiveOnlineRental(movie.id, mac);
-  if (!unlocked) {
-    return res.status(403).json({ success: false, message: 'Not unlocked for this device' });
-  }
   const params = new URLSearchParams({
     autoplay: 'true', autonext: 'false', theme: '0c8f6d',
     download: 'false', nextbutton: 'true', episodeselector: 'true', lang: 'en'

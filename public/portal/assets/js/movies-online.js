@@ -145,20 +145,15 @@ function renderOnlineMoviesFlat(list) {
   el.innerHTML = `<div class="movies-grid">${list.map(movieCardHtml).join('')}</div>`;
 }
 
+// Owner's call: no coin/session gate right now, opens whether or not the
+// device has paid time - the real access control is the network-level
+// firewall (nftables), which already blocks an unpaid device from
+// reaching vidrock.ru at all. The rent-confirm/coin-insert functions below
+// (showOnlineRentConfirmStep etc.) are left in place, just unused, for
+// whenever paid mode gets re-planned and wired back in on purpose.
 function openOnlineMovie(id) {
   const movie = onlineAllMovies.find((m) => m.id === id);
   if (!movie) return;
-
-  if (!movie.unlocked) {
-    if (movie.tier === 'free') {
-      alert('You need active WiFi time to watch this. Insert a coin on the main portal page first.');
-      return;
-    }
-    onlinePendingRentMovieId = id;
-    showOnlineRentConfirmStep(movie);
-    return;
-  }
-
   startOnlinePlayback(movie);
 }
 
