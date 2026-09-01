@@ -147,6 +147,7 @@
       </select>
       <input type="number" id="omBulkPrice" min="0" placeholder="10" style="width:60px;display:none;padding:5px 8px;font-size:12.5px;">
       <button class="btn btn-secondary" style="padding:6px 12px;font-size:12.5px;" onclick="omApplyBulk()">Apply</button>
+      <button class="btn btn-secondary" style="padding:6px 12px;font-size:12.5px;color:var(--danger,#e74c3c);" onclick="omApplyBulkDelete()"><i class="fas fa-trash"></i> Delete Selected</button>
     </div>
   </div>
 
@@ -158,11 +159,13 @@
           <th>Movie</th>
           <th style="width:110px;">Tier</th>
           <th style="width:90px;text-align:right;">Price</th>
+          <th style="width:80px;text-align:right;" title="Higher shows first in the 🔥 Exclusive row and within genre rows">Priority</th>
+          <th style="width:90px;text-align:right;" title="Hours before a rental expires for this title. 0 = use the global default in Settings.">Rental Hrs</th>
           <th style="width:70px;"></th>
         </tr>
       </thead>
       <tbody id="omCatalogRows">
-        <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">Loading…</td></tr>
+        <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">Loading…</td></tr>
       </tbody>
     </table>
   </div>
@@ -172,6 +175,70 @@
       <button class="btn btn-secondary" style="padding:5px 10px;font-size:12px;" onclick="omChangePage(-1)"><i class="fas fa-chevron-left"></i></button>
       <button class="btn btn-secondary" style="padding:5px 10px;font-size:12px;" onclick="omChangePage(1)"><i class="fas fa-chevron-right"></i></button>
     </div>
+  </div>
+</div>
+
+<div class="zf3-card">
+  <div class="om-card-header">
+    <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-orange,#f59e0b);"></span>Rentals</div>
+      <div class="om-card-desc">Look up a device's access to a paid title, or manually grant one (VIP, support override, or a permanent unlock - never shown to the customer as anything special).</div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center;">
+    <input type="text" id="omGrantMac" placeholder="Device MAC (aa:bb:cc:dd:ee:ff)" style="width:220px;">
+    <input type="number" id="omGrantTmdbId" placeholder="TMDb ID" style="width:110px;">
+    <input type="number" id="omGrantHours" placeholder="Hours" value="48" style="width:80px;" title="Ignored if Permanent is checked">
+    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-muted);">
+      <input type="checkbox" id="omGrantPermanent" onchange="document.getElementById('omGrantHours').disabled=this.checked"> Permanent
+    </label>
+    <button class="btn btn-secondary" onclick="omGrantRental()"><i class="fas fa-unlock"></i> Grant</button>
+  </div>
+
+  <div style="margin-top:14px;">
+    <input type="text" id="omRentalsFilter" placeholder="Filter by MAC or title…" style="width:100%;" oninput="omFilterRentals(this.value)">
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table class="om-table">
+      <thead>
+        <tr>
+          <th>Movie</th>
+          <th>Device MAC</th>
+          <th>Rented</th>
+          <th>Expires</th>
+          <th style="width:70px;"></th>
+        </tr>
+      </thead>
+      <tbody id="omRentalsRows">
+        <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="zf3-card">
+  <div class="om-card-header">
+    <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-blue,#2563eb);"></span>Top Searches</div>
+      <div class="om-card-desc">What customers actually search for and then open - real demand, not TMDb's popularity ranking.</div>
+    </div>
+    <button class="btn btn-secondary" style="padding:6px 12px;font-size:12.5px;" onclick="omLoadTopSearches()"><i class="fas fa-rotate"></i> Refresh</button>
+  </div>
+  <div style="overflow-x:auto;">
+    <table class="om-table">
+      <thead>
+        <tr>
+          <th>Search</th>
+          <th style="width:80px;text-align:right;">Hits</th>
+          <th style="width:160px;">Last searched</th>
+        </tr>
+      </thead>
+      <tbody id="omTopSearchesRows">
+        <tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">Loading…</td></tr>
+      </tbody>
+    </table>
   </div>
 </div>
 

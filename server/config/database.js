@@ -494,6 +494,18 @@ db.exec(`
     tier TEXT NOT NULL DEFAULT 'paid', -- 'free' | 'paid'
     price_pesos INTEGER NOT NULL DEFAULT 0,
     poster_path TEXT,
+    -- Admin-set display priority (Movies > Online > Price Groups) - higher
+    -- shows first within the 🔥 Exclusive row and within each genre row,
+    -- replacing TMDb's own popularity/rating ordering with something the
+    -- operator actually controls. Default 0 (no manual boost).
+    priority INTEGER NOT NULL DEFAULT 0,
+    -- Per-movie rental window in hours for paid titles - 0 means "use the
+    -- global movie_rental_hours setting" (see server/routes/coin.js), a
+    -- positive value overrides it for just this title (e.g. a 12-hour
+    -- window for a title priced differently than the rest of the catalog).
+    -- Permanent-per-device access is a separate, manual admin grant (see
+    -- online_movie_rentals below) - not a property of the movie itself.
+    rental_hours INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -525,6 +537,19 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS online_movie_hidden (
     tmdb_id INTEGER PRIMARY KEY,
     hidden_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- One row per search that ended in the customer actually opening a movie
+  -- from the results (not every keystroke - a search that goes nowhere
+  -- says nothing about real demand). Powers the admin's "Top Searches"
+  -- panel (Movies > Online) - what customers are looking for, including
+  -- titles that aren't in the catalog yet if the click-through target is
+  -- still recorded as whatever they clicked closest to their intent.
+  CREATE TABLE IF NOT EXISTS online_movie_searches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query TEXT NOT NULL,
+    movie_id INTEGER NOT NULL,
+    searched_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
   -- Portal ad/promo carousel (new movies, promos, whatever the operator
@@ -2073,6 +2098,18 @@ try {
   // rows just stay NULL (no way to backfill without re-syncing) and simply
   // won't show up in the client's "New Releases" row until the next sync.
   db.exec('ALTER TABLE tmdb_movie_feed ADD COLUMN release_date TEXT');
+} catch (e) {
+  // already applied
+}
+
+try {
+  db.exec('ALTER TABLE online_movie_pricing ADD COLUMN priority INTEGER NOT NULL DEFAULT 0');
+} catch (e) {
+  // already applied
+}
+
+try {
+  db.exec('ALTER TABLE online_movie_pricing ADD COLUMN rental_hours INTEGER NOT NULL DEFAULT 0');
 } catch (e) {
   // already applied
 }

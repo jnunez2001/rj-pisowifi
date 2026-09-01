@@ -295,7 +295,12 @@ async function finalizePendingCoins(mac) {
     const changeCredited = total - movie.price_pesos;
     if (changeCredited > 0) addMovieCredit(mac, changeCredited);
 
-    const rentalHours = parseFloat(db.prepare("SELECT value FROM settings WHERE key = 'movie_rental_hours'").get()?.value || '48');
+    // 0 (the default) means "no per-movie override" - falls back to the
+    // same global setting local rentals use. A positive value (Movies >
+    // Online > Price Groups) overrides it for just this title.
+    const rentalHours = movie.rental_hours > 0
+      ? movie.rental_hours
+      : parseFloat(db.prepare("SELECT value FROM settings WHERE key = 'movie_rental_hours'").get()?.value || '48');
     const expiresAt = new Date(Date.now() + rentalHours * 60 * 60 * 1000).toISOString();
     db.prepare('INSERT INTO online_movie_rentals (movie_id, mac_address, expires_at) VALUES (?, ?, ?)').run(movie.id, mac, expiresAt);
     db.prepare(`

@@ -446,7 +446,7 @@ router.get('/online-movies', (req, res) => {
     return {
       id: m.id, title: m.title, tier: m.tier, price_pesos: m.price_pesos, release_date: m.release_date || null,
       poster: tmdbService.getCachedPosterUrl(m.id), genres: tmdbService.getCachedGenres(m.id), unlocked,
-      views: viewsById.get(m.id) || 0,
+      views: viewsById.get(m.id) || 0, priority: m.priority || 0,
     };
   });
   res.json({ success: true, movies, session_active: true });
@@ -459,6 +459,21 @@ router.get('/online-movies', (req, res) => {
 router.get('/online-movies/sources', (req, res) => {
   const sources = db.prepare('SELECT id, name, is_default FROM movie_streaming_sources ORDER BY sort_order, id').all();
   res.json({ success: true, sources });
+});
+
+// POST /online-movies/search-hit {query, movie_id} - logs a search only
+// when it led somewhere real (the client only calls this the moment a
+// customer opens a movie while the search box has text in it - see
+// movies-online.js), not on every keystroke. Powers the admin's Top
+// Searches panel (real demand signal) without drowning it in abandoned/
+// typo searches. Fire-and-forget from the client, so this fails soft and
+// never blocks or affects opening the movie itself.
+router.post('/online-movies/search-hit', (req, res) => {
+  const query = String(req.body?.query || '').trim().slice(0, 200);
+  const movieId = parseInt(req.body?.movie_id, 10);
+  if (!query || !movieId) return res.status(400).json({ success: false });
+  db.prepare('INSERT INTO online_movie_searches (query, movie_id) VALUES (?, ?)').run(query, movieId);
+  res.json({ success: true });
 });
 
 // GET /online-movies/:id/embed?mac=xx - hands back an embed URL built from

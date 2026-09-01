@@ -669,13 +669,17 @@ router.get('/sales', adminAuth, (req, res) => {
       FROM session_history WHERE date(ended_at, 'localtime') = ?
     `).get(today);
 
+    // Dashboard's date-range pill picks this - defaults to 7 (unchanged
+    // behavior for anyone not touching the picker), clamped to a sane
+    // range so a stray query param can't force a full-table scan.
+    const windowDays = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 90);
     const weekSales = db.prepare(`
       SELECT date(created_at, 'localtime') as date,
         SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as total,
         COUNT(*) as transactions
-      FROM transactions WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-7 days')
+      FROM transactions WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
       GROUP BY date(created_at, 'localtime') ORDER BY date DESC
-    `).all();
+    `).all(windowDays);
 
     // Bug: the admin UI showed "Monthly Sales" as weekTotal * 4, a rough
     // guess, not real data (wrong the moment revenue isn't perfectly flat
@@ -810,6 +814,7 @@ router.get('/sales', adminAuth, (req, res) => {
         sessions_ended_today: todaySessionDuration.ended_count || 0
       },
       week: weekSales,
+      window_days: windowDays,
       month: { total_income: monthSales.total || 0 },
       chart,
       chart_format: chartFormat,
@@ -3684,6 +3689,43 @@ router.get('/version', adminAuth, (req, res) => {
   res.json({ success: true, version: pkg.version });
 });
 
+// GET /api/admin/system/datetime - current server clock/timezone/NTP
+// state, plus the full valid timezone list for the Settings dropdown.
+router.get('/system/datetime', adminAuth, async (req, res) => {
+  try {
+    const systemDateTimeService = require('../services/systemDateTimeService');
+    const [status, timezones] = await Promise.all([
+      systemDateTimeService.getStatus(),
+      systemDateTimeService.listTimezones()
+    ]);
+    return res.json({ success: true, ...status, timezones });
+  } catch (err) {
+    console.error('System datetime status error:', err);
+    res.status(500).json({ success: false, message: 'Could not read the server\'s clock settings.' });
+  }
+});
+
+// POST /api/admin/system/datetime - { ntp_enabled, timezone }. A real
+// system-level change, deliberately NTP-first (see
+// systemDateTimeService.js's header comment for why there's no manual
+// date-typing field here).
+router.post('/system/datetime', adminAuth, async (req, res) => {
+  try {
+    const systemDateTimeService = require('../services/systemDateTimeService');
+    if (typeof req.body.ntp_enabled === 'boolean') {
+      await systemDateTimeService.setNtpEnabled(req.body.ntp_enabled);
+    }
+    if (req.body.timezone) {
+      await systemDateTimeService.setTimezone(String(req.body.timezone));
+    }
+    console.log(`🕐 Admin updated server date/time settings: ntp_enabled=${req.body.ntp_enabled}, timezone=${req.body.timezone}`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('System datetime update error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Could not update the server\'s clock settings.' });
+  }
+});
+
 // POST /api/admin/system/reboot, the admin panel requires typing "REBOOT"
 // before this fires, but the server checks the exact same word again
 // server-side too, since a client-side-only check is trivially bypassable
@@ -5334,17 +5376,30 @@ router.post('/movies/online-catalog/price', adminAuth, (req, res) => {
   const title = String(req.body?.title || '').trim();
   const tier = req.body?.tier === 'paid' ? 'paid' : 'free';
   const pricePesos = tier === 'paid' ? Math.max(0, parseInt(req.body?.price_pesos, 10) || 0) : 0;
+  const priority = parseInt(req.body?.priority, 10) || 0;
+  const rentalHours = tier === 'paid' ? Math.max(0, parseInt(req.body?.rental_hours, 10) || 0) : 0;
   if (!tmdbId || !title) {
     return res.status(400).json({ success: false, message: 'A movie and title are required.' });
   }
   onlineMovieCatalog.unhide(tmdbId);
   db.prepare(`
-    INSERT INTO online_movie_pricing (tmdb_id, title, tier, price_pesos, updated_at)
-    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO online_movie_pricing (tmdb_id, title, tier, price_pesos, priority, rental_hours, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(tmdb_id) DO UPDATE SET title = excluded.title, tier = excluded.tier,
-      price_pesos = excluded.price_pesos, updated_at = CURRENT_TIMESTAMP
-  `).run(tmdbId, title, tier, pricePesos);
+      price_pesos = excluded.price_pesos, priority = excluded.priority,
+      rental_hours = excluded.rental_hours, updated_at = CURRENT_TIMESTAMP
+  `).run(tmdbId, title, tier, pricePesos, priority, rentalHours);
   res.json({ success: true });
+});
+
+// Group delete (Price Groups' "Delete Selected" bulk action) - same
+// permanent-hide semantics as the single-row Delete button, just applied to
+// every selected id in one transaction (see onlineMovieCatalog.hideMany()).
+router.post('/movies/online-catalog/bulk-delete', adminAuth, (req, res) => {
+  const ids = Array.isArray(req.body?.movies) ? req.body.movies.map((m) => (typeof m === 'object' ? m.tmdb_id : m)) : [];
+  if (ids.length === 0) return res.status(400).json({ success: false, message: 'No movies selected.' });
+  onlineMovieCatalog.hideMany(ids);
+  res.json({ success: true, removed: ids.length });
 });
 
 // Add a title by TMDb ID alone, no search needed - looks the title up from
@@ -5478,6 +5533,94 @@ router.delete('/movies/online-catalog/:tmdbId', adminAuth, (req, res) => {
   if (!tmdbId) return res.status(400).json({ success: false, message: 'Invalid movie id.' });
   onlineMovieCatalog.hide(tmdbId);
   res.json({ success: true });
+});
+
+// A sentinel far-future expiry, not a real schema flag - see the comment
+// on POST /movies/online-rentals/grant below for why this was chosen over
+// a schema migration (online_movie_rentals.expires_at is NOT NULL and
+// every existing read already just compares it against datetime('now'),
+// so this needed no other code to change at all).
+const PERMANENT_RENTAL_EXPIRY = '9999-12-31 23:59:59';
+
+// GET /movies/online-rentals?q=&page= - lets the owner look up or audit
+// who has an active/permanent unlock on a paid title. q matches against
+// either the MAC address or the movie title (joins tmdb_movie_feed/
+// online_movie_pricing purely for display - enforcement never depends on
+// this route, see portal.js's hasActiveOnlineRental()).
+router.get('/movies/online-rentals', adminAuth, (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = 30;
+
+  const rows = db.prepare(`
+    SELECT r.id, r.movie_id, r.mac_address, r.rented_at, r.expires_at,
+      COALESCE(p.title, f.title, 'TMDb #' || r.movie_id) as title
+    FROM online_movie_rentals r
+    LEFT JOIN online_movie_pricing p ON p.tmdb_id = r.movie_id
+    LEFT JOIN tmdb_movie_feed f ON f.tmdb_id = r.movie_id
+    ORDER BY r.rented_at DESC
+  `).all();
+
+  const filtered = q
+    ? rows.filter((r) => r.mac_address.toLowerCase().includes(q) || r.title.toLowerCase().includes(q))
+    : rows;
+  const total = filtered.length;
+  const start = (page - 1) * limit;
+  const pageItems = filtered.slice(start, start + limit).map((r) => ({
+    ...r,
+    permanent: r.expires_at === PERMANENT_RENTAL_EXPIRY,
+    active: r.expires_at === PERMANENT_RENTAL_EXPIRY || new Date(r.expires_at) > new Date(),
+  }));
+
+  res.json({ success: true, rentals: pageItems, total, page, limit });
+});
+
+// Manually grants (or extends) one device's access to one paid title -
+// e.g. a VIP customer, a troubleshooting override, or a permanent unlock
+// that's never surfaced to the customer as anything special (per owner
+// request: it should look exactly like a normal unlock on their end, no
+// "you have permanent access" messaging anywhere). `permanent: true` uses
+// a far-future sentinel expiry instead of a schema change - every existing
+// active-rental check already just compares expires_at against
+// datetime('now')/`new Date()`, so a date this far out is already treated
+// as "always active" with no other code needing to know this is special.
+router.post('/movies/online-rentals/grant', adminAuth, (req, res) => {
+  const mac = String(req.body?.mac || '').trim().toLowerCase();
+  const tmdbId = parseInt(req.body?.tmdb_id, 10);
+  const permanent = !!req.body?.permanent;
+  const hours = Math.max(1, parseInt(req.body?.hours, 10) || 48);
+  if (!mac || !tmdbId) return res.status(400).json({ success: false, message: 'A device MAC and a movie are required.' });
+
+  const movie = onlineMovieCatalog.getById(tmdbId);
+  if (!movie) return res.status(404).json({ success: false, message: 'That movie is not in the catalog.' });
+
+  const expiresAt = permanent ? PERMANENT_RENTAL_EXPIRY : new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+  db.prepare('INSERT INTO online_movie_rentals (movie_id, mac_address, expires_at) VALUES (?, ?, ?)').run(movie.id, mac, expiresAt);
+  res.json({ success: true, expires_at: expiresAt });
+});
+
+// Revokes one specific grant (undo a manual grant, or cut a normal rental
+// short) - deletes the row outright rather than back-dating expires_at, so
+// it simply stops matching hasActiveOnlineRental()'s query.
+router.delete('/movies/online-rentals/:id', adminAuth, (req, res) => {
+  db.prepare('DELETE FROM online_movie_rentals WHERE id = ?').run(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+// GET /movies/top-searches - what customers actually typed and then opened
+// a result for (server/routes/portal.js's POST /online-movies/search-hit
+// is what logs these) - real demand signal, separate from Most Watched
+// (which only reflects titles you already have) or TMDb's own popularity
+// ranking (which reflects the whole world, not your customers).
+router.get('/movies/top-searches', adminAuth, (req, res) => {
+  const rows = db.prepare(`
+    SELECT query, COUNT(*) as hits, MAX(searched_at) as last_searched
+    FROM online_movie_searches
+    GROUP BY LOWER(query)
+    ORDER BY hits DESC, last_searched DESC
+    LIMIT 20
+  `).all();
+  res.json({ success: true, searches: rows });
 });
 
 router.post('/movies/:id', adminAuth, (req, res) => {

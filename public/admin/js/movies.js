@@ -130,6 +130,7 @@ function destroyMovies() {
   clearInterval(moviesPollInterval);
   clearTimeout(omSearchDebounce);
   clearTimeout(omFilterDebounce);
+  clearTimeout(omRentalsFilterDebounce);
 }
 
 function escapeHtml(str) {
@@ -156,6 +157,8 @@ async function omInit() {
   await omLoadSources();
   omState.page = 1;
   await omLoadCatalog();
+  await omLoadRentals();
+  await omLoadTopSearches();
 }
 
 function omSetPill(elId, isSet) {
@@ -411,12 +414,12 @@ async function omLoadCatalog() {
   const params = new URLSearchParams({ q: omState.filter, page: omState.page, limit: omState.limit });
   const data = await apiCall('GET', `/api/admin/movies/online-catalog?${params.toString()}`);
   if (!data.success) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">Could not load catalog</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">Could not load catalog</td></tr>';
     return;
   }
   omState.total = data.total;
   if (data.movies.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">No titles match.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">No titles match.</td></tr>';
   } else {
     tbody.innerHTML = data.movies.map(omRenderCatalogRow).join('');
   }
@@ -454,6 +457,12 @@ function omRenderCatalogRow(m) {
       <td class="om-price-cell">
         <input type="number" class="om-price-input" min="0" value="${m.price_pesos || 0}" style="width:60px;text-align:right;${priceInputStyle}">
       </td>
+      <td class="om-price-cell">
+        <input type="number" class="om-priority-input" value="${m.priority || 0}" style="width:60px;text-align:right;" title="Higher shows first in 🔥 Exclusive and within genre rows">
+      </td>
+      <td class="om-price-cell">
+        <input type="number" class="om-rental-hours-input" min="0" value="${m.rental_hours || 0}" style="width:70px;text-align:right;${priceInputStyle}" title="0 = use the global default">
+      </td>
       <td style="text-align:right;white-space:nowrap;">
         <button class="btn btn-secondary om-reset-btn" style="padding:4px 8px;font-size:11px;" title="Reset to Free"><i class="fas fa-rotate-left"></i></button>
         <button class="btn btn-secondary om-delete-btn" style="padding:4px 8px;font-size:11px;color:var(--danger,#e74c3c);" title="Remove from catalog"><i class="fas fa-trash"></i></button>
@@ -467,13 +476,18 @@ function omInlineSave(row) {
   const title = row.dataset.title;
   const tier = row.querySelector('.om-tier-select').value;
   const priceInput = row.querySelector('.om-price-input');
+  const rentalHoursInput = row.querySelector('.om-rental-hours-input');
+  const priority = row.querySelector('.om-priority-input').value;
   priceInput.style.display = tier === 'paid' ? 'inline-block' : 'none';
-  omSavePrice(tmdbId, title, tier, priceInput.value);
+  rentalHoursInput.style.display = tier === 'paid' ? 'inline-block' : 'none';
+  omSavePrice(tmdbId, title, tier, priceInput.value, priority, rentalHoursInput.value);
 }
 
-async function omSavePrice(tmdbId, title, tier, priceRaw) {
+async function omSavePrice(tmdbId, title, tier, priceRaw, priorityRaw, rentalHoursRaw) {
   const price_pesos = tier === 'paid' ? Math.max(0, parseInt(priceRaw, 10) || 0) : 0;
-  const data = await apiCall('POST', '/api/admin/movies/online-catalog/price', { tmdb_id: tmdbId, title, tier, price_pesos });
+  const priority = parseInt(priorityRaw, 10) || 0;
+  const rental_hours = tier === 'paid' ? Math.max(0, parseInt(rentalHoursRaw, 10) || 0) : 0;
+  const data = await apiCall('POST', '/api/admin/movies/online-catalog/price', { tmdb_id: tmdbId, title, tier, price_pesos, priority, rental_hours });
   if (data.success) showToast(`"${title}" updated`, 'success');
   else showToast(data.message || 'Could not save', 'error');
 }
@@ -524,6 +538,111 @@ async function omApplyBulk() {
   }
 }
 
+// Group delete - same permanent-hide semantics as the single-row Delete
+// button (won't reappear on the next TMDb sync), applied to every checked
+// row at once.
+async function omApplyBulkDelete() {
+  const rows = [...document.querySelectorAll('.om-row-check:checked')].map((cb) => cb.closest('tr'));
+  if (rows.length === 0) return;
+  if (!confirm(`Remove ${rows.length} selected title(s) from the catalog? They won't reappear even after syncing from TMDb, until added back manually.`)) return;
+  const movies = rows.map((r) => ({ tmdb_id: parseInt(r.dataset.id, 10) }));
+  const data = await apiCall('POST', '/api/admin/movies/online-catalog/bulk-delete', { movies });
+  if (data.success) {
+    showToast(`Removed ${data.removed} title(s)`, 'success');
+    omLoadCatalog();
+  } else {
+    showToast(data.message || 'Could not remove', 'error');
+  }
+}
+
+// ── Rentals (grant/revoke/lookup) ────────────────────────────────────────
+let omRentalsAll = [];
+
+async function omLoadRentals() {
+  const tbody = document.getElementById('omRentalsRows');
+  if (!tbody) return;
+  const data = await apiCall('GET', '/api/admin/movies/online-rentals');
+  omRentalsAll = data.success ? data.rentals : [];
+  omRenderRentals(omRentalsAll);
+}
+
+function omRenderRentals(list) {
+  const tbody = document.getElementById('omRentalsRows');
+  if (list.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">No rentals yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = list.map((r) => `
+    <tr data-rental-id="${r.id}">
+      <td>${escapeHtml(r.title)}</td>
+      <td>${escapeHtml(r.mac_address)}</td>
+      <td>${new Date(r.rented_at.replace(' ', 'T') + 'Z').toLocaleString()}</td>
+      <td>${r.permanent ? '<b>Permanent</b>' : new Date(r.expires_at.replace(' ', 'T') + 'Z').toLocaleString()}</td>
+      <td style="text-align:right;">
+        <button class="btn btn-secondary om-rental-revoke-btn" style="padding:4px 8px;font-size:11px;" title="Revoke"><i class="fas fa-xmark"></i></button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+let omRentalsFilterDebounce = null;
+function omFilterRentals(value) {
+  clearTimeout(omRentalsFilterDebounce);
+  omRentalsFilterDebounce = setTimeout(() => {
+    const q = value.trim().toLowerCase();
+    const filtered = q
+      ? omRentalsAll.filter((r) => r.mac_address.toLowerCase().includes(q) || r.title.toLowerCase().includes(q))
+      : omRentalsAll;
+    omRenderRentals(filtered);
+  }, 300);
+}
+
+async function omGrantRental() {
+  const mac = document.getElementById('omGrantMac').value.trim();
+  const tmdb_id = parseInt(document.getElementById('omGrantTmdbId').value, 10);
+  const permanent = document.getElementById('omGrantPermanent').checked;
+  const hours = document.getElementById('omGrantHours').value;
+  if (!mac || !tmdb_id) {
+    showToast('A device MAC and a TMDb ID are required', 'error');
+    return;
+  }
+  const data = await apiCall('POST', '/api/admin/movies/online-rentals/grant', { mac, tmdb_id, permanent, hours });
+  if (data.success) {
+    showToast(permanent ? 'Permanent access granted' : `Granted for ${hours} hour(s)`, 'success');
+    document.getElementById('omGrantMac').value = '';
+    document.getElementById('omGrantTmdbId').value = '';
+    omLoadRentals();
+  } else {
+    showToast(data.message || 'Could not grant access', 'error');
+  }
+}
+
+async function omRevokeRental(id) {
+  if (!confirm('Revoke this access grant? The device will need to pay again to watch this title.')) return;
+  await apiCall('DELETE', `/api/admin/movies/online-rentals/${id}`);
+  showToast('Revoked', 'success');
+  omLoadRentals();
+}
+
+// ── Top Searches ──────────────────────────────────────────────────────────
+async function omLoadTopSearches() {
+  const tbody = document.getElementById('omTopSearchesRows');
+  if (!tbody) return;
+  const data = await apiCall('GET', '/api/admin/movies/top-searches');
+  const rows = data.success ? data.searches : [];
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">No searches logged yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map((r) => `
+    <tr>
+      <td>${escapeHtml(r.query)}</td>
+      <td style="text-align:right;">${r.hits}</td>
+      <td>${new Date(r.last_searched.replace(' ', 'T') + 'Z').toLocaleString()}</td>
+    </tr>
+  `).join('');
+}
+
 function omChangePage(delta) {
   const maxPage = Math.max(1, Math.ceil(omState.total / omState.limit));
   const next = omState.page + delta;
@@ -572,11 +691,17 @@ document.addEventListener('click', (e) => {
   if (removeSourceBtn) {
     const row = removeSourceBtn.closest('tr[data-source-id]');
     if (row) omRemoveSource(row);
+    return;
+  }
+  const revokeBtn = e.target.closest('.om-rental-revoke-btn');
+  if (revokeBtn) {
+    const row = revokeBtn.closest('tr[data-rental-id]');
+    if (row) omRevokeRental(parseInt(row.dataset.rentalId, 10));
   }
 });
 
 document.addEventListener('change', (e) => {
-  if (e.target.matches('.om-tier-select, .om-price-input')) {
+  if (e.target.matches('.om-tier-select, .om-price-input, .om-priority-input, .om-rental-hours-input')) {
     const row = e.target.closest('#omCatalogRows tr');
     if (row) omInlineSave(row);
   }

@@ -95,6 +95,16 @@ function movieCardHtml(m) {
 // genre doesn't get its own near-empty shelf.
 const MIN_ROW_SIZE = 4;
 
+// Within-row order used to be whatever TMDb's list responses happened to
+// return (effectively TMDb's own popularity/rating ranking) - per owner
+// request, an admin-set priority (Movies > Online > Price Groups) now
+// decides it instead: higher priority first, real view count as a
+// tiebreaker (still real usage data, not a TMDb signal), title last so the
+// order is at least stable for anything untouched by an admin.
+function byPriorityThenViews(a, b) {
+  return (b.priority || 0) - (a.priority || 0) || (b.views || 0) - (a.views || 0) || a.title.localeCompare(b.title);
+}
+
 function buildGenreRows(list) {
   const buckets = new Map();
   list.forEach((m) => {
@@ -105,6 +115,7 @@ function buildGenreRows(list) {
   });
   return [...buckets.entries()]
     .filter(([, items]) => items.length >= MIN_ROW_SIZE)
+    .map(([label, items]) => [label, items.slice().sort(byPriorityThenViews)])
     .sort((a, b) => b[1].length - a[1].length);
 }
 
@@ -115,6 +126,24 @@ function rowsHtml(rows) {
       <div class="movies-online-row-track">${items.map(movieCardHtml).join('')}</div>
     </div>
   `).join('');
+}
+
+// Paid titles pinned to the very top of the page (owner request: paid
+// movies should be the top priority on the Movies home) - labeled by
+// appeal, not by pricing tier, so it doesn't read as an upsell shelf.
+// Sorted by admin priority so the operator controls which paid titles lead,
+// not TMDb. Local (self-hosted) premium titles aren't included here yet -
+// see localLibraryRowHtml() below for those; folding them in would need a
+// priority field on the local catalog too, not built in this pass.
+function exclusiveRowHtml(list) {
+  const ranked = list.filter((m) => m.tier === 'paid').sort(byPriorityThenViews).slice(0, 20);
+  if (ranked.length === 0) return '';
+  return `
+    <div class="movies-online-row">
+      <h3 class="movies-online-row-title">🔥 Exclusive</h3>
+      <div class="movies-online-row-track">${ranked.map(movieCardHtml).join('')}</div>
+    </div>
+  `;
 }
 
 // Real usage ranking (server/routes/portal.js increments `views` once per
@@ -185,18 +214,19 @@ function localLibraryRowHtml(list) {
 // view without needing to remember to pass both catalogs each time.
 function renderOnlineMoviesRows() {
   const el = document.getElementById('onlineMoviesRows');
+  const exclusive = exclusiveRowHtml(onlineAllMovies);
   const top10 = topWatchedRowHtml(onlineAllMovies);
   const newReleases = newReleasesRowHtml(onlineAllMovies);
   const localRow = localLibraryRowHtml(allMovies);
   const genreRows = buildGenreRows(onlineAllMovies);
   if (genreRows.length > 0) {
-    el.innerHTML = top10 + newReleases + localRow + rowsHtml(genreRows);
+    el.innerHTML = exclusive + top10 + newReleases + localRow + rowsHtml(genreRows);
     return;
   }
   const tierRows = TIER_ROWS
     .map(({ tier, label }) => [label, onlineAllMovies.filter((m) => m.tier === tier)])
     .filter(([, items]) => items.length > 0);
-  el.innerHTML = top10 + newReleases + localRow + rowsHtml(tierRows);
+  el.innerHTML = exclusive + top10 + newReleases + localRow + rowsHtml(tierRows);
 }
 
 // Flat grid used only for search results, where tier grouping isn't useful.
@@ -211,9 +241,27 @@ function renderOnlineMoviesFlat(list) {
 // reaching vidrock.ru at all. The rent-confirm/coin-insert functions below
 // (showOnlineRentConfirmStep etc.) are left in place, just unused, for
 // whenever paid mode gets re-planned and wired back in on purpose.
+// Logs a search only when it actually led somewhere (the search box still
+// has the customer's text in it at the moment they open a movie) - a
+// keystroke that never gets clicked says nothing about real demand, see
+// server/routes/portal.js's POST /online-movies/search-hit and the admin's
+// Top Searches panel. Fire-and-forget: never awaited, never blocks or
+// affects opening the movie, fails silently if the request doesn't land.
+function logSearchHitIfSearching(movieId) {
+  const box = document.getElementById('onlineMoviesSearch');
+  const query = box ? box.value.trim() : '';
+  if (!query) return;
+  fetch('/api/portal/online-movies/search-hit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, movie_id: movieId }),
+  }).catch(() => {});
+}
+
 function openOnlineMovie(id) {
   const movie = onlineAllMovies.find((m) => m.id === id);
   if (!movie) return;
+  logSearchHitIfSearching(id);
 
   if (movie.tier === 'paid' && !movie.unlocked) {
     onlinePendingRentMovieId = id;

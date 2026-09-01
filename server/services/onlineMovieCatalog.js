@@ -13,9 +13,10 @@
 //   1. tmdb_movie_feed - auto-populated from TMDb's own Trending/Popular/
 //      Top Rated lists (admin panel's Movies > Online > "Sync from TMDB"),
 //      see tmdbService.js's syncFeed().
-//   2. online_movie_pricing - admin-set tier/price, and how a title gets
-//      added directly by TMDb ID or search even if it was never in the
-//      synced feed. A title with no row here is free by default.
+//   2. online_movie_pricing - admin-set tier/price/priority/rental_hours,
+//      and how a title gets added directly by TMDb ID or search even if it
+//      was never in the synced feed. A title with no row here is free,
+//      unprioritized, and on the global rental window by default.
 const db = require('../config/database');
 
 function getHiddenIds() {
@@ -24,13 +25,16 @@ function getHiddenIds() {
 
 function getAll() {
   const hidden = getHiddenIds();
-  const pricingRows = db.prepare('SELECT tmdb_id, title, tier, price_pesos FROM online_movie_pricing').all();
+  const pricingRows = db.prepare('SELECT tmdb_id, title, tier, price_pesos, priority, rental_hours FROM online_movie_pricing').all();
   const feedRows = db.prepare('SELECT tmdb_id, title, release_date FROM tmdb_movie_feed').all();
 
   const merged = new Map();
   for (const row of feedRows) {
     if (hidden.has(row.tmdb_id)) continue;
-    merged.set(row.tmdb_id, { id: row.tmdb_id, title: row.title, tier: 'free', price_pesos: 0, release_date: row.release_date || null });
+    merged.set(row.tmdb_id, {
+      id: row.tmdb_id, title: row.title, tier: 'free', price_pesos: 0,
+      release_date: row.release_date || null, priority: 0, rental_hours: 0,
+    });
   }
   // Pricing rows are applied last, so an admin override always wins over
   // the synced feed's default 'free', and can also introduce a title that
@@ -44,6 +48,8 @@ function getAll() {
       tier: row.tier,
       price_pesos: row.price_pesos,
       release_date: existing?.release_date || null,
+      priority: row.priority || 0,
+      rental_hours: row.rental_hours || 0,
     });
   }
 
@@ -53,13 +59,16 @@ function getAll() {
 function getById(id) {
   const numId = Number(id);
   if (getHiddenIds().has(numId)) return null;
-  const pricingRow = db.prepare('SELECT title, tier, price_pesos FROM online_movie_pricing WHERE tmdb_id = ?').get(numId);
+  const pricingRow = db.prepare('SELECT title, tier, price_pesos, priority, rental_hours FROM online_movie_pricing WHERE tmdb_id = ?').get(numId);
   if (pricingRow) {
     const feedRow = db.prepare('SELECT title FROM tmdb_movie_feed WHERE tmdb_id = ?').get(numId);
-    return { id: numId, title: feedRow?.title || pricingRow.title, tier: pricingRow.tier, price_pesos: pricingRow.price_pesos };
+    return {
+      id: numId, title: feedRow?.title || pricingRow.title, tier: pricingRow.tier,
+      price_pesos: pricingRow.price_pesos, priority: pricingRow.priority || 0, rental_hours: pricingRow.rental_hours || 0,
+    };
   }
   const feedRow = db.prepare('SELECT title FROM tmdb_movie_feed WHERE tmdb_id = ?').get(numId);
-  if (feedRow) return { id: numId, title: feedRow.title, tier: 'free', price_pesos: 0 };
+  if (feedRow) return { id: numId, title: feedRow.title, tier: 'free', price_pesos: 0, priority: 0, rental_hours: 0 };
   return null;
 }
 
@@ -77,6 +86,16 @@ function hide(id) {
   db.prepare('DELETE FROM online_movie_pricing WHERE tmdb_id = ?').run(numId);
 }
 
+// Same as hide() but for the admin's group-delete (select several rows in
+// Price Groups, delete them all at once) - one transaction instead of N
+// separate round trips.
+function hideMany(ids) {
+  const run = db.transaction((list) => {
+    for (const id of list) hide(id);
+  });
+  run(ids.map(Number));
+}
+
 // Clears a hidden flag - called whenever an admin deliberately re-adds a
 // title by TMDb ID or search (server/routes/admin.js), so "hidden" only
 // ever means "an admin removed this and hasn't brought it back," not a
@@ -85,4 +104,4 @@ function unhide(id) {
   db.prepare('DELETE FROM online_movie_hidden WHERE tmdb_id = ?').run(Number(id));
 }
 
-module.exports = { getAll, getById, hide, unhide };
+module.exports = { getAll, getById, hide, hideMany, unhide };
