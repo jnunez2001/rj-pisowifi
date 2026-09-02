@@ -124,12 +124,25 @@ router.get('/detect', async (req, res) => {
 
 router.get('/rates', (req, res) => {
   try {
-    const rates = getRates();
-
     const getSetting = (key, def) => {
       const s = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
       return s ? s.value : def;
     };
+
+    // Operator-facing "disable Premium" kill-switch (Settings). Excluded
+    // right here rather than at getRates() itself, which is shared with
+    // the admin Rates/Plans management pages - those need to keep seeing
+    // every Premium tier regardless, so an operator can re-enable later
+    // without having to recreate them. The portal never even learns these
+    // rows exist while disabled, so every existing client-side check that
+    // already keys off "is there a Premium rate in what I was given"
+    // (the gold Insert Coin button, Convert, the WiFi Rates modal's
+    // Premium tab) hides itself automatically with no separate flag to
+    // thread through - and coinCreditService.js's creditCoinValue()
+    // separately refuses to credit a Premium purchase while this is off,
+    // so a stale cached page can't bypass it either.
+    const premiumEnabled = getSetting('enable_premium', '1') !== '0';
+    const rates = premiumEnabled ? getRates() : getRates().filter((r) => !r.download_mbps);
 
     return res.json({
       success: true,
