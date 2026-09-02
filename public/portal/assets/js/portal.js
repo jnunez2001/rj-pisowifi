@@ -233,11 +233,29 @@ function urlBase64ToUint8Array(base64String) {
   return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
 }
 
+// Bug found live: this required 'serviceWorker' in navigator &&
+// 'PushManager' in window to even show the button - but a normal captive
+// portal is reached over plain HTTP, and Chrome (correctly, this is a
+// secure-context restriction, not a bug in Chrome) never exposes either
+// API there at all. That made the button hide itself specifically for
+// every customer on the ordinary HTTP portal, exactly the case it exists
+// to handle - tapping it is what's supposed to redirect them to the
+// HTTPS port where those APIs actually work (see enableNotifications()
+// below, which already does that redirect first). Only require the full
+// API check once already on HTTPS; on HTTP, just needs the Notification
+// API to exist (for the permission prompt after redirecting) and a VAPID
+// key configured. Can't check "already granted" from the HTTP side
+// either way - that permission lives on the separate HTTPS origin, which
+// isn't readable from here, so it may show for someone already
+// subscribed, tapping it again there is a harmless no-op, not broken.
 function updateNotificationsButton() {
   const btn = document.getElementById('enableNotificationsBtn');
   if (!btn) return;
-  const supported = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
-  const alreadyGranted = supported && Notification.permission === 'granted';
+  const onHttps = location.protocol === 'https:';
+  const supported = onHttps
+    ? ('serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window)
+    : ('Notification' in window);
+  const alreadyGranted = onHttps && supported && Notification.permission === 'granted';
   btn.style.display = (supported && portalSettings.vapid_public_key && !alreadyGranted) ? 'block' : 'none';
 }
 
@@ -276,25 +294,6 @@ async function enableNotifications() {
     playSound('success');
   } catch (e) {
     console.error('Enable notifications failed:', e);
-  }
-}
-
-// Escapes the OS's restricted captive-portal webview (Android's captive
-// portal login activity, iOS's Captive Network Assistant) into the
-// customer's real browser, so the portal URL lands in normal history/tabs
-// they can return to later without hunting for a hostname or waiting on a
-// push notification. window.open() reliably hands off to the real browser
-// on Android in most cases; iOS's CNA is deliberately hardened against
-// exactly this kind of escape and may just ignore it, no way to force it
-// from here, that's a platform restriction, not something fixable in this
-// app. Falls back to a plain alert with the URL if the popup is blocked,
-// so the customer at least sees an address to remember, rather than
-// nothing happening with no explanation.
-function continueInBrowser() {
-  const url = location.href;
-  const win = window.open(url, '_blank');
-  if (!win) {
-    alert(`Open this address in your browser to return anytime:\n\n${url}`);
   }
 }
 
