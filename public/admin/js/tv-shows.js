@@ -21,7 +21,6 @@ async function tvInit() {
       tvRenderFeedStatus(data.feed);
     }
   } catch (e) {}
-  await tvLoadSources();
   tvState.page = 1;
   tvRenderSortHeaders();
   await tvLoadCatalog();
@@ -71,63 +70,10 @@ async function tvSyncFeed() {
   }
 }
 
-// ── Streaming Sources (tv_streaming_sources) ────────────────────────────
-async function tvLoadSources() {
-  const data = await apiCall('GET', '/api/admin/tv-shows/streaming-sources');
-  const tbody = document.getElementById('tvSourcesRows');
-  if (!tbody) return;
-  const sources = data.success ? data.sources : [];
-  if (sources.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:14px;">No sources yet - add one below.</td></tr>';
-    return;
-  }
-  tbody.innerHTML = sources.map((s) => `
-    <tr data-source-id="${s.id}">
-      <td><i class="fas fa-star om-default-star ${s.is_default ? 'active' : ''}" title="Default"></i></td>
-      <td><input type="text" class="tv-source-name" value="${escapeHtml(s.name)}"></td>
-      <td><input type="text" class="tv-source-url" value="${escapeHtml(s.url_template)}" style="width:100%;"></td>
-      <td style="text-align:right;">
-        <button class="btn btn-secondary tv-source-remove" style="padding:4px 8px;font-size:11px;"><i class="fas fa-trash"></i></button>
-      </td>
-    </tr>
-  `).join('');
-}
-
-async function tvAddSource() {
-  const name = document.getElementById('tvNewSourceName').value.trim();
-  const template = document.getElementById('tvNewSourceUrl').value.trim();
-  if (!name || !template) { showToast('A name and URL template are required', 'error'); return; }
-  const data = await apiCall('POST', '/api/admin/tv-shows/streaming-sources', { name, url_template: template });
-  if (data.success) {
-    document.getElementById('tvNewSourceName').value = '';
-    document.getElementById('tvNewSourceUrl').value = '';
-    showToast('Source added', 'success');
-    tvLoadSources();
-  } else {
-    showToast(data.message || 'Could not add source', 'error');
-  }
-}
-
-async function tvSaveSourceRow(row) {
-  const id = row.dataset.sourceId;
-  const name = row.querySelector('.tv-source-name').value.trim();
-  const url_template = row.querySelector('.tv-source-url').value.trim();
-  const data = await apiCall('POST', `/api/admin/tv-shows/streaming-sources/${id}`, { name, url_template });
-  if (data.success) showToast('Saved', 'success');
-  else showToast(data.message || 'Could not save', 'error');
-}
-
-async function tvSetDefaultSource(row) {
-  const id = row.dataset.sourceId;
-  await apiCall('POST', `/api/admin/tv-shows/streaming-sources/${id}`, { is_default: true });
-  tvLoadSources();
-}
-
-async function tvRemoveSource(row) {
-  if (!confirm('Remove this streaming source?')) return;
-  await apiCall('DELETE', `/api/admin/tv-shows/streaming-sources/${row.dataset.sourceId}`);
-  tvLoadSources();
-}
+// Streaming sources are managed from the combined Streaming Sources card
+// under Online Movies (public/admin/js/movies.js's om* functions) - see
+// server/routes/admin.js's /movies/streaming-sources routes and the
+// streaming_sources table (movie_url_template/tv_url_template columns).
 
 // ── TMDb search / add ────────────────────────────────────────────────────
 function tvSearchTmdb(value) {
@@ -540,18 +486,6 @@ document.addEventListener('click', (e) => {
     if (row) tvDeleteFromCatalog(parseInt(row.dataset.id, 10), row.dataset.title);
     return;
   }
-  const star = e.target.closest('#tvSourcesRows .om-default-star');
-  if (star) {
-    const row = star.closest('tr[data-source-id]');
-    if (row) tvSetDefaultSource(row);
-    return;
-  }
-  const removeSourceBtn = e.target.closest('.tv-source-remove');
-  if (removeSourceBtn) {
-    const row = removeSourceBtn.closest('tr[data-source-id]');
-    if (row) tvRemoveSource(row);
-    return;
-  }
   const revokeBtn = e.target.closest('.tv-rental-revoke-btn');
   if (revokeBtn) {
     const row = revokeBtn.closest('tr[data-rental-id]');
@@ -581,9 +515,5 @@ document.addEventListener('change', (e) => {
   if (e.target.matches('.tv-tier-select, .tv-price-input, .tv-priority-input, .tv-rental-hours-input')) {
     const row = e.target.closest('#tvCatalogRows tr');
     if (row) tvInlineSave(row);
-  }
-  if (e.target.matches('.tv-source-name, .tv-source-url')) {
-    const row = e.target.closest('tr[data-source-id]');
-    if (row) tvSaveSourceRow(row);
   }
 });

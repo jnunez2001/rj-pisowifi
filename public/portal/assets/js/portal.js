@@ -72,7 +72,8 @@ let portalSettings = {
   grace_period_minutes: '0',
   payment_methods: 'both',
   portal_hostname: '',
-  allow_premium_to_regular_convert: '0'
+  allow_premium_to_regular_convert: '0',
+  movies_open_in_chrome: '0'
 };
 
 // ===== COIN MODAL TIMER =====
@@ -1396,6 +1397,7 @@ async function loadSettings() {
     portalSettings.vapid_public_key = data.vapid_public_key || '';
     portalSettings.portal_hostname = data.portal_hostname || '';
     portalSettings.allow_premium_to_regular_convert = data.allow_premium_to_regular_convert || '0';
+    portalSettings.movies_open_in_chrome = data.movies_open_in_chrome || '0';
     applyPortalSettings();
     updateNotificationsButton();
 
@@ -1610,6 +1612,30 @@ function convertEligible() {
   if (!premiumRates.length) return false;
   const minPremiumMinutes = Math.min(...premiumRates.map(r => r.minutes));
   return currentSession.minutes_remaining >= minPremiumMinutes;
+}
+
+// ===== MOVIES: OPEN IN CHROME (settings.movies_open_in_chrome) =====
+// Captive-portal WiFi login webviews (Android's CaptivePortalLogin, iOS's
+// Captive Network Assistant) are stripped-down browser shells - no real
+// fullscreen, autoplay often blocked, generally a worse video experience
+// than a real browser tab. When this admin toggle is on, an Android
+// device gets kicked into a real Chrome tab via an intent:// URL - the
+// one reliable way to force a specific app from inside that webview
+// (a plain https:// link or window.open() just stays inside it). iOS has
+// no equivalent: Apple's CNA deliberately blocks switching to Safari from
+// inside it (to stop customers dodging the captive-portal-completion
+// check), so this silently does nothing there and iPhone customers just
+// get the normal in-portal behavior regardless of the setting - it's not
+// a bug, there's genuinely no reliable way to do this on iOS.
+function openMoviesLink(event) {
+  if (portalSettings.movies_open_in_chrome === '1' && /Android/i.test(navigator.userAgent)) {
+    if (event) event.preventDefault();
+    const scheme = window.location.protocol.replace(':', '');
+    const intentUrl = `intent://${window.location.host}/portal/movies.html#Intent;scheme=${scheme};package=com.android.chrome;end;`;
+    window.location.href = intentUrl;
+    return false;
+  }
+  return true;
 }
 
 // ===== MODALS =====

@@ -130,7 +130,7 @@
       <button class="btn btn-free" id="freeClaimBtn" onclick="claimFreeMinutes()" style="display:none;">
         <i class="fas fa-gift"></i>&nbsp; CLAIM FREE 5 MINS
       </button>
-      <a href="/portal/movies.html" class="btn btn-movies">
+      <a href="/portal/movies.html" class="btn btn-movies" onclick="return openMoviesLink(event)">
         <i class="fas fa-clapperboard"></i>
         <span>MOVIES<span class="btn-movies-sub">Watch on us - free &amp; premium titles</span></span>
       </a>
@@ -174,7 +174,7 @@
       <button class="btn btn-outline" id="convertDownBtnConnected" onclick="handleInsertCoin('convert_down')" style="display:none;" title="Switch your speed back to Regular for the rest of your session">
         <i class="fas fa-arrow-down"></i>&nbsp; CONVERT TO REGULAR
       </button>
-      <a href="/portal/movies.html" class="btn btn-movies">
+      <a href="/portal/movies.html" class="btn btn-movies" onclick="return openMoviesLink(event)">
         <i class="fas fa-clapperboard"></i>
         <span>MOVIES<span class="btn-movies-sub">Watch on us - free &amp; premium titles</span></span>
       </a>
@@ -430,6 +430,6 @@
     </div>
   </div>
 
-  <script src="/portal/assets/js/portal.js"></script>
+  <script src="/portal/assets/js/portal.js?v=1"></script>
 </body>
 </html>

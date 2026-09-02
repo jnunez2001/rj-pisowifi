@@ -5552,50 +5552,89 @@ router.get('/movies/online-settings', adminAuth, (req, res) => {
   res.json({ success: true, tmdb_key_set: tmdbKeySet, feed: feedStatus });
 });
 
-// ── Streaming Sources (movie_streaming_sources) ─────────────────────────
-// Multiple named embed sources ("Server 1", "Server 2", ...) - a customer
-// can switch between them from the player overlay if one is slow/down/ad-
-// heavy (see GET /api/portal/online-movies/sources and the :id/embed
-// route's ?source_id= param).
+// ── Streaming Sources (streaming_sources) ───────────────────────────────
+// One combined list for both Movies and TV Shows (owner request: a real
+// provider is usually one server offering both, e.g. vidcore.org/embed/
+// movie/{tmdb_id} AND vidcore.org/embed/tv/{tmdb_id}/{season}/{episode} -
+// two separately-managed "Server 1/2/3" sections just duplicated the same
+// list). Either template can be blank (a provider that only serves one
+// kind), but at least one is required. A customer switches between
+// sources from the player overlay if one is slow/down/ad-heavy (see
+// GET /api/portal/online-movies/sources, /api/portal/tv-shows/sources,
+// and each :id/embed route's ?source_id= param).
+const SEASON_PLACEHOLDER_RE = /\{season(_number)?\}/;
+const EPISODE_PLACEHOLDER_RE = /\{episode(_number)?\}/;
+
+function validateStreamingTemplates(movieTemplate, tvTemplate) {
+  if (!movieTemplate && !tvTemplate) {
+    return 'A Movie URL, a Series URL, or both are required.';
+  }
+  if (movieTemplate && !movieTemplate.includes('{tmdb_id}')) {
+    return 'The Movie URL must contain the literal {tmdb_id} placeholder.';
+  }
+  if (tvTemplate) {
+    if (!tvTemplate.includes('{tmdb_id}')) {
+      return 'The Series URL must contain the literal {tmdb_id} placeholder.';
+    }
+    if (!SEASON_PLACEHOLDER_RE.test(tvTemplate) || !EPISODE_PLACEHOLDER_RE.test(tvTemplate)) {
+      return 'The Series URL must contain a season placeholder ({season} or {season_number}) and an episode placeholder ({episode} or {episode_number}).';
+    }
+  }
+  return null;
+}
+
 router.get('/movies/streaming-sources', adminAuth, (req, res) => {
-  const sources = db.prepare('SELECT * FROM movie_streaming_sources ORDER BY sort_order, id').all();
+  const sources = db.prepare('SELECT * FROM streaming_sources ORDER BY sort_order, id').all();
   res.json({ success: true, sources });
 });
 
 router.post('/movies/streaming-sources', adminAuth, (req, res) => {
   const name = String(req.body?.name || '').trim();
-  const template = String(req.body?.url_template || '').trim();
-  if (!name || !template) return res.status(400).json({ success: false, message: 'A name and URL template are required.' });
-  if (!template.includes('{tmdb_id}')) {
-    return res.status(400).json({ success: false, message: 'The URL must contain the literal {tmdb_id} placeholder.' });
-  }
-  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM movie_streaming_sources').get().m;
-  const isFirst = db.prepare('SELECT COUNT(*) as c FROM movie_streaming_sources').get().c === 0;
-  const result = db.prepare('INSERT INTO movie_streaming_sources (name, url_template, is_default, sort_order) VALUES (?, ?, ?, ?)')
-    .run(name, template, isFirst ? 1 : 0, maxOrder + 1);
+  const movieTemplate = String(req.body?.movie_url_template || '').trim() || null;
+  const tvTemplate = String(req.body?.tv_url_template || '').trim() || null;
+  if (!name) return res.status(400).json({ success: false, message: 'A name is required.' });
+  const error = validateStreamingTemplates(movieTemplate, tvTemplate);
+  if (error) return res.status(400).json({ success: false, message: error });
+
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM streaming_sources').get().m;
+  const isFirst = db.prepare('SELECT COUNT(*) as c FROM streaming_sources').get().c === 0;
+  const result = db.prepare('INSERT INTO streaming_sources (name, movie_url_template, tv_url_template, is_default, sort_order) VALUES (?, ?, ?, ?, ?)')
+    .run(name, movieTemplate, tvTemplate, isFirst ? 1 : 0, maxOrder + 1);
   res.json({ success: true, id: result.lastInsertRowid });
 });
 
 router.post('/movies/streaming-sources/:id', adminAuth, (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const { name, url_template, is_default } = req.body || {};
-  if (url_template !== undefined && !String(url_template).includes('{tmdb_id}')) {
-    return res.status(400).json({ success: false, message: 'The URL must contain the literal {tmdb_id} placeholder.' });
+  const { name, movie_url_template, tv_url_template, is_default } = req.body || {};
+  if (movie_url_template !== undefined || tv_url_template !== undefined) {
+    const current = db.prepare('SELECT movie_url_template, tv_url_template FROM streaming_sources WHERE id = ?').get(id);
+    const nextMovie = movie_url_template !== undefined ? (String(movie_url_template).trim() || null) : current?.movie_url_template;
+    const nextTv = tv_url_template !== undefined ? (String(tv_url_template).trim() || null) : current?.tv_url_template;
+    const error = validateStreamingTemplates(nextMovie, nextTv);
+    if (error) return res.status(400).json({ success: false, message: error });
   }
   if (is_default) {
     // Only one default at a time - clear the others first.
-    db.prepare('UPDATE movie_streaming_sources SET is_default = 0').run();
+    db.prepare('UPDATE streaming_sources SET is_default = 0').run();
   }
   db.prepare(`
-    UPDATE movie_streaming_sources SET
-      name = COALESCE(?, name), url_template = COALESCE(?, url_template), is_default = COALESCE(?, is_default)
+    UPDATE streaming_sources SET
+      name = COALESCE(?, name),
+      movie_url_template = CASE WHEN ? THEN ? ELSE movie_url_template END,
+      tv_url_template = CASE WHEN ? THEN ? ELSE tv_url_template END,
+      is_default = COALESCE(?, is_default)
     WHERE id = ?
-  `).run(name || null, url_template || null, is_default ? 1 : (is_default === false ? 0 : null), id);
+  `).run(
+    name || null,
+    movie_url_template !== undefined ? 1 : 0, movie_url_template !== undefined ? (String(movie_url_template).trim() || null) : null,
+    tv_url_template !== undefined ? 1 : 0, tv_url_template !== undefined ? (String(tv_url_template).trim() || null) : null,
+    is_default ? 1 : (is_default === false ? 0 : null), id
+  );
   res.json({ success: true });
 });
 
 router.delete('/movies/streaming-sources/:id', adminAuth, (req, res) => {
-  db.prepare('DELETE FROM movie_streaming_sources WHERE id = ?').run(parseInt(req.params.id, 10));
+  db.prepare('DELETE FROM streaming_sources WHERE id = ?').run(parseInt(req.params.id, 10));
   res.json({ success: true });
 });
 
@@ -6069,47 +6108,9 @@ router.get('/tv-shows/online-settings', adminAuth, (req, res) => {
   res.json({ success: true, tmdb_key_set: tmdbKeySet, feed: feedStatus });
 });
 
-// ── Streaming Sources (tv_streaming_sources) - needs season+episode too ──
-router.get('/tv-shows/streaming-sources', adminAuth, (req, res) => {
-  const sources = db.prepare('SELECT * FROM tv_streaming_sources ORDER BY sort_order, id').all();
-  res.json({ success: true, sources });
-});
-
-router.post('/tv-shows/streaming-sources', adminAuth, (req, res) => {
-  const name = String(req.body?.name || '').trim();
-  const template = String(req.body?.url_template || '').trim();
-  if (!name || !template) return res.status(400).json({ success: false, message: 'A name and URL template are required.' });
-  if (!template.includes('{tmdb_id}') || !template.includes('{season}') || !template.includes('{episode}')) {
-    return res.status(400).json({ success: false, message: 'The URL must contain the literal {tmdb_id}, {season}, and {episode} placeholders.' });
-  }
-  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM tv_streaming_sources').get().m;
-  const isFirst = db.prepare('SELECT COUNT(*) as c FROM tv_streaming_sources').get().c === 0;
-  const result = db.prepare('INSERT INTO tv_streaming_sources (name, url_template, is_default, sort_order) VALUES (?, ?, ?, ?)')
-    .run(name, template, isFirst ? 1 : 0, maxOrder + 1);
-  res.json({ success: true, id: result.lastInsertRowid });
-});
-
-router.post('/tv-shows/streaming-sources/:id', adminAuth, (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const { name, url_template, is_default } = req.body || {};
-  if (url_template !== undefined && (!String(url_template).includes('{tmdb_id}') || !String(url_template).includes('{season}') || !String(url_template).includes('{episode}'))) {
-    return res.status(400).json({ success: false, message: 'The URL must contain the literal {tmdb_id}, {season}, and {episode} placeholders.' });
-  }
-  if (is_default) {
-    db.prepare('UPDATE tv_streaming_sources SET is_default = 0').run();
-  }
-  db.prepare(`
-    UPDATE tv_streaming_sources SET
-      name = COALESCE(?, name), url_template = COALESCE(?, url_template), is_default = COALESCE(?, is_default)
-    WHERE id = ?
-  `).run(name || null, url_template || null, is_default ? 1 : (is_default === false ? 0 : null), id);
-  res.json({ success: true });
-});
-
-router.delete('/tv-shows/streaming-sources/:id', adminAuth, (req, res) => {
-  db.prepare('DELETE FROM tv_streaming_sources WHERE id = ?').run(parseInt(req.params.id, 10));
-  res.json({ success: true });
-});
+// Streaming Sources for TV now lives entirely under /movies/streaming-
+// sources (streaming_sources table, tv_url_template column) - see that
+// section's comment above for why the two were merged into one list.
 
 router.get('/tv-shows/tmdb-search', adminAuth, async (req, res) => {
   try {

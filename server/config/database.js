@@ -479,14 +479,9 @@ db.exec(`
     views INTEGER NOT NULL DEFAULT 0
   );
 
-  -- Named embed sources for the Online Movies tab (admin panel's Movies >
-  -- Online > Streaming Sources). A customer sees these as "Server 1",
-  -- "Server 2", etc. and can switch between them from the player overlay if
-  -- one is slow/down/ad-heavy - see GET /api/portal/online-movies/sources
-  -- and GET /api/portal/online-movies/:id/embed?source_id=. url_template
-  -- must contain the literal "{tmdb_id}" placeholder, same rule as the
-  -- single-source version this replaced. is_default picks which one loads
-  -- first when a customer presses play, before they've chosen a server.
+  -- Superseded by streaming_sources further down (kept, not dropped - see
+  -- that table's comment for why, and the one-time migration below that
+  -- copies these rows forward).
   CREATE TABLE IF NOT EXISTS movie_streaming_sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -653,14 +648,37 @@ db.exec(`
     expires_at DATETIME NOT NULL
   );
 
-  -- Named embed sources for TV, separate from movie_streaming_sources
-  -- because the URL shape is different - a TV embed needs a season AND
-  -- episode number, a movie embed doesn't. url_template must contain all
-  -- three literal placeholders: "{tmdb_id}", "{season}", "{episode}".
+  -- Superseded by streaming_sources below (kept, not dropped, so a
+  -- pre-existing install's rows are never destroyed - the one-time
+  -- migration further down copies them forward instead).
   CREATE TABLE IF NOT EXISTS tv_streaming_sources (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     url_template TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- One combined "Streaming Sources" list for both Movies and TV Shows,
+  -- replacing movie_streaming_sources/tv_streaming_sources above (owner
+  -- request: a real provider is usually one server offering both movie
+  -- and series embeds, e.g. vidcore.org/embed/movie/{tmdb_id} AND
+  -- vidcore.org/embed/tv/{tmdb_id}/{season}/{episode} - two separate
+  -- admin sections just duplicated the same "Server 1/2/3" list for no
+  -- reason). Either template can be NULL (a provider that only serves one
+  -- kind), but at least one is required - enforced in the admin route, not
+  -- here, so this stays a straightforward CREATE TABLE.
+  -- Season/episode placeholder NAMING varies by provider (seen live:
+  -- {season}/{episode} and {season_number}/{episode_number}) - the actual
+  -- substitution in server/routes/portal.js accepts either, so an admin
+  -- can paste whatever token names their specific provider's docs use
+  -- rather than being forced into one exact spelling.
+  CREATE TABLE IF NOT EXISTS streaming_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    movie_url_template TEXT,
+    tv_url_template TEXT,
     is_default INTEGER NOT NULL DEFAULT 0,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -1701,6 +1719,17 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // here means "forfeit as normal", '1' means the owner has switched it to
   // persist across sessions instead (Movies page toggle).
   upsertIfMissing('movie_credit_persists', '0');
+  // Captive-portal WiFi login webviews (Android's CaptivePortalLogin,
+  // iOS's Captive Network Assistant) are stripped-down browser shells -
+  // no real fullscreen, autoplay often blocked, video generally worse
+  // than a real browser tab. '1' makes the Movies button try to force
+  // Android devices into a real Chrome tab instead (public/portal/
+  // assets/js/portal.js's openMoviesLink(), an intent:// URL - the one
+  // reliable way to do this from inside that webview). iOS has no
+  // equivalent: Apple's CNA deliberately blocks switching to Safari from
+  // inside it, so iPhone customers are unaffected either way and just see
+  // the normal in-portal behavior regardless of this setting.
+  upsertIfMissing('movies_open_in_chrome', '0');
   // PC Rental Settings (public/admin/rental) - all read/written through
   // the existing generic GET/POST /api/admin/settings, same as every
   // other operator-facing setting in this file. Defaults match the
@@ -2324,6 +2353,46 @@ try {
     }
   }
   db.prepare("DELETE FROM settings WHERE key = 'movie_embed_url_template'").run();
+}
+
+// One-time migration: merges movie_streaming_sources + tv_streaming_sources
+// into the combined streaming_sources table (owner request: one list per
+// real provider, not two separately-managed sections for the same
+// "Server 1/2/3" servers). Matches rows by name - "Server 1" movie +
+// "Server 1" tv become one combined row with both templates; a name that
+// only existed on one side becomes a row with just that template set.
+// Guarded on streaming_sources being empty so this can only ever run
+// once - an admin adding a brand-new source afterward never re-triggers
+// a merge that could duplicate rows.
+{
+  const alreadyMigrated = db.prepare('SELECT COUNT(*) as c FROM streaming_sources').get().c > 0;
+  if (!alreadyMigrated) {
+    const movieSources = db.prepare('SELECT * FROM movie_streaming_sources').all();
+    const tvSources = db.prepare('SELECT * FROM tv_streaming_sources').all();
+    if (movieSources.length > 0 || tvSources.length > 0) {
+      const byName = new Map();
+      for (const m of movieSources) {
+        byName.set(m.name, { name: m.name, movie_url_template: m.url_template, tv_url_template: null, is_default: m.is_default, sort_order: m.sort_order });
+      }
+      for (const t of tvSources) {
+        if (byName.has(t.name)) {
+          const existing = byName.get(t.name);
+          existing.tv_url_template = t.url_template;
+          existing.is_default = existing.is_default || t.is_default;
+        } else {
+          byName.set(t.name, { name: t.name, movie_url_template: null, tv_url_template: t.url_template, is_default: t.is_default, sort_order: t.sort_order });
+        }
+      }
+      const insertMerged = db.prepare(`
+        INSERT INTO streaming_sources (name, movie_url_template, tv_url_template, is_default, sort_order)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      for (const row of byName.values()) {
+        insertMerged.run(row.name, row.movie_url_template, row.tv_url_template, row.is_default ? 1 : 0, row.sort_order);
+      }
+      console.log(`✅ Migrated ${byName.size} streaming source(s) into the combined table`);
+    }
+  }
 }
 
 console.log('✅ Database initialized successfully');

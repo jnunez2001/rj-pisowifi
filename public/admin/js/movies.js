@@ -17,6 +17,7 @@ async function loadMoviesPage() {
       document.getElementById('moviesSourceDir').value = settingsData.settings.movies_source_dir || '';
       document.getElementById('movieRentalHours').value = settingsData.settings.movie_rental_hours || '48';
       document.getElementById('movieCreditPersists').checked = settingsData.settings.movie_credit_persists === '1';
+      document.getElementById('moviesOpenInChrome').checked = settingsData.settings.movies_open_in_chrome === '1';
     }
   } catch (e) {}
 
@@ -116,9 +117,11 @@ async function saveMoviesSettings() {
   const dir = document.getElementById('moviesSourceDir').value.trim();
   const hours = document.getElementById('movieRentalHours').value;
   const creditPersists = document.getElementById('movieCreditPersists').checked;
+  const openInChrome = document.getElementById('moviesOpenInChrome').checked;
   try {
     const data = await apiCall('POST', '/api/admin/settings', {
       movies_source_dir: dir, movie_rental_hours: String(hours), movie_credit_persists: creditPersists ? '1' : '0',
+      movies_open_in_chrome: openInChrome ? '1' : '0',
     });
     if (data.success) {
       showToast('Movies settings saved', 'success');
@@ -190,7 +193,7 @@ async function omLoadSources() {
   const sources = data.success ? data.sources : [];
   omSetPill('omSourceStatus', sources.length > 0);
   if (sources.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:16px;">No sources yet - add one below.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px;">No sources yet - add one below.</td></tr>';
     return;
   }
   tbody.innerHTML = sources.map((s) => `
@@ -199,7 +202,8 @@ async function omLoadSources() {
         <i class="fas fa-star om-default-star ${s.is_default ? 'active' : ''}" title="Default source" style="cursor:pointer;"></i>
       </td>
       <td><input type="text" class="om-source-name" value="${escapeHtml(s.name)}" style="width:100%;"></td>
-      <td><input type="text" class="om-source-url" value="${escapeHtml(s.url_template)}" style="width:100%;"></td>
+      <td><input type="text" class="om-source-movie-url" placeholder="(none)" value="${escapeHtml(s.movie_url_template || '')}" style="width:100%;"></td>
+      <td><input type="text" class="om-source-tv-url" placeholder="(none)" value="${escapeHtml(s.tv_url_template || '')}" style="width:100%;"></td>
       <td style="text-align:right;">
         <button class="btn btn-secondary om-source-remove" style="padding:4px 8px;font-size:11px;"><i class="fas fa-trash"></i></button>
       </td>
@@ -209,13 +213,15 @@ async function omLoadSources() {
 
 async function omAddSource() {
   const name = document.getElementById('omNewSourceName').value.trim();
-  const url_template = document.getElementById('omNewSourceUrl').value.trim();
-  if (!name || !url_template) { showToast('Enter both a name and a URL', 'error'); return; }
-  const data = await apiCall('POST', '/api/admin/movies/streaming-sources', { name, url_template });
+  const movie_url_template = document.getElementById('omNewSourceMovieUrl').value.trim();
+  const tv_url_template = document.getElementById('omNewSourceTvUrl').value.trim();
+  if (!name || (!movie_url_template && !tv_url_template)) { showToast('Enter a name and at least one URL template', 'error'); return; }
+  const data = await apiCall('POST', '/api/admin/movies/streaming-sources', { name, movie_url_template, tv_url_template });
   if (data.success) {
     showToast(`"${name}" added`, 'success');
     document.getElementById('omNewSourceName').value = '';
-    document.getElementById('omNewSourceUrl').value = '';
+    document.getElementById('omNewSourceMovieUrl').value = '';
+    document.getElementById('omNewSourceTvUrl').value = '';
     omLoadSources();
   } else {
     showToast(data.message || 'Could not add source', 'error');
@@ -225,8 +231,9 @@ async function omAddSource() {
 async function omSaveSourceRow(row) {
   const id = row.dataset.sourceId;
   const name = row.querySelector('.om-source-name').value.trim();
-  const url_template = row.querySelector('.om-source-url').value.trim();
-  const data = await apiCall('POST', `/api/admin/movies/streaming-sources/${id}`, { name, url_template });
+  const movie_url_template = row.querySelector('.om-source-movie-url').value.trim();
+  const tv_url_template = row.querySelector('.om-source-tv-url').value.trim();
+  const data = await apiCall('POST', `/api/admin/movies/streaming-sources/${id}`, { name, movie_url_template, tv_url_template });
   if (data.success) showToast('Source updated', 'success');
   else showToast(data.message || 'Could not save', 'error');
 }
@@ -827,7 +834,7 @@ document.addEventListener('change', (e) => {
     const row = e.target.closest('#omCatalogRows tr');
     if (row) omInlineSave(row);
   }
-  if (e.target.matches('.om-source-name, .om-source-url')) {
+  if (e.target.matches('.om-source-name, .om-source-movie-url, .om-source-tv-url')) {
     const row = e.target.closest('tr[data-source-id]');
     if (row) omSaveSourceRow(row);
   }

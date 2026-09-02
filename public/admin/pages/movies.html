@@ -78,6 +78,16 @@
       <div style="font-size:12px;color:var(--text-muted);">Off by default: any unused Movie Credit is forfeited the moment a customer's WiFi session ends. Turn this on to let it persist instead, like a permanent store credit tied to their device.</div>
     </div>
   </div>
+  <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border-color,#2a2a2a);display:flex;align-items:center;gap:10px;">
+    <label class="toggle-switch">
+      <input type="checkbox" id="moviesOpenInChrome" onchange="saveMoviesSettings()">
+      <span class="toggle-slider"></span>
+    </label>
+    <div>
+      <div style="font-size:13px;font-weight:600;">Open Movies in a real Chrome tab (Android)</div>
+      <div style="font-size:12px;color:var(--text-muted);">WiFi login screens run in a stripped-down browser that often blocks fullscreen and autoplay. Turning this on kicks Android devices into a real Chrome tab when they tap Movies, for better video playback. Apple doesn't allow this trick on iPhone - iOS customers are unaffected either way.</div>
+    </div>
+  </div>
 </div>
 
 <div class="zf3-card">
@@ -101,7 +111,7 @@
   <div class="om-card-header">
     <div>
       <div class="om-card-title"><span class="om-dot" style="background:var(--accent-red,#ef4444);"></span>Streaming Sources</div>
-      <div class="om-card-desc">One or more embed servers customers can switch between while watching.</div>
+      <div class="om-card-desc">One or more embed servers customers can switch between while watching - shared by both Movies and TV Shows. Fill in whichever URL a server supports; leave the other blank if it doesn't offer that content type.</div>
     </div>
     <span class="om-status-pill" id="omSourceStatus">NOT SET</span>
   </div>
@@ -111,21 +121,23 @@
       <tr>
         <th style="width:22px;"></th>
         <th style="width:110px;">Name</th>
-        <th>URL Template</th>
+        <th>Movie URL Template</th>
+        <th>Series URL Template</th>
         <th style="width:70px;"></th>
       </tr>
     </thead>
     <tbody id="omSourcesRows">
-      <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:16px;">Loading…</td></tr>
+      <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:16px;">Loading…</td></tr>
     </tbody>
   </table>
 
   <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
     <input type="text" id="omNewSourceName" placeholder="Name (e.g. Server 2)" style="width:150px;">
-    <input type="text" id="omNewSourceUrl" placeholder="https://provider.com/embed/movie/{tmdb_id}" style="flex:1;min-width:220px;">
+    <input type="text" id="omNewSourceMovieUrl" placeholder="Movie URL: https://provider.com/embed/movie/{tmdb_id}" style="flex:1;min-width:220px;">
+    <input type="text" id="omNewSourceTvUrl" placeholder="Series URL: https://provider.com/embed/tv/{tmdb_id}/{season}/{episode}" style="flex:1;min-width:220px;">
     <button class="btn btn-primary" onclick="omAddSource()"><i class="fas fa-plus"></i> Add Source</button>
   </div>
-  <div class="om-help">Each URL must contain the literal token <code>{tmdb_id}</code>. The star marks which one loads first when a customer presses play; they can still switch servers from the player.</div>
+  <div class="om-help">Movie URLs need the literal token <code>{tmdb_id}</code>. Series URLs need <code>{tmdb_id}</code> plus a season and episode token - either <code>{season}</code>/<code>{episode}</code> or <code>{season_number}</code>/<code>{episode_number}</code>, whichever the provider uses. The star marks which one loads first when a customer presses play; they can still switch servers from the player.</div>
 </div>
 
 <div class="zf3-card" style="margin-bottom:16px;">
@@ -348,38 +360,14 @@
 <div class="zf3-card">
   <div class="om-card-header">
     <div>
-      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-red,#ef4444);"></span>Streaming Sources</div>
-      <div class="om-card-desc">One or more embed servers for episodes. The URL needs a season and episode number too, not just the show.</div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-blue,#2563eb);"></span>TMDb Sync</div>
+      <div class="om-card-desc">Streaming sources for series are managed in the combined Streaming Sources card above, in Online Movies.</div>
     </div>
     <span class="om-status-pill" id="tvTmdbStatus">NOT SET</span>
   </div>
 
-  <table class="om-table" style="margin-top:14px;">
-    <thead>
-      <tr>
-        <th style="width:24px;"></th>
-        <th style="width:140px;">Name</th>
-        <th>URL Template</th>
-        <th style="width:40px;"></th>
-      </tr>
-    </thead>
-    <tbody id="tvSourcesRows">
-      <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:14px;">Loading…</td></tr>
-    </tbody>
-  </table>
-  <div style="display:flex;gap:8px;margin-top:10px;">
-    <input type="text" id="tvNewSourceName" placeholder="e.g. Server 1" style="width:140px;">
-    <input type="text" id="tvNewSourceUrl" placeholder="https://provider.example/embed/tv/{tmdb_id}/{season}/{episode}" style="flex:1;">
-    <button class="btn btn-secondary" onclick="tvAddSource()"><i class="fas fa-plus"></i> Add</button>
-  </div>
-  <div class="om-help">Each URL must contain the literal tokens <code>{tmdb_id}</code>, <code>{season}</code>, and <code>{episode}</code>. The star marks which one loads first.</div>
-
-  <div class="om-divider"></div>
-  <div style="display:flex;align-items:center;justify-content:space-between;">
-    <div>
-      <div style="font-size:13px;font-weight:700;">TMDb Sync</div>
-      <div class="om-help" id="tvFeedStatus" style="margin-top:2px;">Not synced yet.</div>
-    </div>
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:12px;">
+    <div class="om-help" id="tvFeedStatus" style="margin-top:2px;">Not synced yet.</div>
     <button class="btn btn-secondary" id="tvSyncBtn" onclick="tvSyncFeed()"><i class="fas fa-rotate"></i> Sync from TMDb</button>
   </div>
   <div class="om-help">Uses the same TMDb API key entered above in Online Movies - nothing extra to configure here.</div>

@@ -142,6 +142,7 @@ router.get('/rates', (req, res) => {
       vapid_public_key: getSetting('vapid_public_key', ''),
       portal_hostname: getSetting('portal_hostname', ''),
       allow_premium_to_regular_convert: getSetting('allow_premium_to_regular_convert', '0'),
+      movies_open_in_chrome: getSetting('movies_open_in_chrome', '0'),
       promo_banner_images: db.prepare('SELECT image_path FROM promo_banner_images ORDER BY sort_order ASC').all().map((r) => r.image_path)
     });
 
@@ -527,7 +528,11 @@ router.get('/online-movies', (req, res) => {
 // never the actual URL template (no reason for that to reach the client
 // until a specific movie's embed is requested).
 router.get('/online-movies/sources', (req, res) => {
-  const sources = db.prepare('SELECT id, name, is_default FROM movie_streaming_sources ORDER BY sort_order, id').all();
+  const sources = db.prepare(`
+    SELECT id, name, is_default FROM streaming_sources
+    WHERE movie_url_template IS NOT NULL AND movie_url_template != ''
+    ORDER BY sort_order, id
+  `).all();
   res.json({ success: true, sources });
 });
 
@@ -592,8 +597,12 @@ router.get('/online-movies/:id/embed', (req, res) => {
 
   const sourceId = parseInt(req.query.source_id, 10);
   const source = sourceId
-    ? db.prepare('SELECT * FROM movie_streaming_sources WHERE id = ?').get(sourceId)
-    : db.prepare('SELECT * FROM movie_streaming_sources ORDER BY is_default DESC, sort_order, id LIMIT 1').get();
+    ? db.prepare(`SELECT * FROM streaming_sources WHERE id = ? AND movie_url_template IS NOT NULL AND movie_url_template != ''`).get(sourceId)
+    : db.prepare(`
+        SELECT * FROM streaming_sources
+        WHERE movie_url_template IS NOT NULL AND movie_url_template != ''
+        ORDER BY is_default DESC, sort_order, id LIMIT 1
+      `).get();
   if (!source) {
     return res.status(503).json({ success: false, message: 'No movie source configured yet - set one in Settings > Movies.' });
   }
@@ -607,7 +616,7 @@ router.get('/online-movies/:id/embed', (req, res) => {
     ON CONFLICT(movie_id) DO UPDATE SET views = views + 1
   `).run(movie.id);
 
-  return res.json({ success: true, source_id: source.id, embed_url: source.url_template.replace('{tmdb_id}', movie.id) });
+  return res.json({ success: true, source_id: source.id, embed_url: source.movie_url_template.replace('{tmdb_id}', movie.id) });
 });
 
 // POST /online-movies/:id/unlock-with-credit {mac} - the no-coins-needed
@@ -684,7 +693,11 @@ router.get('/tv-shows', (req, res) => {
 });
 
 router.get('/tv-shows/sources', (req, res) => {
-  const sources = db.prepare('SELECT id, name, is_default FROM tv_streaming_sources ORDER BY sort_order, id').all();
+  const sources = db.prepare(`
+    SELECT id, name, is_default FROM streaming_sources
+    WHERE tv_url_template IS NOT NULL AND tv_url_template != ''
+    ORDER BY sort_order, id
+  `).all();
   res.json({ success: true, sources });
 });
 
@@ -738,10 +751,14 @@ router.get('/tv-shows/:id/embed', (req, res) => {
 
   const sourceId = parseInt(req.query.source_id, 10);
   const source = sourceId
-    ? db.prepare('SELECT * FROM tv_streaming_sources WHERE id = ?').get(sourceId)
-    : db.prepare('SELECT * FROM tv_streaming_sources ORDER BY is_default DESC, sort_order, id LIMIT 1').get();
+    ? db.prepare(`SELECT * FROM streaming_sources WHERE id = ? AND tv_url_template IS NOT NULL AND tv_url_template != ''`).get(sourceId)
+    : db.prepare(`
+        SELECT * FROM streaming_sources
+        WHERE tv_url_template IS NOT NULL AND tv_url_template != ''
+        ORDER BY is_default DESC, sort_order, id LIMIT 1
+      `).get();
   if (!source) {
-    return res.status(503).json({ success: false, message: 'No TV source configured yet - set one in Movies > TV Shows.' });
+    return res.status(503).json({ success: false, message: 'No TV source configured yet - set one in Movies > Streaming Sources.' });
   }
 
   db.prepare(`
@@ -749,10 +766,14 @@ router.get('/tv-shows/:id/embed', (req, res) => {
     ON CONFLICT(series_id) DO UPDATE SET views = views + 1
   `).run(series.id);
 
-  const embedUrl = source.url_template
-    .replace('{tmdb_id}', series.id)
-    .replace('{season}', season)
-    .replace('{episode}', episode);
+  // Providers disagree on placeholder naming ({season} vs {season_number},
+  // {episode} vs {episode_number} - e.g. vidsrc.sbs uses the _number form)
+  // so replace whichever alias is actually present rather than requiring
+  // one exact spelling.
+  const embedUrl = source.tv_url_template
+    .replace(/\{tmdb_id\}/g, series.id)
+    .replace(/\{season(_number)?\}/g, season)
+    .replace(/\{episode(_number)?\}/g, episode);
   return res.json({ success: true, source_id: source.id, embed_url: embedUrl });
 });
 
