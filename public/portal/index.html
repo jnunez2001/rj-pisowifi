@@ -225,6 +225,15 @@
       <div class="paused-info">
         <i class="fas fa-pause-circle" style="font-size:50px;color:#ffa000;"></i>
         <p style="color:#888;font-size:16px;font-weight:700;margin-top:10px;letter-spacing:1px;">SESSION PAUSED</p>
+        <!-- Real customer confusion this closes: pausing freezes your
+             remaining minutes, but it does NOT extend how long you're
+             allowed to be away - a hard cutoff still applies (server/
+             services/sessionService.js's resumeSession() force-expires a
+             paused session past hard_expires_at even with minutes still
+             banked). Telling customers this plainly here, where they're
+             actually deciding whether to walk away, beats leaving it
+             undocumented and having someone come back to a lost session. -->
+        <p id="pausedHint" style="color:#aaa;font-size:13px;margin-top:8px;padding:0 20px;line-height:1.4;"></p>
       </div>
       <button class="btn btn-resume" onclick="resumeSession()">
         <i class="fas fa-play"></i>&nbsp; RESUME SESSION
