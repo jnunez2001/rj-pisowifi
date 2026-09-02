@@ -329,9 +329,14 @@ router.get('/sessions', adminAuth, async (req, res) => {
       // showing every session as online rather than wrongly flagging paid
       // customers as disconnected.
     }
+    // Shows a real device name (e.g. "Joshs-iPhone") instead of a bare MAC
+    // where one's been observed - see
+    // networkDevicesService.getDisplayNames().
+    const displayNames = networkDevicesService.getDisplayNames(sessionsWithTime.map((s) => s.mac_address));
     sessionsWithTime.forEach((s) => {
       const mac = String(s.mac_address || '').toLowerCase();
       s.online = onlineByMac.has(mac) ? onlineByMac.get(mac) : true;
+      s.display_name = displayNames.get(mac) || null;
     });
 
     await Promise.all(sessionsWithTime.map(async (s) => {
@@ -961,6 +966,13 @@ router.get('/users/guests', adminAuth, (req, res) => {
       FROM transactions WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
     `).get(days);
 
+    // Shows a real device name (e.g. "Joshs-iPhone") instead of a bare
+    // MAC where one's been observed - see
+    // networkDevicesService.getDisplayNames().
+    const displayNames = require('../services/networkDevicesService').getDisplayNames([
+      ...active.map((s) => s.mac_address), ...ended.map((s) => s.mac_address),
+    ]);
+
     return res.json({
       success: true,
       active: active.map((s) => ({
@@ -968,11 +980,13 @@ router.get('/users/guests', adminAuth, (req, res) => {
         minutes_remaining: s.minutes_remaining, is_paused: s.is_paused, created_at: s.created_at,
         hard_expires_at: s.hard_expires_at, redeemed_code: s.redeemed_code,
         source_type: s.source_type, coin_value: s.coin_value,
+        display_name: displayNames.get(String(s.mac_address || '').toLowerCase()) || null,
       })),
       recent: ended.map((s) => ({
         voucher_code: s.voucher_code, mac_address: s.mac_address, started_at: s.started_at,
         ended_at: s.ended_at, duration_seconds: s.duration_seconds,
         source_type: s.source_type, coin_value: s.coin_value,
+        display_name: displayNames.get(String(s.mac_address || '').toLowerCase()) || null,
       })),
       kpi: { totalSessionsPeriod: kpiPeriod.sessions || 0, totalRevenuePeriod: kpiPeriod.revenue || 0, activeNow: active.filter((s) => s.is_paused !== 1).length },
     });
@@ -1023,10 +1037,15 @@ router.get('/users/devices', adminAuth, (req, res) => {
     const labels = db.prepare('SELECT mac_address, label FROM client_labels').all();
     const labelByMac = new Map(labels.map((r) => [r.mac_address.toLowerCase(), r.label]));
     const trusted = new Set(db.prepare('SELECT mac_address FROM trusted_devices').all().map((r) => r.mac_address.toLowerCase()));
+    // Falls back to the device's own auto-captured DHCP hostname (e.g.
+    // "Joshs-iPhone") when no manual label has been set - same
+    // client_labels-wins-over-hostname precedence Network Devices already
+    // uses. See networkDevicesService.getDisplayNames().
+    const hostnames = require('../services/networkDevicesService').getDisplayNames(macRows.map((r) => r.mac_address));
 
     const devices = macRows.map((r) => ({
       mac_address: r.mac_address,
-      label: labelByMac.get(r.mac_address.toLowerCase()) || null,
+      label: labelByMac.get(r.mac_address.toLowerCase()) || hostnames.get(r.mac_address.toLowerCase()) || null,
       first_seen: r.first_seen,
       last_seen: r.last_seen,
       session_count: sessionCountByMac.get(r.mac_address)?.session_count || 0,
@@ -1232,6 +1251,11 @@ router.get('/dashboard/top-spenders-today', adminAuth, (req, res) => {
       ORDER BY total DESC
       LIMIT 5
     `).all(today);
+    // Shows a real device name (e.g. "Joshs-iPhone") instead of a bare
+    // MAC where one's been observed - see
+    // networkDevicesService.getDisplayNames().
+    const names = require('../services/networkDevicesService').getDisplayNames(rows.map((r) => r.mac_address));
+    for (const r of rows) r.display_name = names.get(r.mac_address) || null;
     return res.json({ success: true, spenders: rows });
   } catch (err) {
     console.error('Top spenders error:', err);

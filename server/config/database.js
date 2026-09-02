@@ -1014,6 +1014,22 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Auto-captured device names (the phone's own DHCP hostname, e.g.
+  -- "Joshs-iPhone"), separate from client_labels above which is an
+  -- operator's MANUAL rename. This is a write-through cache: whenever a
+  -- live DHCP lookup (dnsmasq.leases in standalone/openwrt, the MikroTik
+  -- lease table in Controller mode) happens to observe a real hostname for
+  -- a mac, it's persisted here - because a customer's Top Spenders/Users
+  -- entry needs to still show a name hours later, even after their phone
+  -- has disconnected and its live DHCP lease is long gone. client_labels
+  -- always wins when both exist (an operator's explicit rename shouldn't
+  -- be silently overwritten by whatever the phone happens to call itself).
+  CREATE TABLE IF NOT EXISTS device_hostnames (
+    mac_address TEXT PRIMARY KEY,
+    hostname TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Config safety engine (server/services/configSafety.js) audit trail.
   -- One row per attempted network configuration change (Standalone mode
   -- lane/port-role apply), win or lose - snapshot_json is the FULL
