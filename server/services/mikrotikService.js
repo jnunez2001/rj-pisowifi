@@ -713,6 +713,38 @@ async function testConnection() {
   return true;
 }
 
+// Real incident report: after a brownout took the MikroTik down (no UPS)
+// and it came back up, every client on the SSID got full-speed internet
+// with no portal/login gate at all - the walled-garden enforcement itself
+// had stopped working, not just individual client bindings. This app only
+// ever manages ip-bindings/queues against an ASSUMED-already-configured
+// Hotspot server (see this file's top comment) - it never actually
+// verifies the Hotspot server itself is still enabled and bound. This is
+// a read-only check for exactly that: if every hotspot server RouterOS
+// knows about comes back disabled (or none exist where they should),
+// nothing is gating access, so an operator needs to know immediately, not
+// discover it from lost revenue. Deliberately NOT auto-re-enabling here -
+// blindly flipping a hotspot server back on without knowing why it went
+// disabled (a genuine admin change vs. a real fault) is exactly the kind
+// of "risky, not well-understood" repair this codebase's watchdog
+// philosophy says to only ever alert on, never silently fix.
+async function checkHotspotEnabled() {
+  const config = getMikrotikConfig();
+  if (!config.ip) return { ok: true, reason: 'not configured' };
+  return withMikrotik(config, async (client) => {
+    const res = await client.talk(['/ip/hotspot/print']);
+    const servers = res.re || [];
+    if (servers.length === 0) {
+      return { ok: false, reason: 'No Hotspot server found on the router at all.' };
+    }
+    const allDisabled = servers.every((s) => s.disabled === 'true');
+    if (allDisabled) {
+      return { ok: false, reason: `Every Hotspot server (${servers.map((s) => s.name).join(', ')}) is disabled.` };
+    }
+    return { ok: true };
+  });
+}
+
 // Bug found on real hardware: app.js/portal.js resolved a client's MAC from
 // its IP by reading this server's own local ARP table / dnsmasq.leases,
 // both of which only ever have entries for devices on the same Layer 2
@@ -1413,6 +1445,7 @@ module.exports = {
   setPortalDnsName,
   setDnsFilterServers,
   testConnection,
+  checkHotspotEnabled,
   getMacFromIp,
   getIpFromMac,
   listVlans,

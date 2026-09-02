@@ -181,6 +181,14 @@
 // button on the device itself.
 #define WIFI_RECONNECT_TIMEOUT_MS  300000
 
+// How long heartbeats can keep failing at the network level WHILE
+// WiFi.status() still reports connected before this device gives up and
+// force-reboots itself (wifi_manager.cpp's checkWiFiReconnect()) - a real
+// brownout report: the radio got stuck "associated" after the AP itself
+// power-cycled, and only a full power cycle fixed it. This is the
+// software equivalent, self-healing automatically.
+#define HEARTBEAT_STUCK_REBOOT_MS  600000
+
 // How many CONSECUTIVE postCoin() failures (coin.cpp - either a network
 // failure after all retries, or the server itself rejecting the credit)
 // before this device stops opening the coin gate at all. See coin.cpp
@@ -253,7 +261,7 @@ void ledBlink(int times, int ms);
 
 // wifi_manager.cpp
 bool connectWiFi();
-void registerVendo();
+bool registerVendo();
 void checkWiFiReconnect();
 bool discoverServer();
 

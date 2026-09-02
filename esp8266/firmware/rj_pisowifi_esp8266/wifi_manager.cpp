@@ -5,6 +5,9 @@
 #include <WiFiUdp.h>
 
 unsigned long lastHeartbeat = 0;
+// See the self-heal reboot logic in checkWiFiReconnect()'s connected
+// branch below.
+unsigned long heartbeatStuckSince = 0;
 
 // Same hand-rolled extractor already used just above for device_secret -
 // pulled out into a helper now that a second string field (status) needs
@@ -149,8 +152,13 @@ bool connectWiFi() {
   return false;
 }
 
-void registerVendo() {
-  if (config.server_ip.isEmpty()) return;
+// Returns true if the server actually answered (any HTTP status still
+// proves the link is genuinely up), false only on a network-level failure
+// - see the self-heal reboot logic in checkWiFiReconnect() below, which
+// needs this distinction to tell a real answer apart from WiFi.status()
+// lying about the link being usable.
+bool registerVendo() {
+  if (config.server_ip.isEmpty()) return true; // not a link failure, nothing to report yet
 
   String url = "http://" + config.server_ip + ":" +
                String(config.server_port) + "/api/admin/vendo/register";
@@ -171,6 +179,7 @@ void registerVendo() {
 
   int code = http.POST(payload);
   Serial.println("Register response: " + String(code));
+  bool gotResponse = code > 0;
 
   // First-ever register (or a legacy device that never had one) gets a
   // secret back to remember for every future call - same hand-rolled
@@ -203,7 +212,7 @@ void registerVendo() {
       saveConfig();
       http.end();
       startSetupMode();
-      return;
+      return true;
     }
     if (nowAdopted != config.is_adopted) {
       config.is_adopted = nowAdopted;
@@ -214,6 +223,7 @@ void registerVendo() {
   }
 
   http.end();
+  return gotResponse;
 }
 
 void checkWiFiReconnect() {
@@ -271,9 +281,30 @@ void checkWiFiReconnect() {
     // Piggybacks the queued-event sync onto the same cadence.
     if (millis() - lastHeartbeat >= 60000) {
       Serial.println("Sending heartbeat...");
-      registerVendo();
+      bool gotResponse = registerVendo();
       syncQueuedEvents();
       lastHeartbeat = millis();
+
+      // Bug found live on the ESP32 sibling firmware (real brownout
+      // report), same fix applies here: when the AP/router lose power in
+      // the same outage as this device (which has its own UPS and never
+      // actually loses power), the WiFi radio can come out the other side
+      // holding a stale association - WiFi.status() keeps reporting
+      // connected, but no actual traffic gets through. Only a full power
+      // cycle fixed it in the field; this is the software equivalent,
+      // self-healing automatically instead of requiring someone to
+      // physically visit the machine.
+      if (!gotResponse) {
+        if (heartbeatStuckSince == 0) heartbeatStuckSince = millis();
+        if (millis() - heartbeatStuckSince >= HEARTBEAT_STUCK_REBOOT_MS) {
+          Serial.println("Heartbeat has failed for " + String(HEARTBEAT_STUCK_REBOOT_MS / 60000) + " min despite WiFi reporting connected - self-healing with a reboot");
+          queueDeviceLog("Self-heal reboot: heartbeat stuck failing despite WiFi reporting connected");
+          delay(200);
+          ESP.restart();
+        }
+      } else {
+        heartbeatStuckSince = 0;
+      }
     }
   }
 }

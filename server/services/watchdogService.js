@@ -432,6 +432,26 @@ async function runHealthCheck() {
       mikrotikUnreachableSince = null;
       await require('./timerService').applyOutageCompensation(gapMs, 'The MikroTik router');
     }
+
+    // Real incident: after this exact router-power-loss-then-recovery
+    // scenario, the Hotspot's own walled-garden enforcement had stopped
+    // working entirely - every client got free full-speed internet, no
+    // portal shown. Only meaningful to check once the router itself is
+    // reachable (the block above already covers total unreachability).
+    if (routerReachable) {
+      try {
+        const hotspotCheck = await require('./mikrotikService').checkHotspotEnabled();
+        if (!hotspotCheck.ok) {
+          issues.push({
+            severity: 'critical',
+            code: 'mikrotik_hotspot_disabled',
+            message: `The MikroTik Hotspot gate appears to be OFF - customers may be getting free internet with no login/coin prompt. ${hotspotCheck.reason} Check Hotspot server status on the router immediately.`,
+          });
+        }
+      } catch (e) {
+        console.error('🛡️ [Watchdog] Hotspot status check failed:', e.message);
+      }
+    }
   }
 
   checkVendoConnectivity();
