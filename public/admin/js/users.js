@@ -84,7 +84,10 @@ function renderGuestsTable() {
     return `
       <tr>
         <td data-label="Session"><span style="font-family:monospace;font-size:13px;font-weight:700;color:var(--text-primary);">${r.voucher_code}</span></td>
-        <td data-label="MAC Address" style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${r.mac_address}</td>
+        <td data-label="MAC Address">
+          ${r.display_name ? `<div style="font-size:13px;color:var(--text-primary);">${escapeHtml(r.display_name)}</div>` : ''}
+          <div style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${r.mac_address}</div>
+        </td>
         <td data-label="Source" style="font-size:13px;color:var(--text-secondary);">${sourceLabel(r.source_type)}${r.coin_value ? ` · ₱${r.coin_value}` : ''}</td>
         <td data-label="Started" style="font-size:12px;color:var(--text-muted);">${parseSqlDate(r.created_at || r.started_at).toLocaleString()}</td>
         <td data-label="Duration" style="font-size:13px;color:var(--text-secondary);">${isActive ? formatSessionTime(r.minutes_remaining) : formatMins(Math.round((r.duration_seconds || 0) / 60))}</td>

@@ -29,6 +29,53 @@ function getLanInterface() {
   return db.prepare("SELECT value FROM settings WHERE key = 'lan_interface'").get()?.value || process.env.LAN_IF || 'enp0s8';
 }
 
+// Shared "what should we call this customer's device" helper, used by Top
+// Spenders, Live Sessions, and the Users tab so they show a real device
+// name (e.g. "Joshs-iPhone") instead of a bare MAC address - the exact
+// same client_labels-then-hostname fallback this file already applies for
+// Network Devices (see listDevices() below), just made reusable for
+// callers that only have a mac, not a full live network scan. An
+// operator's manual rename (client_labels) always wins over whatever a
+// phone happens to call itself.
+function recordObservedHostname(mac, hostname) {
+  const macClean = String(mac || '').trim().toLowerCase();
+  const nameClean = String(hostname || '').trim();
+  // dnsmasq writes a literal "*" for a lease with no hostname - never
+  // persist that as if it were a real name.
+  if (!macClean || !nameClean || nameClean === '*') return;
+  try {
+    db.prepare(`
+      INSERT INTO device_hostnames (mac_address, hostname, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(mac_address) DO UPDATE SET hostname = excluded.hostname, updated_at = excluded.updated_at
+    `).run(macClean, nameClean);
+  } catch (e) {
+    console.error('Failed to record observed hostname:', e.message);
+  }
+}
+
+// Batch lookup for a list of macs (Top Spenders/Live Sessions/Users tab
+// all render a whole table at once) - one query each for the manual-label
+// and auto-hostname tables rather than N+1 per row.
+function getDisplayNames(macs) {
+  const cleanMacs = [...new Set((macs || []).map((m) => String(m || '').trim().toLowerCase()).filter(Boolean))];
+  if (cleanMacs.length === 0) return new Map();
+
+  const placeholders = cleanMacs.map(() => '?').join(',');
+  const labels = db.prepare(`SELECT mac_address, label FROM client_labels WHERE mac_address IN (${placeholders}) AND label != ''`).all(...cleanMacs);
+  const hostnames = db.prepare(`SELECT mac_address, hostname FROM device_hostnames WHERE mac_address IN (${placeholders})`).all(...cleanMacs);
+
+  const result = new Map();
+  for (const h of hostnames) result.set(h.mac_address, h.hostname);
+  for (const l of labels) result.set(l.mac_address, l.label); // manual label wins
+  return result;
+}
+
+// Single-mac convenience wrapper over the batch lookup above.
+function getDisplayName(mac) {
+  const macClean = String(mac || '').trim().toLowerCase();
+  return getDisplayNames([macClean]).get(macClean) || null;
+}
+
 // Real tc HTB byte counter for a standalone client's own shaping class -
 // only exists while that client has an active shaped session.
 function getTcTraffic(classId) {
@@ -137,6 +184,13 @@ async function listDevices() {
       }
     }
 
+    // Feeds the same write-through cache Top Spenders/Live Sessions/Users
+    // read from (see recordObservedHostname above) - a page load here is a
+    // free opportunity to capture a real device name for later, even for
+    // a device that never triggers a portal MAC detection (e.g. one that
+    // never opens the portal, just sits on the network).
+    if (entry.hostname && !isVendo) recordObservedHostname(entry.mac, entry.hostname);
+
     devices.push({
       mac: entry.mac,
       name: labelByMac.get(entry.mac) || (isVendo ? vendo.name : (entry.hostname || entry.mac)),
@@ -230,4 +284,4 @@ async function unblockDevice(mac) {
   logDeviceEvent(normalizedMac, 'unblocked', 'Network access restored');
 }
 
-module.exports = { listDevices, summarize, listGroups, createGroup, deleteGroup, assignDeviceGroup, logDeviceEvent, getDeviceHistory, blockDevice, unblockDevice, getTcTraffic };
+module.exports = { listDevices, summarize, listGroups, createGroup, deleteGroup, assignDeviceGroup, logDeviceEvent, getDeviceHistory, blockDevice, unblockDevice, getTcTraffic, recordObservedHostname, getDisplayName, getDisplayNames };

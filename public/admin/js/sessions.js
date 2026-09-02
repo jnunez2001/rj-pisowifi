@@ -213,7 +213,10 @@ function renderSessionsTable() {
           <span style="font-family:monospace;font-size:13px;color:var(--text-primary);font-weight:700;">${s.voucher_code}</span>
           <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Start: ${parseSqlDate(s.created_at).toLocaleTimeString()}</div>
         </td>
-        <td data-label="MAC Address" style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${s.mac_address}</td>
+        <td data-label="MAC Address">
+          ${s.display_name ? `<div style="font-size:13px;color:var(--text-primary);">${escapeHtml(s.display_name)}</div>` : ''}
+          <div style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${s.mac_address}</div>
+        </td>
         <td data-label="IP Address" style="font-size:13px;color:var(--text-secondary);">${s.ip_address || '--'}</td>
         <td data-label="Plan">
           ${s.redeemed_code ? `<span style="font-size:13px;color:var(--text-primary);">Voucher</span><div style="font-size:11px;color:var(--text-muted);">${s.redeemed_code}</div>` : '<span style="font-size:13px;color:var(--text-primary);">Coin Session</span>'}

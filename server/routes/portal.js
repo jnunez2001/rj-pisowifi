@@ -71,6 +71,14 @@ async function getMacFromIp(ip) {
         // Format: timestamp MAC IP hostname client-id
         if (parts[2] === ip) {
           mac = parts[1].toLowerCase();
+          // Free capture: this device's own DHCP hostname (e.g.
+          // "Joshs-iPhone") is sitting right here every time a portal
+          // MAC-detect happens - persist it so Top Spenders/Live
+          // Sessions/Users can show a real name instead of a bare MAC.
+          // See networkDevicesService.recordObservedHostname().
+          if (parts[3] && parts[3] !== '*') {
+            require('../services/networkDevicesService').recordObservedHostname(mac, parts[3]);
+          }
           break;
         }
       }

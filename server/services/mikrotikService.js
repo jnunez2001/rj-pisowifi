@@ -763,7 +763,16 @@ async function getMacFromIp(ip) {
     return await withMikrotik(config, async (client) => {
       const res = await client.talk(['/ip/dhcp-server/lease/print', `?address=${ip}`]);
       const lease = res.re[0];
-      return lease && lease['mac-address'] ? lease['mac-address'].toLowerCase() : null;
+      if (!lease || !lease['mac-address']) return null;
+      const mac = lease['mac-address'].toLowerCase();
+      // Free capture: RouterOS already reports the client's own DHCP
+      // hostname (active-host-name preferred, host-name as fallback - the
+      // same distinction scanForDevices() below already uses) in this
+      // same lease record - persist it so Top Spenders/Live Sessions/
+      // Users can show a real device name instead of a bare MAC.
+      const hostname = lease['active-host-name'] || lease['host-name'];
+      if (hostname) require('./networkDevicesService').recordObservedHostname(mac, hostname);
+      return mac;
     });
   } catch (err) {
     console.error('MikroTik getMacFromIp error:', err.message);
