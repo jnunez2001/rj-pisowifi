@@ -64,6 +64,77 @@ let pendingCreateUsername = null;
 let pendingCreatePasswordHash = null;
 const PENDING_TIMEOUT_MS = 40000; // must match/slightly exceed portal's 30s coin timer
 
+// Bug found live, real money lost: every pendingXxx variable above was
+// PURELY in-memory - if the Node process restarted for ANY reason
+// (a crash, a brownout-triggered reboot, even a routine `systemctl
+// restart` during a deploy) while a customer had an open Insert Coin
+// window, this state was silently wiped. A real coin landing right
+// after found `pendingCoinMac` null and fell through to crediting
+// `deviceMac` - the coin ACCEPTOR's own hardware mac, not the
+// customer's - creating a real, "successful" session no customer's
+// phone could ever see. The server logged nothing wrong; the customer
+// got nothing; only a bad review surfaced it. Persisting this state to
+// the settings table (mirroring the guarded-migration pattern already
+// used elsewhere in this codebase for durable single-row state) and
+// reconciling it at boot - exactly the same "don't trust in-memory
+// state survived a restart" principle timerService.js's own
+// restoreActiveSessions() already applies to sessions - closes this
+// permanently. Every mutation site below calls savePendingState()
+// immediately after changing these variables.
+function savePendingState() {
+  try {
+    const state = {
+      pendingCoinMac, pendingSetAt, pendingTotal, pendingIp, pendingKioskId,
+      pendingMode, pendingMovieId, pendingOnlineMovieId,
+      pendingCreateUsername, pendingCreatePasswordHash
+    };
+    db.prepare("INSERT INTO settings (key, value) VALUES ('coin_pending_state', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .run(JSON.stringify(state));
+  } catch (e) {
+    console.error('Failed to persist pending coin state:', e.message);
+  }
+}
+
+// Called once at module load (server boot). Restores whatever window
+// was open when the process last stopped, and reconciles it against
+// real elapsed time exactly like a fresh request would - a window
+// still within its timeout gets its finalize timer rescheduled for the
+// REMAINING time; one that already expired while the server was down
+// gets finalized immediately (crediting whatever real coins had
+// already accumulated, same as if the timer had fired normally) rather
+// than silently discarded.
+function restorePendingStateAtBoot() {
+  try {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'coin_pending_state'").get();
+    if (!row?.value) return;
+    const state = JSON.parse(row.value);
+    if (!state?.pendingCoinMac) return;
+
+    pendingCoinMac = state.pendingCoinMac;
+    pendingSetAt = state.pendingSetAt || 0;
+    pendingTotal = state.pendingTotal || 0;
+    pendingIp = state.pendingIp || '';
+    pendingKioskId = state.pendingKioskId ?? null;
+    pendingMode = state.pendingMode || 'regular';
+    pendingMovieId = state.pendingMovieId ?? null;
+    pendingOnlineMovieId = state.pendingOnlineMovieId ?? null;
+    pendingCreateUsername = state.pendingCreateUsername ?? null;
+    pendingCreatePasswordHash = state.pendingCreatePasswordHash ?? null;
+
+    const elapsed = Date.now() - pendingSetAt;
+    if (elapsed < PENDING_TIMEOUT_MS && pendingTotal > 0) {
+      console.log(`🔄 Restored an in-flight coin window for ${pendingCoinMac} (₱${pendingTotal}) across a restart - rescheduling finalize for the remaining ${Math.round((PENDING_TIMEOUT_MS - elapsed) / 1000)}s`);
+      pendingFinalizeTimer = setTimeout(() => finalizePendingCoins(pendingCoinMac), Math.max(0, PENDING_TIMEOUT_MS - elapsed));
+    } else if (pendingTotal > 0) {
+      console.log(`🔄 A coin window for ${pendingCoinMac} (₱${pendingTotal}) had already expired while the server was down - finalizing it now instead of losing it.`);
+      finalizePendingCoins(pendingCoinMac).catch((e) => console.error('Boot-time finalize failed:', e.message));
+    }
+  } catch (e) {
+    console.error('Failed to restore pending coin state at boot:', e.message);
+  }
+}
+restorePendingStateAtBoot();
+
 // Bug found live: crediting each coin the instant it was detected meant a
 // session got created (and network access granted via sessionService's
 // allowClient()) on the very first coin, not once the customer was done
@@ -126,6 +197,7 @@ async function finalizePendingCoins(mac) {
   pendingCreatePasswordHash = null;
   if (pendingFinalizeTimer) clearTimeout(pendingFinalizeTimer);
   pendingFinalizeTimer = null;
+  savePendingState();
 
   // Movie rental: a completely separate real-coin payment from WiFi
   // time, never touches sessions/minutes_remaining at all - see
@@ -473,6 +545,7 @@ router.post('/pending', (req, res) => {
   pendingKioskId = null;
   pendingMode = resolvedMode;
   pendingFinalizeTimer = null;
+  savePendingState();
   console.log(`⏳ Pending coin registered for ${pendingCoinMac} (${pendingMode})`);
   return res.json({ success: true });
 });
@@ -584,6 +657,7 @@ router.post('/', async (req, res) => {
     } else if (pendingCoinMac) {
       // expired pending slot, clear it
       pendingCoinMac = null;
+      savePendingState();
     }
 
     // Validate MAC format early (Bug #27)
@@ -647,6 +721,7 @@ router.post('/', async (req, res) => {
       pendingTotal += coin_value;
       pendingIp = ip || pendingIp;
       if (kioskId != null) pendingKioskId = kioskId;
+      savePendingState();
       scheduleFinalize(mac);
 
       // Bug found live: nothing pushed a wake-up while coins were still
@@ -673,6 +748,26 @@ router.post('/', async (req, res) => {
     // change above. Same real-IP lookup as finalizePendingCoins() above,
     // req.body's own ip is the relay device's, not necessarily the
     // customer's.
+    //
+    // Fail-safe alert: `mac` at this point is still `deviceMac` (nothing
+    // overwrote it, since pendingValid was false the whole way through) -
+    // the coin acceptor's OWN hardware mac, not a customer's. Crediting
+    // it still happens below (dropping the coin on the floor with zero
+    // record would be worse), but this is exactly the failure mode that
+    // silently cost real customers real time with no diagnostic trail -
+    // now it's impossible to miss in the Notifications feed instead of
+    // finding out from a bad review.
+    if (deviceMac && mac === String(deviceMac).toLowerCase()) {
+      try {
+        require('../services/alertEventService').logAlertEvent(
+          'warning',
+          'coin_credited_no_pending_match',
+          `Coin credited with no customer match: ${mac}`,
+          `₱${coin_value} was credited to the coin acceptor's own address (${mac}) because no customer's Insert Coin window was open when it arrived. No customer's phone will see this credit. This usually means the pending window was lost (e.g. a server restart mid-insertion) or a coin was dropped without a customer having opened Insert Coin first.`
+        );
+      } catch (e) {}
+    }
+
     let result;
     try {
       const realIp = (await require('../services/networkService').getIpFromMac(mac)) || ip;
