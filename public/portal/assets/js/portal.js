@@ -1234,13 +1234,21 @@ async function checkSession() {
   const mac = getMac();
   if (!mac) { updateUI(null); return; }
   try {
-    const res = await fetch(`${SERVER}/api/session/mac/${encodeURIComponent(mac)}`);
+    // Neither request depends on the other's result (the coin-spam check
+    // only reads isBlocked, a UI flag from a previous poll, not anything
+    // this session fetch returns) - firing them together instead of
+    // waiting on one before starting the next shaves a full round trip
+    // off every 8s poll, not just first load.
+    const wantsSpamCheck = !isBlocked;
+    const [res, spamRes] = await Promise.all([
+      fetch(`${SERVER}/api/session/mac/${encodeURIComponent(mac)}`),
+      wantsSpamCheck ? fetch(`${SERVER}/api/coin/status/${encodeURIComponent(mac)}`) : Promise.resolve(null),
+    ]);
     const data = await res.json();
     updateConnectionBanner(false);
     updateUI(data.active ? data : null);
 
-    if (!isBlocked) {
-      const spamRes = await fetch(`${SERVER}/api/coin/status/${encodeURIComponent(mac)}`);
+    if (spamRes) {
       const spamData = await spamRes.json();
       if (spamData.blocked && spamData.remaining > 0) {
         showBlockUI(spamData.remaining);
@@ -2017,8 +2025,14 @@ function checkOpenInChrome() {
 
 async function init() {
   checkOpenInChrome();
-  await loadSettings();
-  await detectDevice();
+  // Real report: the portal was slow enough to load that customers may
+  // have left before it finished. loadSettings() (branding/rates, doesn't
+  // need a MAC) and detectDevice() (needs the client's IP, not settings)
+  // don't depend on each other - running them sequentially just added a
+  // whole extra round trip's worth of wait before anything else could
+  // start. checkSession()/checkFreeClaimEligibility() genuinely need the
+  // MAC detectDevice() resolves, so those stay after it.
+  await Promise.all([loadSettings(), detectDevice()]);
   connectEventStream(getMac());
   await checkSession();
   await checkFreeClaimEligibility();

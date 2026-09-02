@@ -7,6 +7,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const compression = require('compression');
 const path = require('path');
 const fs = require('fs');
 const { execSync } = require('child_process');
@@ -149,6 +150,14 @@ const allowedOrigins = (process.env.STARKFI_ALLOWED_ORIGINS || '')
 app.use(cors({
   origin: allowedOrigins.length > 0 ? allowedOrigins : false,
 }));
+// Real report: the portal (customer-facing captive portal, run on modest
+// hardware and served over WiFi to a phone that just joined) was slow
+// enough to load that customers may have been leaving before it finished.
+// The portal's JS/CSS bundle alone is ~220KB uncompressed - gzip cuts
+// that roughly 3-4x for text assets, and this had simply never been
+// turned on. Placed early, before routes/static, so it compresses both
+// API JSON responses and the static portal/admin assets below.
+app.use(compression());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -255,7 +264,22 @@ app.use('/movies_cache', express.static(path.join(__dirname, '../public/movies_c
   }
 }));
 
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(path.join(__dirname, '../public'), {
+  setHeaders: (res, filePath) => {
+    // Real report: the portal was slow enough to load that customers may
+    // have left before it finished. These asset types are only ever
+    // updated by an operator's git-pull (same URL, new content), not
+    // cache-busted with a version query string - a short max-age still
+    // lets a customer reconnecting later that day skip re-downloading the
+    // ~220KB portal JS/CSS bundle without leaving a stale asset around for
+    // long after an update. HTML is deliberately excluded (no
+    // Cache-Control here) so a fresh page load always revalidates and
+    // picks up a new splash/version/copy change immediately.
+    if (/\.(js|css|png|jpe?g|gif|svg|webp|woff2?|ttf|ico)$/i.test(filePath)) {
+      res.set('Cache-Control', 'public, max-age=3600');
+    }
+  }
+}));
 
 // ── Caching ──────────────────────────────────────────────────────
 const authCache = new Map();
