@@ -1,9 +1,22 @@
 #include "config.h"
+#include "event_queue.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 #include <WiFiUdp.h>
 
 unsigned long lastHeartbeat = 0;
+
+// Same hand-rolled extractor already used just above for device_secret -
+// pulled out into a helper now that a second string field (status) needs
+// the identical extraction.
+static String extractJsonString(const String& json, const String& key) {
+  int keyIdx = json.indexOf("\"" + key + "\"");
+  if (keyIdx < 0) return "";
+  int start = json.indexOf('"', json.indexOf(':', keyIdx) + 1) + 1;
+  int end = json.indexOf('"', start);
+  if (start <= 0 || end <= start) return "";
+  return json.substring(start, end);
+}
 
 // Zero-config discovery (server/services/vendoDiscoveryService.js) - lets
 // this device find the ZenFi server's address on its own instead of
@@ -168,18 +181,36 @@ void registerVendo() {
   // than silently adopting a value from whoever answered.
   if (code == 200) {
     String body = http.getString();
-    int key = body.indexOf("\"device_secret\"");
-    if (key >= 0) {
-      int start = body.indexOf('"', body.indexOf(':', key) + 1) + 1;
-      int end = body.indexOf('"', start);
-      if (start > 0 && end > start) {
-        String issued = body.substring(start, end);
-        if (issued.length() && issued != config.device_secret) {
-          config.device_secret = issued;
-          saveConfig();
-        }
-      }
+    String issued = extractJsonString(body, "device_secret");
+    bool changed = false;
+    if (issued.length() && issued != config.device_secret) {
+      config.device_secret = issued;
+      changed = true;
     }
+
+    String status = extractJsonString(body, "status");
+    bool nowAdopted = (status == "adopted");
+    if (config.is_adopted && status.length() && !nowAdopted) {
+      // The ONLY signal that should ever clear an adopted device's
+      // binding automatically: the server itself, on a real 200
+      // response, confirming this mac is no longer adopted (an operator
+      // deleted/unbound it in Devices). A connectivity failure must
+      // NEVER reach this - see checkWiFiReconnect()'s own guard below,
+      // this is deliberately the opposite trigger.
+      Serial.println("Server reports this device is no longer adopted - clearing local binding and returning to setup mode");
+      config.is_adopted = false;
+      config.device_secret = "";
+      saveConfig();
+      http.end();
+      startSetupMode();
+      return;
+    }
+    if (nowAdopted != config.is_adopted) {
+      config.is_adopted = nowAdopted;
+      changed = true;
+    }
+
+    if (changed) saveConfig();
   }
 
   http.end();
@@ -198,10 +229,29 @@ void checkWiFiReconnect() {
     // from any phone/laptop nearby, same as a brand-new device.
     if (wifiLostAt == 0) {
       wifiLostAt = millis();
+      queueDeviceLog("WiFi lost");
     } else if (millis() - wifiLostAt >= WIFI_RECONNECT_TIMEOUT_MS) {
-      Serial.println("WiFi still unreachable after " + String(WIFI_RECONNECT_TIMEOUT_MS / 60000) + " min - opening setup hotspot automatically");
-      startSetupMode();
-      return;
+      // Bug found live on the ESP32 sibling firmware (matches a reported
+      // brownout incident), same fix applies here: this used to fire
+      // unconditionally, so a WiFi router that lost power in the same
+      // brownout as the server looked identical to "this device was
+      // never set up" - it opened its own setup hotspot mid-outage. An
+      // already-adopted device just keeps retrying indefinitely instead -
+      // setup mode stays reachable via the physical button, and via a
+      // real server-confirmed unbind (registerVendo() above), never
+      // automatically from a connectivity gap alone.
+      if (config.is_adopted) {
+        static unsigned long lastAdoptedRetryLog = 0;
+        if (lastAdoptedRetryLog == 0 || millis() - lastAdoptedRetryLog >= WIFI_RECONNECT_TIMEOUT_MS) {
+          Serial.println("WiFi still unreachable, but this device is already adopted - retrying instead of opening setup mode");
+          queueDeviceLog("WiFi still down after adoption - skipped auto setup mode, kept retrying");
+          lastAdoptedRetryLog = millis();
+        }
+      } else {
+        Serial.println("WiFi still unreachable after " + String(WIFI_RECONNECT_TIMEOUT_MS / 60000) + " min - opening setup hotspot automatically");
+        startSetupMode();
+        return;
+      }
     }
 
     Serial.println("WiFi lost, reconnecting...");
@@ -210,15 +260,19 @@ void checkWiFiReconnect() {
     connectWiFi();
     if (WiFi.status() == WL_CONNECTED) {
       wifiLostAt = 0;
+      queueDeviceLog("WiFi regained");
       registerVendo();
+      syncQueuedEvents();
       lastHeartbeat = millis();
     }
   } else {
     wifiLostAt = 0;
-    // Send heartbeat every 60 seconds to stay Online in admin panel
+    // Send heartbeat every 60 seconds to stay Online in admin panel.
+    // Piggybacks the queued-event sync onto the same cadence.
     if (millis() - lastHeartbeat >= 60000) {
       Serial.println("Sending heartbeat...");
       registerVendo();
+      syncQueuedEvents();
       lastHeartbeat = millis();
     }
   }

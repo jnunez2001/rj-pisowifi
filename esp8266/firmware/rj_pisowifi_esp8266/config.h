@@ -181,6 +181,12 @@
 // button on the device itself.
 #define WIFI_RECONNECT_TIMEOUT_MS  300000
 
+// How many CONSECUTIVE postCoin() failures (coin.cpp - either a network
+// failure after all retries, or the server itself rejecting the credit)
+// before this device stops opening the coin gate at all. See coin.cpp
+// and relay.cpp for how this is used.
+#define COIN_HEALTH_FAIL_THRESHOLD  3
+
 // ===== CONFIG STRUCT =====
 struct Config {
   String vendo_name;
@@ -199,6 +205,17 @@ struct Config {
   // device on the LAN claiming the same MAC. Empty until the first
   // successful register response.
   String device_secret;
+  // Bug found live on the ESP32 sibling firmware, same fix applies here:
+  // without a persisted "have I actually been through onboarding"
+  // flag, ANY sufficiently long WiFi/server outage (a brownout, the
+  // router itself losing power) looked identical to "never configured" -
+  // checkWiFiReconnect() opened this device's own setup hotspot
+  // automatically regardless. Set true only once the server's own
+  // registration response confirms adopted status (wifi_manager.cpp's
+  // registerVendo()); cleared only by a genuine unbind (an admin deleted
+  // this device from Devices) or a manual factory reset via the physical
+  // setup button.
+  bool   is_adopted;
 };
 
 // ===== GLOBAL VARIABLES =====
@@ -219,6 +236,8 @@ extern bool btnHeld;
 extern unsigned long btnPressStart;
 extern unsigned long lastOTACheck;
 extern unsigned long wifiLostAt;
+extern int coinFailStreak;
+extern bool coinHealthOk;
 
 // ===== FUNCTION DECLARATIONS =====
 
@@ -249,11 +268,16 @@ void processCoinPulses();
 void postCoin(int coinValue);
 
 // relay.cpp
-void activateRelay();
+bool activateRelay();
 void deactivateRelay();
 void checkRelayTimeout();
 
 // ota.cpp
 void checkForFirmwareUpdate();
+
+// event_queue.cpp
+void queueCoinEvent(int coinValue);
+void queueDeviceLog(const String& message);
+void syncQueuedEvents();
 
 #endif

@@ -81,6 +81,16 @@
 // button on the device itself.
 #define WIFI_RECONNECT_TIMEOUT_MS  300000
 
+// How many CONSECUTIVE postCoin() failures (coin.cpp - either a network
+// failure after all retries, or the server itself rejecting the credit)
+// before this device stops opening the coin gate at all. A single failure
+// is treated as noise (a blip); this many in a row without a single
+// success in between means something is actually wrong with this specific
+// coin acceptor/link, and letting it keep taking money into a pipeline
+// that's already shown it won't credit it is worse than refusing new
+// coins until an operator (or a self-heal restart) clears it.
+#define COIN_HEALTH_FAIL_THRESHOLD  3
+
 // ===== CONFIG STRUCT =====
 struct Config {
   String vendo_name;
@@ -92,6 +102,28 @@ struct Config {
   String device_ip;
   String gateway;
   String subnet;
+  // Persisted across reboots/connectivity loss. Bug found live: without
+  // this, ANY sufficiently long WiFi/server outage (a brownout, the
+  // router itself losing power) looked identical to "never configured" -
+  // checkWiFiReconnect() opened this device's own setup hotspot
+  // automatically regardless of whether it had already been through
+  // onboarding. Set true only once the server's own registration
+  // response confirms adopted status (wifi_manager.cpp's registerVendo());
+  // cleared only by a genuine unbind (the server no longer recognizing
+  // this mac as adopted - an admin deleted it from Devices) or a manual
+  // factory reset via the physical setup button. See
+  // checkWiFiReconnect()'s guard on this flag.
+  bool   is_adopted;
+  // Issued by the server on first registration, must be echoed back on
+  // every future call (see server/routes/admin.js's POST /vendo/register
+  // comment on this exact mechanism). Bug found live: this field existed
+  // server-side but firmware never stored or resent it, so every
+  // registration after the very first one was silently rejected with
+  // 403 "Invalid device secret" - the device kept crediting coins fine
+  // (a separate route), but never successfully updated its own
+  // last_seen/online status again, looking permanently offline in
+  // admin despite working.
+  String device_secret;
 };
 
 // ===== GLOBAL VARIABLES =====
@@ -109,6 +141,19 @@ extern bool btnHeld;
 extern unsigned long btnPressStart;
 extern unsigned long lastOTACheck;
 extern unsigned long wifiLostAt;
+
+// Consecutive postCoin() failures that were NOT a network problem (see
+// coin.cpp) - i.e. attempts that reached the server and got a real error
+// back, or (once coinHealthOk is wired into activateRelay(), see below)
+// the count that trips it. Reset to 0 on any successful credit.
+extern int coinFailStreak;
+// False once coinFailStreak crosses COIN_HEALTH_FAIL_THRESHOLD.
+// activateRelay() checks this and refuses to open the coin gate while
+// false, so a coin acceptor in a bad state can't keep taking customers'
+// money into a pipeline that's already shown it won't credit it. Cleared
+// back to true only by a successful coin credit or an operator-triggered
+// self-heal (web_server.cpp's /report-issue handler).
+extern bool coinHealthOk;
 
 // ===== FUNCTION DECLARATIONS =====
 
@@ -138,11 +183,16 @@ void processCoinPulses();
 void postCoin(int coinValue);
 
 // relay.cpp
-void activateRelay();
+bool activateRelay();
 void deactivateRelay();
 void checkRelayTimeout();
 
 // ota.cpp
 void checkForFirmwareUpdate();
+
+// event_queue.cpp
+void queueCoinEvent(int coinValue);
+void queueDeviceLog(const String& message);
+void syncQueuedEvents();
 
 #endif

@@ -1,8 +1,25 @@
 #include "config.h"
+#include "event_queue.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
 
 unsigned long lastHeartbeat = 0;
+
+// No ArduinoJson anywhere in this codebase (payloads are already built via
+// plain string concatenation) - this is the matching manual extractor for
+// the couple of string fields registerVendo() needs back out of the
+// server's response. Only correct for simple, non-escaped string values
+// (device_secret and status are both server-generated, never contain a
+// literal quote), not a general JSON parser.
+static String extractJsonString(const String& json, const String& key) {
+  String pattern = "\"" + key + "\":\"";
+  int idx = json.indexOf(pattern);
+  if (idx == -1) return "";
+  idx += pattern.length();
+  int end = json.indexOf("\"", idx);
+  if (end == -1) return "";
+  return json.substring(idx, end);
+}
 
 bool connectWiFi() {
   if (config.wifi_ssid.isEmpty()) return false;
@@ -66,11 +83,58 @@ void registerVendo() {
   payload += "\"mac\":\"" + WiFi.macAddress() + "\",";
   payload += "\"name\":\"" + config.vendo_name + "\",";
   payload += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
-  payload += "\"version\":\"" + String(FIRMWARE_VERSION) + "\"";
+  payload += "\"version\":\"" + String(FIRMWARE_VERSION) + "\",";
+  // Bug found live (curl-tested): the server has rejected every heartbeat
+  // after the first one with 403 "Invalid device secret" since this field
+  // was never sent back - the device kept crediting coins fine (a
+  // separate route) but never again updated its own online status,
+  // showing permanently offline in admin despite working normally.
+  payload += "\"device_secret\":\"" + config.device_secret + "\"";
   payload += "}";
 
   int code = http.POST(payload);
   Serial.println("Register response: " + String(code));
+
+  if (code == 200) {
+    String body = http.getString();
+    String newSecret = extractJsonString(body, "device_secret");
+    String status = extractJsonString(body, "status");
+    bool changed = false;
+
+    if (!newSecret.isEmpty() && newSecret != config.device_secret) {
+      config.device_secret = newSecret;
+      changed = true;
+    }
+
+    bool nowAdopted = (status == "adopted");
+    if (config.is_adopted && !status.isEmpty() && !nowAdopted) {
+      // The ONLY signal that should ever clear an adopted device's
+      // binding automatically: the server itself, on a real 200
+      // response, confirming this mac is no longer adopted (an operator
+      // deleted/unbound it in Devices). A connectivity failure must
+      // NEVER reach this - see checkWiFiReconnect()'s own guard below,
+      // this is deliberately the opposite trigger.
+      Serial.println("Server reports this device is no longer adopted - clearing local binding and returning to setup mode");
+      config.is_adopted = false;
+      config.device_secret = "";
+      saveConfig();
+      http.end();
+      startSetupMode();
+      return;
+    }
+
+    if (nowAdopted != config.is_adopted) {
+      config.is_adopted = nowAdopted;
+      changed = true;
+    }
+
+    if (changed) saveConfig();
+  } else if (code == 403) {
+    // Rejected/mismatched secret - retry on the next heartbeat rather
+    // than treating this as an unbind signal (see comment above).
+    Serial.println("Register rejected (invalid device secret) - will retry on next heartbeat");
+  }
+
   http.end();
 }
 
@@ -103,10 +167,29 @@ void checkWiFiReconnect() {
     // from any phone/laptop nearby, same as a brand-new device.
     if (wifiLostAt == 0) {
       wifiLostAt = millis();
+      queueDeviceLog("WiFi lost");
     } else if (millis() - wifiLostAt >= WIFI_RECONNECT_TIMEOUT_MS) {
-      Serial.println("WiFi still unreachable after " + String(WIFI_RECONNECT_TIMEOUT_MS / 60000) + " min - opening setup hotspot automatically");
-      startSetupMode();
-      return;
+      // Bug found live (matches a reported brownout incident): this used
+      // to fire unconditionally, so a WiFi router that lost power in the
+      // same brownout as the server looked identical to "this device was
+      // never set up" - it opened its own setup hotspot mid-outage,
+      // confusing anyone who then had to walk over and manually cancel
+      // it. An already-adopted device just keeps retrying indefinitely
+      // instead - setup mode stays reachable via the physical button, and
+      // via a real server-confirmed unbind (registerVendo() above), never
+      // automatically from a connectivity gap alone.
+      if (config.is_adopted) {
+        static unsigned long lastAdoptedRetryLog = 0;
+        if (lastAdoptedRetryLog == 0 || millis() - lastAdoptedRetryLog >= WIFI_RECONNECT_TIMEOUT_MS) {
+          Serial.println("WiFi still unreachable, but this device is already adopted - retrying instead of opening setup mode");
+          queueDeviceLog("WiFi still down after adoption - skipped auto setup mode, kept retrying");
+          lastAdoptedRetryLog = millis();
+        }
+      } else {
+        Serial.println("WiFi still unreachable after " + String(WIFI_RECONNECT_TIMEOUT_MS / 60000) + " min - opening setup hotspot automatically");
+        startSetupMode();
+        return;
+      }
     }
 
     Serial.println("WiFi lost, reconnecting...");
@@ -115,15 +198,21 @@ void checkWiFiReconnect() {
     connectWiFi();
     if (WiFi.status() == WL_CONNECTED) {
       wifiLostAt = 0;
+      queueDeviceLog("WiFi regained");
       registerVendo();
+      syncQueuedEvents();
       lastHeartbeat = millis();
     }
   } else {
     wifiLostAt = 0;
-    // Send heartbeat every 60 seconds to stay Online in admin panel
+    // Send heartbeat every 60 seconds to stay Online in admin panel.
+    // Piggybacks the queued-event sync onto the same cadence - no need
+    // for a separate timer, and this only needs to run once WiFi (and
+    // therefore the server) is actually reachable.
     if (millis() - lastHeartbeat >= 60000) {
       Serial.println("Sending heartbeat...");
       registerVendo();
+      syncQueuedEvents();
       lastHeartbeat = millis();
     }
   }

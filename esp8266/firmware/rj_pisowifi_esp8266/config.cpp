@@ -19,6 +19,8 @@ bool btnHeld = false;
 unsigned long btnPressStart = 0;
 unsigned long lastOTACheck = 0;
 unsigned long wifiLostAt = 0;
+int coinFailStreak = 0;
+bool coinHealthOk = true;
 
 // ESP32's version of this firmware uses the Preferences library (NVS-
 // backed key/value storage), which doesn't exist on ESP8266. LittleFS is
@@ -40,6 +42,7 @@ void loadConfig() {
   config.gateway     = "";
   config.subnet      = "255.255.255.0";
   config.device_secret = "";
+  config.is_adopted  = false;
 
   File f = LittleFS.open(CONFIG_PATH, "r");
   if (f) {
@@ -61,6 +64,12 @@ void loadConfig() {
     // (gets issued a fresh one on its next register call) instead of
     // failing to load its config at all.
     config.device_secret = f.readStringUntil('\n');
+    // Same upgrade-safe append as device_secret above - a config file
+    // saved by older firmware simply ends before this line, and an empty/
+    // missing value here defaults safely to "not adopted" (falls back to
+    // whatever the next successful registerVendo() response reports).
+    String adoptedStr = f.readStringUntil('\n'); adoptedStr.trim();
+    config.is_adopted = adoptedStr == "1";
     f.close();
 
     // Every line above still carries its trailing '\n' except possibly
@@ -101,6 +110,7 @@ void saveConfig() {
   f.println(config.gateway);
   f.println(config.subnet);
   f.println(config.device_secret);
+  f.println(config.is_adopted ? "1" : "0");
   f.close();
   Serial.println("Config saved.");
 }

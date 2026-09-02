@@ -1,7 +1,14 @@
 #include "config.h"
 #include "audio.h"
 
-void activateRelay() {
+bool activateRelay() {
+  // Refuses to open the coin gate once repeated postCoin() failures
+  // (coin.cpp) show something is wrong, either the acceptor's link to the
+  // server or the acceptor itself - see coin.cpp for how this is tripped.
+  if (!coinHealthOk) {
+    Serial.println("Relay activation blocked: coin health check failed");
+    return false;
+  }
   digitalWrite(RELAY_PIN, RELAY_ON_STATE);
   relayActive = true;
   relayActivatedAt = millis();
@@ -10,6 +17,7 @@ void activateRelay() {
   Serial.println("Relay ON");
   lcdPrint(2, "Insert coin now");
   lcdPrint(3, "");
+  return true;
 }
 
 void deactivateRelay() {

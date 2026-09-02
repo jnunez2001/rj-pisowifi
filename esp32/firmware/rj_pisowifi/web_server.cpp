@@ -125,7 +125,11 @@ void setupWebServer() {
   // POST relay on
   server.on("/relay/on", HTTP_POST, []() {
     if (!rejectUnlessFromServer()) return;
-    activateRelay();
+    if (!activateRelay()) {
+      server.send(503, "application/json",
+        "{\"success\":false,\"message\":\"Coin health check failed\",\"coin_health\":false}");
+      return;
+    }
     server.send(200, "application/json", "{\"success\":true}");
   });
 
@@ -136,6 +140,26 @@ void setupWebServer() {
     server.send(200, "application/json", "{\"success\":true}");
   });
 
+  // POST report issue - a deliberately distinct, one-click path from the
+  // portal's text-based support chat: no typing, just "something's wrong
+  // here." Attempts a self-heal (restart) since a fresh boot clears
+  // coinFailStreak/coinHealthOk and most transient states this device can
+  // get stuck in. Only safe to do when nothing is mid-flight (a coin
+  // being counted, the gate open for one) - restarting through that would
+  // itself risk causing the exact "coin taken, nothing credited" failure
+  // this exists to fix.
+  server.on("/report-issue", HTTP_POST, []() {
+    if (!rejectUnlessFromServer()) return;
+    if (relayActive || processingCoin) {
+      server.send(409, "application/json",
+        "{\"success\":false,\"message\":\"Busy, try again in a moment\"}");
+      return;
+    }
+    server.send(200, "application/json", "{\"success\":true,\"message\":\"Restarting...\"}");
+    delay(500);
+    ESP.restart();
+  });
+
   // GET status
   server.on("/status", HTTP_GET, []() {
     String json = "{";
@@ -144,6 +168,7 @@ void setupWebServer() {
     json += "\"ip\":\"" + WiFi.localIP().toString() + "\",";
     json += "\"relay\":" + String(relayActive ? "true" : "false") + ",";
     json += "\"wifi\":" + String(WiFi.status() == WL_CONNECTED ? "true" : "false") + ",";
+    json += "\"coin_health\":" + String(coinHealthOk ? "true" : "false") + ",";
     json += "\"firmware\":\"" + String(FIRMWARE_VERSION) + "\"";
     json += "}";
     server.send(200, "application/json", json);

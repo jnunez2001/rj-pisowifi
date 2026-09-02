@@ -1,4 +1,5 @@
 #include "config.h"
+#include "event_queue.h"
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
 
@@ -106,10 +107,38 @@ void postCoin(int coinValue) {
     lcdPrint(3, "Accepted!");
     ledBlink(2, 100);
     relayActivatedAt = millis();
+    coinFailStreak = 0;
+    if (!coinHealthOk) {
+      Serial.println("Coin health recovered after a successful credit");
+      coinHealthOk = true;
+      queueDeviceLog("coin health recovered after a successful credit");
+    }
   } else {
     Serial.println("Coin rejected: " + String(code));
     lcdPrint(3, "Error: " + String(code));
     ledBlink(5, 50);
+
+    // A negative code means postCoin() never got a real reply after all
+    // retries (WiFi/server unreachable for the whole retry window) - this
+    // coin was physically taken and would otherwise vanish with zero
+    // record. Queue it locally so it can be synced and credited (to this
+    // device's own mac, flagged for review) the moment connectivity
+    // returns, instead of being lost.
+    if (code <= 0) {
+      queueCoinEvent(coinValue);
+      queueDeviceLog("coin queued: server unreachable, P" + String(coinValue));
+    }
+
+    // Same coin-health guard as the ESP32 sibling firmware: after enough
+    // CONSECUTIVE failures with no success in between, stop opening the
+    // coin gate at all (relay.cpp's activateRelay()) until a self-heal
+    // restart (/report-issue) or a successful credit clears it.
+    coinFailStreak++;
+    if (coinFailStreak >= COIN_HEALTH_FAIL_THRESHOLD && coinHealthOk) {
+      coinHealthOk = false;
+      Serial.println("Coin health check failed after " + String(coinFailStreak) + " consecutive failures - blocking further coin acceptance");
+      queueDeviceLog("coin health degraded after " + String(coinFailStreak) + " consecutive failures");
+    }
   }
 }
 

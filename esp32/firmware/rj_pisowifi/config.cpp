@@ -15,6 +15,8 @@ bool btnHeld = false;
 unsigned long btnPressStart = 0;
 unsigned long lastOTACheck = 0;
 unsigned long wifiLostAt = 0;
+int coinFailStreak = 0;
+bool coinHealthOk = true;
 
 // ===== LOAD CONFIG =====
 void loadConfig() {
@@ -28,12 +30,15 @@ void loadConfig() {
   config.device_ip   = prefs.getString("device_ip", "");
   config.gateway     = prefs.getString("gateway", "");
   config.subnet      = prefs.getString("subnet", "255.255.255.0");
+  config.is_adopted    = prefs.getBool("is_adopted", false);
+  config.device_secret = prefs.getString("device_secret", "");
   prefs.end();
 
   Serial.println("Config loaded:");
   Serial.println("  Vendo:  " + config.vendo_name);
   Serial.println("  WiFi:   " + config.wifi_ssid);
   Serial.println("  Server: " + config.server_ip + ":" + String(config.server_port));
+  Serial.println("  Adopted: " + String(config.is_adopted ? "yes" : "no"));
 }
 
 // ===== SAVE CONFIG =====
@@ -48,6 +53,8 @@ void saveConfig() {
   prefs.putString("device_ip",   config.device_ip);
   prefs.putString("gateway",     config.gateway);
   prefs.putString("subnet",      config.subnet);
+  prefs.putBool("is_adopted",      config.is_adopted);
+  prefs.putString("device_secret", config.device_secret);
   prefs.end();
   Serial.println("Config saved.");
 }

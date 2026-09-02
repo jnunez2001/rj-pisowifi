@@ -1,4 +1,5 @@
 #include "config.h"
+#include "event_queue.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
 
@@ -91,10 +92,42 @@ void postCoin(int coinValue) {
     lcdPrint(3, "Accepted!");
     ledBlink(2, 100);
     relayActivatedAt = millis();
+    coinFailStreak = 0;
+    if (!coinHealthOk) {
+      Serial.println("Coin health recovered after a successful credit");
+      coinHealthOk = true;
+      queueDeviceLog("coin health recovered after a successful credit");
+    }
   } else {
     Serial.println("Coin rejected: " + String(code));
     lcdPrint(3, "Error: " + String(code));
     ledBlink(5, 50);
+
+    // A negative code means postCoin() never got a real reply after all
+    // retries (WiFi/server unreachable for the whole ~18s retry window) -
+    // this coin was physically taken and would otherwise vanish with zero
+    // record. Queue it locally so it can be synced and credited (to this
+    // device's own mac, flagged for review - see server's coin-queue-sync
+    // route) the moment connectivity returns, instead of being lost.
+    if (code <= 0) {
+      queueCoinEvent(coinValue);
+      queueDeviceLog("coin queued: server unreachable, P" + String(coinValue));
+    }
+
+    // Bug this guards against, in combination with activateRelay(): a
+    // coin acceptor or its link to the server that's actually broken
+    // (not just one bad blip) would otherwise keep taking customers'
+    // money into a pipeline that's already shown it won't credit it,
+    // exactly the reported incident. After enough CONSECUTIVE failures
+    // with no success in between, stop opening the coin gate at all
+    // until a self-heal restart (web_server.cpp's /report-issue) or a
+    // successful credit clears it.
+    coinFailStreak++;
+    if (coinFailStreak >= COIN_HEALTH_FAIL_THRESHOLD && coinHealthOk) {
+      coinHealthOk = false;
+      Serial.println("Coin health check failed after " + String(coinFailStreak) + " consecutive failures - blocking further coin acceptance");
+      queueDeviceLog("coin health degraded after " + String(coinFailStreak) + " consecutive failures");
+    }
   }
 }
 
