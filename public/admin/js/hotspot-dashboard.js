@@ -111,6 +111,7 @@ const HS_SOURCE_CONFIG = [
   { key: 'satellite_kiosks', label: 'Satellite Kiosks', icon: 'fa-tower-broadcast', color: '#1a9c63' },
   { key: 'voucher', label: 'Vouchers', icon: 'fa-ticket', color: '#8a6d3d' },
   { key: 'promo', label: 'Promos', icon: 'fa-gift', color: '#3d6d94' },
+  { key: 'movies', label: 'Movies & TV', icon: 'fa-clapperboard', color: '#a6486b' },
   { key: 'free', label: 'Free Claims', icon: 'fa-hand-holding-heart', color: '#9e9e9e' },
 ];
 
@@ -168,10 +169,11 @@ async function hsLoadSalesStats() {
       satellite_kiosks: { amount: t.satellite_kiosk_income || 0, count: t.satellite_kiosk_transactions || 0 },
       voucher: { amount: t.voucher_income || 0, count: t.voucher_transactions || 0 },
       promo: { amount: t.promo_income || 0, count: t.promo_transactions || 0 },
+      movies: { amount: t.movie_income || 0, count: t.movie_transactions || 0 },
       free: { amount: 0, count: t.free_claims || 0 },
     };
     const grandTotal = t.total_income || 0;
-    const totalTransactions = (t.coin_transactions || 0) + (t.voucher_transactions || 0) + (t.promo_transactions || 0) + (t.free_claims || 0);
+    const totalTransactions = (t.coin_transactions || 0) + (t.voucher_transactions || 0) + (t.promo_transactions || 0) + (t.movie_transactions || 0) + (t.free_claims || 0);
 
     // Satellite Kiosks only shows up at all if the operator has at least
     // one registered - progressive disclosure, same rule as everywhere

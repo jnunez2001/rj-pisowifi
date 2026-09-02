@@ -328,6 +328,231 @@
   </div>
 </div>
 
+<!-- ============================================================
+     TV SHOWS - series/anime/K-drama with seasons & episodes. Its own
+     catalog/pricing/sources/rentals (server/services/tvCatalogService.js,
+     tv_series_*/tv_streaming_sources tables) - see that file's header
+     comment for why this isn't folded into Online Movies above. Shares
+     the TMDb key already entered above and the Revenue card at the top
+     of this page (its own "tv" bucket). Anime/K-Drama rows on the
+     customer side are auto-detected from TMDb's own genre + origin
+     country data - nothing to configure here for that part.
+     ============================================================ -->
+<div class="zf3-header" style="margin-top:8px;">
+  <div>
+    <div class="page-title" style="font-size:20px;">TV Shows</div>
+    <div class="page-subtitle">Series, anime, and K-drama - whole-series pricing, seasons &amp; episodes.</div>
+  </div>
+</div>
+
+<div class="zf3-card">
+  <div class="om-card-header">
+    <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-red,#ef4444);"></span>Streaming Sources</div>
+      <div class="om-card-desc">One or more embed servers for episodes. The URL needs a season and episode number too, not just the show.</div>
+    </div>
+    <span class="om-status-pill" id="tvTmdbStatus">NOT SET</span>
+  </div>
+
+  <table class="om-table" style="margin-top:14px;">
+    <thead>
+      <tr>
+        <th style="width:24px;"></th>
+        <th style="width:140px;">Name</th>
+        <th>URL Template</th>
+        <th style="width:40px;"></th>
+      </tr>
+    </thead>
+    <tbody id="tvSourcesRows">
+      <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:14px;">Loading…</td></tr>
+    </tbody>
+  </table>
+  <div style="display:flex;gap:8px;margin-top:10px;">
+    <input type="text" id="tvNewSourceName" placeholder="e.g. Server 1" style="width:140px;">
+    <input type="text" id="tvNewSourceUrl" placeholder="https://provider.example/embed/tv/{tmdb_id}/{season}/{episode}" style="flex:1;">
+    <button class="btn btn-secondary" onclick="tvAddSource()"><i class="fas fa-plus"></i> Add</button>
+  </div>
+  <div class="om-help">Each URL must contain the literal tokens <code>{tmdb_id}</code>, <code>{season}</code>, and <code>{episode}</code>. The star marks which one loads first.</div>
+
+  <div class="om-divider"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div style="font-size:13px;font-weight:700;">TMDb Sync</div>
+      <div class="om-help" id="tvFeedStatus" style="margin-top:2px;">Not synced yet.</div>
+    </div>
+    <button class="btn btn-secondary" id="tvSyncBtn" onclick="tvSyncFeed()"><i class="fas fa-rotate"></i> Sync from TMDb</button>
+  </div>
+  <div class="om-help">Uses the same TMDb API key entered above in Online Movies - nothing extra to configure here.</div>
+</div>
+
+<div class="zf3-card">
+  <div class="om-card-header">
+    <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-green,#22c55e);"></span>Price Groups</div>
+      <div class="om-card-desc">Search any series and set it Free or a price. Paying unlocks every season/episode for the rental window.</div>
+    </div>
+  </div>
+
+  <div style="position:relative;margin-top:12px;">
+    <div style="display:flex;gap:8px;">
+      <input type="text" id="tvSearchInput" placeholder="Search to add a series by title…" style="flex:1;" oninput="tvSearchTmdb(this.value)">
+      <input type="number" id="tvAddByIdInput" placeholder="or TMDb ID" style="width:110px;">
+      <button class="btn btn-secondary" onclick="tvAddById()"><i class="fas fa-plus"></i> Add</button>
+    </div>
+    <div class="om-search-dropdown" id="tvSearchDropdown"></div>
+  </div>
+
+  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+    <input type="file" id="tvImportFile" accept=".txt" style="display:none;" onchange="tvImportIds(this.files[0])">
+    <button class="btn btn-secondary" onclick="document.getElementById('tvImportFile').click()">
+      <i class="fas fa-file-arrow-up"></i> Import .txt of TMDb IDs
+    </button>
+    <button class="btn btn-secondary" onclick="tvExportIds()">
+      <i class="fas fa-file-arrow-down"></i> Export Catalog List
+    </button>
+  </div>
+
+  <div style="margin-top:10px;">
+    <input type="text" id="tvCatalogFilter" placeholder="Filter catalog below…" style="width:100%;" oninput="tvFilterCatalog(this.value)">
+  </div>
+
+  <div class="om-bulk-bar" id="tvBulkBar">
+    <span><strong id="tvBulkCount">0</strong> selected</span>
+    <div style="display:flex;align-items:center;gap:8px;">
+      <span style="color:var(--text-muted);font-size:12.5px;">Set to:</span>
+      <select id="tvBulkTier" class="om-tier-select" onchange="document.getElementById('tvBulkPrice').style.display=this.value==='paid'?'inline-block':'none'">
+        <option value="free">Free</option>
+        <option value="paid">Paid — ₱</option>
+      </select>
+      <input type="number" id="tvBulkPrice" min="0" placeholder="10" style="width:60px;display:none;padding:5px 8px;font-size:12.5px;">
+      <button class="btn btn-secondary" style="padding:6px 12px;font-size:12.5px;" onclick="tvApplyBulk()">Apply</button>
+      <button class="btn btn-secondary" style="padding:6px 12px;font-size:12.5px;color:var(--danger,#e74c3c);" onclick="tvApplyBulkDelete()"><i class="fas fa-trash"></i> Delete Selected</button>
+    </div>
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table class="om-table">
+      <thead>
+        <tr>
+          <th style="width:28px;"><input type="checkbox" id="tvSelectAll" onclick="tvToggleAll(this)"></th>
+          <th class="tv-sortable" data-sort="title" onclick="tvSortBy('title')">Series<span class="om-sort-arrow"></span></th>
+          <th class="tv-sortable" style="width:110px;" data-sort="tier" onclick="tvSortBy('tier')">Tier<span class="om-sort-arrow"></span></th>
+          <th class="tv-sortable" style="width:90px;text-align:right;" data-sort="price" onclick="tvSortBy('price')">Price<span class="om-sort-arrow"></span></th>
+          <th class="tv-sortable" style="width:80px;text-align:right;" data-sort="priority" onclick="tvSortBy('priority')" title="A manual boost - higher shows first in genre/Anime/K-Drama rows.">Priority<span class="om-sort-arrow"></span></th>
+          <th class="tv-sortable" style="width:90px;text-align:right;" data-sort="rental_hours" onclick="tvSortBy('rental_hours')" title="Hours before a rental expires. 0 = use the global default in Settings. Unlocks the WHOLE series.">Rental Hrs<span class="om-sort-arrow"></span></th>
+          <th style="width:70px;"></th>
+        </tr>
+      </thead>
+      <tbody id="tvCatalogRows">
+        <tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:20px;">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="om-table-footer">
+    <span id="tvTableSummary"></span>
+    <div style="display:flex;gap:6px;">
+      <button class="btn btn-secondary" style="padding:5px 10px;font-size:12px;" onclick="tvChangePage(-1)"><i class="fas fa-chevron-left"></i></button>
+      <button class="btn btn-secondary" style="padding:5px 10px;font-size:12px;" onclick="tvChangePage(1)"><i class="fas fa-chevron-right"></i></button>
+    </div>
+  </div>
+</div>
+
+<div class="zf3-card">
+  <div class="om-card-header">
+    <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-orange,#f59e0b);"></span>Rentals</div>
+      <div class="om-card-desc">Look up a device's access to a series, or manually grant one (unlocks every season/episode).</div>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center;">
+    <input type="text" id="tvGrantMac" placeholder="Device MAC (aa:bb:cc:dd:ee:ff)" style="width:220px;">
+    <input type="number" id="tvGrantTmdbId" placeholder="TMDb ID" style="width:110px;">
+    <input type="number" id="tvGrantHours" placeholder="Hours" value="48" style="width:80px;" title="Ignored if Permanent is checked">
+    <label style="display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--text-muted);">
+      <input type="checkbox" id="tvGrantPermanent" onchange="document.getElementById('tvGrantHours').disabled=this.checked"> Permanent
+    </label>
+    <button class="btn btn-secondary" onclick="tvGrantRental()"><i class="fas fa-unlock"></i> Grant</button>
+  </div>
+
+  <div style="margin-top:14px;">
+    <input type="text" id="tvRentalsFilter" placeholder="Filter by MAC or title…" style="width:100%;" oninput="tvFilterRentals(this.value)">
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table class="om-table">
+      <thead>
+        <tr>
+          <th>Series</th>
+          <th>Device MAC</th>
+          <th>Rented</th>
+          <th>Expires</th>
+          <th style="width:70px;"></th>
+        </tr>
+      </thead>
+      <tbody id="tvRentalsRows">
+        <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="zf3-card">
+  <div class="om-card-header">
+    <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-blue,#2563eb);"></span>Top Searches</div>
+      <div class="om-card-desc">What customers actually search for and then open, in TV Shows specifically.</div>
+    </div>
+    <button class="btn btn-secondary" style="padding:6px 12px;font-size:12.5px;" onclick="tvLoadTopSearches()"><i class="fas fa-rotate"></i> Refresh</button>
+  </div>
+  <div style="overflow-x:auto;">
+    <table class="om-table">
+      <thead>
+        <tr>
+          <th>Search</th>
+          <th style="width:80px;text-align:right;">Hits</th>
+          <th style="width:160px;">Last searched</th>
+        </tr>
+      </thead>
+      <tbody id="tvTopSearchesRows">
+        <tr><td colspan="3" style="text-align:center;color:var(--text-muted);padding:20px;">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="zf3-card">
+  <div class="om-card-header">
+    <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-green,#22c55e);"></span>TV Requests</div>
+      <div class="om-card-desc">Titles customers asked for from the Movies tab's "Request a Movie" form (works for shows too).</div>
+    </div>
+    <select id="tvRequestsStatusFilter" class="om-tier-select" onchange="tvLoadRequests()">
+      <option value="">All</option>
+      <option value="pending" selected>Pending</option>
+      <option value="added">Added</option>
+      <option value="declined">Declined</option>
+    </select>
+  </div>
+  <div style="overflow-x:auto;">
+    <table class="om-table">
+      <thead>
+        <tr>
+          <th>Requested by</th>
+          <th>Title</th>
+          <th style="width:70px;">Year</th>
+          <th style="width:140px;">Requested</th>
+          <th style="width:100px;">Status</th>
+          <th style="width:120px;"></th>
+        </tr>
+      </thead>
+      <tbody id="tvRequestsRows">
+        <tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:20px;">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
 <style>
   .movies-admin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
   .movie-admin-card { border: 1px solid var(--border-color, #2a2a2a); border-radius: 12px; overflow: hidden; }
@@ -376,8 +601,8 @@
 
   .om-table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 14px; }
   .om-table thead th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); font-weight: 700; padding: 0 8px 8px; border-bottom: 1px solid var(--border-color, #2a2a2a); }
-  .om-table thead th.om-sortable { cursor: pointer; user-select: none; }
-  .om-table thead th.om-sortable:hover { color: var(--text-primary); }
+  .om-table thead th.om-sortable, .om-table thead th.tv-sortable { cursor: pointer; user-select: none; }
+  .om-table thead th.om-sortable:hover, .om-table thead th.tv-sortable:hover { color: var(--text-primary); }
   .om-sort-arrow { display: inline-block; width: 10px; margin-left: 2px; }
   .om-table thead th.om-sort-active .om-sort-arrow::after { content: '▼'; font-size: 9px; }
   .om-table thead th.om-sort-active.om-sort-desc .om-sort-arrow::after { content: '▲'; }

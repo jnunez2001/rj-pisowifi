@@ -56,6 +56,11 @@ let pendingMovieId = null;
 // ids are the `movies` table's own autoincrement ids, and the two spaces
 // can overlap by coincidence, so they must never be conflated.
 let pendingOnlineMovieId = null;
+// Only set/used when pendingMode === 'tv_series' - the TMDb TV series id
+// being unlocked (server/services/tvCatalogService.js). Unlocks the WHOLE
+// series (every season/episode) for the rental window, same "separate id
+// space, never conflate" reasoning as pendingOnlineMovieId above.
+let pendingTvSeriesId = null;
 // Only set/used when pendingMode === 'pc_rental_create_account' - the
 // desired username/hashed password for the new rental_members account
 // this coin window is funding, captured at open time (POST /pending) so
@@ -85,7 +90,7 @@ function savePendingState() {
   try {
     const state = {
       pendingCoinMac, pendingSetAt, pendingTotal, pendingIp, pendingKioskId,
-      pendingMode, pendingMovieId, pendingOnlineMovieId,
+      pendingMode, pendingMovieId, pendingOnlineMovieId, pendingTvSeriesId,
       pendingCreateUsername, pendingCreatePasswordHash
     };
     db.prepare("INSERT INTO settings (key, value) VALUES ('coin_pending_state', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
@@ -118,6 +123,7 @@ function restorePendingStateAtBoot() {
     pendingMode = state.pendingMode || 'regular';
     pendingMovieId = state.pendingMovieId ?? null;
     pendingOnlineMovieId = state.pendingOnlineMovieId ?? null;
+    pendingTvSeriesId = state.pendingTvSeriesId ?? null;
     pendingCreateUsername = state.pendingCreateUsername ?? null;
     pendingCreatePasswordHash = state.pendingCreatePasswordHash ?? null;
 
@@ -165,6 +171,7 @@ async function finalizePendingCoins(mac) {
   const mode = pendingMode;
   const movieId = pendingMovieId;
   const onlineMovieId = pendingOnlineMovieId;
+  const tvSeriesId = pendingTvSeriesId;
   const createUsername = pendingCreateUsername;
   const createPasswordHash = pendingCreatePasswordHash;
 
@@ -193,6 +200,7 @@ async function finalizePendingCoins(mac) {
   pendingMode = 'regular';
   pendingMovieId = null;
   pendingOnlineMovieId = null;
+  pendingTvSeriesId = null;
   pendingCreateUsername = null;
   pendingCreatePasswordHash = null;
   if (pendingFinalizeTimer) clearTimeout(pendingFinalizeTimer);
@@ -399,6 +407,48 @@ async function finalizePendingCoins(mac) {
     return { success: true, result: { movie_unlocked: true, movie_id: movie.id, expires_at: expiresAt, credit_applied: creditApplied, change_credited: changeCredited } };
   }
 
+  // TV series rental: unlocks the WHOLE series (every season/episode) for
+  // the rental window, against tvCatalogService + tv_series_rentals - same
+  // credit-application and over/underpay banking logic as 'online_movie'
+  // above (shares the same movie_credits balance, see the comment on
+  // hasActiveTvRental in portal.js for why that's one pool, not two).
+  if (mode === 'tv_series') {
+    const tvCatalogService = require('../services/tvCatalogService');
+    const series = tvCatalogService.getById(tvSeriesId);
+    if (!series) {
+      return { success: false, reason: 'series_not_found' };
+    }
+
+    const creditRow = db.prepare('SELECT balance_pesos FROM movie_credits WHERE mac_address = ?').get(mac);
+    const creditApplied = Math.min(creditRow?.balance_pesos || 0, series.price_pesos);
+    const amountNeeded = series.price_pesos - creditApplied;
+
+    if (total < amountNeeded) {
+      addMovieCredit(mac, total);
+      console.log(`⚠️ TV series rental window for ${mac} closed with ₱${total}` + (creditApplied > 0 ? ` (+₱${creditApplied} credit not yet applied)` : '') + `, needed ₱${amountNeeded} more - not unlocked, ₱${total} credited to their balance instead.`);
+      return { success: false, reason: 'insufficient_amount', total, needed: amountNeeded, credited_to_balance: total };
+    }
+
+    if (creditApplied > 0) {
+      db.prepare('UPDATE movie_credits SET balance_pesos = balance_pesos - ?, updated_at = CURRENT_TIMESTAMP WHERE mac_address = ?').run(creditApplied, mac);
+    }
+    const changeCredited = total - amountNeeded;
+    if (changeCredited > 0) addMovieCredit(mac, changeCredited);
+
+    const rentalHours = series.rental_hours > 0
+      ? series.rental_hours
+      : parseFloat(db.prepare("SELECT value FROM settings WHERE key = 'movie_rental_hours'").get()?.value || '48');
+    const expiresAt = new Date(Date.now() + rentalHours * 60 * 60 * 1000).toISOString();
+    db.prepare('INSERT INTO tv_series_rentals (series_id, mac_address, expires_at) VALUES (?, ?, ?)').run(series.id, mac, expiresAt);
+    db.prepare(`
+      INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, mac_address)
+      VALUES (?, ?, 0, 'tv_series_rental', ?)
+    `).run(`TV-SERIES-${series.id}`, series.price_pesos, mac);
+    console.log(`✅ TV series unlocked for ${mac}: "${series.title}" (₱${series.price_pesos})` + (creditApplied > 0 ? `, ₱${creditApplied} from credit` : '') + (changeCredited > 0 ? ` + ₱${changeCredited} credited to their balance` : ''));
+    require('../services/vendoAudioService').playVendoAmount(total).catch(() => {});
+    return { success: true, result: { series_unlocked: true, series_id: series.id, expires_at: expiresAt, credit_applied: creditApplied, change_credited: changeCredited } };
+  }
+
   try {
     let result;
     if (mode === 'convert') result = await convertCoinValue(mac, total, ip, kioskId);
@@ -455,15 +505,15 @@ function pruneCoinEventCache() {
 
 // POST /api/coin/pending, portal calls this right when INSERT COIN modal opens
 router.post('/pending', (req, res) => {
-  const { mac, is_premium, mode, movie_id, online_movie_id, username, password } = req.body;
+  const { mac, is_premium, mode, movie_id, online_movie_id, tv_series_id, username, password } = req.body;
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
   // mode is the current contract ('regular'|'premium'|'convert'|'movie'|
-  // 'online_movie'|'pc_rental'|'pc_rental_create_account'); is_premium is
-  // kept working for older portal.js builds still sending the plain
-  // boolean, mapped onto the same 'premium' mode.
-  const resolvedMode = (mode === 'convert' || mode === 'convert_down' || mode === 'movie' || mode === 'online_movie' || mode === 'pc_rental' || mode === 'pc_rental_create_account') ? mode
+  // 'online_movie'|'tv_series'|'pc_rental'|'pc_rental_create_account');
+  // is_premium is kept working for older portal.js builds still sending
+  // the plain boolean, mapped onto the same 'premium' mode.
+  const resolvedMode = (mode === 'convert' || mode === 'convert_down' || mode === 'movie' || mode === 'online_movie' || mode === 'tv_series' || mode === 'pc_rental' || mode === 'pc_rental_create_account') ? mode
     : (mode === 'premium' || is_premium) ? 'premium' : 'regular';
 
   // Coinslot purpose (wifi/pc/both) is enforced per-vendo, not here -
@@ -486,6 +536,13 @@ router.post('/pending', (req, res) => {
     const movie = onlineMovieCatalog.getById(parseInt(online_movie_id, 10));
     if (!movie || movie.tier === 'free') {
       return res.status(400).json({ success: false, message: 'Not a rentable online movie' });
+    }
+  }
+  if (resolvedMode === 'tv_series') {
+    const tvCatalogService = require('../services/tvCatalogService');
+    const series = tvCatalogService.getById(parseInt(tv_series_id, 10));
+    if (!series || series.tier === 'free') {
+      return res.status(400).json({ success: false, message: 'Not a rentable TV series' });
     }
   }
   if (resolvedMode === 'pc_rental') {
@@ -539,6 +596,7 @@ router.post('/pending', (req, res) => {
   pendingTotal = 0;
   pendingMovieId = resolvedMode === 'movie' ? parseInt(movie_id, 10) : null;
   pendingOnlineMovieId = resolvedMode === 'online_movie' ? parseInt(online_movie_id, 10) : null;
+  pendingTvSeriesId = resolvedMode === 'tv_series' ? parseInt(tv_series_id, 10) : null;
   pendingCreateUsername = createUsername;
   pendingCreatePasswordHash = createPasswordHash;
   pendingIp = '';

@@ -68,6 +68,10 @@ function tagKind(list, kind) {
 // separate systems before this merge; normalized here rather than changing
 // either database schema.
 function movieCardHtml(m) {
+  // TV series have their own card renderer (episode badge, opens the
+  // season/episode picker instead of playing directly) - delegated to
+  // tv-shows-online.js rather than teaching this function about episodes.
+  if (m._kind === 'tv' && typeof tvCardHtml === 'function') return tvCardHtml(m);
   const isLocal = m._kind === 'local';
   const isPaidTier = isLocal ? m.tier === 'premium' : m.tier === 'paid';
   const lock = (isPaidTier && !m.unlocked) ? '<div class="movie-card-lock"><i class="fas fa-lock"></i></div>' : '';
@@ -224,15 +228,20 @@ function renderOnlineMoviesRows() {
   const top10 = topWatchedRowHtml(onlineAllMovies);
   const newReleases = newReleasesRowHtml(onlineAllMovies);
   const localRow = localLibraryRowHtml(allMovies);
+  // tv-shows-online.js, appended after the movie rows so Anime/K-Drama/
+  // series genre shelves show up on this same page (per owner request:
+  // one organized Movies tab, not a separate TV tab) - guarded since this
+  // file can't assume tv-shows-online.js loaded first/at all.
+  const tvRows = typeof buildTvRowsHtml === 'function' ? buildTvRowsHtml() : '';
   const genreRows = buildGenreRows(onlineAllMovies);
   if (genreRows.length > 0) {
-    el.innerHTML = exclusive + top10 + newReleases + localRow + rowsHtml(genreRows);
+    el.innerHTML = exclusive + top10 + newReleases + localRow + rowsHtml(genreRows) + tvRows;
     return;
   }
   const tierRows = TIER_ROWS
     .map(({ tier, label }) => [label, onlineAllMovies.filter((m) => m.tier === tier)])
     .filter(([, items]) => items.length > 0);
-  el.innerHTML = exclusive + top10 + newReleases + localRow + rowsHtml(tierRows);
+  el.innerHTML = exclusive + top10 + newReleases + localRow + rowsHtml(tierRows) + tvRows;
 }
 
 // Flat grid used only for search results, where tier grouping isn't useful.
@@ -601,7 +610,21 @@ function closeOnlineMoviePlayer() {
 // server-side to one request per device per rolling 24h (see that route) -
 // this file never enforces that itself, it just surfaces whatever message
 // the server sends back if a customer tries again too soon.
-function openMovieRequestOverlay() {
+// Shared by both Movies and TV Shows (tv-shows-online.js calls
+// openMovieRequestOverlay('tv') instead of a second near-identical form) -
+// which endpoint submitMovieRequest() posts to just follows whichever
+// media type opened it last.
+let movieRequestMediaType = 'movie';
+
+function openMovieRequestOverlay(mediaType) {
+  movieRequestMediaType = mediaType === 'tv' ? 'tv' : 'movie';
+  const isTv = movieRequestMediaType === 'tv';
+  document.querySelector('#movieRequestOverlay h3').textContent = isTv ? 'Request a Series' : 'Request a Movie';
+  document.querySelector('#movieRequestOverlay p').textContent = isTv
+    ? "Don't see it in our library? Let us know and we'll consider adding it."
+    : "Don't see it in our library? Let us know and we'll consider adding it.";
+  document.querySelector('#movieRequestTitle').previousElementSibling.textContent = isTv ? 'Series title' : 'Movie title';
+  document.getElementById('movieRequestTitle').placeholder = isTv ? 'e.g. Attack on Titan' : 'e.g. Oppenheimer';
   // Remembers the customer's name locally (per-device, never sent anywhere
   // but this same form) so a repeat requester doesn't have to retype it -
   // purely a convenience, not an identity system.
@@ -624,7 +647,7 @@ async function submitMovieRequest() {
   const msgEl = document.getElementById('movieRequestMsg');
 
   if (!name || !title) {
-    msgEl.textContent = 'Please enter your name and the movie title.';
+    msgEl.textContent = `Please enter your name and the ${movieRequestMediaType === 'tv' ? 'series' : 'movie'} title.`;
     msgEl.style.color = 'var(--accent-red, #ef4444)';
     msgEl.style.display = 'block';
     return;
@@ -633,7 +656,8 @@ async function submitMovieRequest() {
   const btn = document.getElementById('movieRequestSubmitBtn');
   btn.disabled = true;
   try {
-    const res = await fetch('/api/portal/movie-requests', {
+    const endpoint = movieRequestMediaType === 'tv' ? '/api/portal/tv-requests' : '/api/portal/movie-requests';
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ mac: onlineCurrentMac, requester_name: name, title, year }),
@@ -665,7 +689,7 @@ document.getElementById('onlineMoviesSearch').addEventListener('input', (e) => {
     renderOnlineMoviesRows();
     return;
   }
-  const combined = [...onlineAllMovies, ...allMovies];
+  const combined = [...onlineAllMovies, ...allMovies, ...(typeof tvAllSeries !== 'undefined' ? tvAllSeries : [])];
   renderOnlineMoviesFlat(combined.filter((m) => m.title.toLowerCase().includes(q)));
 });
 
@@ -673,19 +697,35 @@ document.getElementById('onlineMoviesSearch').addEventListener('input', (e) => {
 // merged into one set of rows here instead, per owner request that
 // customers see a single Movies experience rather than separate tabs.
 // loadMovies() (movies.js) populates the local library; loadOnlineMovies()
-// above populates the TMDb-backed one. Detects the MAC exactly once here
-// and hands it to both (their own detectMacForMovies() calls are guarded
-// to skip re-detecting) - doing it twice in parallel used to fire two
-// near-simultaneous /api/portal/detect requests from the same device, and
-// the server's own per-IP rate limit silently blanked whichever one lost
-// the race, breaking either local or online paid rentals at random.
-detectMacForMovies().then((mac) => {
-  currentMac = mac;
-  onlineCurrentMac = mac;
-  return Promise.all([loadMovies(), loadOnlineMovies()]);
-}).then(() => {
-  tagKind(allMovies, 'local');
-  tagKind(onlineAllMovies, 'online');
-  renderOnlineMoviesRows();
-  refreshMovieCredit();
-});
+// above populates the TMDb-backed one; loadTvShows() (tv-shows-online.js,
+// if present) populates the series catalog. Detects the MAC exactly once
+// here and hands it to all three (their own detectMacForMovies() calls are
+// guarded to skip re-detecting) - doing it separately in parallel used to
+// fire multiple near-simultaneous /api/portal/detect requests from the
+// same device, and the server's own per-IP rate limit silently blanked
+// whichever one lost the race, breaking paid rentals at random.
+//
+// This is deliberately called from the BOTTOM of tv-shows-online.js (the
+// last script tag in movies.html), not here, even though the function
+// itself lives in this file - see that file's tail comment. Calling it
+// here raced tv-shows-online.js's own script load: when the MAC comes
+// from a ?mac= URL param, detectMacForMovies() resolves on the same tick
+// with no real network round-trip, so this .then() could fire before the
+// browser had even finished fetching/executing the next <script> tag,
+// leaving loadTvShows undefined and silently skipping the whole TV
+// catalog - found live via ?mac= testing, but not something to leave to
+// timing luck for real (slow-network) devices either.
+function startUnifiedMoviesInit() {
+  detectMacForMovies().then((mac) => {
+    currentMac = mac;
+    onlineCurrentMac = mac;
+    const loaders = [loadMovies(), loadOnlineMovies()];
+    if (typeof loadTvShows === 'function') loaders.push(loadTvShows());
+    return Promise.all(loaders);
+  }).then(() => {
+    tagKind(allMovies, 'local');
+    tagKind(onlineAllMovies, 'online');
+    renderOnlineMoviesRows();
+    refreshMovieCredit();
+  });
+}

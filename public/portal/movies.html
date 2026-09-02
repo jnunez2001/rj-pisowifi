@@ -164,8 +164,46 @@
     </div>
   </div>
 
+  <!-- SERIES DETAIL (seasons & episodes) - a series card opens this instead
+       of playing directly, since a series has no single "the video" the
+       way a movie does. Paying (movieRentOverlay above, reused) unlocks
+       every season/episode shown here for the rental window, not just one -
+       see server/services/tvCatalogService.js's header comment. -->
+  <div id="seriesDetailOverlay" class="movie-player-overlay">
+    <div class="movie-player-topbar">
+      <button class="movie-player-close" onclick="closeSeriesDetail()"><i class="fas fa-times"></i></button>
+      <div id="seriesDetailTitle" class="movie-player-title"></div>
+    </div>
+    <div class="series-detail-body">
+      <div id="seriesDetailSeasonTabs" class="series-season-tabs"></div>
+      <div id="seriesDetailEpisodes" class="series-episode-list"></div>
+    </div>
+  </div>
+
+  <!-- TV PLAYER OVERLAY (iframe embed) - kept fully separate from
+       onlineMoviePlayerOverlay (not shared) so a customer switching
+       servers mid-episode can never be misrouted into the movie playback
+       code path or vice versa. -->
+  <div id="tvPlayerOverlay" class="movie-player-overlay">
+    <div class="movie-player-topbar">
+      <button class="movie-player-close" onclick="closeTvPlayer()"><i class="fas fa-times"></i></button>
+      <div id="tvPlayerTitle" class="movie-player-title"></div>
+    </div>
+    <div id="tvSourceTabs" class="online-source-tabs"></div>
+    <div class="movie-player-body">
+      <iframe id="tvPlayerFrame" class="movie-player-iframe" src="" allowfullscreen
+        allow="autoplay; encrypted-media; picture-in-picture" referrerpolicy="origin"
+        sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+    </div>
+  </div>
+
+  <!-- REQUEST A MOVIE/SERIES - one shared form (movies-online.js sets
+       tvRequestsMediaType and swaps the title/label before opening) rather
+       than a second near-identical overlay just for TV. -->
+
   <script src="/portal/assets/js/vendor/hls.min.js"></script>
   <script src="/portal/assets/js/movies.js?v=5"></script>
-  <script src="/portal/assets/js/movies-online.js?v=15"></script>
+  <script src="/portal/assets/js/movies-online.js?v=18"></script>
+  <script src="/portal/assets/js/tv-shows-online.js?v=2"></script>
 </body>
 </html>

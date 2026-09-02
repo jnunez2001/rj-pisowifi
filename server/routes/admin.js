@@ -659,6 +659,22 @@ router.get('/sales', adminAuth, (req, res) => {
       FROM transactions WHERE date(created_at, 'localtime') = ? AND type = 'free'
     `).get(today);
 
+    // Bug found live: Today's Revenue only ever summed coin+promo+voucher,
+    // silently excluding movie/TV rental income (server/routes/coin.js's
+    // 'movie'/'online_movie'/'tv_series' transaction types) - a real
+    // mismatch against the Week/Month figures below and the Movies tab's
+    // own Revenue card (both already use a `type != 'free'` EXCLUSION
+    // filter, which naturally includes these; this route's `today` block
+    // used narrower per-category INCLUSION filters instead, and movies/TV
+    // simply had no category here at all). Added as its own category
+    // (not folded into coin_income) so "Revenue by Source" can show it
+    // honestly instead of misattributing it to coin sales.
+    const todayMovies = db.prepare(`
+      SELECT COUNT(*) as movie_count, SUM(coin_value) as movie_income
+      FROM transactions WHERE date(created_at, 'localtime') = ?
+        AND type IN ('movie_rental', 'online_movie_rental', 'online_movie_rental_credit', 'tv_series_rental', 'tv_series_rental_credit')
+    `).get(today);
+
     // Real average session duration - see session_history's column comment
     // in database.js. Scoped to sessions that actually ENDED today, not
     // ones that started today (a session that started yesterday and just
@@ -805,7 +821,9 @@ router.get('/sales', adminAuth, (req, res) => {
         promo_transactions: todayPromo.promo_count || 0,
         voucher_income: todayVoucher.voucher_income || 0,
         voucher_transactions: todayVoucher.voucher_count || 0,
-        total_income: (todaySales.total_coins || 0) + (todayPromo.promo_income || 0) + (todayVoucher.voucher_income || 0),
+        movie_income: todayMovies.movie_income || 0,
+        movie_transactions: todayMovies.movie_count || 0,
+        total_income: (todaySales.total_coins || 0) + (todayPromo.promo_income || 0) + (todayVoucher.voucher_income || 0) + (todayMovies.movie_income || 0),
         transactions: todaySales.transaction_count || 0,
         minutes_sold: todaySales.total_minutes || 0,
         free_claims: todayFree.free_count || 0,
@@ -5858,19 +5876,20 @@ router.delete('/movies/online-rentals/:id', adminAuth, (req, res) => {
 // at collection time, only once it's actually earned via a completed
 // rental or a WiFi-time conversion, so this can't double-count it.
 router.get('/movies/revenue', adminAuth, (req, res) => {
-  const MOVIE_TYPES = ['movie_rental', 'online_movie_rental', 'online_movie_rental_credit'];
+  const MOVIE_TYPES = ['movie_rental', 'online_movie_rental', 'online_movie_rental_credit', 'tv_series_rental', 'tv_series_rental_credit'];
   const placeholders = MOVIE_TYPES.map(() => '?').join(',');
   const today = db.prepare("SELECT date('now', 'localtime') as d").get().d;
 
   const sumFor = (whereClause, ...params) => db.prepare(`
     SELECT
       COALESCE(SUM(CASE WHEN type = 'movie_rental' THEN coin_value ELSE 0 END), 0) as local,
-      COALESCE(SUM(CASE WHEN type != 'movie_rental' THEN coin_value ELSE 0 END), 0) as online,
+      COALESCE(SUM(CASE WHEN type IN ('online_movie_rental', 'online_movie_rental_credit') THEN coin_value ELSE 0 END), 0) as online,
+      COALESCE(SUM(CASE WHEN type IN ('tv_series_rental', 'tv_series_rental_credit') THEN coin_value ELSE 0 END), 0) as tv,
       COUNT(*) as rentals
     FROM transactions WHERE type IN (${placeholders}) ${whereClause}
   `).get(...MOVIE_TYPES, ...params);
 
-  const toTotals = (row) => ({ local: row.local, online: row.online, total: row.local + row.online, rentals: row.rentals });
+  const toTotals = (row) => ({ local: row.local, online: row.online, tv: row.tv, total: row.local + row.online + row.tv, rentals: row.rentals });
 
   const todayTotals = toTotals(sumFor("AND date(created_at, 'localtime') = ?", today));
   const monthTotals = toTotals(sumFor("AND strftime('%Y-%m', created_at, 'localtime') = strftime('%Y-%m', 'now', 'localtime')"));
@@ -5885,6 +5904,7 @@ router.get('/movies/revenue', adminAuth, (req, res) => {
   const topMovies = topRows.map((row) => {
     const onlineMatch = row.voucher_code.match(/^ONLINE-MOVIE-(\d+)$/);
     const localMatch = row.voucher_code.match(/^MOVIE-(\d+)$/);
+    const tvMatch = row.voucher_code.match(/^TV-SERIES-(\d+)$/);
     let title = row.voucher_code;
     let kind = 'unknown';
     if (onlineMatch) {
@@ -5897,6 +5917,12 @@ router.get('/movies/revenue', adminAuth, (req, res) => {
       kind = 'local';
       const movie = movieService.getMovie(localMatch[1]);
       title = movie?.title || `Movie #${localMatch[1]}`;
+    } else if (tvMatch) {
+      kind = 'tv';
+      const id = parseInt(tvMatch[1], 10);
+      title = db.prepare('SELECT title FROM tv_series_pricing WHERE tmdb_id = ?').get(id)?.title
+        || db.prepare('SELECT title FROM tv_series_feed WHERE tmdb_id = ?').get(id)?.title
+        || `TMDb TV #${id}`;
     }
     return { title, kind, revenue: row.revenue, rentals: row.rentals };
   });
@@ -5904,25 +5930,32 @@ router.get('/movies/revenue', adminAuth, (req, res) => {
   res.json({ success: true, today: todayTotals, month: monthTotals, all_time: allTimeTotals, top_movies: topMovies });
 });
 
+// ?media_type= (default 'movie') - online_movie_searches is shared with
+// TV Shows (see database.js's column comment), filtered here so each
+// section's Top Searches panel only shows its own kind.
 router.get('/movies/top-searches', adminAuth, (req, res) => {
+  const mediaType = req.query.media_type === 'tv' ? 'tv' : 'movie';
   const rows = db.prepare(`
     SELECT query, COUNT(*) as hits, MAX(searched_at) as last_searched
-    FROM online_movie_searches
+    FROM online_movie_searches WHERE media_type = ?
     GROUP BY LOWER(query)
     ORDER BY hits DESC, last_searched DESC
     LIMIT 20
-  `).all();
+  `).all(mediaType);
   res.json({ success: true, searches: rows });
 });
 
-// GET /movies/requests?status= - the "Movie Requests" panel (Movies >
-// Online). Defaults to showing everything, newest first; ?status=pending
-// narrows to just what still needs a decision.
+// GET /movies/requests?status=&media_type= - the Requests panel, shared
+// with TV Shows (movie_requests table) - defaults to 'movie' so the
+// existing Movies > Online panel keeps showing only what it always did.
+// Defaults to showing everything (within that media_type), newest first;
+// ?status=pending narrows to just what still needs a decision.
 router.get('/movies/requests', adminAuth, (req, res) => {
   const status = ['pending', 'added', 'declined'].includes(req.query.status) ? req.query.status : '';
+  const mediaType = req.query.media_type === 'tv' ? 'tv' : 'movie';
   const rows = status
-    ? db.prepare('SELECT * FROM movie_requests WHERE status = ? ORDER BY created_at DESC').all(status)
-    : db.prepare('SELECT * FROM movie_requests ORDER BY created_at DESC').all();
+    ? db.prepare('SELECT * FROM movie_requests WHERE media_type = ? AND status = ? ORDER BY created_at DESC').all(mediaType, status)
+    : db.prepare('SELECT * FROM movie_requests WHERE media_type = ? ORDER BY created_at DESC').all(mediaType);
   res.json({ success: true, requests: rows });
 });
 
@@ -5940,6 +5973,328 @@ router.post('/movies/requests/:id/status', adminAuth, (req, res) => {
 });
 
 router.delete('/movies/requests/:id', adminAuth, (req, res) => {
+  db.prepare('DELETE FROM movie_requests WHERE id = ?').run(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+// ============================================================
+// TV SHOWS (series/anime/K-drama) - mirrors the entire Online Movies
+// admin section above, against tvCatalogService/tmdbTvService and the
+// tv_series_*/tv_streaming_sources/tv_poster_cache tables instead. See
+// database.js's header comment on those tables for why this is a fully
+// separate system rather than a "kind" flag bolted onto the movie one.
+// Shares: the TMDb API key (/movies/tmdb-key, /movies/tmdb-test - one key
+// works for both TMDb API surfaces), the Revenue card (extended above to
+// include a `tv` bucket), and movie_requests/online_movie_searches (via
+// ?media_type=tv, see those routes above) - not shared: the catalog,
+// pricing, hidden-list, streaming sources, and rentals, all their own
+// tables so a TV series id can never collide with a movie id.
+// ============================================================
+const tvCatalogService = require('../services/tvCatalogService');
+const tmdbTvService = require('../services/tmdbTvService');
+
+router.get('/tv-shows/online-settings', adminAuth, (req, res) => {
+  const tmdbKeySet = !!db.prepare("SELECT value FROM settings WHERE key = 'tmdb_api_key'").get()?.value;
+  const feedStatus = tmdbTvService.getFeedStatus();
+  res.json({ success: true, tmdb_key_set: tmdbKeySet, feed: feedStatus });
+});
+
+// ── Streaming Sources (tv_streaming_sources) - needs season+episode too ──
+router.get('/tv-shows/streaming-sources', adminAuth, (req, res) => {
+  const sources = db.prepare('SELECT * FROM tv_streaming_sources ORDER BY sort_order, id').all();
+  res.json({ success: true, sources });
+});
+
+router.post('/tv-shows/streaming-sources', adminAuth, (req, res) => {
+  const name = String(req.body?.name || '').trim();
+  const template = String(req.body?.url_template || '').trim();
+  if (!name || !template) return res.status(400).json({ success: false, message: 'A name and URL template are required.' });
+  if (!template.includes('{tmdb_id}') || !template.includes('{season}') || !template.includes('{episode}')) {
+    return res.status(400).json({ success: false, message: 'The URL must contain the literal {tmdb_id}, {season}, and {episode} placeholders.' });
+  }
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM tv_streaming_sources').get().m;
+  const isFirst = db.prepare('SELECT COUNT(*) as c FROM tv_streaming_sources').get().c === 0;
+  const result = db.prepare('INSERT INTO tv_streaming_sources (name, url_template, is_default, sort_order) VALUES (?, ?, ?, ?)')
+    .run(name, template, isFirst ? 1 : 0, maxOrder + 1);
+  res.json({ success: true, id: result.lastInsertRowid });
+});
+
+router.post('/tv-shows/streaming-sources/:id', adminAuth, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { name, url_template, is_default } = req.body || {};
+  if (url_template !== undefined && (!String(url_template).includes('{tmdb_id}') || !String(url_template).includes('{season}') || !String(url_template).includes('{episode}'))) {
+    return res.status(400).json({ success: false, message: 'The URL must contain the literal {tmdb_id}, {season}, and {episode} placeholders.' });
+  }
+  if (is_default) {
+    db.prepare('UPDATE tv_streaming_sources SET is_default = 0').run();
+  }
+  db.prepare(`
+    UPDATE tv_streaming_sources SET
+      name = COALESCE(?, name), url_template = COALESCE(?, url_template), is_default = COALESCE(?, is_default)
+    WHERE id = ?
+  `).run(name || null, url_template || null, is_default ? 1 : (is_default === false ? 0 : null), id);
+  res.json({ success: true });
+});
+
+router.delete('/tv-shows/streaming-sources/:id', adminAuth, (req, res) => {
+  db.prepare('DELETE FROM tv_streaming_sources WHERE id = ?').run(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+router.get('/tv-shows/tmdb-search', adminAuth, async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (!q) return res.json({ success: true, results: [] });
+    const results = await tmdbTvService.searchSeries(q);
+    res.json({ success: true, results });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || 'Search failed' });
+  }
+});
+
+router.post('/tv-shows/tmdb-sync', adminAuth, async (req, res) => {
+  try {
+    const result = await tmdbTvService.syncFeed();
+    if (result.skipped) return res.status(400).json({ success: false, message: 'Set a TMDb API key first.' });
+    res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('TMDb TV feed sync error:', err);
+    res.status(500).json({ success: false, message: err.message || 'Sync failed' });
+  }
+});
+
+const TV_CATALOG_SORTERS = {
+  title: (a, b) => a.title.localeCompare(b.title),
+  tier: (a, b) => a.tier.localeCompare(b.tier) || a.title.localeCompare(b.title),
+  price: (a, b) => a.price_pesos - b.price_pesos || a.title.localeCompare(b.title),
+  priority: (a, b) => (a.priority || 0) - (b.priority || 0) || a.title.localeCompare(b.title),
+  rental_hours: (a, b) => (a.rental_hours || 0) - (b.rental_hours || 0) || a.title.localeCompare(b.title),
+};
+
+router.get('/tv-shows/catalog', adminAuth, (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const sortKey = TV_CATALOG_SORTERS[req.query.sort] ? req.query.sort : 'title';
+  const dir = req.query.dir === 'desc' ? 'desc' : 'asc';
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30));
+
+  let all = tvCatalogService.getAll();
+  if (q) all = all.filter((s) => s.title.toLowerCase().includes(q));
+  all.sort(TV_CATALOG_SORTERS[sortKey]);
+  if (dir === 'desc') all.reverse();
+
+  const total = all.length;
+  const start = (page - 1) * limit;
+  const pageItems = all.slice(start, start + limit).map((s) => ({
+    ...s,
+    poster: tmdbTvService.getCachedPosterUrl(s.id),
+  }));
+
+  res.json({ success: true, series: pageItems, total, page, limit });
+});
+
+router.post('/tv-shows/catalog/price', adminAuth, (req, res) => {
+  const tmdbId = parseInt(req.body?.tmdb_id, 10);
+  const title = String(req.body?.title || '').trim();
+  const tier = req.body?.tier === 'paid' ? 'paid' : 'free';
+  const pricePesos = tier === 'paid' ? Math.max(0, parseInt(req.body?.price_pesos, 10) || 0) : 0;
+  const priority = parseInt(req.body?.priority, 10) || 0;
+  const rentalHours = tier === 'paid' ? Math.max(0, parseInt(req.body?.rental_hours, 10) || 0) : 0;
+  if (!tmdbId || !title) {
+    return res.status(400).json({ success: false, message: 'A series and title are required.' });
+  }
+  tvCatalogService.unhide(tmdbId);
+  db.prepare(`
+    INSERT INTO tv_series_pricing (tmdb_id, title, tier, price_pesos, priority, rental_hours, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(tmdb_id) DO UPDATE SET title = excluded.title, tier = excluded.tier,
+      price_pesos = excluded.price_pesos, priority = excluded.priority,
+      rental_hours = excluded.rental_hours, updated_at = CURRENT_TIMESTAMP
+  `).run(tmdbId, title, tier, pricePesos, priority, rentalHours);
+  res.json({ success: true });
+});
+
+router.post('/tv-shows/catalog/bulk-delete', adminAuth, (req, res) => {
+  const ids = Array.isArray(req.body?.series) ? req.body.series.map((s) => (typeof s === 'object' ? s.tmdb_id : s)) : [];
+  if (ids.length === 0) return res.status(400).json({ success: false, message: 'No series selected.' });
+  tvCatalogService.hideMany(ids);
+  res.json({ success: true, removed: ids.length });
+});
+
+router.post('/tv-shows/catalog/add-by-id', adminAuth, async (req, res) => {
+  const tmdbId = parseInt(req.body?.tmdb_id, 10);
+  const tier = req.body?.tier === 'paid' ? 'paid' : 'free';
+  const pricePesos = tier === 'paid' ? Math.max(0, parseInt(req.body?.price_pesos, 10) || 0) : 0;
+  if (!tmdbId) return res.status(400).json({ success: false, message: 'Enter a TMDb ID first.' });
+
+  try {
+    const series = await tmdbTvService.getSeriesById(tmdbId);
+    tvCatalogService.unhide(series.id);
+    db.prepare(`
+      INSERT INTO tv_series_pricing (tmdb_id, title, tier, price_pesos, updated_at)
+      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(tmdb_id) DO UPDATE SET title = excluded.title, tier = excluded.tier,
+        price_pesos = excluded.price_pesos, updated_at = CURRENT_TIMESTAMP
+    `).run(series.id, series.title, tier, pricePesos);
+    res.json({ success: true, title: series.title });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || 'Could not add that ID.' });
+  }
+});
+
+router.post('/tv-shows/catalog/import', adminAuth, idListUpload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, message: 'No file uploaded.' });
+
+  const text = req.file.buffer.toString('utf8');
+  const ids = [...new Set(
+    text.split(/\r?\n/)
+      .map((line) => line.match(/\d+/))
+      .filter(Boolean)
+      .map((m) => parseInt(m[0], 10))
+  )];
+
+  if (ids.length === 0) {
+    return res.status(400).json({ success: false, message: 'No numeric TMDb IDs found in that file.' });
+  }
+
+  const existing = new Set(tvCatalogService.getAll().map((s) => s.id));
+  const toFetch = ids.filter((id) => !existing.has(id));
+
+  const upsert = db.prepare(`
+    INSERT INTO tv_series_pricing (tmdb_id, title, tier, price_pesos, updated_at)
+    VALUES (?, ?, 'free', 0, CURRENT_TIMESTAMP)
+    ON CONFLICT(tmdb_id) DO UPDATE SET title = excluded.title, updated_at = CURRENT_TIMESTAMP
+  `);
+
+  let added = 0;
+  let failed = 0;
+  const CONCURRENCY = 5;
+  for (let i = 0; i < toFetch.length; i += CONCURRENCY) {
+    const batch = toFetch.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(batch.map((id) => tmdbTvService.getSeriesById(id)));
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        tvCatalogService.unhide(result.value.id);
+        upsert.run(result.value.id, result.value.title);
+        added++;
+      } else {
+        failed++;
+      }
+    }
+  }
+
+  res.json({
+    success: true,
+    total_lines_found: ids.length,
+    already_in_catalog: ids.length - toFetch.length,
+    added,
+    failed,
+  });
+});
+
+router.get('/tv-shows/catalog/export', adminAuth, (req, res) => {
+  const series = tvCatalogService.getAll().slice().sort((a, b) => a.title.localeCompare(b.title));
+  const lines = series.map((s) => `${s.id} # ${s.title}`);
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', 'attachment; filename="tv-shows-tmdb-ids.txt"');
+  res.send(lines.join('\n') + '\n');
+});
+
+router.post('/tv-shows/catalog/bulk-price', adminAuth, (req, res) => {
+  const ids = Array.isArray(req.body?.series) ? req.body.series : [];
+  const tier = req.body?.tier === 'paid' ? 'paid' : 'free';
+  const pricePesos = tier === 'paid' ? Math.max(0, parseInt(req.body?.price_pesos, 10) || 0) : 0;
+  if (ids.length === 0) return res.status(400).json({ success: false, message: 'No series selected.' });
+
+  const upsert = db.prepare(`
+    INSERT INTO tv_series_pricing (tmdb_id, title, tier, price_pesos, updated_at)
+    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(tmdb_id) DO UPDATE SET tier = excluded.tier, price_pesos = excluded.price_pesos, updated_at = CURRENT_TIMESTAMP
+  `);
+  const applyAll = db.transaction((items) => {
+    for (const item of items) upsert.run(item.tmdb_id, item.title, tier, pricePesos);
+  });
+  applyAll(ids);
+  res.json({ success: true, updated: ids.length });
+});
+
+router.delete('/tv-shows/catalog/price/:tmdbId', adminAuth, (req, res) => {
+  db.prepare('DELETE FROM tv_series_pricing WHERE tmdb_id = ?').run(parseInt(req.params.tmdbId, 10));
+  res.json({ success: true });
+});
+
+router.delete('/tv-shows/catalog/:tmdbId', adminAuth, (req, res) => {
+  const tmdbId = parseInt(req.params.tmdbId, 10);
+  if (!tmdbId) return res.status(400).json({ success: false, message: 'Invalid series id.' });
+  tvCatalogService.hide(tmdbId);
+  res.json({ success: true });
+});
+
+// ── Rentals (grant/revoke/lookup) - unlocks the WHOLE series ────────────
+router.get('/tv-shows/rentals', adminAuth, (req, res) => {
+  const q = String(req.query.q || '').trim().toLowerCase();
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = 30;
+
+  const rows = db.prepare(`
+    SELECT r.id, r.series_id, r.mac_address, r.rented_at, r.expires_at,
+      COALESCE(p.title, f.title, 'TMDb TV #' || r.series_id) as title
+    FROM tv_series_rentals r
+    LEFT JOIN tv_series_pricing p ON p.tmdb_id = r.series_id
+    LEFT JOIN tv_series_feed f ON f.tmdb_id = r.series_id
+    ORDER BY r.rented_at DESC
+  `).all();
+
+  const filtered = q
+    ? rows.filter((r) => r.mac_address.toLowerCase().includes(q) || r.title.toLowerCase().includes(q))
+    : rows;
+  const total = filtered.length;
+  const start = (page - 1) * limit;
+  const pageItems = filtered.slice(start, start + limit).map((r) => ({
+    ...r,
+    permanent: r.expires_at === PERMANENT_RENTAL_EXPIRY,
+    active: r.expires_at === PERMANENT_RENTAL_EXPIRY || new Date(r.expires_at) > new Date(),
+  }));
+
+  res.json({ success: true, rentals: pageItems, total, page, limit });
+});
+
+router.post('/tv-shows/rentals/grant', adminAuth, (req, res) => {
+  const mac = String(req.body?.mac || '').trim().toLowerCase();
+  const tmdbId = parseInt(req.body?.tmdb_id, 10);
+  const permanent = !!req.body?.permanent;
+  const hours = Math.max(1, parseInt(req.body?.hours, 10) || 48);
+  if (!mac || !tmdbId) return res.status(400).json({ success: false, message: 'A device MAC and a series are required.' });
+
+  const series = tvCatalogService.getById(tmdbId);
+  if (!series) return res.status(404).json({ success: false, message: 'That series is not in the catalog.' });
+
+  const expiresAt = permanent ? PERMANENT_RENTAL_EXPIRY : new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+  db.prepare('INSERT INTO tv_series_rentals (series_id, mac_address, expires_at) VALUES (?, ?, ?)').run(series.id, mac, expiresAt);
+  res.json({ success: true, expires_at: expiresAt });
+});
+
+router.delete('/tv-shows/rentals/:id', adminAuth, (req, res) => {
+  db.prepare('DELETE FROM tv_series_rentals WHERE id = ?').run(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+// ── Requests (Movies > TV Shows > TV Requests panel) ────────────────────
+// Same movie_requests table as Movies (media_type='tv'), same rate limit
+// (server/routes/portal.js's POST /tv-requests). Status update/delete reuse
+// the existing /movies/requests/:id/status and /movies/requests/:id routes
+// verbatim (they operate on the shared table by id, media-type-agnostic).
+
+router.post('/tv-shows/requests/:id/status', adminAuth, (req, res) => {
+  const status = req.body?.status;
+  if (!['pending', 'added', 'declined'].includes(status)) {
+    return res.status(400).json({ success: false, message: 'Invalid status.' });
+  }
+  db.prepare('UPDATE movie_requests SET status = ? WHERE id = ?').run(status, parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
+router.delete('/tv-shows/requests/:id', adminAuth, (req, res) => {
   db.prepare('DELETE FROM movie_requests WHERE id = ?').run(parseInt(req.params.id, 10));
   res.json({ success: true });
 });

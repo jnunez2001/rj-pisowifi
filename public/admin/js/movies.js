@@ -23,6 +23,7 @@ async function loadMoviesPage() {
   await refreshMoviesGrid();
   await omLoadRevenue();
   await omInit();
+  if (typeof tvInit === 'function') await tvInit();
 
   clearInterval(moviesPollInterval);
   moviesPollInterval = setInterval(refreshMoviesGrid, 5000);
@@ -136,6 +137,7 @@ function destroyMovies() {
   clearTimeout(omSearchDebounce);
   clearTimeout(omFilterDebounce);
   clearTimeout(omRentalsFilterDebounce);
+  if (typeof destroyTv === 'function') destroyTv();
 }
 
 function escapeHtml(str) {
@@ -604,12 +606,19 @@ function omRenderRentals(list) {
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:20px;">No rentals yet.</td></tr>';
     return;
   }
+  // Bug found live: expires_at is always already a full ISO string
+  // (coin.js/admin.js write it via new Date(...).toISOString()) - unlike
+  // rented_at just below (a raw SQLite DATETIME 'YYYY-MM-DD HH:MM:SS', no
+  // timezone, needing the T/Z insertion to parse as UTC), appending an
+  // extra "Z" onto an already-Z-terminated string produced "...123ZZ", an
+  // invalid date that rendered as "Invalid Date" for every non-permanent
+  // rental.
   tbody.innerHTML = list.map((r) => `
     <tr data-rental-id="${r.id}">
       <td>${escapeHtml(r.title)}</td>
       <td>${escapeHtml(r.mac_address)}</td>
       <td>${new Date(r.rented_at.replace(' ', 'T') + 'Z').toLocaleString()}</td>
-      <td>${r.permanent ? '<b>Permanent</b>' : new Date(r.expires_at.replace(' ', 'T') + 'Z').toLocaleString()}</td>
+      <td>${r.permanent ? '<b>Permanent</b>' : new Date(r.expires_at).toLocaleString()}</td>
       <td style="text-align:right;">
         <button class="btn btn-secondary om-rental-revoke-btn" style="padding:4px 8px;font-size:11px;" title="Revoke"><i class="fas fa-xmark"></i></button>
       </td>

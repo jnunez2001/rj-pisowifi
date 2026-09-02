@@ -60,3 +60,35 @@
   background: rgba(255,255,255,0.08); color: #ccc; border: 1px solid rgba(255,255,255,0.15); cursor: pointer;
 }
 .online-source-tab.active { background: var(--brand-teal); border-color: var(--brand-teal); color: #fff; }
+
+/* ===== TV SHOWS (series detail: seasons & episodes) ===== */
+.series-detail-body { flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 0 16px 16px; }
+.series-season-tabs { display: flex; gap: 8px; padding: 8px 0 12px; overflow-x: auto; flex-shrink: 0; }
+.series-season-tab {
+  flex-shrink: 0; padding: 6px 14px; border-radius: 999px; font-size: 12.5px; font-weight: 700;
+  background: rgba(255,255,255,0.08); color: #ccc; border: 1px solid rgba(255,255,255,0.15); cursor: pointer;
+}
+.series-season-tab.active { background: var(--brand-teal); border-color: var(--brand-teal); color: #fff; }
+.series-episode-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.series-episode-row {
+  display: flex; gap: 10px; align-items: center; padding: 8px; border-radius: 8px;
+  background: rgba(255,255,255,0.06); cursor: pointer;
+}
+.series-episode-row:hover { background: rgba(255,255,255,0.1); }
+.series-episode-row.playing { background: var(--brand-teal); }
+.series-episode-thumb {
+  width: 84px; height: 47px; border-radius: 6px; background-size: cover; background-position: center;
+  background-color: #222; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: #888;
+}
+.series-episode-info { flex: 1; min-width: 0; }
+.series-episode-title { font-size: 13px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.series-episode-meta { font-size: 11.5px; color: #aaa; margin-top: 2px; }
+
+/* Small "episodic" badge on a series card in the browse grid, distinguishing
+   it from a movie without any "TV/Online" system-jargon label - see the
+   owner's request on the movie merge earlier this session for the same
+   "describe by what it is to the customer, not which backend" rule. */
+.movie-card-episodic-badge {
+  position: absolute; top: 8px; left: 8px; background: rgba(0,0,0,0.75); color: #fff;
+  font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;
+}

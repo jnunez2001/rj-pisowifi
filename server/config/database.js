@@ -565,6 +565,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     query TEXT NOT NULL,
     movie_id INTEGER NOT NULL,
+    media_type TEXT NOT NULL DEFAULT 'movie', -- 'movie' | 'tv' - reused by TV Shows' Top Searches
     searched_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -582,7 +583,108 @@ db.exec(`
     title TEXT NOT NULL,
     year TEXT,
     status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'added' | 'declined'
+    media_type TEXT NOT NULL DEFAULT 'movie', -- 'movie' | 'tv' - reused by TV Shows' Requests panel
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- ===== TV SHOWS (series/anime/K-drama with seasons & episodes) =====
+  -- A parallel system to the Online Movies tables above, on purpose kept
+  -- entirely separate rather than reusing tmdb_movie_feed/
+  -- online_movie_pricing: TMDb's TV endpoints (/tv/*, /search/tv,
+  -- /discover/tv) are a different API surface from /movie/*, a series id
+  -- and a movie id can collide (both are just small TMDb integers, same
+  -- reason online_movie_rentals never shared a table with movie_rentals),
+  -- and a series needs season/episode structure a movie has no concept of
+  -- at all. Same owner-approved design as movies: whole-series pricing
+  -- (pay once, unlock every season/episode for the rental window, not
+  -- per-episode), and rows organized automatically from TMDb's own
+  -- genre + origin_country data (Anime = Animation genre + Japan origin,
+  -- K-Drama = Korea origin) rather than manual per-title tagging.
+  -- Separate from tmdb_poster_cache on purpose - a TV series id and a
+  -- movie id are both just small TMDb integers from two different id
+  -- spaces and can coincidentally collide, same reasoning as
+  -- tv_series_rentals vs movie_rentals. Also carries origin_country
+  -- (genres alone can't tell Anime from any other Animation, or K-Drama
+  -- from any other Drama).
+  CREATE TABLE IF NOT EXISTS tv_poster_cache (
+    tmdb_id INTEGER PRIMARY KEY,
+    poster_path TEXT,
+    genres TEXT, -- JSON array of genre name strings
+    origin_country TEXT, -- JSON array, e.g. '["JP"]'
+    fetched_at DATETIME
+  );
+
+  CREATE TABLE IF NOT EXISTS tv_series_feed (
+    tmdb_id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    poster_path TEXT,
+    genres TEXT, -- JSON array of genre name strings
+    origin_country TEXT, -- JSON array, e.g. '["JP"]' - drives Anime/K-Drama auto-rows
+    source TEXT, -- 'trending' | 'popular' | 'top_rated' | 'new_release'
+    first_air_date TEXT, -- TMDb's 'YYYY-MM-DD'
+    fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS tv_series_pricing (
+    tmdb_id INTEGER PRIMARY KEY,
+    title TEXT NOT NULL,
+    tier TEXT NOT NULL DEFAULT 'paid', -- 'free' | 'paid'
+    price_pesos INTEGER NOT NULL DEFAULT 0,
+    priority INTEGER NOT NULL DEFAULT 0,
+    rental_hours INTEGER NOT NULL DEFAULT 0, -- 0 = use movie_rental_hours global default
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS tv_series_hidden (
+    tmdb_id INTEGER PRIMARY KEY,
+    hidden_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Unlocks the WHOLE series (every season/episode) for the rental window,
+  -- not one episode - mirrors online_movie_rentals exactly, including the
+  -- same far-future-sentinel convention for a permanent admin grant (see
+  -- server/routes/admin.js's PERMANENT_RENTAL_EXPIRY).
+  CREATE TABLE IF NOT EXISTS tv_series_rentals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    series_id INTEGER NOT NULL,
+    mac_address TEXT NOT NULL,
+    rented_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    expires_at DATETIME NOT NULL
+  );
+
+  -- Named embed sources for TV, separate from movie_streaming_sources
+  -- because the URL shape is different - a TV embed needs a season AND
+  -- episode number, a movie embed doesn't. url_template must contain all
+  -- three literal placeholders: "{tmdb_id}", "{season}", "{episode}".
+  CREATE TABLE IF NOT EXISTS tv_streaming_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url_template TEXT NOT NULL,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Real per-series play counts (incremented once per episode actually
+  -- played, not per browse) - same "Top Watched" role online_movie_views
+  -- plays for movies. Series-level, not per-episode: a customer watching
+  -- through a season shouldn't fragment the count across 12 rows.
+  CREATE TABLE IF NOT EXISTS tv_series_views (
+    series_id INTEGER PRIMARY KEY,
+    views INTEGER NOT NULL DEFAULT 0
+  );
+
+  -- Short-lived cache of a season's episode list (TMDb's /tv/{id}/season/
+  -- {n}) - fetched live the first time any customer opens that season,
+  -- reused for a day afterward so ten customers browsing the same popular
+  -- series' Season 1 in one evening doesn't mean ten separate TMDb calls.
+  CREATE TABLE IF NOT EXISTS tv_season_cache (
+    series_id INTEGER NOT NULL,
+    season_number INTEGER NOT NULL,
+    data TEXT NOT NULL, -- JSON array of {episode_number, name, still_path, air_date}
+    fetched_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (series_id, season_number)
   );
 
   -- Portal ad/promo carousel (new movies, promos, whatever the operator
@@ -2186,6 +2288,23 @@ try {
 
 try {
   db.exec('ALTER TABLE online_movie_pricing ADD COLUMN rental_hours INTEGER NOT NULL DEFAULT 0');
+} catch (e) {
+  // already applied
+}
+
+// Reused by TV Shows (online_movie_searches -> Top Searches, movie_requests
+// -> the Requests panel) instead of duplicating both tables/admin panels
+// just for a second content type - 'movie' is the default so every
+// existing row (all pre-dating TV Shows) keeps meaning exactly what it
+// always meant.
+try {
+  db.exec("ALTER TABLE online_movie_searches ADD COLUMN media_type TEXT NOT NULL DEFAULT 'movie'");
+} catch (e) {
+  // already applied
+}
+
+try {
+  db.exec("ALTER TABLE movie_requests ADD COLUMN media_type TEXT NOT NULL DEFAULT 'movie'");
 } catch (e) {
   // already applied
 }
