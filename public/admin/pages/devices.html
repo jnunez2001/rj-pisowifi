@@ -318,3 +318,54 @@
   </div>
   <div id="coinslotLogPagination" style="display:flex;justify-content:center;gap:8px;margin-top:16px;"></div>
 </div>
+
+<!-- VENDO SYSTEM LOGS -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-microchip" style="margin-right:8px;color:var(--accent-blue);"></i>Vendo System Logs
+    </div>
+  </div>
+  <div style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">
+    A device's own account of what it experienced (WiFi lost/regained, setup mode entered, coin queued while offline, self-heal reboots) - synced up automatically once it reconnects. This is the ONLY place these show up; the server has no visibility into what a disconnected device was doing on its own.
+  </div>
+  <div class="grid-2" style="margin-bottom:16px;">
+    <div class="form-group">
+      <label class="form-label">Device</label>
+      <select id="vendoLogVendo" class="form-control" onchange="loadVendoDeviceLog(1)">
+        <option value="">All devices</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Time range</label>
+      <select id="vendoLogHours" class="form-control" onchange="loadVendoDeviceLog(1)">
+        <option value="1">Last hour</option>
+        <option value="24" selected>Last 24 hours</option>
+        <option value="168">Last 7 days</option>
+        <option value="720">Last 30 days</option>
+      </select>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <span id="vendoLogCount" style="font-size:12px;color:var(--text-muted);"></span>
+    <button class="btn btn-secondary" onclick="exportVendoDeviceLog()">
+      <i class="fas fa-download"></i> Export CSV
+    </button>
+  </div>
+  <div style="overflow-x:auto;">
+    <table class="table-stack">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Device</th>
+          <th>MAC Address</th>
+          <th>Message</th>
+        </tr>
+      </thead>
+      <tbody id="vendoLogRows">
+        <tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px;">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="vendoLogPagination" style="display:flex;justify-content:center;gap:8px;margin-top:16px;"></div>
+</div>

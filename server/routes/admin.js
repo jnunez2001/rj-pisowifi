@@ -5378,6 +5378,76 @@ router.get('/coinslot-activity/export', adminAuth, (req, res) => {
   }
 });
 
+// Shared by GET /vendo-device-log and its CSV export below - a device's
+// own account of its lifecycle events (WiFi lost/regained, setup mode
+// skipped/entered, coin queued/synced, self-heal reboots), synced up from
+// firmware once reconnected (see POST /vendo/device-log-sync above). This
+// incident showed the gap directly: "the logs can't tell it, just
+// Self-heal check passed" - the server has zero visibility into what a
+// disconnected device was doing, this is the device's own side of that
+// story. device_at is the device's own millis() at the time (relative
+// ordering only, meaningless as a real timestamp - a device can be up for
+// weeks and millis() has no wall-clock relation), so rows are ordered and
+// filtered by received_at (this server's real clock) instead.
+function queryVendoDeviceLog({ vendoId, hours, limit, offset }) {
+  const params = [];
+  let where = "vdl.received_at >= datetime('now', ?)";
+  params.push(`-${hours} hours`);
+  if (vendoId) {
+    where += ' AND vdl.mac_address = (SELECT mac_address FROM vendos WHERE id = ?)';
+    params.push(vendoId);
+  }
+  const rows = db.prepare(`
+    SELECT vdl.id, vdl.mac_address, vdl.message, vdl.device_at, vdl.received_at,
+      v.id as vendo_id, v.name as vendo_name
+    FROM vendo_device_log vdl
+    LEFT JOIN vendos v ON v.mac_address = vdl.mac_address
+    WHERE ${where}
+    ORDER BY vdl.received_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, offset);
+  const total = db.prepare(`SELECT COUNT(*) as c FROM vendo_device_log vdl WHERE ${where}`).get(...params).c;
+  return { rows, total };
+}
+
+// GET /api/admin/vendo-device-log?vendo_id=&hours=24&page=1
+router.get('/vendo-device-log', adminAuth, (req, res) => {
+  try {
+    const vendoId = req.query.vendo_id ? parseInt(req.query.vendo_id, 10) : null;
+    const hours = Math.min(parseInt(req.query.hours, 10) || 24, 24 * 90);
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = 50;
+    const { rows, total } = queryVendoDeviceLog({ vendoId, hours, limit, offset: (page - 1) * limit });
+    return res.json({ success: true, entries: rows, total, page, limit });
+  } catch (err) {
+    console.error('Vendo device log error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/vendo-device-log/export?vendo_id=&hours=24
+router.get('/vendo-device-log/export', adminAuth, (req, res) => {
+  try {
+    const vendoId = req.query.vendo_id ? parseInt(req.query.vendo_id, 10) : null;
+    const hours = Math.min(parseInt(req.query.hours, 10) || 24, 24 * 90);
+    const { rows } = queryVendoDeviceLog({ vendoId, hours, limit: 50000, offset: 0 });
+
+    const header = 'received_at,mac_address,vendo_name,message\n';
+    const csvEscape = (v) => (v == null ? '' : `"${String(v).replace(/"/g, '""')}"`);
+    const body = rows.map((r) =>
+      [r.received_at, r.mac_address, r.vendo_name || '', r.message].map(csvEscape).join(',')
+    ).join('\n');
+
+    const filename = `vendo-device-log-${Date.now()}.csv`;
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(header + body);
+  } catch (err) {
+    console.error('Vendo device log export error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // POST /api/admin/reports/:id/approve-credit - manually credits a
 // disputed peso amount to that report's MAC's currently active session,
 // reusing the exact same math as POST /session/:code/addtime. Leaves a

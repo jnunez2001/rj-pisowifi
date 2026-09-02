@@ -187,6 +187,7 @@ async function loadDevices() {
       document.getElementById('onlineDevices').textContent = '0';
       document.getElementById('offlineDevices').textContent = '0';
       loadCoinslotActivity(coinslotLogPage);
+      loadVendoDeviceLog(vendoLogPage);
       return;
     }
 
@@ -264,8 +265,8 @@ async function loadDevices() {
     document.getElementById('onlineDevices').textContent = online;
     document.getElementById('offlineDevices').textContent = offline;
 
-    // Reuses this same vendos list for the Coinslot Activity filter
-    // dropdown below, rather than a second round trip.
+    // Reuses this same vendos list for the Coinslot Activity and Vendo
+    // System Logs filter dropdowns below, rather than extra round trips.
     const vendoSelect = document.getElementById('coinslotLogVendo');
     if (vendoSelect) {
       const currentValue = vendoSelect.value;
@@ -273,11 +274,19 @@ async function loadDevices() {
         data.vendos.map((v) => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('');
       vendoSelect.value = currentValue;
     }
+    const vendoLogSelect = document.getElementById('vendoLogVendo');
+    if (vendoLogSelect) {
+      const currentValue = vendoLogSelect.value;
+      vendoLogSelect.innerHTML = '<option value="">All devices</option>' +
+        data.vendos.map((v) => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('');
+      vendoLogSelect.value = currentValue;
+    }
 
   } catch(e) {
     console.error('Devices error:', e);
   }
   loadCoinslotActivity(coinslotLogPage);
+  loadVendoDeviceLog(vendoLogPage);
 }
 
 let coinslotLogPage = 1;
@@ -351,6 +360,76 @@ async function exportCoinslotActivity() {
     showToast('Coinslot activity exported!');
   } catch (e) {
     showToast('Could not export coinslot activity.', 'error');
+  }
+}
+
+let vendoLogPage = 1;
+
+async function loadVendoDeviceLog(page) {
+  vendoLogPage = page || vendoLogPage;
+  const tbody = document.getElementById('vendoLogRows');
+  if (!tbody) return;
+  const vendoId = document.getElementById('vendoLogVendo')?.value || '';
+  const hours = document.getElementById('vendoLogHours')?.value || '24';
+  try {
+    const params = new URLSearchParams({ hours, page: vendoLogPage });
+    if (vendoId) params.set('vendo_id', vendoId);
+    const data = await apiCall('GET', `/api/admin/vendo-device-log?${params}`);
+    if (!data.success || !data.entries || data.entries.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px;">No device logs in this window - a device only uploads these once reconnected, and only firmware built to send them will ever populate this.</td></tr>';
+      document.getElementById('vendoLogCount').textContent = '';
+      document.getElementById('vendoLogPagination').innerHTML = '';
+      return;
+    }
+    tbody.innerHTML = data.entries.map((e) => `
+      <tr>
+        <td data-label="Time" style="font-size:12px;color:var(--text-muted);">${new Date(e.received_at.replace(' ', 'T') + 'Z').toLocaleString()}</td>
+        <td data-label="Device">${e.vendo_name ? escapeHtml(e.vendo_name) : '<span style="color:var(--text-muted);">Unknown</span>'}</td>
+        <td data-label="MAC Address" style="font-family:monospace;font-size:12px;color:var(--text-muted);">${e.mac_address}</td>
+        <td data-label="Message">${escapeHtml(e.message)}</td>
+      </tr>
+    `).join('');
+    document.getElementById('vendoLogCount').textContent = `${data.total} total`;
+
+    const totalPages = Math.max(1, Math.ceil(data.total / data.limit));
+    const pager = document.getElementById('vendoLogPagination');
+    if (totalPages > 1) {
+      pager.innerHTML = `
+        <button class="btn btn-sm btn-secondary" ${vendoLogPage <= 1 ? 'disabled' : ''} onclick="loadVendoDeviceLog(${vendoLogPage - 1})">Previous</button>
+        <span style="align-self:center;font-size:12px;color:var(--text-muted);">Page ${vendoLogPage} of ${totalPages}</span>
+        <button class="btn btn-sm btn-secondary" ${vendoLogPage >= totalPages ? 'disabled' : ''} onclick="loadVendoDeviceLog(${vendoLogPage + 1})">Next</button>
+      `;
+    } else {
+      pager.innerHTML = '';
+    }
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:24px;">Could not load device logs.</td></tr>';
+  }
+}
+
+// Same authenticated-fetch-then-blob pattern used elsewhere.
+async function exportVendoDeviceLog() {
+  try {
+    const vendoId = document.getElementById('vendoLogVendo')?.value || '';
+    const hours = document.getElementById('vendoLogHours')?.value || '24';
+    const params = new URLSearchParams({ hours });
+    if (vendoId) params.set('vendo_id', vendoId);
+    const res = await fetch(`${API}/vendo-device-log/export?${params}`, {
+      headers: { 'password': authToken }
+    });
+    if (res.status === 401) { handleAuthFailure(); return; }
+    if (!res.ok) { showToast('Could not export device logs.', 'error'); return; }
+    const text = await res.text();
+    const blob = new Blob([text], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `vendo-device-log-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Device logs exported!');
+  } catch (e) {
+    showToast('Could not export device logs.', 'error');
   }
 }
 
