@@ -1701,6 +1701,16 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // default - an operator selling Premium as a one-way upgrade shouldn't
   // have to opt out of a downgrade path they never intended to offer.
   upsertIfMissing('allow_premium_to_regular_convert', '0');
+  // Outage/brownout time compensation (server/services/timerService.js's
+  // reconcileOutageCompensation(), called at boot; watchdogService.js's
+  // Controller-mode router-liveness check). Real incident: a brownout hit
+  // both this server and (separately) the coin credit path - once fixed,
+  // the natural next question is "did the outage itself eat customers'
+  // paid time while nothing could serve them?" On by default since this
+  // protects customer trust/reputation exactly like the incident that
+  // prompted it - an operator who'd rather not extend sessions
+  // automatically can turn it off in Settings.
+  upsertIfMissing('enable_outage_compensation', '1');
   if (!db.prepare("SELECT key FROM settings WHERE key = 'vendo_firmware_released'").get()) {
     const hadVersion = !!db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value;
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('vendo_firmware_released', hadVersion ? '1' : '0');

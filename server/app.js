@@ -21,7 +21,7 @@ const adminRoute = require('./routes/admin');
 const portalRoute = require('./routes/portal');
 const rentalRoute = require('./routes/rental');
 
-const { startTimer } = require('./services/timerService');
+const { startTimer, reconcileOutageCompensation } = require('./services/timerService');
 const mikrotikService = require('./services/mikrotikService');
 
 // Cache package.json on startup (Bug #47)
@@ -492,7 +492,14 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-startTimer();
+// Reconcile any outage that happened while this process was down BEFORE
+// the timer's own cron starts ticking again - it needs to see the
+// heartbeat from the LAST time this process was alive, not one this
+// boot's own tick just overwrote. See timerService.js for the full
+// rationale (this is the server-restart half; watchdogService.js's
+// Controller-mode router check is the other half, for an outage that
+// never actually took this process down).
+reconcileOutageCompensation().finally(() => startTimer());
 
 // Bug (same root cause as the nginx IPv6 fix, one level deeper): binding
 // explicitly to '0.0.0.0' only accepts IPv4 connections. A browser

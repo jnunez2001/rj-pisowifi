@@ -129,6 +129,7 @@ async function loadSettings() {
     document.getElementById('maxPauses').value = s.max_pauses || 0;
     setToggle('autoPauseIdle', 'autoPauseIdleLabel', s.enable_auto_pause_idle === '1');
     document.getElementById('autoPauseIdleMinutes').value = s.auto_pause_idle_minutes || 10;
+    setToggle('enableOutageCompensation', 'enableOutageCompensationLabel', s.enable_outage_compensation === '1');
     document.getElementById('gracePeriodMinutes').value = s.grace_period_minutes || 0;
     document.getElementById('wifiSpeedTimerMs').value = s.wifi_speed_timer_ms || 1000;
     setToggle('allowPremiumToRegularConvert', 'allowPremiumToRegularConvertLabel', s.allow_premium_to_regular_convert === '1');
@@ -219,6 +220,7 @@ async function saveSessionSettings() {
       max_pauses: document.getElementById('maxPauses').value,
       enable_auto_pause_idle: document.getElementById('autoPauseIdle').checked ? '1' : '0',
       auto_pause_idle_minutes: document.getElementById('autoPauseIdleMinutes').value,
+      enable_outage_compensation: document.getElementById('enableOutageCompensation').checked ? '1' : '0',
       grace_period_minutes: document.getElementById('gracePeriodMinutes').value,
       wifi_speed_timer_ms: document.getElementById('wifiSpeedTimerMs').value,
       allow_premium_to_regular_convert: document.getElementById('allowPremiumToRegularConvert').checked ? '1' : '0',

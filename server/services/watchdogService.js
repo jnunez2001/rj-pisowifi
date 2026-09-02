@@ -50,6 +50,12 @@ let lastResult = { at: null, status: 'unknown', issues: [] };
 let lastIssueCodes = new Set();
 let lastOnlineVendoMacs = new Set();
 let hasSweptVendoConnectivityOnce = false;
+// Outage compensation, Controller-mode half (server/services/timerService.js
+// has the server-restart half). Tracks when the MikroTik router FIRST
+// became unreachable - in-memory only is fine here, unlike the restart
+// case, since this condition self-heals on its own recovery within the
+// same running process, nothing to survive across a restart.
+let mikrotikUnreachableSince = null;
 const VENDO_ONLINE_WINDOW_MS = 3 * 60 * 1000; // matches devices.js's isOnline() 3-minute window
 
 function pruneFixTimestamps() {
@@ -397,6 +403,34 @@ async function runHealthCheck() {
           message: `Re-applied speed limits for ${reshaped.length} session(s) that moved to a different access point.`,
         });
       }
+    }
+  } else if (mode === 'mikrotik') {
+    // Bug this fixes: this check used to be skipped entirely for
+    // Controller mode ("this box isn't the source of truth for access
+    // control"), true for enforcement, but it left a real gap - if the
+    // MikroTik router itself is unreachable (a brownout, a cable pulled),
+    // every customer behind it loses internet exactly like a standalone
+    // outage, but nothing here ever noticed or compensated their expiry
+    // clocks for it. testConnection() is a lightweight single-command
+    // liveness check (mikrotikApiClient.js), not a full config query.
+    let routerReachable = false;
+    try {
+      routerReachable = await require('./mikrotikService').testConnection();
+    } catch (e) {
+      routerReachable = false;
+    }
+
+    if (!routerReachable) {
+      if (mikrotikUnreachableSince === null) mikrotikUnreachableSince = Date.now();
+      issues.push({
+        severity: 'critical',
+        code: 'mikrotik_router_unreachable',
+        message: 'The MikroTik router could not be reached. Customer internet access and session expiry compensation cannot be verified until it recovers.',
+      });
+    } else if (mikrotikUnreachableSince !== null) {
+      const gapMs = Date.now() - mikrotikUnreachableSince;
+      mikrotikUnreachableSince = null;
+      await require('./timerService').applyOutageCompensation(gapMs, 'The MikroTik router');
     }
   }
 

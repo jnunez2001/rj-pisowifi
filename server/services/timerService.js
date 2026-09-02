@@ -105,6 +105,83 @@ async function restoreTrustedDevices() {
   }
 }
 
+// Outage/brownout time compensation, part 1 of 2 (part 2 is the
+// reconciliation below, run once at boot). This just writes a heartbeat
+// timestamp to `settings` on every successful tick, cheap since this cron
+// is already running every 30s regardless - reconcileOutageCompensation()
+// reads it back at the NEXT boot to figure out how long this process was
+// actually down for.
+function writeAliveHeartbeat() {
+  try {
+    const db = require('../config/database');
+    db.prepare(
+      "INSERT INTO settings (key, value) VALUES ('last_alive_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    ).run(new Date().toISOString());
+  } catch (e) {
+    console.error('Failed to write alive heartbeat:', e.message);
+  }
+}
+
+// Shared by both outage-compensation triggers: a server-restart gap
+// (reconcileOutageCompensation() below, at boot) and a Controller-mode
+// router-unreachable gap (watchdogService.js, once the router recovers).
+// Same fix either way - during the gap nobody could actually use their
+// paid time, but nothing stopped expiry clocks from continuing to run,
+// so extend every session's expiry (active and paused alike, a paused
+// customer's hard cap shouldn't be eaten by downtime either) by exactly
+// how long the gap was.
+const MIN_OUTAGE_GAP_MS = 2 * TICK_MS; // a false-positive here is expensive (drifts every customer's clock), a missed one just means slightly less generous compensation - lean conservative
+async function applyOutageCompensation(gapMs, sourceLabel) {
+  try {
+    const db = require('../config/database');
+    const enabled = db.prepare("SELECT value FROM settings WHERE key = 'enable_outage_compensation'").get()?.value !== '0';
+    if (!enabled) return;
+    if (!Number.isFinite(gapMs) || gapMs < MIN_OUTAGE_GAP_MS) return;
+
+    const gapSeconds = Math.round(gapMs / 1000);
+    const sessionCount = db.prepare('SELECT COUNT(*) AS c FROM sessions').get()?.c || 0;
+    if (sessionCount === 0) return;
+
+    db.prepare(`
+      UPDATE sessions
+      SET expires_at = datetime(expires_at, '+' || ? || ' seconds'),
+          hard_expires_at = datetime(hard_expires_at, '+' || ? || ' seconds')
+    `).run(gapSeconds, gapSeconds);
+
+    const minutes = Math.round(gapMs / 60000);
+    console.log(`⏱️ Outage compensation: ${sourceLabel} was down ~${minutes} min - extended ${sessionCount} session(s)' expiry to compensate`);
+    try {
+      require('./alertEventService').logAlertEvent(
+        'info',
+        'outage_compensated',
+        `Compensated ${sessionCount} session(s) for a ~${minutes} min outage (${sourceLabel})`,
+        `${sourceLabel} appears to have been unreachable/down for about ${minutes} minute(s). Every active and paused session's expiry was extended by that amount so customers aren't charged for time they couldn't use.`
+      );
+    } catch (e) {}
+  } catch (e) {
+    console.error('Outage compensation failed:', e.message);
+  }
+}
+
+// Server-restart case, called once at boot, before startTimer()'s cron
+// begins ticking again (server/app.js). Compares "how long ago did this
+// process last confirm it was alive" (the heartbeat above, written by the
+// PREVIOUS run of this process) against now, to figure out how long this
+// boot's own downtime actually was.
+async function reconcileOutageCompensation() {
+  try {
+    const db = require('../config/database');
+    const lastAliveRow = db.prepare("SELECT value FROM settings WHERE key = 'last_alive_at'").get();
+    if (!lastAliveRow?.value) return; // first-ever boot, nothing to compare against
+
+    const lastAlive = new Date(lastAliveRow.value).getTime();
+    const gapMs = Date.now() - lastAlive;
+    await applyOutageCompensation(gapMs, 'The server');
+  } catch (e) {
+    console.error('Outage compensation reconciliation failed:', e.message);
+  }
+}
+
 function checkTcQdisc() {
   try {
     const db = require('../config/database');
@@ -153,6 +230,8 @@ async function startTimer() {
     try {
       const db = require('../config/database');
       const { expireSession, resumeSession, pauseSession } = require('./sessionService');
+
+      writeAliveHeartbeat();
 
       const now = new Date().toISOString();
       const getSetting = (key, def) => parseInt(db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? def, 10) || def;
@@ -541,4 +620,4 @@ async function startTimer() {
   console.log('✅ Timer service started');
 }
 
-module.exports = { startTimer };
+module.exports = { startTimer, reconcileOutageCompensation, applyOutageCompensation };
