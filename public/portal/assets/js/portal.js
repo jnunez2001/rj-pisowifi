@@ -368,11 +368,21 @@ function formatSeconds(seconds) {
   return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
 
+// Bug found live: this only ever showed the time (e.g. "6:08 AM"), fine
+// for a session expiring later today, but genuinely ambiguous for a
+// multi-day plan (rates.html's own 3-day tier, for example) - a customer
+// had no way to tell if that was tonight or three days from now. Only
+// adds the date when the expiry ISN'T today, so a same-day session still
+// shows the same clean time-only label as before.
 function formatExpiry(dateStr) {
   if (!dateStr) return '--';
-  return new Date(dateStr).toLocaleTimeString([], {
-    hour: '2-digit', minute: '2-digit'
-  });
+  const d = new Date(dateStr);
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (isToday) return time;
+  const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return `${date}, ${time}`;
 }
 
 function formatMinutes(mins) {
