@@ -186,6 +186,7 @@ async function loadDevices() {
       document.getElementById('totalDevices').textContent = '0';
       document.getElementById('onlineDevices').textContent = '0';
       document.getElementById('offlineDevices').textContent = '0';
+      loadCoinslotActivity(coinslotLogPage);
       return;
     }
 
@@ -263,8 +264,93 @@ async function loadDevices() {
     document.getElementById('onlineDevices').textContent = online;
     document.getElementById('offlineDevices').textContent = offline;
 
+    // Reuses this same vendos list for the Coinslot Activity filter
+    // dropdown below, rather than a second round trip.
+    const vendoSelect = document.getElementById('coinslotLogVendo');
+    if (vendoSelect) {
+      const currentValue = vendoSelect.value;
+      vendoSelect.innerHTML = '<option value="">All devices</option>' +
+        data.vendos.map((v) => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('');
+      vendoSelect.value = currentValue;
+    }
+
   } catch(e) {
     console.error('Devices error:', e);
+  }
+  loadCoinslotActivity(coinslotLogPage);
+}
+
+let coinslotLogPage = 1;
+
+async function loadCoinslotActivity(page) {
+  coinslotLogPage = page || coinslotLogPage;
+  const tbody = document.getElementById('coinslotLogRows');
+  if (!tbody) return;
+  const vendoId = document.getElementById('coinslotLogVendo')?.value || '';
+  const hours = document.getElementById('coinslotLogHours')?.value || '24';
+  try {
+    const params = new URLSearchParams({ hours, page: coinslotLogPage });
+    if (vendoId) params.set('vendo_id', vendoId);
+    const data = await apiCall('GET', `/api/admin/coinslot-activity?${params}`);
+    if (!data.success || !data.pulses || data.pulses.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px;">No coin activity in this window.</td></tr>';
+      document.getElementById('coinslotLogCount').textContent = '';
+      document.getElementById('coinslotLogPagination').innerHTML = '';
+      return;
+    }
+    tbody.innerHTML = data.pulses.map((p) => `
+      <tr>
+        <td data-label="Time" style="font-size:12px;color:var(--text-muted);">${new Date(p.received_at.replace(' ', 'T') + 'Z').toLocaleString()}</td>
+        <td data-label="Device">${p.vendo_name ? escapeHtml(p.vendo_name) : '<span style="color:var(--text-muted);">Unknown</span>'}</td>
+        <td data-label="MAC Address" style="font-family:monospace;font-size:12px;color:var(--text-muted);">${p.mac_address}</td>
+        <td data-label="Amount">₱${p.coin_value}</td>
+        <td data-label="Status">${p.is_vendo_fallback
+          ? '<span class="badge badge-orange" title="Real money accepted, but no customer session was created">No customer match</span>'
+          : '<span class="badge badge-green">OK</span>'}</td>
+      </tr>
+    `).join('');
+    document.getElementById('coinslotLogCount').textContent = `${data.total} total`;
+
+    const totalPages = Math.max(1, Math.ceil(data.total / data.limit));
+    const pager = document.getElementById('coinslotLogPagination');
+    if (totalPages > 1) {
+      pager.innerHTML = `
+        <button class="btn btn-sm btn-secondary" ${coinslotLogPage <= 1 ? 'disabled' : ''} onclick="loadCoinslotActivity(${coinslotLogPage - 1})">Previous</button>
+        <span style="align-self:center;font-size:12px;color:var(--text-muted);">Page ${coinslotLogPage} of ${totalPages}</span>
+        <button class="btn btn-sm btn-secondary" ${coinslotLogPage >= totalPages ? 'disabled' : ''} onclick="loadCoinslotActivity(${coinslotLogPage + 1})">Next</button>
+      `;
+    } else {
+      pager.innerHTML = '';
+    }
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px;">Could not load coin activity.</td></tr>';
+  }
+}
+
+// Same authenticated-fetch-then-blob pattern used elsewhere (about.js's
+// downloadSupportBundle, logs.js's exportLogs).
+async function exportCoinslotActivity() {
+  try {
+    const vendoId = document.getElementById('coinslotLogVendo')?.value || '';
+    const hours = document.getElementById('coinslotLogHours')?.value || '24';
+    const params = new URLSearchParams({ hours });
+    if (vendoId) params.set('vendo_id', vendoId);
+    const res = await fetch(`${API}/coinslot-activity/export?${params}`, {
+      headers: { 'password': authToken }
+    });
+    if (res.status === 401) { handleAuthFailure(); return; }
+    if (!res.ok) { showToast('Could not export coinslot activity.', 'error'); return; }
+    const text = await res.text();
+    const blob = new Blob([text], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `coinslot-activity-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Coinslot activity exported!');
+  } catch (e) {
+    showToast('Could not export coinslot activity.', 'error');
   }
 }
 

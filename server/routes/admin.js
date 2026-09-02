@@ -4973,46 +4973,85 @@ router.get('/diagnostics/last-boot', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/logs, unified real event log for the System > Logs
-// page. Merges watchdog_events (self-heal check history) and
+// Shared by GET /logs and its CSV export below. Merges THREE sources into
+// one time-ordered feed: watchdog_events (self-heal check history),
 // network_config_versions (config-change audit trail, already built by
-// configSafety.js) into one time-ordered feed instead of two separate
-// tables nothing ever browsed together. financial events stay out of
-// this (transactions has its own Sales Report view already, and mixing
-// revenue records into an operational log invites confusion between the
-// two, not clarity).
+// configSafety.js), and alert_events (the general info/warning/critical
+// feed already fed by logAlertEvent() from all over this app - coin
+// activity, vendo connect/disconnect, tethering detection, the
+// coin_credited_no_pending_match fail-safe, etc). Real incident: this
+// page used to be watchdog+config only, so "all it ever said was
+// Self-heal check passed" while a real, alert-logged problem (a coin
+// silently crediting the wrong mac) was invisible here even though it
+// WAS being recorded elsewhere - this closes that gap by surfacing
+// everything in one place instead of requiring an operator to already
+// know which of several separate tables to go look in. Financial
+// TRANSACTION records (the money itself) still stay out of this -
+// Sales Report already owns that view - this is operational/event
+// history, not a ledger.
+function queryUnifiedLogs(limit) {
+  const watchdog = db.prepare(
+    'SELECT id, status, issues_json, checked_at FROM watchdog_events ORDER BY checked_at DESC LIMIT ?'
+  ).all(limit).map((r) => ({
+    source: 'watchdog',
+    time: r.checked_at,
+    level: r.status === 'ok' ? 'info' : 'warning',
+    message: r.status === 'ok' ? 'Self-heal check passed' : 'Self-heal check found issues',
+    // Bug found live: each issue is a structured {severity, code, message}
+    // object (see watchdogService.js's persistResult()), not a plain
+    // string - naively .join()-ing the array rendered "[object Object]".
+    detail: (() => { try { return JSON.parse(r.issues_json).map((i) => i.message || i).join(', '); } catch (e) { return ''; } })(),
+  }));
+  const configChanges = db.prepare(
+    'SELECT id, created_at, operator, reason, applied, rolled_back, verify_status FROM network_config_versions ORDER BY created_at DESC LIMIT ?'
+  ).all(limit).map((r) => ({
+    source: 'config',
+    time: r.created_at,
+    level: r.rolled_back ? 'warning' : 'info',
+    message: r.rolled_back
+      ? 'Network config change rolled back'
+      : r.applied ? 'Network config applied' : 'Network config change recorded',
+    detail: `${r.operator || 'admin'}${r.reason ? ', ' + r.reason : ''}`,
+  }));
+  const alerts = db.prepare(
+    'SELECT id, severity, code, title, detail, created_at FROM alert_events ORDER BY created_at DESC LIMIT ?'
+  ).all(limit).map((r) => ({
+    source: 'alert',
+    time: r.created_at,
+    level: r.severity, // already 'info' | 'warning' | 'critical'
+    message: r.title,
+    detail: r.detail || '',
+  }));
+  return watchdog.concat(configChanges, alerts)
+    .sort((a, b) => new Date(b.time) - new Date(a.time))
+    .slice(0, limit);
+}
+
 router.get('/logs', adminAuth, (req, res) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
-    const watchdog = db.prepare(
-      'SELECT id, status, issues_json, checked_at FROM watchdog_events ORDER BY checked_at DESC LIMIT ?'
-    ).all(limit).map((r) => ({
-      source: 'watchdog',
-      time: r.checked_at,
-      level: r.status === 'ok' ? 'info' : 'warning',
-      message: r.status === 'ok' ? 'Self-heal check passed' : 'Self-heal check found issues',
-      // Bug found live: each issue is a structured {severity, code, message}
-      // object (see watchdogService.js's persistResult()), not a plain
-      // string - naively .join()-ing the array rendered "[object Object]".
-      detail: (() => { try { return JSON.parse(r.issues_json).map((i) => i.message || i).join(', '); } catch (e) { return ''; } })(),
-    }));
-    const configChanges = db.prepare(
-      'SELECT id, created_at, operator, reason, applied, rolled_back, verify_status FROM network_config_versions ORDER BY created_at DESC LIMIT ?'
-    ).all(limit).map((r) => ({
-      source: 'config',
-      time: r.created_at,
-      level: r.rolled_back ? 'warning' : 'info',
-      message: r.rolled_back
-        ? 'Network config change rolled back'
-        : r.applied ? 'Network config applied' : 'Network config change recorded',
-      detail: `${r.operator || 'admin'}${r.reason ? ', ' + r.reason : ''}`,
-    }));
-    const merged = watchdog.concat(configChanges)
-      .sort((a, b) => new Date(b.time) - new Date(a.time))
-      .slice(0, limit);
-    return res.json({ success: true, logs: merged });
+    return res.json({ success: true, logs: queryUnifiedLogs(limit) });
   } catch (err) {
     console.error('Logs error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/logs/export - same merged feed, as a downloadable CSV
+// for sending along with a support request.
+router.get('/logs/export', adminAuth, (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit, 10) || 1000, 5000);
+    const logs = queryUnifiedLogs(limit);
+    const header = 'time,level,source,message,detail\n';
+    const csvEscape = (v) => (v == null ? '' : `"${String(v).replace(/"/g, '""')}"`);
+    const body = logs.map((l) => [l.time, l.level, l.source, l.message, l.detail].map(csvEscape).join(',')).join('\n');
+    const filename = `starkfi-logs-${Date.now()}.csv`;
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(header + body);
+  } catch (err) {
+    console.error('Logs export error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -5141,6 +5180,81 @@ router.get('/coin-pulse-log', adminAuth, (req, res) => {
     `).all(mac, `-${hours} hours`);
     return res.json({ success: true, pulses: rows });
   } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// Shared by GET /coinslot-activity and its CSV export below - every raw
+// coin pulse this server has ever received (coin_pulse_log, written the
+// instant a pulse arrives in coin.js's POST /, independent of whether it
+// ended up credited), joined against vendos so each row can show a real
+// device name instead of a bare mac, and flagged when the pulse's mac
+// matches a KNOWN VENDO's own mac_address - the exact signature of the
+// "no customer's Insert Coin window was open" fallback path (see coin.js's
+// coin_credited_no_pending_match alert) rather than a genuine customer.
+function queryCoinslotActivity({ vendoId, hours, limit, offset }) {
+  const params = [];
+  let where = "received_at >= datetime('now', ?)";
+  params.push(`-${hours} hours`);
+  if (vendoId) {
+    where += ' AND cpl.mac_address = (SELECT mac_address FROM vendos WHERE id = ?)';
+    params.push(vendoId);
+  }
+  const rows = db.prepare(`
+    SELECT cpl.id, cpl.mac_address, cpl.coin_value, cpl.kiosk_id, cpl.received_at,
+      v.id as vendo_id, v.name as vendo_name,
+      CASE WHEN v.id IS NOT NULL THEN 1 ELSE 0 END as is_vendo_fallback
+    FROM coin_pulse_log cpl
+    LEFT JOIN vendos v ON v.mac_address = cpl.mac_address
+    WHERE ${where}
+    ORDER BY cpl.received_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, offset);
+  const total = db.prepare(`SELECT COUNT(*) as c FROM coin_pulse_log cpl WHERE ${where}`).get(...params).c;
+  return { rows, total };
+}
+
+// GET /api/admin/coinslot-activity?vendo_id=&hours=24&page=1 - the general
+// debugging feed this incident showed was missing: every coin pulse
+// received, filterable by device/time range, with the vendo-fallback
+// failure mode (coin.js's coin_credited_no_pending_match case) visibly
+// flagged per row instead of requiring a manual database query to find.
+router.get('/coinslot-activity', adminAuth, (req, res) => {
+  try {
+    const vendoId = req.query.vendo_id ? parseInt(req.query.vendo_id, 10) : null;
+    const hours = Math.min(parseInt(req.query.hours, 10) || 24, 24 * 90);
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = 50;
+    const { rows, total } = queryCoinslotActivity({ vendoId, hours, limit, offset: (page - 1) * limit });
+    return res.json({ success: true, pulses: rows, total, page, limit });
+  } catch (err) {
+    console.error('Coinslot activity error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/coinslot-activity/export?vendo_id=&hours=24 - same query,
+// no pagination cap beyond a sane hard ceiling, returned as a downloadable
+// CSV for offline debugging/sharing with support.
+router.get('/coinslot-activity/export', adminAuth, (req, res) => {
+  try {
+    const vendoId = req.query.vendo_id ? parseInt(req.query.vendo_id, 10) : null;
+    const hours = Math.min(parseInt(req.query.hours, 10) || 24, 24 * 90);
+    const { rows } = queryCoinslotActivity({ vendoId, hours, limit: 50000, offset: 0 });
+
+    const header = 'received_at,mac_address,vendo_name,coin_value,kiosk_id,vendo_fallback\n';
+    const csvEscape = (v) => (v == null ? '' : `"${String(v).replace(/"/g, '""')}"`);
+    const body = rows.map((r) =>
+      [r.received_at, r.mac_address, r.vendo_name || '', r.coin_value, r.kiosk_id ?? '', r.is_vendo_fallback ? 'yes' : 'no']
+        .map(csvEscape).join(',')
+    ).join('\n');
+
+    const filename = `coinslot-activity-${Date.now()}.csv`;
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(header + body);
+  } catch (err) {
+    console.error('Coinslot activity export error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

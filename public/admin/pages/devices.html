@@ -266,3 +266,55 @@
     </div>
   </div>
 </div>
+
+<!-- COINSLOT ACTIVITY -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-coins" style="margin-right:8px;color:var(--accent-yellow);"></i>Coinslot Activity
+    </div>
+  </div>
+  <div style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">
+    Every raw coin pulse this server has received, independent of whether it ended up credited. A row flagged "No customer match" means real money was accepted but no session was created for a customer's phone - check that row's device and time to investigate.
+  </div>
+  <div class="grid-2" style="margin-bottom:16px;">
+    <div class="form-group">
+      <label class="form-label">Device</label>
+      <select id="coinslotLogVendo" class="form-control" onchange="loadCoinslotActivity(1)">
+        <option value="">All devices</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Time range</label>
+      <select id="coinslotLogHours" class="form-control" onchange="loadCoinslotActivity(1)">
+        <option value="1">Last hour</option>
+        <option value="24" selected>Last 24 hours</option>
+        <option value="168">Last 7 days</option>
+        <option value="720">Last 30 days</option>
+      </select>
+    </div>
+  </div>
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+    <span id="coinslotLogCount" style="font-size:12px;color:var(--text-muted);"></span>
+    <button class="btn btn-secondary" onclick="exportCoinslotActivity()">
+      <i class="fas fa-download"></i> Export CSV
+    </button>
+  </div>
+  <div style="overflow-x:auto;">
+    <table class="table-stack">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Device</th>
+          <th>MAC Address</th>
+          <th>Amount</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="coinslotLogRows">
+        <tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px;">Loading...</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div id="coinslotLogPagination" style="display:flex;justify-content:center;gap:8px;margin-top:16px;"></div>
+</div>
