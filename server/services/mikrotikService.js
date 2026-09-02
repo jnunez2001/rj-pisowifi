@@ -137,6 +137,49 @@ async function blockClient(mac) {
   }
 }
 
+// Real incident: blockClient() above (called from every session-ending
+// path, sessionService.js's expireSession()) removes this MAC's bypass
+// binding - but that call is wrapped in a try/catch that only logs and
+// gives up on failure (a network hiccup, an API timeout), with nothing
+// to retry it and no alert to the operator. A customer whose session
+// ended during exactly that kind of blip keeps free, ungated internet
+// forever afterward, with zero record anywhere pointing at why -
+// confirmed live: a real leftover "rj-piso-"-commented bypass binding
+// for a mac with no matching active session.
+//
+// This is the cleanup: compares every bypassed binding THIS APP ITSELF
+// created (identified by its own "rj-piso-" comment prefix - never
+// touches a binding an operator added by hand for their own reasons)
+// against the macs that should currently have one (active/unpaused
+// sessions, trusted devices, adopted vendos), and removes any that no
+// longer belong. Safe by construction: worst case is a session that
+// expired seconds ago gets its (already-supposed-to-be-gone) access cut
+// a few seconds later than it should have.
+async function reconcileBypassBindings(shouldHaveAccessMacs) {
+  const config = getMikrotikConfig();
+  if (!config.ip) return { removed: [] };
+  const allowed = new Set([...shouldHaveAccessMacs].map((m) => String(m).toLowerCase()));
+  try {
+    return await withMikrotik(config, async (client) => {
+      const res = await client.talk(['/ip/hotspot/ip-binding/print', '?type=bypassed']);
+      const removed = [];
+      for (const binding of res.re) {
+        const comment = binding.comment || '';
+        if (!comment.startsWith('rj-piso-')) continue; // never touch a binding we didn't create
+        const mac = String(binding['mac-address'] || '').toLowerCase();
+        if (mac && !allowed.has(mac)) {
+          await client.talk(['/ip/hotspot/ip-binding/remove', `=.id=${binding['.id']}`]);
+          removed.push(mac);
+        }
+      }
+      return { removed };
+    });
+  } catch (err) {
+    console.error('MikroTik reconcileBypassBindings error:', err.message);
+    return { removed: [] };
+  }
+}
+
 function queueNameFor(mac) {
   return `rj-${mac.replace(/:/g, '')}`;
 }
@@ -1455,6 +1498,7 @@ module.exports = {
   setDnsFilterServers,
   testConnection,
   checkHotspotEnabled,
+  reconcileBypassBindings,
   getMacFromIp,
   getIpFromMac,
   listVlans,

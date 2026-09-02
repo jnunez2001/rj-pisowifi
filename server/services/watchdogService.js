@@ -451,6 +451,40 @@ async function runHealthCheck() {
       } catch (e) {
         console.error('🛡️ [Watchdog] Hotspot status check failed:', e.message);
       }
+
+      // Real incident: blockClient() (called when a session ends) removes
+      // this customer's router-side bypass, but that call is a best-effort
+      // try/catch with nothing to retry it - a network blip at exactly the
+      // wrong moment leaves a real customer with permanent free, ungated
+      // internet, confirmed live via a leftover "rj-piso-" bypass binding
+      // with no matching active session. Cleans up any of this app's OWN
+      // stale bindings (never touches one an operator added by hand) every
+      // 2-minute cycle, so a missed removal self-heals within minutes
+      // instead of silently costing revenue indefinitely.
+      try {
+        // is_paused=0 OR pause_reason='idle': a MANUAL pause calls
+        // blockClient() (sessionService.js's pauseSession()), so that mac
+        // correctly has no binding right now - but an idle auto-pause
+        // deliberately never blocks (it has to auto-resume the instant
+        // real traffic returns), so that mac must stay counted as
+        // "should have access" or this would wrongly strip a legitimately
+        // idle-but-still-connected customer's bypass.
+        const shouldHaveAccess = new Set([
+          ...db.prepare("SELECT mac_address FROM sessions WHERE is_paused = 0 OR pause_reason = 'idle'").all().map((r) => r.mac_address),
+          ...db.prepare('SELECT mac_address FROM trusted_devices').all().map((r) => r.mac_address),
+          ...db.prepare('SELECT mac_address FROM vendos').all().map((r) => r.mac_address),
+        ]);
+        const { removed } = await require('./mikrotikService').reconcileBypassBindings(shouldHaveAccess);
+        if (removed.length > 0) {
+          issues.push({
+            severity: 'warning',
+            code: 'mikrotik_stale_bypass_cleaned',
+            message: `Removed ${removed.length} stale bypass binding(s) that were giving free internet with no active session: ${removed.join(', ')}.`,
+          });
+        }
+      } catch (e) {
+        console.error('🛡️ [Watchdog] Bypass reconciliation failed:', e.message);
+      }
     }
   }
 
