@@ -453,12 +453,58 @@ async function activateVendoRelay() {
   try {
     const res = await fetch(`${SERVER}/api/portal/relay/on`, { method: 'POST' });
     const data = await res.json();
+    if (data.coin_health === false) {
+      // Distinct from the generic "vendo offline" toast below - the
+      // machine IS reachable, it's refusing to open the gate because its
+      // own health check tripped (repeated failed credits). Show the
+      // one-click report banner instead of a toast the customer can't
+      // act on.
+      const banner = document.getElementById('coinHealthBanner');
+      if (banner) banner.style.display = 'block';
+      return;
+    }
     if (!data.success && res.status !== 400) {
       showToast('Vendo offline - coin slot may not respond', 'error');
     }
   } catch(e) {
     // Network-level failure reaching this server's own API - not
     // necessarily the ESP32's fault, don't alarm the customer over it.
+  }
+}
+
+// One-click "something's wrong with the coin machine" report, distinct
+// from the text-based "Report a Problem" form (openReportModal()) - no
+// typing needed since the problem (coin health check failed) is already
+// known. Proxies to the vendo's own /report-issue route, which attempts a
+// safe self-heal restart when idle.
+async function reportCoinIssue() {
+  const btn = document.getElementById('reportCoinIssueBtn');
+  const originalHtml = btn ? btn.innerHTML : '';
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>&nbsp; SENDING...';
+  }
+  try {
+    const res = await fetch(`${SERVER}/api/portal/report-issue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mac: getMac() })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(data.message || 'Thanks, your report has been sent.', 'success');
+      const banner = document.getElementById('coinHealthBanner');
+      if (banner) banner.style.display = 'none';
+    } else {
+      showToast(data.message || 'Could not send the report right now.', 'error');
+    }
+  } catch (e) {
+    showToast('Could not send the report right now.', 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+    }
   }
 }
 
@@ -732,6 +778,8 @@ async function handleInsertCoin(mode) {
 
   const modal = document.getElementById('coinModal');
   modal.classList.toggle('coin-modal-premium', mode === 'premium' || mode === 'convert');
+  const coinHealthBanner = document.getElementById('coinHealthBanner');
+  if (coinHealthBanner) coinHealthBanner.style.display = 'none';
   const title = document.getElementById('coinModalTitle');
   // A Converted customer pressing what's now their ONLY "add time" button
   // still goes through mode 'premium' server-side (same crediting path,

@@ -343,6 +343,19 @@
 
         <div id="coinModalStackNotice" style="display:none;"></div>
 
+        <!-- Shown only when the coin machine itself has refused several
+             credits in a row (firmware's own health check) - a one-click
+             report distinct from the text-based "Report a Problem" form,
+             no typing needed since the problem is already known. -->
+        <div id="coinHealthBanner" style="display:none;background:#fff3e0;border:1px solid #ffb74d;border-radius:10px;padding:12px;margin-bottom:14px;text-align:center;">
+          <p style="margin:0 0 10px;font-size:13px;color:#8a5a00;font-weight:700;">
+            <i class="fas fa-triangle-exclamation"></i>&nbsp; This coin machine isn't accepting coins right now.
+          </p>
+          <button type="button" class="btn btn-outline" id="reportCoinIssueBtn" onclick="reportCoinIssue()" style="width:100%;">
+            <i class="fas fa-flag"></i>&nbsp; REPORT ISSUE
+          </button>
+        </div>
+
         <!-- CIRCULAR COUNTDOWN TIMER -->
         <div class="coin-timer-wrap">
           <svg class="coin-timer-svg" viewBox="0 0 120 120">

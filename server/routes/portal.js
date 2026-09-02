@@ -191,6 +191,21 @@ router.post('/relay/:action', async (req, res) => {
       signal: AbortSignal.timeout(3000)
     });
 
+    // Bug this fixes: the ESP32's own response body was discarded
+    // entirely, so a coin-health-check failure (firmware's activateRelay()
+    // refusing to open the gate after repeated credit failures, see
+    // coin.cpp/relay.cpp) looked identical to any other unreachable-device
+    // error to the portal - no way to show the customer a distinct "report
+    // issue" affordance instead of a generic "vendo offline" toast.
+    if (relayRes.status === 503) {
+      const data = await relayRes.json().catch(() => ({}));
+      return res.status(503).json({
+        success: false,
+        message: data.message || 'Coin health check failed',
+        coin_health: false,
+      });
+    }
+
     if (!relayRes.ok) {
       return res.status(502).json({ success: false, message: 'ESP32 relay request failed' });
     }
@@ -199,6 +214,61 @@ router.post('/relay/:action', async (req, res) => {
   } catch (e) {
     console.error(`[Vendo] Relay ${action} failed:`, e.message);
     return res.status(502).json({ success: false, message: 'ESP32 unreachable' });
+  }
+});
+
+// POST /report-issue - a deliberately distinct, one-click "something's
+// wrong with the coin machine" signal from the text-based "Report a
+// Problem" chat form above. No typing needed: the portal shows this when
+// /relay/on comes back with coin_health:false (the coin acceptor has
+// already refused several credits in a row, see the firmware's own
+// activateRelay() guard). Proxies to the vendo's own /report-issue route
+// (esp32/esp8266 firmware), which attempts a safe self-heal restart when
+// idle - always logs the report itself first, even if the vendo can't be
+// reached, since the report is useful operator signal on its own.
+const reportIssueRateLimit = new Map();
+const REPORT_ISSUE_RATE_LIMIT_MS = 30000; // longer cooldown than the chat report - this triggers an actual device restart attempt, not just a message
+
+router.post('/report-issue', async (req, res) => {
+  const ip = getRealClientIp(req);
+  const last = reportIssueRateLimit.get(ip);
+  if (last && Date.now() - last < REPORT_ISSUE_RATE_LIMIT_MS) {
+    return res.status(429).json({ success: false, message: 'Please wait a moment before trying again.' });
+  }
+  reportIssueRateLimit.set(ip, Date.now());
+
+  const mac = req.body?.mac ? String(req.body.mac).trim().toLowerCase() : null;
+  try {
+    require('../services/alertEventService').logAlertEvent(
+      'warning',
+      'customer_reported_coin_issue',
+      'Customer reported the coin machine isn\'t working',
+      mac ? `Reported from device ${mac}. A self-heal restart was attempted.` : 'A self-heal restart was attempted.'
+    );
+  } catch (e) {}
+
+  const vendoIp = db.prepare("SELECT value FROM settings WHERE key = 'vendo_ip'").get()?.value;
+  if (!vendoIp) {
+    // Report is still logged above even with no vendo configured (e.g.
+    // direct-GPIO/Main Kiosk mode) - an operator should still see it.
+    return res.json({ success: true, message: 'Thanks, your report has been sent.' });
+  }
+
+  try {
+    const issueRes = await fetch(`http://${vendoIp}/report-issue`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(3000),
+    });
+    const data = await issueRes.json().catch(() => ({}));
+    if (issueRes.status === 409) {
+      return res.status(409).json({ success: false, message: data.message || 'The coin machine is busy, please try again in a moment.' });
+    }
+    if (!issueRes.ok) {
+      return res.json({ success: true, message: 'Thanks, your report has been sent (the machine could not be restarted automatically).' });
+    }
+    return res.json({ success: true, message: 'Thanks - the coin machine is restarting now.' });
+  } catch (e) {
+    return res.json({ success: true, message: 'Thanks, your report has been sent (the machine could not be restarted automatically).' });
   }
 });
 
@@ -574,6 +644,168 @@ router.post('/online-movies/:id/unlock-with-credit', (req, res) => {
   console.log(`✅ Online movie rental unlocked for ${mac} using ₱${movie.price_pesos} credit: "${movie.title}"`);
 
   res.json({ success: true, expires_at: expiresAt });
+});
+
+// ── TV Shows (series/anime/K-drama, seasons & episodes) ─────────────────
+// Parallel to Online Movies above but against tvCatalogService/
+// tv_series_* tables - see database.js's header comment on those tables
+// for why this isn't just "movies with an extra field". Whole-SERIES
+// pricing: one tv_series_rentals row unlocks every season/episode for the
+// rental window, not per-episode. Shares movie_credits with Online Movies
+// on purpose (one balance, spendable on either) rather than a second,
+// parallel credit pool that would just fragment the same money.
+const tvCatalogService = require('../services/tvCatalogService');
+const tmdbTvService = require('../services/tmdbTvService');
+
+function hasActiveTvRental(seriesId, mac) {
+  return !!db.prepare(`
+    SELECT 1 FROM tv_series_rentals WHERE series_id = ? AND mac_address = ? AND expires_at > datetime('now')
+  `).get(seriesId, mac);
+}
+
+// GET /tv-shows?mac=xx - same shape/spirit as GET /online-movies. Also
+// returns origin_country (alongside genres) so the client can build the
+// Anime/K-Drama auto-rows (Animation genre + Japan origin / Korea origin)
+// without a second round trip.
+router.get('/tv-shows', (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  const viewRows = db.prepare('SELECT series_id, views FROM tv_series_views').all();
+  const viewsById = new Map(viewRows.map((r) => [r.series_id, r.views]));
+  const series = tvCatalogService.getAll().map((s) => {
+    const unlocked = s.tier === 'free' ? true : (mac ? hasActiveTvRental(s.id, mac) : false);
+    return {
+      id: s.id, title: s.title, tier: s.tier, price_pesos: s.price_pesos, first_air_date: s.first_air_date || null,
+      poster: tmdbTvService.getCachedPosterUrl(s.id), genres: tmdbTvService.getCachedGenres(s.id),
+      origin_country: tmdbTvService.getCachedOriginCountry(s.id), unlocked,
+      views: viewsById.get(s.id) || 0, priority: s.priority || 0,
+    };
+  });
+  res.json({ success: true, series });
+});
+
+router.get('/tv-shows/sources', (req, res) => {
+  const sources = db.prepare('SELECT id, name, is_default FROM tv_streaming_sources ORDER BY sort_order, id').all();
+  res.json({ success: true, sources });
+});
+
+// GET /tv-shows/:id/seasons - live TMDb lookup (not pre-synced into the
+// feed table, unlike the catalog list itself) since this is only ever
+// called when a customer actually opens one series' detail view, not on
+// every catalog page load - request volume stays comparable to opening a
+// movie's embed, not a per-row cost on the browse grid.
+router.get('/tv-shows/:id/seasons', async (req, res) => {
+  try {
+    const series = await tmdbTvService.getSeriesById(req.params.id);
+    res.json({ success: true, seasons: series.seasons, overview: series.overview });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || 'Could not load seasons.' });
+  }
+});
+
+router.get('/tv-shows/:id/season/:num/episodes', async (req, res) => {
+  try {
+    const episodes = await tmdbTvService.getEpisodes(req.params.id, parseInt(req.params.num, 10));
+    res.json({ success: true, episodes });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message || 'Could not load episodes.' });
+  }
+});
+
+router.post('/tv-shows/search-hit', (req, res) => {
+  const query = String(req.body?.query || '').trim().slice(0, 200);
+  const seriesId = parseInt(req.body?.series_id, 10);
+  if (!query || !seriesId) return res.status(400).json({ success: false });
+  db.prepare("INSERT INTO online_movie_searches (query, movie_id, media_type) VALUES (?, ?, 'tv')").run(query, seriesId);
+  res.json({ success: true });
+});
+
+// GET /tv-shows/:id/embed?season=&episode=&mac=&source_id= - same gate/
+// source-resolution logic as GET /online-movies/:id/embed, plus the
+// season/episode numbers a movie embed has no concept of. Views are
+// counted per-series (not per-episode) - see tv_series_views' comment.
+router.get('/tv-shows/:id/embed', (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  const season = parseInt(req.query.season, 10);
+  const episode = parseInt(req.query.episode, 10);
+  if (!season || !episode) return res.status(400).json({ success: false, message: 'A season and episode are required.' });
+
+  const series = tvCatalogService.getById(req.params.id);
+  if (!series) return res.status(404).json({ success: false, message: 'Series not found' });
+
+  if (series.tier !== 'free' && !hasActiveTvRental(series.id, mac)) {
+    return res.status(403).json({ success: false, message: 'Not unlocked for this device' });
+  }
+
+  const sourceId = parseInt(req.query.source_id, 10);
+  const source = sourceId
+    ? db.prepare('SELECT * FROM tv_streaming_sources WHERE id = ?').get(sourceId)
+    : db.prepare('SELECT * FROM tv_streaming_sources ORDER BY is_default DESC, sort_order, id LIMIT 1').get();
+  if (!source) {
+    return res.status(503).json({ success: false, message: 'No TV source configured yet - set one in Movies > TV Shows.' });
+  }
+
+  db.prepare(`
+    INSERT INTO tv_series_views (series_id, views) VALUES (?, 1)
+    ON CONFLICT(series_id) DO UPDATE SET views = views + 1
+  `).run(series.id);
+
+  const embedUrl = source.url_template
+    .replace('{tmdb_id}', series.id)
+    .replace('{season}', season)
+    .replace('{episode}', episode);
+  return res.json({ success: true, source_id: source.id, embed_url: embedUrl });
+});
+
+// POST /tv-shows/:id/unlock-with-credit {mac} - same no-coins-needed
+// credit path as movies' equivalent route, unlocking the whole series.
+router.post('/tv-shows/:id/unlock-with-credit', (req, res) => {
+  const mac = String(req.body?.mac || '').trim().toLowerCase();
+  if (!mac) return res.status(400).json({ success: false, message: 'Valid MAC address required' });
+  const series = tvCatalogService.getById(req.params.id);
+  if (!series) return res.status(404).json({ success: false, message: 'Series not found' });
+  if (series.tier === 'free') return res.status(400).json({ success: false, message: 'This series is already free.' });
+
+  const creditRow = db.prepare('SELECT balance_pesos FROM movie_credits WHERE mac_address = ?').get(mac);
+  const balance = creditRow?.balance_pesos || 0;
+  if (balance < series.price_pesos) {
+    return res.status(400).json({ success: false, message: `Your ₱${balance} credit isn't enough - this series is ₱${series.price_pesos}.` });
+  }
+
+  db.prepare('UPDATE movie_credits SET balance_pesos = balance_pesos - ?, updated_at = CURRENT_TIMESTAMP WHERE mac_address = ?').run(series.price_pesos, mac);
+
+  const rentalHours = series.rental_hours > 0
+    ? series.rental_hours
+    : parseFloat(db.prepare("SELECT value FROM settings WHERE key = 'movie_rental_hours'").get()?.value || '48');
+  const expiresAt = new Date(Date.now() + rentalHours * 60 * 60 * 1000).toISOString();
+  db.prepare('INSERT INTO tv_series_rentals (series_id, mac_address, expires_at) VALUES (?, ?, ?)').run(series.id, mac, expiresAt);
+  db.prepare(`
+    INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, mac_address)
+    VALUES (?, ?, 0, 'tv_series_rental_credit', ?)
+  `).run(`TV-SERIES-${series.id}`, series.price_pesos, mac);
+  console.log(`✅ TV series unlocked for ${mac} using ₱${series.price_pesos} credit: "${series.title}"`);
+
+  res.json({ success: true, expires_at: expiresAt });
+});
+
+// POST /tv-requests {mac, requester_name, title, year} - same form/rate
+// limit as POST /movie-requests, reusing movie_requests with media_type
+// 'tv' instead of a second table (see database.js's column comment). The
+// once-per-day limit is shared across both - one request a day total,
+// whether it's for a movie or a series.
+router.post('/tv-requests', (req, res) => {
+  const mac = String(req.body?.mac || '').trim().toLowerCase();
+  const requesterName = String(req.body?.requester_name || '').trim().slice(0, 60);
+  const title = String(req.body?.title || '').trim().slice(0, 150);
+  const year = String(req.body?.year || '').trim().slice(0, 10);
+  if (!mac || !requesterName || !title) {
+    return res.status(400).json({ success: false, message: 'Your name and the series title are required.' });
+  }
+  const recent = db.prepare(`SELECT 1 FROM movie_requests WHERE mac_address = ? AND created_at > datetime('now', '-1 day')`).get(mac);
+  if (recent) {
+    return res.status(429).json({ success: false, message: 'You can only request one title per day - try again tomorrow.' });
+  }
+  db.prepare("INSERT INTO movie_requests (mac_address, requester_name, title, year, media_type) VALUES (?, ?, ?, ?, 'tv')").run(mac, requesterName, title, year);
+  res.json({ success: true });
 });
 
 // ── Movie Credit balance (database.js's movie_credits table) ───────────
