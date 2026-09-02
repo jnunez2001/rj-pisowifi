@@ -281,6 +281,37 @@ router.post('/report-issue', async (req, res) => {
   }
 });
 
+// POST /track {event_type, mac} - a small, honest click-analytics log
+// for the portal's own home-screen buttons (Insert Coin, Premium, Movies,
+// WiFi Rates, Vouchers, Free Claim, Report a Problem), so an operator can
+// see what customers actually tap vs. ignore, not guess. Deliberately a
+// tiny fixed vocabulary, not free-text event names - no customer-supplied
+// string ever reaches the database as an event_type, only these.
+const PORTAL_EVENT_TYPES = new Set([
+  'insert_coin', 'premium', 'convert', 'movies', 'wifi_rates', 'vouchers', 'free_claim', 'report_problem',
+]);
+const trackRateLimit = new Map();
+const TRACK_RATE_LIMIT_MS = 1000; // one click per second per IP is plenty - this is analytics, not a security gate
+
+router.post('/track', (req, res) => {
+  const ip = getRealClientIp(req);
+  const last = trackRateLimit.get(ip);
+  if (last && Date.now() - last < TRACK_RATE_LIMIT_MS) {
+    return res.json({ success: true }); // silently drop, never surface a rate-limit error for background analytics
+  }
+  trackRateLimit.set(ip, Date.now());
+
+  const eventType = String(req.body?.event_type || '');
+  if (!PORTAL_EVENT_TYPES.has(eventType)) {
+    return res.status(400).json({ success: false });
+  }
+  const mac = req.body?.mac ? String(req.body.mac).trim().toLowerCase() : null;
+  try {
+    db.prepare('INSERT INTO portal_events (event_type, mac_address) VALUES (?, ?)').run(eventType, mac);
+  } catch (e) {}
+  return res.json({ success: true });
+});
+
 // Named sounds only, never an arbitrary client-supplied name - the vendo
 // builds a fetch URL straight from whatever this sends it
 // (esp8266/firmware's /play route), so accepting anything from the

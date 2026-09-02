@@ -25,6 +25,7 @@ async function loadAnalytics() {
     renderHourChart(data.sessionsByHour);
     renderSessionAnalytics(data.sessionAnalytics);
     renderTopUsers(data.topUsers);
+    renderPortalClicks(data.portalClicks);
   } catch (e) {
     console.error('Analytics load error:', e);
   }
@@ -210,6 +211,37 @@ function renderTopUsers(users) {
       </div>
       <div class="zf3-bar-track"><div class="zf3-bar-fill" style="width:${Math.round((u.total / max) * 100)}%;"></div></div>
       <span class="zf3-list-value">₱${u.total}</span>
+    </div>
+  `).join('');
+}
+
+const PORTAL_CLICK_LABELS = {
+  insert_coin: 'Insert Coin',
+  premium: 'Premium (Boost)',
+  convert: 'Convert to Premium',
+  movies: 'Movies',
+  wifi_rates: 'WiFi Rates',
+  vouchers: 'Vouchers',
+  free_claim: 'Claim Free Minutes',
+  report_problem: 'Report a Problem',
+};
+
+function renderPortalClicks(clicks) {
+  const el = document.getElementById('anPortalClicks');
+  if (!el) return;
+  if (!clicks || clicks.length === 0) {
+    el.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px 0;font-size:13px;">No portal clicks recorded in this period yet</div>';
+    return;
+  }
+  const max = Math.max(...clicks.map((c) => c.count));
+  el.innerHTML = clicks.map((c, i) => `
+    <div class="zf3-list-row">
+      <div class="zf3-list-left">
+        <div class="zf3-rank">${i + 1}</div>
+        <span>${PORTAL_CLICK_LABELS[c.event_type] || c.event_type}</span>
+      </div>
+      <div class="zf3-bar-track"><div class="zf3-bar-fill" style="width:${Math.round((c.count / max) * 100)}%;"></div></div>
+      <span class="zf3-list-value">${c.count}</span>
     </div>
   `).join('');
 }
