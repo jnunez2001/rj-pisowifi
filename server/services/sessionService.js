@@ -713,9 +713,39 @@ async function expireSession(voucherCode) {
   // Block internet access
   if (session && session.mac_address) {
     try {
-      await blockClient(session.mac_address);
+      // Bug found live: blockClient() (mikrotikService.js in Controller
+      // mode) never actually throws on failure - it catches its own
+      // errors internally and resolves with `false`. This call discarded
+      // that return value entirely, so the try/catch below never fired
+      // for the exact failure it exists to catch - a customer whose
+      // session ended during a router API blip kept a real, working
+      // bypass binding forever with zero record anywhere, confirmed live
+      // via a leftover bypass with no matching session. Capturing the
+      // return value and alerting on false closes that gap; watchdogService's
+      // periodic reconciliation is the backstop that cleans up the binding
+      // itself even if this alert is the only thing anyone ever sees.
+      // Standalone/OpenWRT drivers deliberately resolve with `undefined`
+      // either way (their own documented "just log and resolve"
+      // contract, see networkService.js) - only MikroTik's blockClient
+      // returns a real true/false. Checking `=== false` specifically
+      // (not falsy) so this only ever fires on MikroTik's explicit
+      // failure signal, never misfires as a false alarm on every single
+      // standalone/OpenWRT session expiry.
+      const blocked = await blockClient(session.mac_address);
       await removeClientBandwidth(session.mac_address);
-      console.log(`[Network] Internet blocked for ${session.mac_address}`);
+      if (blocked !== false) {
+        console.log(`[Network] Internet blocked for ${session.mac_address}`);
+      } else {
+        console.error(`[Network] Failed to block ${session.mac_address} - may still have access until the next reconciliation pass`);
+        try {
+          require('./alertEventService').logAlertEvent(
+            'warning',
+            'session_end_block_failed',
+            `Could not confirm internet was blocked for ${session.mac_address}`,
+            'Their session ended, but the router/firewall did not confirm access was actually cut - they may still have a working connection until the next automatic reconciliation pass (Controller mode) or a manual check.'
+          );
+        } catch (e) {}
+      }
     } catch(e) {
       console.error(`[Network] Failed to block ${session.mac_address}:`, e.message);
     }
