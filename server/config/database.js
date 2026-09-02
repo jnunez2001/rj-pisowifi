@@ -1888,6 +1888,11 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   // prompted it - an operator who'd rather not extend sessions
   // automatically can turn it off in Settings.
   upsertIfMissing('enable_outage_compensation', '1');
+  // Operator-facing "disable Premium" kill-switch. On by default so
+  // existing installs keep today's behavior unchanged. See
+  // coinCreditService.js's isPremiumEnabled() and portal.js's GET /rates
+  // for how this actually gets enforced, not just hidden from the UI.
+  upsertIfMissing('enable_premium', '1');
   if (!db.prepare("SELECT key FROM settings WHERE key = 'vendo_firmware_released'").get()) {
     const hadVersion = !!db.prepare("SELECT value FROM settings WHERE key = 'vendo_firmware_version'").get()?.value;
     db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run('vendo_firmware_released', hadVersion ? '1' : '0');

@@ -132,6 +132,7 @@ async function loadSettings() {
     setToggle('enableOutageCompensation', 'enableOutageCompensationLabel', s.enable_outage_compensation === '1');
     document.getElementById('gracePeriodMinutes').value = s.grace_period_minutes || 0;
     document.getElementById('wifiSpeedTimerMs').value = s.wifi_speed_timer_ms || 1000;
+    setToggle('enablePremium', 'enablePremiumLabel', s.enable_premium === '1');
     setToggle('allowPremiumToRegularConvert', 'allowPremiumToRegularConvertLabel', s.allow_premium_to_regular_convert === '1');
 
     // Anti-Tethering Detection
@@ -223,6 +224,7 @@ async function saveSessionSettings() {
       enable_outage_compensation: document.getElementById('enableOutageCompensation').checked ? '1' : '0',
       grace_period_minutes: document.getElementById('gracePeriodMinutes').value,
       wifi_speed_timer_ms: document.getElementById('wifiSpeedTimerMs').value,
+      enable_premium: document.getElementById('enablePremium').checked ? '1' : '0',
       allow_premium_to_regular_convert: document.getElementById('allowPremiumToRegularConvert').checked ? '1' : '0',
     });
     if (data.success) showToast('Session settings saved!');

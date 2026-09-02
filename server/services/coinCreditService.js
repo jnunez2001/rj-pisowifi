@@ -41,6 +41,15 @@ class NoMatchingRateError extends Error {
   }
 }
 
+// Operator-facing "disable Premium" kill-switch (Settings). Checked here,
+// not just hidden from the portal's own GET /rates response (see
+// portal.js), so a customer on an already-open/cached page can't bypass
+// the toggle by POSTing a Premium purchase directly - the actual credit
+// is refused the same way an unmatched coin value already is.
+function isPremiumEnabled() {
+  return db.prepare("SELECT value FROM settings WHERE key = 'enable_premium'").get()?.value !== '0';
+}
+
 // Credits `coinValue` pesos to `mac` (creating a session if none exists,
 // otherwise topping up the existing one). Throws NoMatchingRateError if no
 // configured rate tier can account for any part of the amount, callers
@@ -61,6 +70,10 @@ class NoMatchingRateError extends Error {
 async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremium = false) {
   const { getRates } = require('./voucherService');
   const { creditOrCreateSession } = require('./sessionService');
+
+  if (isPremium && !isPremiumEnabled()) {
+    throw new NoMatchingRateError(coinValue);
+  }
 
   const allRates = getRates()
     .filter((r) => !!r.download_mbps === isPremium)
@@ -190,6 +203,10 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
 async function convertCoinValue(mac, coinValue, ip = '', kioskId = null) {
   const { getRates } = require('./voucherService');
   const { getSessionByMac, convertToPremiumSession } = require('./sessionService');
+
+  if (!isPremiumEnabled()) {
+    throw new NoMatchingRateError(coinValue);
+  }
 
   if (!getSessionByMac(mac)) {
     throw new Error('No active session to convert. Insert coins normally first.');
