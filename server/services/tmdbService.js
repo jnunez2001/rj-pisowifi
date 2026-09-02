@@ -254,4 +254,33 @@ function getFeedStatus() {
   return { count: row?.count || 0, last_synced: row?.last_synced || null };
 }
 
-module.exports = { getCachedPosterUrl, getCachedGenres, warmCache, testConnection, searchMovies, getMovieById, syncFeed, getFeedStatus };
+// Live TMDb trending order for the "Follow TMDb Trending" Top 10 mode
+// (server/routes/portal.js's GET /online-movies/top10). Deliberately NOT
+// stored in tmdb_movie_feed - that table's `source` column gets
+// overwritten by whichever of trending/popular/top_rated/new_release
+// syncFeed() processes last for a given id, so it can't reliably answer
+// "is this trending right now". Cached in memory for an hour so the
+// customer-facing route (called far more often than once an hour) isn't
+// making a live TMDb request per page load.
+let trendingCache = { ids: [], fetchedAt: 0 };
+const TRENDING_CACHE_MS = 60 * 60 * 1000;
+
+async function getTrendingIds() {
+  const apiKey = getApiKey();
+  if (!apiKey) return [];
+  if (trendingCache.ids.length && Date.now() - trendingCache.fetchedAt < TRENDING_CACHE_MS) {
+    return trendingCache.ids;
+  }
+  try {
+    const res = await fetchWithTimeout(`${BASE_URL}/trending/movie/day?api_key=${apiKey}`);
+    if (!res.ok) return trendingCache.ids;
+    const data = await res.json();
+    const ids = (data.results || []).map((m) => m.id);
+    trendingCache = { ids, fetchedAt: Date.now() };
+    return ids;
+  } catch (e) {
+    return trendingCache.ids;
+  }
+}
+
+module.exports = { getCachedPosterUrl, getCachedGenres, warmCache, testConnection, searchMovies, getMovieById, syncFeed, getFeedStatus, getTrendingIds };

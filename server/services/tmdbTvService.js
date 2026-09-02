@@ -267,7 +267,30 @@ function getFeedStatus() {
   return { count: row?.count || 0, last_synced: row?.last_synced || null };
 }
 
+// Mirrors tmdbService.js's getTrendingIds() - see its comment for why this
+// isn't just read off tv_series_feed's `source` column.
+let trendingCache = { ids: [], fetchedAt: 0 };
+const TRENDING_CACHE_MS = 60 * 60 * 1000;
+
+async function getTrendingIds() {
+  const apiKey = getApiKey();
+  if (!apiKey) return [];
+  if (trendingCache.ids.length && Date.now() - trendingCache.fetchedAt < TRENDING_CACHE_MS) {
+    return trendingCache.ids;
+  }
+  try {
+    const res = await fetchWithTimeout(`${BASE_URL}/trending/tv/day?api_key=${apiKey}`);
+    if (!res.ok) return trendingCache.ids;
+    const data = await res.json();
+    const ids = (data.results || []).map((s) => s.id);
+    trendingCache = { ids, fetchedAt: Date.now() };
+    return ids;
+  } catch (e) {
+    return trendingCache.ids;
+  }
+}
+
 module.exports = {
   getCachedPosterUrl, getCachedGenres, getCachedOriginCountry, warmCache,
-  searchSeries, getSeriesById, getEpisodes, syncFeed, getFeedStatus,
+  searchSeries, getSeriesById, getEpisodes, syncFeed, getFeedStatus, getTrendingIds,
 };

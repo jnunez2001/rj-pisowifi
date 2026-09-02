@@ -13,7 +13,7 @@
        even after the server has a newer version, which silently breaks the
        page (mismatched element IDs between cached JS and fresh HTML) with
        no visible error. Bump the version string whenever this file changes. -->
-  <link rel="stylesheet" href="/portal/assets/css/movies-online.css?v=5">
+  <link rel="stylesheet" href="/portal/assets/css/movies-online.css?v=6">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 </head>
 <body class="movies-body">
@@ -66,6 +66,16 @@
   <div id="onlineMoviesSection">
     <div class="movies-online-search">
       <input type="text" id="onlineMoviesSearch" placeholder="Search online movies...">
+    </div>
+    <div class="movies-online-controls">
+      <div class="movies-online-type-tabs">
+        <button class="movies-online-type-tab active" data-type="all" onclick="setMoviesTypeFilter('all')">All</button>
+        <button class="movies-online-type-tab" data-type="movie" onclick="setMoviesTypeFilter('movie')">Movies</button>
+        <button class="movies-online-type-tab" data-type="tv" onclick="setMoviesTypeFilter('tv')">Series</button>
+      </div>
+      <select id="onlineGenreSelect" class="movies-online-genre-select" onchange="setGenreFilter(this.value)">
+        <option value="">All Genres</option>
+      </select>
     </div>
     <div id="onlineMoviesRows"></div>
     <div style="text-align:center;padding:24px 0 32px;">
@@ -203,7 +213,7 @@
 
   <script src="/portal/assets/js/vendor/hls.min.js"></script>
   <script src="/portal/assets/js/movies.js?v=5"></script>
-  <script src="/portal/assets/js/movies-online.js?v=18"></script>
-  <script src="/portal/assets/js/tv-shows-online.js?v=2"></script>
+  <script src="/portal/assets/js/movies-online.js?v=19"></script>
+  <script src="/portal/assets/js/tv-shows-online.js?v=3"></script>
 </body>
 </html>

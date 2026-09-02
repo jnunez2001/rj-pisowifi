@@ -21,6 +21,15 @@ let onlineAllMovies = [];
 let onlineCurrentMac = '';
 let onlinePendingRentMovieId = null;
 let onlineMoviesRendered = false;
+let onlineTop10Movies = [];
+// 'all' | 'movie' | 'tv' - the Movies/Series tab above the rows. Filters
+// what's on screen, it's not a page swap - the underlying catalogs stay
+// loaded, this just decides what renderOnlineMoviesRows() includes.
+let moviesTypeFilter = 'all';
+// '' = "All Genres". Replaces the old one-row-per-genre auto-stacking
+// (buildGenreRows) with a single dropdown-selected row, combining movies
+// and series in that genre together - see renderOnlineMoviesRows().
+let moviesGenreFilter = '';
 
 // Kept working (unused while the source toggle is hidden - see
 // movies.html) so Local can come back later with a one-line change.
@@ -30,11 +39,6 @@ async function setMoviesSource(source) {
   document.getElementById('onlineMoviesSection').style.display = source === 'online' ? '' : 'none';
   if (source === 'online' && !onlineMoviesRendered) await loadOnlineMovies();
 }
-
-const TIER_ROWS = [
-  { tier: 'free', label: 'Free' },
-  { tier: 'paid', label: 'Paid' },
-];
 
 // Takes onlineCurrentMac as already set by the unified init at the bottom
 // of this file - see the comment on movies.js's loadMovies() for why this
@@ -49,6 +53,78 @@ async function loadOnlineMovies() {
   } catch (e) {
     onlineAllMovies = [];
   }
+}
+
+// The numbered "Top 10 Movies" row - ranking mode (most-viewed/TMDb
+// trending/admin-curated) is decided entirely server-side, see
+// server/routes/portal.js's computeTop10() and the admin's Movies > Top 10
+// Ranking card. This client just renders whatever order comes back.
+async function loadMovieTop10() {
+  try {
+    const res = await fetch(`/api/portal/online-movies/top10?mac=${encodeURIComponent(onlineCurrentMac)}`);
+    const data = await res.json();
+    onlineTop10Movies = data.top10 || [];
+  } catch (e) {
+    onlineTop10Movies = [];
+  }
+}
+
+// Shared list for the Movies/Series tab + genre dropdown - local + online
+// movies both count as "Movies" for this filter, tv-shows-online.js's
+// tvAllSeries is "Series". Tagged with _mediaType (distinct from _kind,
+// which distinguishes the local vs online BACKEND a movie came from) so
+// this filter logic doesn't have to know about that split.
+function combinedCatalogForFilter() {
+  const movies = [...allMovies, ...onlineAllMovies];
+  movies.forEach((m) => { m._mediaType = 'movie'; });
+  const series = typeof tvAllSeries !== 'undefined' ? tvAllSeries : [];
+  series.forEach((s) => { s._mediaType = 'tv'; });
+  if (moviesTypeFilter === 'movie') return movies;
+  if (moviesTypeFilter === 'tv') return series;
+  return [...movies, ...series];
+}
+
+// Rebuilt every time the Movies/Series tab changes (not just once) so a
+// genre that only exists in the currently-hidden media type doesn't
+// clutter the dropdown - e.g. picking "Series" hides movie-only genres.
+function populateGenreDropdown() {
+  const sel = document.getElementById('onlineGenreSelect');
+  if (!sel) return;
+  const previous = sel.value;
+  const genreSet = new Set();
+  combinedCatalogForFilter().forEach((m) => (m.genres || []).forEach((g) => genreSet.add(g)));
+  const sorted = [...genreSet].sort();
+  sel.innerHTML = '<option value="">All Genres</option>' + sorted.map((g) => `<option value="${escapeHtmlMovies(g)}">${escapeHtmlMovies(g)}</option>`).join('');
+  moviesGenreFilter = sorted.includes(previous) ? previous : '';
+  sel.value = moviesGenreFilter;
+}
+
+function setMoviesTypeFilter(type) {
+  moviesTypeFilter = type;
+  document.querySelectorAll('.movies-online-type-tab').forEach((b) => b.classList.toggle('active', b.dataset.type === type));
+  populateGenreDropdown();
+  renderOnlineMoviesRows();
+}
+
+function setGenreFilter(genre) {
+  moviesGenreFilter = genre;
+  renderOnlineMoviesRows();
+}
+
+// Shared by the Top 10 Movies and Top 10 Series rows - a plain rows-html
+// helper plus a numbered rank badge injected into each card.
+function numberedRowHtml(title, items) {
+  if (!items || items.length === 0) return '';
+  const cards = items.map((m, i) => {
+    const card = movieCardHtml(m);
+    return card.replace('<div class="movie-card-thumb">', `<div class="movie-card-rank">${i + 1}</div><div class="movie-card-thumb">`);
+  }).join('');
+  return `
+    <div class="movies-online-row movies-online-row-top10">
+      <h3 class="movies-online-row-title">${title}</h3>
+      <div class="movies-online-row-track">${cards}</div>
+    </div>
+  `;
 }
 
 // Tags each item with which backend/player it came from - never shown to
@@ -116,20 +192,6 @@ function bySmartOrder(a, b) {
   return (b.priority || 0) - (a.priority || 0) || (b.views || 0) - (a.views || 0) || a.title.localeCompare(b.title);
 }
 
-function buildGenreRows(list) {
-  const buckets = new Map();
-  list.forEach((m) => {
-    (m.genres && m.genres.length ? m.genres : []).forEach((genre) => {
-      if (!buckets.has(genre)) buckets.set(genre, []);
-      buckets.get(genre).push(m);
-    });
-  });
-  return [...buckets.entries()]
-    .filter(([, items]) => items.length >= MIN_ROW_SIZE)
-    .map(([label, items]) => [label, items.slice().sort(bySmartOrder)])
-    .sort((a, b) => b[1].length - a[1].length);
-}
-
 function rowsHtml(rows) {
   return rows.map(([label, items]) => `
     <div class="movies-online-row">
@@ -152,26 +214,6 @@ function exclusiveRowHtml(list) {
     <div class="movies-online-row">
       <h3 class="movies-online-row-title">🔥 Exclusive</h3>
       <div class="movies-online-row-track">${ranked.map(movieCardHtml).join('')}</div>
-    </div>
-  `;
-}
-
-// Real usage ranking (server/routes/portal.js increments `views` once per
-// actual unlocked play, in GET /online-movies/:id/embed - not on page view,
-// so just browsing the grid doesn't inflate it). Hidden entirely until at
-// least one movie has a real play, so a fresh install never shows a fake or
-// empty "Top 10".
-function topWatchedRowHtml(list) {
-  const ranked = list.filter((m) => m.views > 0).sort((a, b) => b.views - a.views).slice(0, 10);
-  if (ranked.length === 0) return '';
-  const cards = ranked.map((m, i) => {
-    const card = movieCardHtml(m);
-    return card.replace('<div class="movie-card-thumb">', `<div class="movie-card-rank">${i + 1}</div><div class="movie-card-thumb">`);
-  }).join('');
-  return `
-    <div class="movies-online-row movies-online-row-top10">
-      <h3 class="movies-online-row-title">🔥 Top 10 Most Watched</h3>
-      <div class="movies-online-row-track">${cards}</div>
     </div>
   `;
 }
@@ -222,26 +264,37 @@ function localLibraryRowHtml(list) {
 // and allMovies (movies.js) directly rather than taking a list argument, so
 // every caller (initial load, search-clear) redraws the exact same merged
 // view without needing to remember to pass both catalogs each time.
+// Combined Movies+Series home screen: Top 10 Movies, Top 10 Series, the
+// permanent Anime/K-Drama rows, then whichever single genre is picked from
+// the dropdown (movies and series mixed together in it) - replacing the
+// old behavior of auto-stacking one row per genre. The Movies/Series tab
+// (moviesTypeFilter) narrows all of this to one media type; left on "All"
+// it's the fully combined view described above. Exclusive/New Releases/HD
+// Library are movie-only bonus rows, kept as before.
 function renderOnlineMoviesRows() {
   const el = document.getElementById('onlineMoviesRows');
-  const exclusive = exclusiveRowHtml(onlineAllMovies);
-  const top10 = topWatchedRowHtml(onlineAllMovies);
-  const newReleases = newReleasesRowHtml(onlineAllMovies);
-  const localRow = localLibraryRowHtml(allMovies);
-  // tv-shows-online.js, appended after the movie rows so Anime/K-Drama/
-  // series genre shelves show up on this same page (per owner request:
-  // one organized Movies tab, not a separate TV tab) - guarded since this
-  // file can't assume tv-shows-online.js loaded first/at all.
-  const tvRows = typeof buildTvRowsHtml === 'function' ? buildTvRowsHtml() : '';
-  const genreRows = buildGenreRows(onlineAllMovies);
-  if (genreRows.length > 0) {
-    el.innerHTML = exclusive + top10 + newReleases + localRow + rowsHtml(genreRows) + tvRows;
-    return;
+  const showMovies = moviesTypeFilter !== 'tv';
+  const showSeries = moviesTypeFilter !== 'movie';
+
+  const top10MoviesRow = showMovies ? numberedRowHtml('🔥 Top 10 Movies', onlineTop10Movies) : '';
+  const top10SeriesRow = showSeries && typeof tvTop10Series !== 'undefined' ? numberedRowHtml('🔥 Top 10 Series', tvTop10Series) : '';
+  // Anime/K-Drama are series-only, so they're hidden entirely under the
+  // Movies tab rather than showing an empty shelf.
+  const animeKdramaRows = showSeries && typeof buildTvRowsHtml === 'function' ? buildTvRowsHtml() : '';
+
+  let genreRow = '';
+  if (moviesGenreFilter) {
+    const pool = combinedCatalogForFilter().filter((m) => (m.genres || []).includes(moviesGenreFilter));
+    if (pool.length > 0) {
+      genreRow = rowsHtml([[moviesGenreFilter, pool.slice().sort(bySmartOrder)]]);
+    }
   }
-  const tierRows = TIER_ROWS
-    .map(({ tier, label }) => [label, onlineAllMovies.filter((m) => m.tier === tier)])
-    .filter(([, items]) => items.length > 0);
-  el.innerHTML = exclusive + top10 + newReleases + localRow + rowsHtml(tierRows) + tvRows;
+
+  const exclusive = showMovies ? exclusiveRowHtml(onlineAllMovies) : '';
+  const newReleases = showMovies ? newReleasesRowHtml(onlineAllMovies) : '';
+  const localRow = showMovies ? localLibraryRowHtml(allMovies) : '';
+
+  el.innerHTML = top10MoviesRow + top10SeriesRow + animeKdramaRows + genreRow + exclusive + newReleases + localRow;
 }
 
 // Flat grid used only for search results, where tier grouping isn't useful.
@@ -719,12 +772,14 @@ function startUnifiedMoviesInit() {
   detectMacForMovies().then((mac) => {
     currentMac = mac;
     onlineCurrentMac = mac;
-    const loaders = [loadMovies(), loadOnlineMovies()];
+    const loaders = [loadMovies(), loadOnlineMovies(), loadMovieTop10()];
     if (typeof loadTvShows === 'function') loaders.push(loadTvShows());
+    if (typeof loadTvTop10 === 'function') loaders.push(loadTvTop10());
     return Promise.all(loaders);
   }).then(() => {
     tagKind(allMovies, 'local');
     tagKind(onlineAllMovies, 'online');
+    populateGenreDropdown();
     renderOnlineMoviesRows();
     refreshMovieCredit();
   });

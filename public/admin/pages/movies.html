@@ -143,6 +143,49 @@
 <div class="zf3-card" style="margin-bottom:16px;">
   <div class="om-card-header">
     <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-orange,#f59e0b);"></span>Top 10 Ranking</div>
+      <div class="om-card-desc">How the numbered "Top 10" row is decided on the customer's home screen, separately for Movies and Series.</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:14px;">
+    <div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px;">Top 10 Movies</div>
+      <select id="top10MovieMode" class="om-tier-select" style="width:100%;" onchange="top10SaveMode('movie', this.value)">
+        <option value="most_viewed">Most Viewed (real plays on this box)</option>
+        <option value="tmdb_trending">Follow TMDb Trending</option>
+        <option value="custom">Custom (hand-picked below)</option>
+      </select>
+      <div id="top10MoviePicksWrap" style="display:none;margin-top:10px;">
+        <div style="position:relative;">
+          <input type="text" id="top10MovieSearch" placeholder="Search a movie to pin…" style="width:100%;" oninput="top10SearchTmdb('movie', this.value)">
+          <div class="om-search-dropdown" id="top10MovieSearchDropdown"></div>
+        </div>
+        <ol id="top10MoviePicksList" style="margin:10px 0 0;padding-left:0;list-style:none;"></ol>
+      </div>
+    </div>
+    <div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px;">Top 10 Series</div>
+      <select id="top10SeriesMode" class="om-tier-select" style="width:100%;" onchange="top10SaveMode('tv', this.value)">
+        <option value="most_viewed">Most Viewed (real plays on this box)</option>
+        <option value="tmdb_trending">Follow TMDb Trending</option>
+        <option value="custom">Custom (hand-picked below)</option>
+      </select>
+      <div id="top10SeriesPicksWrap" style="display:none;margin-top:10px;">
+        <div style="position:relative;">
+          <input type="text" id="top10SeriesSearch" placeholder="Search a series to pin…" style="width:100%;" oninput="top10SearchTmdb('tv', this.value)">
+          <div class="om-search-dropdown" id="top10SeriesSearchDropdown"></div>
+        </div>
+        <ol id="top10SeriesPicksList" style="margin:10px 0 0;padding-left:0;list-style:none;"></ol>
+      </div>
+    </div>
+  </div>
+  <div class="om-help">"Custom" ignores view counts and TMDb entirely - only the titles you pin below show in that Top 10 row, in the order you set.</div>
+</div>
+
+<div class="zf3-card" style="margin-bottom:16px;">
+  <div class="om-card-header">
+    <div>
       <div class="om-card-title"><span class="om-dot" style="background:var(--accent-blue,#2563eb);"></span>TMDb Integration</div>
       <div class="om-card-desc">Powers poster art, genres, search, and the catalog sync below.</div>
     </div>

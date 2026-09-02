@@ -693,6 +693,20 @@ db.exec(`
     views INTEGER NOT NULL DEFAULT 0
   );
 
+  -- Manually-pinned Top 10 picks, only used when movie_top10_mode/
+  -- series_top10_mode (settings) is 'custom' - lets an admin hand-curate
+  -- the front row instead of following either real view counts or TMDb's
+  -- own trending list. sort_order is the display order top to bottom.
+  CREATE TABLE IF NOT EXISTS custom_top_picks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_type TEXT NOT NULL CHECK(media_type IN ('movie', 'tv')),
+    tmdb_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(media_type, tmdb_id)
+  );
+
   -- Short-lived cache of a season's episode list (TMDb's /tv/{id}/season/
   -- {n}) - fetched live the first time any customer opens that season,
   -- reused for a day afterward so ten customers browsing the same popular

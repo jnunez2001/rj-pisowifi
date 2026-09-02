@@ -523,6 +523,57 @@ router.get('/online-movies', (req, res) => {
   res.json({ success: true, movies, session_active: true });
 });
 
+// Shared by GET /online-movies/top10 and GET /tv-shows/top10 - the "front
+// row" ranking is admin-controlled per media type (settings key
+// movie_top10_mode / series_top10_mode), one of:
+//   'most_viewed'   - real play counts on this box (online_movie_views /
+//                      tv_series_views), highest first
+//   'tmdb_trending'  - TMDb's own live trending order (getTrendingIds()),
+//                      filtered down to titles actually in this catalog
+//   'custom'         - an admin-curated, manually-ordered pick list
+//                      (custom_top_picks), ignoring views/TMDb entirely
+// `items` is the full mapped catalog (each entry already has .id/.views),
+// `trendingIds` is already resolved (the caller awaits it, since only the
+// tmdb_trending branch needs a network call) so this helper itself stays
+// synchronous and reusable for both media types.
+function computeTop10(mode, items, trendingIds, mediaType) {
+  const byId = new Map(items.map((it) => [it.id, it]));
+  if (mode === 'custom') {
+    const picks = db.prepare('SELECT tmdb_id FROM custom_top_picks WHERE media_type = ? ORDER BY sort_order, id').all(mediaType);
+    return picks.map((p) => byId.get(p.tmdb_id)).filter(Boolean).slice(0, 10);
+  }
+  if (mode === 'tmdb_trending') {
+    const ranked = trendingIds.map((id) => byId.get(id)).filter(Boolean);
+    if (ranked.length > 0) return ranked.slice(0, 10);
+    // Fall through to most_viewed if trending gave us nothing usable yet
+    // (no TMDb key set, first run before the cache warms, network hiccup)
+    // rather than showing an empty front row.
+  }
+  return [...items].sort((a, b) => (b.views || 0) - (a.views || 0)).slice(0, 10);
+}
+
+// GET /online-movies/top10 - the numbered "Top 10 Movies" row on the
+// customer home screen. Separate endpoint (not folded into GET
+// /online-movies above) because tmdb_trending mode needs an occasional
+// live TMDb call (see computeTop10/getTrendingIds' hourly cache) and the
+// main catalog route above is deliberately kept fully synchronous.
+router.get('/online-movies/top10', async (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  const tmdbService = require('../services/tmdbService');
+  const viewRows = db.prepare('SELECT movie_id, views FROM online_movie_views').all();
+  const viewsById = new Map(viewRows.map((r) => [r.movie_id, r.views]));
+  const items = onlineMovieCatalog.getAll().map((m) => ({
+    id: m.id, title: m.title, tier: m.tier, price_pesos: m.price_pesos, release_date: m.release_date || null,
+    poster: tmdbService.getCachedPosterUrl(m.id), genres: tmdbService.getCachedGenres(m.id),
+    unlocked: m.tier === 'free' ? true : (mac ? hasActiveOnlineRental(m.id, mac) : false),
+    views: viewsById.get(m.id) || 0, priority: m.priority || 0,
+  }));
+  const mode = db.prepare("SELECT value FROM settings WHERE key = 'movie_top10_mode'").get()?.value || 'most_viewed';
+  const trendingIds = mode === 'tmdb_trending' ? await tmdbService.getTrendingIds() : [];
+  const top10 = computeTop10(mode, items, trendingIds, 'movie');
+  res.json({ success: true, mode, top10 });
+});
+
 // GET /online-movies/sources - the server-switcher tabs in the player
 // overlay (public/portal/assets/js/movies-online.js). Just names + ids,
 // never the actual URL template (no reason for that to reach the client
@@ -690,6 +741,25 @@ router.get('/tv-shows', (req, res) => {
     };
   });
   res.json({ success: true, series });
+});
+
+// GET /tv-shows/top10 - mirrors GET /online-movies/top10 above for the
+// "Top 10 Series" row.
+router.get('/tv-shows/top10', async (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  const viewRows = db.prepare('SELECT series_id, views FROM tv_series_views').all();
+  const viewsById = new Map(viewRows.map((r) => [r.series_id, r.views]));
+  const items = tvCatalogService.getAll().map((s) => ({
+    id: s.id, title: s.title, tier: s.tier, price_pesos: s.price_pesos, first_air_date: s.first_air_date || null,
+    poster: tmdbTvService.getCachedPosterUrl(s.id), genres: tmdbTvService.getCachedGenres(s.id),
+    origin_country: tmdbTvService.getCachedOriginCountry(s.id),
+    unlocked: s.tier === 'free' ? true : (mac ? hasActiveTvRental(s.id, mac) : false),
+    views: viewsById.get(s.id) || 0, priority: s.priority || 0,
+  }));
+  const mode = db.prepare("SELECT value FROM settings WHERE key = 'series_top10_mode'").get()?.value || 'most_viewed';
+  const trendingIds = mode === 'tmdb_trending' ? await tmdbTvService.getTrendingIds() : [];
+  const top10 = computeTop10(mode, items, trendingIds, 'tv');
+  res.json({ success: true, mode, top10 });
 });
 
 router.get('/tv-shows/sources', (req, res) => {

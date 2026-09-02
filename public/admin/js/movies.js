@@ -24,6 +24,7 @@ async function loadMoviesPage() {
   await refreshMoviesGrid();
   await omLoadRevenue();
   await omInit();
+  await top10Init();
   if (typeof tvInit === 'function') await tvInit();
 
   clearInterval(moviesPollInterval);
@@ -248,6 +249,100 @@ async function omRemoveSource(row) {
   if (!confirm('Remove this streaming source?')) return;
   await apiCall('DELETE', `/api/admin/movies/streaming-sources/${row.dataset.sourceId}`);
   omLoadSources();
+}
+
+// ── Top 10 Ranking (server/routes/portal.js's computeTop10) ─────────────
+let top10SearchDebounce = null;
+
+async function top10Init() {
+  const data = await apiCall('GET', '/api/admin/movies/top10-settings');
+  if (!data.success) return;
+  document.getElementById('top10MovieMode').value = data.movie_mode;
+  document.getElementById('top10SeriesMode').value = data.series_mode;
+  top10ToggleWrap('movie', data.movie_mode);
+  top10ToggleWrap('tv', data.series_mode);
+  if (data.movie_mode === 'custom') top10LoadPicks('movie');
+  if (data.series_mode === 'custom') top10LoadPicks('tv');
+}
+
+function top10ToggleWrap(mediaType, mode) {
+  const wrap = document.getElementById(mediaType === 'movie' ? 'top10MoviePicksWrap' : 'top10SeriesPicksWrap');
+  wrap.style.display = mode === 'custom' ? 'block' : 'none';
+}
+
+async function top10SaveMode(mediaType, mode) {
+  const body = mediaType === 'movie' ? { movie_mode: mode } : { series_mode: mode };
+  const data = await apiCall('POST', '/api/admin/movies/top10-settings', body);
+  if (data.success) {
+    showToast('Saved', 'success');
+    top10ToggleWrap(mediaType, mode);
+    if (mode === 'custom') top10LoadPicks(mediaType);
+  } else {
+    showToast(data.message || 'Could not save', 'error');
+  }
+}
+
+function top10SearchTmdb(mediaType, query) {
+  clearTimeout(top10SearchDebounce);
+  const dropdown = document.getElementById(mediaType === 'movie' ? 'top10MovieSearchDropdown' : 'top10SeriesSearchDropdown');
+  if (!query.trim()) { dropdown.classList.remove('show'); return; }
+  top10SearchDebounce = setTimeout(async () => {
+    const path = mediaType === 'movie' ? '/api/admin/movies/tmdb-search' : '/api/admin/tv-shows/tmdb-search';
+    const data = await apiCall('GET', `${path}?q=${encodeURIComponent(query)}`);
+    const results = data.success ? data.results : [];
+    if (results.length === 0) { dropdown.innerHTML = '<div class="om-search-result">No matches</div>'; dropdown.classList.add('show'); return; }
+    dropdown.innerHTML = results.map((r) => `
+      <div class="om-search-result" data-id="${r.id}" data-title="${escapeHtml(r.title).replace(/"/g, '&quot;')}" data-media-type="${mediaType}">
+        <img src="${r.poster_path ? 'https://image.tmdb.org/t/p/w92' + r.poster_path : ''}" onerror="this.style.visibility='hidden'">
+        <span>${escapeHtml(r.title)}</span>
+        <span class="yr">${r.year || ''}</span>
+      </div>
+    `).join('');
+    dropdown.classList.add('show');
+  }, 350);
+}
+
+async function top10AddPick(mediaType, tmdbId, title) {
+  const searchInputId = mediaType === 'movie' ? 'top10MovieSearch' : 'top10SeriesSearch';
+  const dropdownId = mediaType === 'movie' ? 'top10MovieSearchDropdown' : 'top10SeriesSearchDropdown';
+  document.getElementById(dropdownId).classList.remove('show');
+  document.getElementById(searchInputId).value = '';
+  const data = await apiCall('POST', '/api/admin/movies/top10-picks', { media_type: mediaType, tmdb_id: tmdbId, title });
+  if (data.success) {
+    showToast(`Pinned "${title}"`, 'success');
+    top10LoadPicks(mediaType);
+  } else {
+    showToast(data.message || 'Could not pin', 'error');
+  }
+}
+
+async function top10LoadPicks(mediaType) {
+  const data = await apiCall('GET', `/api/admin/movies/top10-picks?media_type=${mediaType}`);
+  const list = document.getElementById(mediaType === 'movie' ? 'top10MoviePicksList' : 'top10SeriesPicksList');
+  const picks = data.success ? data.picks : [];
+  if (picks.length === 0) {
+    list.innerHTML = '<li style="color:var(--text-muted);font-size:12.5px;padding:8px 0;">No picks yet - search above to pin one.</li>';
+    return;
+  }
+  list.innerHTML = picks.map((p, i) => `
+    <li style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-color,#eee);">
+      <span style="color:var(--text-muted);font-size:12px;width:18px;">${i + 1}.</span>
+      <span style="flex:1;font-size:13px;">${escapeHtml(p.title)}</span>
+      <button class="btn btn-secondary top10-move-btn" data-pick-id="${p.id}" data-media-type="${mediaType}" data-direction="up" style="padding:3px 7px;font-size:11px;" ${i === 0 ? 'disabled' : ''}><i class="fas fa-arrow-up"></i></button>
+      <button class="btn btn-secondary top10-move-btn" data-pick-id="${p.id}" data-media-type="${mediaType}" data-direction="down" style="padding:3px 7px;font-size:11px;" ${i === picks.length - 1 ? 'disabled' : ''}><i class="fas fa-arrow-down"></i></button>
+      <button class="btn btn-secondary top10-remove-btn" data-pick-id="${p.id}" data-media-type="${mediaType}" style="padding:3px 7px;font-size:11px;color:var(--danger,#e74c3c);"><i class="fas fa-trash"></i></button>
+    </li>
+  `).join('');
+}
+
+async function top10MovePick(id, direction, mediaType) {
+  await apiCall('POST', `/api/admin/movies/top10-picks/${id}/move`, { direction });
+  top10LoadPicks(mediaType);
+}
+
+async function top10RemovePick(id, mediaType) {
+  await apiCall('DELETE', `/api/admin/movies/top10-picks/${id}`);
+  top10LoadPicks(mediaType);
 }
 
 function omToggleReveal() {
@@ -778,6 +873,21 @@ document.addEventListener('click', (e) => {
   const searchResult = e.target.closest('#omSearchDropdown .om-search-result');
   if (searchResult && searchResult.dataset.id) {
     omAddFromSearch(parseInt(searchResult.dataset.id, 10), searchResult.dataset.title);
+    return;
+  }
+  const top10SearchResult = e.target.closest('#top10MovieSearchDropdown .om-search-result, #top10SeriesSearchDropdown .om-search-result');
+  if (top10SearchResult && top10SearchResult.dataset.id) {
+    top10AddPick(top10SearchResult.dataset.mediaType, parseInt(top10SearchResult.dataset.id, 10), top10SearchResult.dataset.title);
+    return;
+  }
+  const top10MoveBtn = e.target.closest('.top10-move-btn');
+  if (top10MoveBtn) {
+    top10MovePick(parseInt(top10MoveBtn.dataset.pickId, 10), top10MoveBtn.dataset.direction, top10MoveBtn.dataset.mediaType);
+    return;
+  }
+  const top10RemoveBtn = e.target.closest('.top10-remove-btn');
+  if (top10RemoveBtn) {
+    top10RemovePick(parseInt(top10RemoveBtn.dataset.pickId, 10), top10RemoveBtn.dataset.mediaType);
     return;
   }
   const resetBtn = e.target.closest('.om-reset-btn');

@@ -5638,6 +5638,81 @@ router.delete('/movies/streaming-sources/:id', adminAuth, (req, res) => {
   res.json({ success: true });
 });
 
+// ── Top 10 Ranking (front-row curation for the customer home screen) ────
+// Shared by Movies and TV Shows - see server/routes/portal.js's
+// computeTop10() for what each mode actually does. Kept under /movies/*
+// (not split into a /tv-shows/* twin) since the admin card managing this
+// is one shared card, same reasoning as the streaming sources merge.
+const TOP10_MODES = ['most_viewed', 'tmdb_trending', 'custom'];
+
+router.get('/movies/top10-settings', adminAuth, (req, res) => {
+  const movieMode = db.prepare("SELECT value FROM settings WHERE key = 'movie_top10_mode'").get()?.value || 'most_viewed';
+  const seriesMode = db.prepare("SELECT value FROM settings WHERE key = 'series_top10_mode'").get()?.value || 'most_viewed';
+  res.json({ success: true, movie_mode: movieMode, series_mode: seriesMode });
+});
+
+router.post('/movies/top10-settings', adminAuth, (req, res) => {
+  const { movie_mode, series_mode } = req.body || {};
+  if (movie_mode !== undefined) {
+    if (!TOP10_MODES.includes(movie_mode)) return res.status(400).json({ success: false, message: 'Invalid movie_mode.' });
+    db.prepare(`INSERT INTO settings (key, value) VALUES ('movie_top10_mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(movie_mode);
+  }
+  if (series_mode !== undefined) {
+    if (!TOP10_MODES.includes(series_mode)) return res.status(400).json({ success: false, message: 'Invalid series_mode.' });
+    db.prepare(`INSERT INTO settings (key, value) VALUES ('series_top10_mode', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(series_mode);
+  }
+  res.json({ success: true });
+});
+
+router.get('/movies/top10-picks', adminAuth, (req, res) => {
+  const mediaType = req.query.media_type === 'tv' ? 'tv' : 'movie';
+  const picks = db.prepare('SELECT * FROM custom_top_picks WHERE media_type = ? ORDER BY sort_order, id').all(mediaType);
+  res.json({ success: true, picks });
+});
+
+router.post('/movies/top10-picks', adminAuth, (req, res) => {
+  const mediaType = req.body?.media_type === 'tv' ? 'tv' : 'movie';
+  const tmdbId = parseInt(req.body?.tmdb_id, 10);
+  const title = String(req.body?.title || '').trim().slice(0, 200);
+  if (!tmdbId || !title) return res.status(400).json({ success: false, message: 'A title and TMDb ID are required.' });
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM custom_top_picks WHERE media_type = ?').get(mediaType).m;
+  try {
+    db.prepare('INSERT INTO custom_top_picks (media_type, tmdb_id, title, sort_order) VALUES (?, ?, ?, ?)')
+      .run(mediaType, tmdbId, title, maxOrder + 1);
+    res.json({ success: true });
+  } catch (err) {
+    if (String(err.message || '').includes('UNIQUE')) {
+      return res.status(400).json({ success: false, message: 'Already in the Top 10 picks.' });
+    }
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// {direction: 'up'|'down'} - swaps this pick's sort_order with its
+// neighbor on that side. Simpler and less error-prone over the wire than
+// having the client re-post a whole reordered array.
+router.post('/movies/top10-picks/:id/move', adminAuth, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const direction = req.body?.direction === 'up' ? 'up' : 'down';
+  const current = db.prepare('SELECT * FROM custom_top_picks WHERE id = ?').get(id);
+  if (!current) return res.status(404).json({ success: false, message: 'Pick not found' });
+  const neighbor = direction === 'up'
+    ? db.prepare('SELECT * FROM custom_top_picks WHERE media_type = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1').get(current.media_type, current.sort_order)
+    : db.prepare('SELECT * FROM custom_top_picks WHERE media_type = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1').get(current.media_type, current.sort_order);
+  if (!neighbor) return res.json({ success: true });
+  const swap = db.transaction(() => {
+    db.prepare('UPDATE custom_top_picks SET sort_order = ? WHERE id = ?').run(neighbor.sort_order, current.id);
+    db.prepare('UPDATE custom_top_picks SET sort_order = ? WHERE id = ?').run(current.sort_order, neighbor.id);
+  });
+  swap();
+  res.json({ success: true });
+});
+
+router.delete('/movies/top10-picks/:id', adminAuth, (req, res) => {
+  db.prepare('DELETE FROM custom_top_picks WHERE id = ?').run(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
 router.post('/movies/tmdb-key', adminAuth, (req, res) => {
   const apiKey = String(req.body?.api_key || '').trim();
   if (!apiKey) return res.status(400).json({ success: false, message: 'Enter a key first.' });

@@ -10,6 +10,7 @@
 // for the whole page, never re-detected here.
 
 let tvAllSeries = [];
+let tvTop10Series = [];
 let tvSources = null;
 let tvCurrentSeries = null;
 let tvCurrentSeasons = [];
@@ -24,8 +25,8 @@ async function loadTvShows() {
     const data = await res.json();
     tvAllSeries = (data.series || []).map((s) => {
       s._kind = 'tv';
-      // Aliased so the shared bySmartOrder()/buildGenreRows() sort/group
-      // logic in movies-online.js works on this list unmodified - a
+      // Aliased so the shared bySmartOrder() sort logic in movies-online.js
+      // works on this list unmodified - a
       // series' "release_date" for recency-sorting purposes is when it
       // first aired, not a movie release_date field it never has.
       s.release_date = s.first_air_date;
@@ -33,6 +34,19 @@ async function loadTvShows() {
     });
   } catch (e) {
     tvAllSeries = [];
+  }
+}
+
+// The numbered "Top 10 Series" row - mirrors movies-online.js's
+// loadMovieTop10(). Ranking mode is admin-controlled server-side (see
+// server/routes/admin.js's series_top10_mode setting).
+async function loadTvTop10() {
+  try {
+    const res = await fetch(`/api/portal/tv-shows/top10?mac=${encodeURIComponent(onlineCurrentMac)}`);
+    const data = await res.json();
+    tvTop10Series = (data.top10 || []).map((s) => { s._kind = 'tv'; return s; });
+  } catch (e) {
+    tvTop10Series = [];
   }
 }
 
@@ -65,18 +79,16 @@ function isKDrama(s) {
   return (s.origin_country || []).includes('KR') && !isAnime(s);
 }
 
-// Auto-organized per owner request: Anime and K-Drama are detected from
-// TMDb's own genre + origin_country data, not manually tagged per title.
-// Everything else falls into ordinary genre rows (reusing movies-online.js's
-// buildGenreRows()/rowsHtml() - both already generic over any list with
-// .genres/.title/.priority/.views, no TV-specific changes needed there),
-// excluding whatever's already claimed by Anime/K-Drama so a title isn't
-// classified twice.
+// Anime and K-Drama are permanent home-screen rows (owner's call, kept
+// separate from the genre dropdown since they're already a working
+// differentiator) - auto-detected from TMDb's own genre + origin_country
+// data, not manually tagged per title. Everything else (ordinary genres)
+// is browsed through the genre dropdown in movies-online.js's
+// renderOnlineMoviesRows(), not stacked here as one row per genre anymore.
 function buildTvRowsHtml() {
   if (!tvAllSeries || tvAllSeries.length === 0) return '';
   const anime = tvAllSeries.filter(isAnime).sort(bySmartOrder);
   const kdrama = tvAllSeries.filter(isKDrama).sort(bySmartOrder);
-  const remaining = tvAllSeries.filter((s) => !isAnime(s) && !isKDrama(s));
 
   const animeRow = anime.length >= MIN_ROW_SIZE ? `
     <div class="movies-online-row">
@@ -90,8 +102,7 @@ function buildTvRowsHtml() {
       <div class="movies-online-row-track">${kdrama.map(movieCardHtml).join('')}</div>
     </div>
   ` : '';
-  const genreRows = buildGenreRows(remaining);
-  return animeRow + kdramaRow + rowsHtml(genreRows);
+  return animeRow + kdramaRow;
 }
 
 function logTvSearchHitIfSearching(seriesId) {

@@ -24,6 +24,24 @@
   color: var(--text-primary); font-size: 14px;
 }
 
+/* Movies/Series tab + genre dropdown - the Top 10 rows, Anime/K-Drama, and
+   the dropdown-selected genre row are all filtered by these two controls,
+   see movies-online.js's renderOnlineMoviesRows(). */
+.movies-online-controls {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 14px 20px 0; flex-wrap: wrap;
+}
+.movies-online-type-tabs { display: flex; gap: 8px; }
+.movies-online-type-tab {
+  border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-secondary);
+  border-radius: 20px; padding: 8px 16px; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+.movies-online-type-tab.active { background: var(--brand-teal); border-color: var(--brand-teal); color: #fff; }
+.movies-online-genre-select {
+  border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary);
+  border-radius: 20px; padding: 8px 14px; font-size: 13px; font-weight: 700; cursor: pointer;
+}
+
 .movies-online-row { padding: 20px 0 0; }
 .movies-online-row-title { margin: 0 20px 10px; font-size: 15px; color: var(--text-primary); }
 .movies-online-row-track {
