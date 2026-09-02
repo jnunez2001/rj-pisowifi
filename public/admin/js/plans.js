@@ -252,21 +252,40 @@ function clearPlansFilters() {
 }
 
 let plOpenMenuId = null;
+// Bug found live: the Actions cell is `position:sticky` (pinned to the
+// right edge so it stays visible on a horizontally-scrolled table), and
+// EVERY row's sticky cell competes at the same implicit stacking level -
+// a dropdown opened in one row (even with its own z-index) could render
+// UNDER the next row's sticky cell rather than over it, since sticky
+// elements don't consistently respect a purely-nested z-index the way a
+// non-sticky ancestor would. Explicitly raising the OPEN row's own sticky
+// cell z-index (not just the dropdown's) above every other row's default
+// while a menu is open fixes this regardless of that quirk, and resets
+// cleanly when it closes.
+function setPlanMenuCellZIndex(id, raised) {
+  const menu = document.getElementById(`planMenu${id}`);
+  const cell = menu?.closest('td');
+  if (cell) cell.style.zIndex = raised ? '30' : '';
+}
+
 function togglePlanMenu(id) {
   if (plOpenMenuId !== null && plOpenMenuId !== id) {
     const prev = document.getElementById(`planMenu${plOpenMenuId}`);
     if (prev) prev.style.display = 'none';
+    setPlanMenuCellZIndex(plOpenMenuId, false);
   }
   const menu = document.getElementById(`planMenu${id}`);
   if (!menu) return;
   const isOpen = menu.style.display === 'block';
   menu.style.display = isOpen ? 'none' : 'block';
+  setPlanMenuCellZIndex(id, !isOpen);
   plOpenMenuId = isOpen ? null : id;
 }
 document.addEventListener('click', (e) => {
   if (plOpenMenuId !== null && !e.target.closest('.dropdown-wrap')) {
     const menu = document.getElementById(`planMenu${plOpenMenuId}`);
     if (menu) menu.style.display = 'none';
+    setPlanMenuCellZIndex(plOpenMenuId, false);
     plOpenMenuId = null;
   }
 });

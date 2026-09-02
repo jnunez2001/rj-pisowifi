@@ -113,7 +113,7 @@ async function loadTopSpenders() {
           <div class="zf3-rank">${i + 1}</div>
           <div class="zf3-avatar"><i class="fas fa-user"></i></div>
           ${s.display_name
-            ? `<span>${escapeHtml(s.display_name)}</span><span style="font-family:monospace;font-size:11px;color:var(--text-muted);margin-left:6px;">${s.mac_address}</span>`
+            ? `<span>${escapeHtml(s.display_name)}</span>`
             : `<span style="font-family:monospace;">${s.mac_address}</span>`}
         </div>
         <div class="zf3-bar-track"><div class="zf3-bar-fill" style="width:${Math.round((s.total / max) * 100)}%;"></div></div>

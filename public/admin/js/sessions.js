@@ -214,8 +214,9 @@ function renderSessionsTable() {
           <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Start: ${parseSqlDate(s.created_at).toLocaleTimeString()}</div>
         </td>
         <td data-label="MAC Address">
-          ${s.display_name ? `<div style="font-size:13px;color:var(--text-primary);">${escapeHtml(s.display_name)}</div>` : ''}
-          <div style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${s.mac_address}</div>
+          ${s.display_name
+            ? `<div style="font-size:13px;color:var(--text-primary);">${escapeHtml(s.display_name)}</div>`
+            : `<div style="font-family:monospace;font-size:12px;color:var(--text-secondary);">${s.mac_address}</div>`}
         </td>
         <td data-label="IP Address" style="font-size:13px;color:var(--text-secondary);">${s.ip_address || '--'}</td>
         <td data-label="Plan">
