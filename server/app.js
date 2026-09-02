@@ -196,6 +196,13 @@ const ADMIN_LAN_ALLOWED_PATHS = new Set([
   '/api/admin/vendo/register',
   '/api/admin/vendo/firmware/version',
   '/api/admin/vendo/firmware/download',
+  // Both device-facing, device_secret-gated (see their own route
+  // comments in admin.js) - same trust model as /vendo/register above,
+  // just missing from this allowlist would silently 404 them for every
+  // real device on the LAN exactly like the register bug this file's
+  // own comment already documents once.
+  '/api/admin/vendo/coin-queue-sync',
+  '/api/admin/vendo/device-log-sync',
 ]);
 function isLocalRequest(req) {
   const addr = req.socket.remoteAddress || '';

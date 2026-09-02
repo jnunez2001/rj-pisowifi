@@ -2872,7 +2872,7 @@ router.post('/vendo/register', (req, res) => {
     // capability behind adoption (this table has never been used for
     // financial attribution), so this is a visibility/approval gate, not
     // an access-control one.
-    const existing = db.prepare('SELECT id, device_secret FROM vendos WHERE mac_address = ?').get(mac);
+    const existing = db.prepare('SELECT id, device_secret, status FROM vendos WHERE mac_address = ?').get(mac);
 
     // Bug: trust in this MAC (adoption, trusted-device bypass) was based on
     // the bare MAC address alone, trivially spoofable by anything on the
@@ -2921,10 +2921,111 @@ router.post('/vendo/register', (req, res) => {
     }
 
     console.log(`📡 Vendo registered: ${name} (${mac}) at ${ip}`);
-    return res.json({ success: true, message: 'Vendo registered', device_secret: issuedSecret });
+    // `status` lets firmware know whether it's genuinely adopted - a real
+    // brownout/connectivity incident showed the device had no way to tell
+    // "I'm bound to this server" from "I've never been approved", so it
+    // fell back into its own setup hotspot on any long connectivity gap
+    // regardless of adoption state. Firmware now persists this and only
+    // auto-opens setup mode when it's NOT adopted; the only way an
+    // already-adopted device sees 'candidate' again is a genuine unbind
+    // (an admin deleting it from Devices, so this exact mac comes back
+    // as a brand-new row on its next check-in) - that's the deliberate,
+    // only-other path back to setup mode this was scoped to support.
+    return res.json({ success: true, message: 'Vendo registered', device_secret: issuedSecret, status: existing ? existing.status : 'candidate' });
 
   } catch (err) {
     console.error('Vendo register error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/vendo/coin-queue-sync - device-facing (no adminAuth, mirrors
+// /api/coin's trusted-LAN-hardware pattern), device_secret required. Lets
+// a coin acceptor upload coin events it detected but couldn't send live
+// (server/network unreachable at the time - firmware's own postCoin()
+// retry window, ~18s, had already exhausted) once it reconnects, instead
+// of those coins being permanently lost with zero record. These are, by
+// definition, coins that arrived with no live customer pending-window
+// match possible (the customer's own phone interaction already timed out
+// minutes/hours ago by the time this sync happens) - credited the same
+// way the existing no-pending-match fail-safe already handles this
+// (coin.js's coin_credited_no_pending_match path): to the device's own
+// mac, clearly flagged, real money never silently dropped, an operator
+// can review and manually reconcile with a customer if identifiable.
+router.post('/vendo/coin-queue-sync', async (req, res) => {
+  try {
+    const mac = String(req.body?.mac || '').trim().toLowerCase();
+    const events = Array.isArray(req.body?.events) ? req.body.events : [];
+    if (!mac || events.length === 0) {
+      return res.status(400).json({ success: false, message: 'mac and events required' });
+    }
+    const vendo = db.prepare('SELECT device_secret FROM vendos WHERE mac_address = ?').get(mac);
+    if (!vendo) return res.status(404).json({ success: false, message: 'Unknown device' });
+    if (vendo.device_secret && req.body?.device_secret !== vendo.device_secret) {
+      return res.status(403).json({ success: false, message: 'Invalid device secret' });
+    }
+
+    const { creditCoinValue, NoMatchingRateError } = require('../services/coinCreditService');
+    const { logAlertEvent } = require('../services/alertEventService');
+    let credited = 0;
+    let failed = 0;
+    for (const ev of events) {
+      const coinValue = parseInt(ev?.value, 10);
+      if (!coinValue || coinValue <= 0) { failed++; continue; }
+      try {
+        db.prepare('INSERT INTO coin_pulse_log (mac_address, coin_value) VALUES (?, ?)').run(mac, coinValue);
+      } catch (e) {}
+      try {
+        await creditCoinValue(mac, coinValue, '', null);
+        credited++;
+      } catch (e) {
+        if (!(e instanceof NoMatchingRateError)) console.error('Coin queue sync credit error:', e.message);
+        failed++;
+      }
+    }
+    logAlertEvent(
+      'warning',
+      'coin_queue_synced',
+      `Delayed coin sync from ${mac}: ${events.length} event(s)`,
+      `This device queued ${events.length} coin event(s) while it couldn't reach the server (₱${credited > 0 ? 'credited to the device\'s own address, review and reconcile with a customer if identifiable' : 'none matched a rate'}). ${failed > 0 ? `${failed} could not be matched to any rate.` : ''}`
+    );
+    console.log(`🔄 Vendo ${mac} synced ${events.length} queued coin event(s): ${credited} credited, ${failed} failed`);
+    return res.json({ success: true, credited, failed });
+  } catch (err) {
+    console.error('Coin queue sync error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/vendo/device-log-sync - device-facing, same auth pattern.
+// A small lifecycle log (WiFi lost/regained, setup mode entered, coin
+// queued/synced) the device keeps locally and uploads once reconnected -
+// this incident showed "the logs can't tell it, just Self-heal check
+// passed" - having the DEVICE's own account of what it experienced,
+// even hours later, is real diagnostic signal a server-side log alone
+// can never produce (the server has no visibility into what a
+// disconnected device was doing). No dedicated admin UI yet - stored for
+// now, queryable directly; worth a real page once there's a sense of
+// what an operator actually wants to see.
+router.post('/vendo/device-log-sync', (req, res) => {
+  try {
+    const mac = String(req.body?.mac || '').trim().toLowerCase();
+    const events = Array.isArray(req.body?.events) ? req.body.events : [];
+    if (!mac || events.length === 0) {
+      return res.status(400).json({ success: false, message: 'mac and events required' });
+    }
+    const vendo = db.prepare('SELECT device_secret FROM vendos WHERE mac_address = ?').get(mac);
+    if (!vendo) return res.status(404).json({ success: false, message: 'Unknown device' });
+    if (vendo.device_secret && req.body?.device_secret !== vendo.device_secret) {
+      return res.status(403).json({ success: false, message: 'Invalid device secret' });
+    }
+    const insert = db.prepare('INSERT INTO vendo_device_log (mac_address, message, device_at) VALUES (?, ?, ?)');
+    for (const ev of events.slice(0, 200)) {
+      insert.run(mac, String(ev?.message || '').slice(0, 500), ev?.at || null);
+    }
+    return res.json({ success: true, stored: Math.min(events.length, 200) });
+  } catch (err) {
+    console.error('Device log sync error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

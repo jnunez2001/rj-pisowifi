@@ -379,6 +379,22 @@ db.exec(`
     received_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- A vendo device's OWN account of what it experienced while it
+  -- couldn't reach the server (WiFi lost, setup mode auto-triggered, a
+  -- coin queued for later sync) - uploaded once it reconnects via
+  -- POST /api/admin/vendo/device-log-sync. device_at is the device's own
+  -- millis()-since-boot timestamp at the time of the event (meaningless
+  -- as an absolute time, only useful for ordering events relative to
+  -- each other within one sync batch) - received_at is the real,
+  -- server-side clock time this row was actually stored.
+  CREATE TABLE IF NOT EXISTS vendo_device_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    mac_address TEXT,
+    message TEXT,
+    device_at INTEGER,
+    received_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Local movie library (server/services/movieService.js). One row per
   -- source video file found under settings.movies_source_dir. 'free'
   -- tier movies are watchable by anyone with an active WiFi session (the
