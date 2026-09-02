@@ -396,6 +396,18 @@ body {
   cursor: not-allowed;
 }
 
+/* Subtle attention animation for the two primary home-screen actions -
+   different visual language per button (a soft glow breathe for Insert
+   Coin, a light sheen sweep for Movies, see .btn-movies::after below) but
+   the same 2.4s cycle length so they read as "in sync" rather than two
+   unrelated things happening on screen. Suspended on a disabled/blocked
+   Insert Coin button - nothing to draw attention to. */
+@keyframes insertCoinGlow {
+  0%, 100% { box-shadow: 0 4px 14px rgba(12,143,109,0.3); }
+  50% { box-shadow: 0 4px 22px rgba(12,143,109,0.65); }
+}
+.btn-insert:not(:disabled) { animation: insertCoinGlow 2.4s ease-in-out infinite; }
+
 .btn-premium {
   background: linear-gradient(135deg, #d4af37, #b8860b);
   color: #fff;
@@ -457,6 +469,30 @@ body {
   align-items: center;
   justify-content: center;
   gap: 10px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* The Movies half of the synced pair above (see .btn-insert's
+   insertCoinGlow) - a light sheen that sweeps across once per 2.4s cycle,
+   then rests off-screen for the remainder, rather than a continuous
+   glow (a dark cinema-style button reads better with a brief highlight
+   than a pulsing shadow). Same cycle length as Insert Coin's glow keeps
+   the two feeling rhythmically paired without being visually identical. */
+@keyframes moviesSheen {
+  0% { left: -60%; }
+  45%, 100% { left: 130%; }
+}
+.btn-movies::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(120deg, transparent, rgba(255,255,255,0.28), transparent);
+  animation: moviesSheen 2.4s ease-in-out infinite;
+  pointer-events: none;
 }
 .btn-movies i { font-size: 18px; }
 .btn-movies .btn-movies-sub {
@@ -956,7 +992,9 @@ body {
 @media (prefers-reduced-motion: reduce) {
   #speedIndicatorFill,
   #speedIndicatorFill::after,
-  .speed-spark {
+  .speed-spark,
+  .btn-insert,
+  .btn-movies::after {
     animation: none;
   }
 }
