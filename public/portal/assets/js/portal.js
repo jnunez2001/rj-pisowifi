@@ -1180,6 +1180,11 @@ function updateUI(session) {
     document.getElementById('sectionDisconnected').style.display = 'none';
     document.getElementById('sectionConnected').style.display = 'none';
     document.getElementById('sectionPaused').style.display = 'block';
+    const pausedHint = document.getElementById('pausedHint');
+    if (pausedHint) {
+      const maxPauseMins = parseInt(portalSettings.max_pause_minutes, 10) || 30;
+      pausedHint.textContent = `Your remaining time is saved. Come back within ${maxPauseMins} minutes to keep it - your session ends by ${formatExpiry(session.hard_expires_at)} at the latest either way.`;
+    }
     stopSpeedIndicatorTicker();
     document.getElementById('speedIndicator').style.display = 'none';
 
