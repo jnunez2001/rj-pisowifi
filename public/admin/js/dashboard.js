@@ -70,6 +70,7 @@ async function loadDashboard() {
     loadSalesStats(),
     loadRecentTransactions(),
     loadTopSpenders(),
+    loadVisitors(),
     loadNetworkLanes(),
     loadNetworkDevicesSummary(),
     loadActiveSessionsCount(),
@@ -118,6 +119,38 @@ async function loadTopSpenders() {
         </div>
         <div class="zf3-bar-track"><div class="zf3-bar-fill" style="width:${Math.round((s.total / max) * 100)}%;"></div></div>
         <span class="zf3-list-value">₱${s.total}</span>
+      </div>
+    `).join('');
+  } catch (e) {
+    el.innerHTML = '';
+  }
+}
+
+// The top of the funnel Top Spenders/Live Sessions can never show, since
+// those only ever include someone who's already paid - everyone currently
+// on the WiFi with no active session, i.e. never opened Insert Coin, or
+// opened it and didn't finish. See GET /api/admin/dashboard/visitors.
+async function loadVisitors() {
+  const el = document.getElementById('visitorsList');
+  const countEl = document.getElementById('visitorsCount');
+  if (!el) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/dashboard/visitors');
+    if (!data.success) { el.innerHTML = ''; return; }
+    if (countEl) countEl.textContent = data.count;
+    if (data.count === 0) {
+      el.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px 0;font-size:13px;">Nobody connected right now who isn\'t already paying</div>';
+      return;
+    }
+    el.innerHTML = data.visitors.slice(0, 10).map((v) => `
+      <div class="zf3-list-row">
+        <div class="zf3-list-left">
+          <div class="zf3-avatar"><i class="fas fa-user-clock"></i></div>
+          ${v.name && v.name !== v.mac
+            ? `<span>${escapeHtml(v.name)}</span>`
+            : `<span style="font-family:monospace;">${v.mac}</span>`}
+        </div>
+        <span style="font-size:12px;color:var(--text-muted);">${v.ip || '--'}</span>
       </div>
     `).join('');
   } catch (e) {

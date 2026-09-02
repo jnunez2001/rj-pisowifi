@@ -1030,6 +1030,22 @@ db.exec(`
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Portal click analytics (server/routes/portal.js's POST /track) - a
+  -- small, honest event log of which home-screen actions customers
+  -- actually tap (Insert Coin, Premium, Movies, WiFi Rates, Vouchers,
+  -- Free Claim, Report a Problem), so an operator can see what's actually
+  -- getting used vs. ignored instead of guessing. mac_address is nullable
+  -- (a customer can tap before MAC detection resolves) - still counts
+  -- toward the click total either way, just not attributable to a
+  -- specific device.
+  CREATE TABLE IF NOT EXISTS portal_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    mac_address TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS idx_portal_events_created ON portal_events(created_at);
+
   -- Config safety engine (server/services/configSafety.js) audit trail.
   -- One row per attempted network configuration change (Standalone mode
   -- lane/port-role apply), win or lose - snapshot_json is the FULL

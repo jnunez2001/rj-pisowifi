@@ -528,6 +528,19 @@ async function playVendoSound(sound) {
   } catch (e) {}
 }
 
+// Small, honest click-analytics ping for the home-screen buttons - fire-
+// and-forget, never blocks or shows an error, since nothing about the
+// customer's actual flow should ever depend on this succeeding.
+function trackClick(eventType) {
+  try {
+    fetch(`${SERVER}/api/portal/track`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event_type: eventType, mac: getMac() })
+    }).catch(() => {});
+  } catch (e) {}
+}
+
 // Same voice prompt, played straight from the customer's own phone -
 // the vendo speaker and the portal page are two separate physical
 // locations (the coin slot vs wherever the customer is sitting/standing),
@@ -759,6 +772,7 @@ function launchConfetti() {
 async function handleInsertCoin(mode) {
   if (isBlocked) return;
   if (mode === 'convert' && !convertEligible()) return; // button should already be disabled/hidden
+  trackClick(mode === 'premium' ? 'premium' : (mode === 'convert' || mode === 'convert_down') ? 'convert' : 'insert_coin');
   playSound('insert');
   insertedTotal = 0;
   pendingRegistered = false;
@@ -1628,6 +1642,7 @@ function convertEligible() {
 // get the normal in-portal behavior regardless of the setting - it's not
 // a bug, there's genuinely no reliable way to do this on iOS.
 function openMoviesLink(event) {
+  trackClick('movies');
   if (portalSettings.movies_open_in_chrome === '1' && /Android/i.test(navigator.userAgent)) {
     if (event) event.preventDefault();
     const scheme = window.location.protocol.replace(':', '');
@@ -1640,11 +1655,13 @@ function openMoviesLink(event) {
 
 // ===== MODALS =====
 function showRates() {
+  trackClick('wifi_rates');
   setRatesTab('standard');
   document.getElementById('ratesModal').classList.add('show');
 }
 
 function showVoucherInput() {
+  trackClick('vouchers');
   const row = document.getElementById('voucherInputRow');
   row.style.display = row.style.display === 'flex' ? 'none' : 'flex';
 }
@@ -1693,6 +1710,7 @@ function selectReportCategory(category) {
 }
 
 function openReportModal() {
+  trackClick('report_problem');
   document.getElementById('reportName').value = '';
   document.getElementById('reportMessage').value = '';
   selectReportCategory('other');
@@ -1988,6 +2006,7 @@ async function checkFreeClaimEligibility() {
 }
 
 async function claimFreeMinutes() {
+  trackClick('free_claim');
   const mac = getMac();
   if (!mac) { alert('Cannot detect device.'); return; }
 

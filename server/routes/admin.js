@@ -1208,6 +1208,18 @@ router.get('/analytics/summary', adminAuth, (req, res) => {
       avg_duration_seconds: Math.round(durationByMac.get(s.mac_address)?.avg_duration || 0),
     }));
 
+    // What customers actually tap on the portal home screen, ranked -
+    // see server/routes/portal.js's POST /track. Real data only: an
+    // event type nobody's tapped yet simply doesn't appear, never a
+    // fabricated zero row.
+    const portalClicks = db.prepare(`
+      SELECT event_type, COUNT(*) as count
+      FROM portal_events
+      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
+      GROUP BY event_type
+      ORDER BY count DESC
+    `).all(days);
+
     return res.json({
       success: true,
       period: { days },
@@ -1228,6 +1240,7 @@ router.get('/analytics/summary', adminAuth, (req, res) => {
         repeatUsers,
       },
       topUsers,
+      portalClicks,
     });
   } catch (err) {
     console.error('Analytics summary error:', err);
@@ -1259,6 +1272,38 @@ router.get('/dashboard/top-spenders-today', adminAuth, (req, res) => {
     return res.json({ success: true, spenders: rows });
   } catch (err) {
     console.error('Top spenders error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/dashboard/visitors - the top of the funnel Top
+// Spenders/Live Sessions can never show, since those only ever include
+// someone who's already paid. This is everyone currently ON the WiFi
+// (real ARP/DHCP presence, same source Network Devices already uses) with
+// NO active session - never opened Insert Coin, or opened it and gave up
+// before actually paying. Excludes vendos and access points (this app's
+// own infrastructure, not customers) and anything with an active session
+// (that's a converted visitor, already counted elsewhere).
+router.get('/dashboard/visitors', adminAuth, async (req, res) => {
+  try {
+    const networkDevicesService = require('../services/networkDevicesService');
+    const devices = await networkDevicesService.listDevices();
+    const sessionMacs = new Set(
+      db.prepare('SELECT mac_address FROM sessions').all().map((r) => String(r.mac_address || '').toLowerCase())
+    );
+    const visitors = devices.filter((d) =>
+      d.status === 'online' &&
+      d.vendo_id === null &&
+      d.type !== 'Access Point' &&
+      !sessionMacs.has(d.mac)
+    );
+    return res.json({
+      success: true,
+      count: visitors.length,
+      visitors: visitors.map((v) => ({ mac: v.mac, name: v.name, ip: v.ip })),
+    });
+  } catch (err) {
+    console.error('Dashboard visitors error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
