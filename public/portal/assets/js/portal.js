@@ -2236,3 +2236,29 @@ window.addEventListener('online', recheckMacOnReconnect);
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') recheckMacOnReconnect();
 });
+
+// Backstop for the two listeners above: 'online' and 'visibilitychange'
+// are the common real-world triggers, but aren't guaranteed on every
+// phone/OS/browser combination a captive-portal flow runs on - a device
+// that reassociates WiFi without ever firing either event would
+// otherwise sit stuck showing "Could not detect your device" with no way
+// to recover except the customer manually reloading. A quiet, low-cost
+// poll only while a MAC is genuinely still missing (clears itself the
+// moment one resolves, so this never runs at all for the normal case of
+// a customer who was already properly connected) closes that gap - the
+// page fixes itself within a few seconds, no popup, no action needed
+// from the customer at all.
+let macRecoveryInterval = null;
+if (!detectedMac) {
+  macRecoveryInterval = setInterval(async () => {
+    if (detectedMac) {
+      clearInterval(macRecoveryInterval);
+      return;
+    }
+    const mac = await detectDevice();
+    if (mac) {
+      clearInterval(macRecoveryInterval);
+      location.reload();
+    }
+  }, 5000);
+}
