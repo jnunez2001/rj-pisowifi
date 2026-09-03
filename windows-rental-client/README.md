@@ -8,10 +8,14 @@ side, over the `POST /api/rental/*` device-facing routes in
 
 ## What this is NOT
 
-This is source code, not a built app. It hasn't been compiled or run -
-I don't have a Windows machine or .NET SDK to test it from here. You'll
-need to build and test it on real Windows hardware, then tell me what
-you see so I can fix anything that needs it.
+`dotnet build` runs and succeeds from this Mac (the .csproj is set up
+for cross-compiling, `EnableWindowsTargeting=true`), so every change
+here is at least confirmed to compile cleanly before being handed off.
+What's NOT possible from here is actually *running* it - no Windows
+machine or display to launch the GUI, click through the lock screen,
+or confirm the keyboard-blocking/lockdown behavior for real. You'll
+still need to run it on real Windows hardware and tell me what you
+see, so anything that only shows up at runtime can get fixed.
 
 ## Build
 

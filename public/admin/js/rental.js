@@ -514,6 +514,130 @@ async function saveRentalCoinslotPurpose(vendoId) {
   }
 }
 
+// ===== CAFÉ HOME (game/app catalog) =====
+// No icon/banner upload here on purpose - artwork stays local to each PC
+// (GameArt\<id>\ on the Windows client), the launcher never depends on
+// downloading images from this server. This panel only manages catalog
+// metadata (name, category, executable path, featured/enabled/order).
+let rentalCategoriesCache = [];
+
+async function refreshRentalCafeHome() {
+  await Promise.all([refreshRentalCategories(), refreshRentalApps()]);
+}
+
+async function refreshRentalCategories() {
+  const el = document.getElementById('rentalCategoriesList');
+  if (!el) return;
+  const data = await apiCall('GET', '/api/admin/rental/categories');
+  rentalCategoriesCache = data.categories || [];
+  el.innerHTML = rentalCategoriesCache.length
+    ? rentalCategoriesCache.map((c) => `
+        <div class="rental-rate-row">
+          <span>${escapeHtmlRental(c.name)} &middot; order ${c.display_order}${c.enabled ? '' : ' &middot; <span style="color:var(--text-muted);">disabled</span>'}</span>
+          <span style="display:flex;gap:6px;">
+            <button class="btn btn-secondary" onclick="toggleRentalCategory(${c.id}, ${c.enabled ? 'false' : 'true'})">
+              <i class="fas ${c.enabled ? 'fa-eye-slash' : 'fa-eye'}"></i>
+            </button>
+            <button class="btn btn-secondary" onclick="deleteRentalCategory(${c.id})"><i class="fas fa-trash"></i></button>
+          </span>
+        </div>
+      `).join('')
+    : '<div style="color:var(--text-muted);font-size:13px;">No categories yet</div>';
+
+  const select = document.getElementById('rentalAppCategory');
+  if (select) {
+    const current = select.value;
+    select.innerHTML = rentalCategoriesCache.map((c) => `<option value="${c.id}">${escapeHtmlRental(c.name)}</option>`).join('');
+    if (current) select.value = current;
+  }
+}
+
+async function addRentalCategory() {
+  const name = document.getElementById('rentalCategoryName').value.trim();
+  const displayOrder = document.getElementById('rentalCategoryOrder').value || 0;
+  if (!name) { alert('Category name required'); return; }
+  const data = await apiCall('POST', '/api/admin/rental/categories', { name, display_order: displayOrder });
+  if (!data.success) { alert(data.message || 'Could not add category'); return; }
+  document.getElementById('rentalCategoryName').value = '';
+  document.getElementById('rentalCategoryOrder').value = '';
+  refreshRentalCategories();
+}
+
+async function toggleRentalCategory(id, enabled) {
+  await apiCall('PATCH', `/api/admin/rental/categories/${id}`, { enabled });
+  refreshRentalCategories();
+}
+
+async function deleteRentalCategory(id) {
+  if (!confirm('Delete this category? Apps in it will keep their category_id pointing at a now-missing row.')) return;
+  await apiCall('DELETE', `/api/admin/rental/categories/${id}`);
+  refreshRentalCategories();
+}
+
+async function refreshRentalApps() {
+  const el = document.getElementById('rentalAppsList');
+  if (!el) return;
+  const data = await apiCall('GET', '/api/admin/rental/apps');
+  const apps = data.apps || [];
+  const categoryName = (id) => rentalCategoriesCache.find((c) => c.id === id)?.name || '(no category)';
+  el.innerHTML = apps.length
+    ? apps.map((a) => `
+        <div class="rental-pc-row">
+          <div class="rental-pc-info">
+            <div class="rental-pc-name">
+              ${escapeHtmlRental(a.name)}
+              ${a.featured ? '<i class="fas fa-star" style="color:#f5a623;" title="Featured"></i>' : ''}
+              ${a.enabled ? '' : '<span style="color:var(--text-muted);font-weight:400;">(disabled)</span>'}
+            </div>
+            <div class="rental-pc-meta">
+              ${escapeHtmlRental(a.type)} &middot; ${escapeHtmlRental(categoryName(a.category_id))} &middot; order ${a.display_order}<br>
+              <span style="font-family:monospace;font-size:11px;">${escapeHtmlRental(a.executable_path)}</span>
+            </div>
+          </div>
+          <span style="display:flex;gap:6px;">
+            <button class="btn btn-secondary" onclick="toggleRentalApp(${a.id}, ${a.enabled ? 'false' : 'true'})">
+              <i class="fas ${a.enabled ? 'fa-eye-slash' : 'fa-eye'}"></i>
+            </button>
+            <button class="btn btn-secondary" onclick="deleteRentalApp(${a.id})"><i class="fas fa-trash"></i></button>
+          </span>
+        </div>
+      `).join('')
+    : '<div style="color:var(--text-muted);font-size:13px;">No games/apps yet</div>';
+}
+
+async function addRentalApp() {
+  const name = document.getElementById('rentalAppName').value.trim();
+  const categoryId = document.getElementById('rentalAppCategory').value || null;
+  const type = document.getElementById('rentalAppType').value;
+  const executablePath = document.getElementById('rentalAppExecutable').value.trim();
+  const description = document.getElementById('rentalAppDescription').value.trim();
+  const featured = document.getElementById('rentalAppFeatured').checked;
+  const displayOrder = document.getElementById('rentalAppOrder').value || 0;
+  if (!name || !executablePath) { alert('Name and executable path are required'); return; }
+  const data = await apiCall('POST', '/api/admin/rental/apps', {
+    name, category_id: categoryId, type, executable_path: executablePath,
+    description, featured, display_order: displayOrder,
+  });
+  if (!data.success) { alert(data.message || 'Could not add game/app'); return; }
+  document.getElementById('rentalAppName').value = '';
+  document.getElementById('rentalAppExecutable').value = '';
+  document.getElementById('rentalAppDescription').value = '';
+  document.getElementById('rentalAppFeatured').checked = false;
+  document.getElementById('rentalAppOrder').value = '';
+  refreshRentalApps();
+}
+
+async function toggleRentalApp(id, enabled) {
+  await apiCall('PATCH', `/api/admin/rental/apps/${id}`, { enabled });
+  refreshRentalApps();
+}
+
+async function deleteRentalApp(id) {
+  if (!confirm('Delete this game/app from the catalog?')) return;
+  await apiCall('DELETE', `/api/admin/rental/apps/${id}`);
+  refreshRentalApps();
+}
+
 function destroyRental() {
   clearInterval(rentalPollInterval);
   clearInterval(rentalCoinPollInterval);

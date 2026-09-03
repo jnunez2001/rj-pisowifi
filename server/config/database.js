@@ -849,6 +849,36 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
+  -- Café Home game/app catalog (V1.0.0 blueprint). Deliberately holds
+  -- metadata only, no icon/banner image columns - the blueprint's own
+  -- Local Game Library section says artwork must live locally on each
+  -- PC, the launcher must not depend on downloading it from the server.
+  -- The Windows client resolves art itself from a local per-app-id
+  -- folder convention and falls back to a generic tile when it's
+  -- missing. executable_path is one value applied fleet-wide (real café
+  -- installs use identical install paths across every station); a
+  -- station that genuinely differs is a real but out-of-scope V1.0.0
+  -- edge case.
+  CREATE TABLE IF NOT EXISTS rental_categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1
+  );
+
+  CREATE TABLE IF NOT EXISTS rental_apps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    category_id INTEGER REFERENCES rental_categories(id),
+    type TEXT NOT NULL DEFAULT 'game', -- 'game' | 'app'
+    executable_path TEXT NOT NULL,
+    description TEXT,
+    featured INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    display_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
   -- Cash reconciliation: an operator's own physical coin count for a
   -- period, compared against what the system logged as credited over that
   -- same window (transactions.coin_value). A mismatch here isn't

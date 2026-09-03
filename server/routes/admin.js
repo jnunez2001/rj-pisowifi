@@ -6920,6 +6920,120 @@ router.delete('/rental/whitelisted-apps/:id', adminAuth, (req, res) => {
   }
 });
 
+// ── PC Rental: Café Home game/app catalog (V1.0.0 blueprint) ──────────
+// Metadata only - no icon/banner columns, see database.js's comment on
+// rental_apps for why (artwork stays local to each PC).
+router.get('/rental/categories', adminAuth, (req, res) => {
+  try {
+    const categories = db.prepare('SELECT * FROM rental_categories ORDER BY display_order ASC, name ASC').all();
+    res.json({ success: true, categories });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/rental/categories', adminAuth, (req, res) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    const displayOrder = parseInt(req.body?.display_order, 10) || 0;
+    if (!name) return res.status(400).json({ success: false, message: 'name required' });
+    db.prepare('INSERT INTO rental_categories (name, display_order) VALUES (?, ?)').run(name, displayOrder);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.patch('/rental/categories/:id', adminAuth, (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM rental_categories WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'Category not found' });
+    const name = req.body?.name !== undefined ? String(req.body.name).trim() : existing.name;
+    const displayOrder = req.body?.display_order !== undefined ? parseInt(req.body.display_order, 10) || 0 : existing.display_order;
+    const enabled = req.body?.enabled !== undefined ? (req.body.enabled ? 1 : 0) : existing.enabled;
+    if (!name) return res.status(400).json({ success: false, message: 'name required' });
+    db.prepare('UPDATE rental_categories SET name = ?, display_order = ?, enabled = ? WHERE id = ?')
+      .run(name, displayOrder, enabled, req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/rental/categories/:id', adminAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM rental_categories WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.get('/rental/apps', adminAuth, (req, res) => {
+  try {
+    const apps = db.prepare('SELECT * FROM rental_apps ORDER BY display_order ASC, name ASC').all();
+    res.json({ success: true, apps });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/rental/apps', adminAuth, (req, res) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    const executablePath = String(req.body?.executable_path || '').trim();
+    const categoryId = req.body?.category_id ? parseInt(req.body.category_id, 10) : null;
+    const type = req.body?.type === 'app' ? 'app' : 'game';
+    const description = String(req.body?.description || '').trim();
+    const featured = req.body?.featured ? 1 : 0;
+    const displayOrder = parseInt(req.body?.display_order, 10) || 0;
+    if (!name) return res.status(400).json({ success: false, message: 'name required' });
+    if (!executablePath) return res.status(400).json({ success: false, message: 'executable_path required' });
+    db.prepare(`
+      INSERT INTO rental_apps (name, category_id, type, executable_path, description, featured, display_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(name, categoryId, type, executablePath, description, featured, displayOrder);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.patch('/rental/apps/:id', adminAuth, (req, res) => {
+  try {
+    const existing = db.prepare('SELECT * FROM rental_apps WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ success: false, message: 'App not found' });
+    const name = req.body?.name !== undefined ? String(req.body.name).trim() : existing.name;
+    const executablePath = req.body?.executable_path !== undefined ? String(req.body.executable_path).trim() : existing.executable_path;
+    const categoryId = req.body?.category_id !== undefined
+      ? (req.body.category_id ? parseInt(req.body.category_id, 10) : null)
+      : existing.category_id;
+    const type = req.body?.type !== undefined ? (req.body.type === 'app' ? 'app' : 'game') : existing.type;
+    const description = req.body?.description !== undefined ? String(req.body.description).trim() : existing.description;
+    const featured = req.body?.featured !== undefined ? (req.body.featured ? 1 : 0) : existing.featured;
+    const enabled = req.body?.enabled !== undefined ? (req.body.enabled ? 1 : 0) : existing.enabled;
+    const displayOrder = req.body?.display_order !== undefined ? parseInt(req.body.display_order, 10) || 0 : existing.display_order;
+    if (!name) return res.status(400).json({ success: false, message: 'name required' });
+    if (!executablePath) return res.status(400).json({ success: false, message: 'executable_path required' });
+    db.prepare(`
+      UPDATE rental_apps SET name = ?, category_id = ?, type = ?, executable_path = ?,
+        description = ?, featured = ?, enabled = ?, display_order = ? WHERE id = ?
+    `).run(name, categoryId, type, executablePath, description, featured, enabled, displayOrder, req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.delete('/rental/apps/:id', adminAuth, (req, res) => {
+  try {
+    db.prepare('DELETE FROM rental_apps WHERE id = ?').run(req.params.id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 router.get('/rental/wallpapers', adminAuth, (req, res) => {
   try {
     const wallpapers = db.prepare('SELECT * FROM rental_wallpapers ORDER BY created_at DESC').all();
