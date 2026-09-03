@@ -89,6 +89,10 @@ router.get('/status', (req, res) => {
   let session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
   let remainingMinutes;
   let loggedInUser = null;
+  // Mockup's top bar shows member points alongside the name/badge on
+  // every poll - cheap to include here rather than a second round trip,
+  // same reasoning as the branding fields below. Stays null for guests.
+  let loggedInPoints = null;
 
   if (session?.is_paused) {
     // Staff maintenance pause (POST /pause) - freeze everything exactly
@@ -99,9 +103,11 @@ router.get('/status', (req, res) => {
     remainingMinutes = session?.member_id
       ? (db.prepare('SELECT seconds FROM rental_members WHERE id = ?').get(session.member_id)?.seconds || 0) / 60
       : Math.max(0, (session?.hard_expires_at ? parseSqliteDate(session.hard_expires_at).getTime() - Date.now() : 0) / 60000);
-    loggedInUser = session?.member_id
-      ? db.prepare('SELECT username FROM rental_members WHERE id = ?').get(session.member_id)?.username || null
-      : null;
+    if (session?.member_id) {
+      const pausedMember = db.prepare('SELECT username, points FROM rental_members WHERE id = ?').get(session.member_id);
+      loggedInUser = pausedMember?.username || null;
+      loggedInPoints = pausedMember?.points ?? null;
+    }
   } else if (session?.member_id) {
     // A logged-in member's time is a live-draining balance, not a fixed
     // expiry timestamp (unlike guest credit below) - it has to be, since
@@ -147,6 +153,7 @@ router.get('/status', (req, res) => {
         db.prepare('UPDATE rental_sessions SET updated_at = ? WHERE pc_id = ?').run(new Date().toISOString(), pc.id);
         remainingMinutes = newSeconds / 60;
         loggedInUser = member.username;
+        loggedInPoints = member.points;
       }
     } else {
       // Member row gone (deleted) but the session still pointed at it -
@@ -182,7 +189,9 @@ router.get('/status', (req, res) => {
     logged_in_user: loggedInUser,
     logo_url: getSetting('rental_logo_url'),
     wallpaper_url: activeWallpaper,
-    lock_announcement: getSetting('rental_lock_announcement')
+    lock_announcement: getSetting('rental_lock_announcement'),
+    instructions_text: getSetting('rental_instructions_text'),
+    logged_in_points: loggedInPoints
   });
 });
 
@@ -332,6 +341,54 @@ router.get('/apps', (req, res) => {
     FROM rental_apps WHERE enabled = 1 ORDER BY display_order ASC, name ASC
   `).all().map((a) => ({ ...a, featured: !!a.featured }));
   return res.json({ success: true, categories, apps });
+});
+
+// GET /api/rental/whitelisted-apps - Clean Up on Exit (V1.0.0 mockup
+// rebuild) needs to know which running processes are exempt from being
+// force-closed when a session ends. Read-only mirror of the admin's
+// existing rental_whitelisted_apps CRUD (server/routes/admin.js), just
+// exposed device-side the same way GET /apps already is.
+router.get('/whitelisted-apps', (req, res) => {
+  const auth = authenticatePc(req.query.mac, req.query.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const apps = db.prepare('SELECT app_name FROM rental_whitelisted_apps').all().map((r) => r.app_name);
+  return res.json({ success: true, apps });
+});
+
+// Debounce for POST /help-request below - holding/mashing the Call Staff
+// button shouldn't flood the admin Notifications feed with duplicates.
+// In-memory only (pc_id -> last request ms) - worst case after a restart
+// is one extra notification, not worth persisting.
+const lastHelpRequestAt = new Map();
+const HELP_REQUEST_COOLDOWN_MS = 2 * 60 * 1000;
+
+// POST /api/rental/help-request - the lock screen's "Call Staff" button
+// (V1.0.0 mockup rebuild). Distinct from the existing staff-override/
+// pause routes: those are STAFF authenticating themselves to unlock a
+// PC; this is a CUSTOMER flagging that they need help, with no password
+// gate. Logs via the same alertEventService pattern already used
+// elsewhere in this codebase (e.g. rental_pc_candidate_detected) so it
+// surfaces in the admin's existing Notifications feed - no new admin UI
+// needed.
+router.post('/help-request', (req, res) => {
+  const auth = authenticatePc(req.body?.mac, req.body?.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const now = Date.now();
+  const last = lastHelpRequestAt.get(auth.pc.id) || 0;
+  if (now - last < HELP_REQUEST_COOLDOWN_MS) {
+    return res.json({ success: true, message: 'Already notified staff, they\'re on their way.' });
+  }
+  lastHelpRequestAt.set(auth.pc.id, now);
+
+  require('../services/alertEventService').logAlertEvent(
+    'info',
+    'rental_help_requested',
+    `${auth.pc.name} needs help`,
+    `A customer pressed Call Staff on ${auth.pc.name}.`
+  );
+  return res.json({ success: true, message: 'Staff has been notified.' });
 });
 
 // POST /api/rental/redeem - {mac, device_secret, redeem_rate_id}. Mirrors

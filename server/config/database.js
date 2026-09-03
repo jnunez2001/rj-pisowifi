@@ -1838,6 +1838,10 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('rental_antiabuse_penalty_minutes', '5');
   upsertIfMissing('rental_lock_announcement', '');
   upsertIfMissing('rental_close_announcement', '');
+  // Windows client's lock-screen "How to Play" button (V1.0.0 mockup
+  // rebuild) - admin-editable instructions text, same pattern as
+  // rental_lock_announcement above.
+  upsertIfMissing('rental_instructions_text', '');
   upsertIfMissing('rental_schedule_enabled', '0');
   upsertIfMissing('rental_schedule_open_time', '06:00');
   upsertIfMissing('rental_schedule_before_close_time', '22:50');

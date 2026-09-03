@@ -1,10 +1,10 @@
 namespace StarkFiRentalClient;
 
-// Shared by LockForm's "Insert Coins"/"Create Account" and
-// CountdownWidget's "Add Time" - functionally the same coin-insert flow
-// (open a pending window, poll the running total, Done to finalize) with
-// different `mode`/pre-filled fields, implemented once instead of
-// copy-pasted three times.
+// Shared by LockForm's "Insert Coins"/"Create Account", CafeHomeForm's
+// top-bar "Add Time", and MySessionPage's "Add Time" - functionally the
+// same coin-insert flow (open a pending window, poll the running total,
+// Done to finalize) with different `mode`/pre-filled fields, implemented
+// once instead of copy-pasted per screen.
 public class CoinInsertPanel : Panel
 {
     public event Action? Cancelled;

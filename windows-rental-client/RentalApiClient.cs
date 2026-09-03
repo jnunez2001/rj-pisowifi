@@ -16,6 +16,8 @@ public class StatusResponse
     [JsonPropertyName("logo_url")] public string? LogoUrl { get; set; }
     [JsonPropertyName("wallpaper_url")] public string? WallpaperUrl { get; set; }
     [JsonPropertyName("lock_announcement")] public string? LockAnnouncement { get; set; }
+    [JsonPropertyName("instructions_text")] public string? InstructionsText { get; set; }
+    [JsonPropertyName("logged_in_points")] public int? LoggedInPoints { get; set; }
 }
 
 public class ApiResult
@@ -73,6 +75,14 @@ public class AppCatalogEntry
     [JsonPropertyName("description")] public string? Description { get; set; }
     [JsonPropertyName("featured")] public bool Featured { get; set; }
     [JsonPropertyName("display_order")] public int DisplayOrder { get; set; }
+}
+
+// GET /api/rental/whitelisted-apps response - Clean Up on Exit's
+// allow-list (process names exempt from being force-closed).
+public class WhitelistedAppsResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; set; }
+    [JsonPropertyName("apps")] public List<string> Apps { get; set; } = new();
 }
 
 // GET /api/coin/pending/:mac response - a plain running-total poll, not
@@ -193,6 +203,22 @@ public class RentalApiClient
     {
         var res = await _http.GetAsync($"{_baseUrl}/api/rental/apps?mac={Uri.EscapeDataString(mac)}&device_secret={Uri.EscapeDataString(deviceSecret)}");
         return await res.Content.ReadFromJsonAsync<AppCatalogResponse>();
+    }
+
+    // Lock screen's "Call Staff" button - no password gate, this is a
+    // customer flagging that they need help, distinct from staff
+    // authenticating themselves (StaffOverrideAsync/PauseAsync above).
+    public async Task<ApiResult?> RequestHelpAsync(string mac, string deviceSecret)
+    {
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/help-request", new { mac, device_secret = deviceSecret });
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    // Clean Up on Exit's allow-list.
+    public async Task<WhitelistedAppsResponse?> GetWhitelistedAppsAsync(string mac, string deviceSecret)
+    {
+        var res = await _http.GetAsync($"{_baseUrl}/api/rental/whitelisted-apps?mac={Uri.EscapeDataString(mac)}&device_secret={Uri.EscapeDataString(deviceSecret)}");
+        return await res.Content.ReadFromJsonAsync<WhitelistedAppsResponse>();
     }
 
     // --- Points / account (server/routes/rental.js) ---

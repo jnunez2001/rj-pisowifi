@@ -1,11 +1,13 @@
+using StarkFiRentalClient.UI;
+
 namespace StarkFiRentalClient;
 
 public static class Program
 {
     private static LockForm _lockForm = null!;
-    private static CountdownWidget _widget = null!;
     private static CafeHomeForm _cafeHome = null!;
     private static bool _lockShowing = true;
+    private static bool _wasLocked = true; // tracks the transition INTO Locked, for Clean Up on Exit
 
     [STAThread]
     public static void Main()
@@ -17,6 +19,9 @@ public static class Program
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
+
+        var prefs = ClientPreferences.Load();
+        Theme.Apply(prefs.Theme);
 
         var config = ClientConfig.Load();
         if (config == null || string.IsNullOrEmpty(config.ServerUrl))
@@ -62,8 +67,13 @@ public static class Program
         }
 
         _lockForm = new LockForm(api, config);
-        _widget = new CountdownWidget(api, config);
-        _cafeHome = new CafeHomeForm(api, config);
+        _cafeHome = new CafeHomeForm(api, config, prefs);
+
+        // Registry Run key should match whatever Settings > Start on Boot
+        // last saved, applied once at launch here in case it was toggled
+        // by hand-editing preferences.json or on a fresh install where
+        // the default (false) never got explicitly applied.
+        StartupManager.SetEnabled(prefs.StartOnBoot);
 
         var poller = new StatusPoller(api, config);
         poller.StatusUpdated += status =>
@@ -89,20 +99,34 @@ public static class Program
 
     private static void HandleStatus(StatusResponse status)
     {
+        _lockForm.SetConnected(true);
+
         if (status.Paused)
         {
-            // Staff maintenance pause - neither the full lock screen nor
-            // the normal countdown; reuse the countdown widget's corner
-            // window with paused content instead of a third window type.
             _lockShowing = false;
+            _wasLocked = false;
             _lockForm.HideLock();
             _cafeHome.HideHome();
-            _widget.ShowPaused();
-            if (!_widget.Visible) _widget.Show();
+            // No dedicated "paused" screen in the mockup rebuild - the
+            // lock screen's own announcement area is repurposed via
+            // ShowLock for this, simplest honest option: show the lock
+            // screen with the pause reason as the announcement text.
+            _lockForm.ShowLock(new StatusResponse
+            {
+                Locked = true, PcName = status.PcName, LockAnnouncement = "Paused by staff - please wait.",
+                WallpaperUrl = status.WallpaperUrl, LogoUrl = status.LogoUrl, InstructionsText = status.InstructionsText,
+            });
         }
         else if (status.Locked)
         {
-            _widget.Hide();
+            if (!_wasLocked)
+            {
+                // Just transitioned INTO locked (session ended) - Clean Up
+                // on Exit fires here, once, not on every subsequent poll
+                // while still locked.
+                _wasLocked = true;
+                _ = _cafeHome.CleanUpOnExitIfEnabledAsync();
+            }
             _cafeHome.HideHome();
             if (!_lockShowing)
             {
@@ -113,9 +137,9 @@ public static class Program
         else
         {
             _lockShowing = false;
+            _wasLocked = false;
             _lockForm.HideLock();
-            _widget.UpdateFromStatus(status);
-            if (!_widget.Visible) _widget.Show();
+            _cafeHome.UpdateFromStatus(status);
             // No-ops on its own (via IsProgramRunning) if a launched game
             // is currently in the foreground - see CafeHomeForm.ShowHome().
             _cafeHome.ShowHome();
@@ -128,10 +152,10 @@ public static class Program
         // whatever the last known "unlocked" state was, lock now. The
         // poller keeps trying in the background; the moment it succeeds
         // again, HandleStatus takes over normally.
+        _lockForm.SetConnected(false);
         if (!_lockShowing)
         {
             _lockShowing = true;
-            _widget.Hide();
             _cafeHome.HideHome();
             _lockForm.Show();
         }
