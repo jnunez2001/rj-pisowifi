@@ -102,6 +102,11 @@ let redirectAfterCoinModal = false;
 // MAC that hadn't timed out yet (up to 40s old). Gating every read behind
 // "the reset has actually been confirmed" closes that gap.
 let pendingRegistered = false;
+// Set by registerPendingCoin() when the server refuses the coin window
+// because this device is on a non-gated lane (e.g. Home WiFi) - read by
+// handleInsertCoin() right after, to show the real reason instead of
+// letting the modal open and later show a misleading "Vendo offline" toast.
+let laneBlockedMessage = null;
 
 function startCoinTimer() {
   coinTimeLeft = COIN_TIMER_DURATION;
@@ -463,6 +468,14 @@ async function activateVendoRelay() {
   try {
     const res = await fetch(`${SERVER}/api/portal/relay/on`, { method: 'POST' });
     const data = await res.json();
+    if (res.status === 403) {
+      // Wrong network (e.g. a Home/staff WiFi, not the gated customer
+      // lane) - a real, specific reason, not a hardware problem. Showing
+      // the generic "Vendo offline" toast here would wrongly suggest the
+      // coin machine itself is broken.
+      showToast(data.message || 'Coin insertion is only available on the customer WiFi.', 'error');
+      return;
+    }
     if (data.coin_health === false) {
       // Distinct from the generic "vendo offline" toast below - the
       // machine IS reachable, it's refusing to open the gate because its
@@ -586,6 +599,19 @@ async function registerPendingCoin() {
       console.log('Coin slot busy with another customer');
       return true;
     }
+    if (res.status === 403) {
+      // Wrong network (e.g. Home/staff WiFi) - bug found live: this used
+      // to fall straight through to "pendingRegistered = true" below on
+      // ANY non-409 response, silently treating a hard block the same as
+      // success and letting the coin modal open anyway (the customer only
+      // found out something was wrong later, from a misleading "Vendo
+      // offline" toast fired by the separate relay call). Caught here so
+      // handleInsertCoin can bail before ever opening the modal.
+      let msg = 'Coin insertion is only available on the customer WiFi.';
+      try { const data = await res.json(); if (data.message) msg = data.message; } catch (e) {}
+      laneBlockedMessage = msg;
+      return 'blocked';
+    }
     // Only now is it safe to trust GET /api/coin/pending/:mac. Before
     // this resolves, a read could still return a leftover total from
     // whatever pending window existed before this one.
@@ -624,6 +650,12 @@ async function registerPendingGpioCoin() {
       body: JSON.stringify({ mac, is_premium: insertingMode !== 'regular' })
     });
     if (res.status === 409) return true;
+    if (res.status === 403) {
+      let msg = 'Coin insertion is only available on the customer WiFi.';
+      try { const data = await res.json(); if (data.message) msg = data.message; } catch (e) {}
+      laneBlockedMessage = msg;
+      return 'blocked';
+    }
   } catch(e) {
     console.log('Failed to register GPIO coin window');
   }
@@ -791,11 +823,15 @@ async function handleInsertCoin(mode) {
   // are fired together (the ESP32-relay and direct-GPIO paths are mutually
   // exclusive per install, the server no-ops whichever mode isn't active),
   // so either one coming back busy means the kiosk is genuinely occupied.
-  const [espBusy, gpioBusy] = await Promise.all([
+  const [espResult, gpioResult] = await Promise.all([
     registerPendingCoin(),
     registerPendingGpioCoin()
   ]);
-  if (espBusy || gpioBusy) {
+  if (espResult === 'blocked' || gpioResult === 'blocked') {
+    showToast(laneBlockedMessage || 'Coin insertion is only available on the customer WiFi.', 'error');
+    return;
+  }
+  if (espResult || gpioResult) {
     showToast('Another customer is using the coin slot right now. Please wait a moment and try again.', 'error');
     return;
   }
