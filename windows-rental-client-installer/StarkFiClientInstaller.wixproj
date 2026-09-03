@@ -1,0 +1,15 @@
+<Project Sdk="WixToolset.Sdk/5.0.2">
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <OutputName>StarkFiCafeClientSetup</OutputName>
+    <!-- Matches windows-rental-client/config.h-equivalent FIRMWARE_VERSION
+         convention used for the ESP32/ESP8266 side - bump this on every
+         installer-relevant change (new files, new shortcuts), independent
+         from the client EXE's own version. -->
+    <DefineConstants>ProductVersion=1.0.0</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="5.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="5.0.2" />
+  </ItemGroup>
+</Project>

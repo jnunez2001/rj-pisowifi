@@ -1,0 +1,101 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+
+  <!--
+    V1.0.0 Client Installation Wizard - deliberately minimal, matches the
+    plan this was scoped from: "the installer should essentially answer
+    one question: do you want to install the Café Client on this PC?"
+    then the app's own first-run setup (Program.cs) takes over for
+    everything café-specific (server address, PC registration).
+
+    Four screens only: Welcome -> Install Location -> Progress -> Finish.
+    License dialog is skipped entirely (standard WixUI_InstallDir includes
+    one by default - the two <Publish> overrides below short-circuit
+    Next/Back around it, a well-established WiX customization, not a
+    hack). No Start Menu shortcut checkbox on the Install Location screen
+    - the shortcut is just always created, matching the mockup's own
+    "no complicated options" note under that screen.
+
+    There is deliberately no "Installing Café Service" step - that
+    component doesn't exist yet (the Local Café Service/watchdog was
+    explicitly deferred to a later phase when Café Home was scoped).
+    Add that step here once that project actually exists, not before.
+  -->
+
+  <Package Name="StarkFi Café Client"
+           Manufacturer="StarkFi"
+           Version="$(ProductVersion)"
+           UpgradeCode="CA754C29-57AB-4A47-A86B-B6E606269DE0"
+           Language="1033"
+           Scope="perMachine">
+
+    <SummaryInformation Description="StarkFi Café Client Setup" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Café Client is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Installs directly to C:\CaféClient (not under Program Files),
+         matching the mockup's own default path exactly - INSTALLFOLDER
+         as a direct child of TARGETDIR (the drive root), not nested
+         under StandardDirectory ProgramFilesFolder. -->
+    <StandardDirectory Id="TARGETDIR">
+      <Directory Id="INSTALLFOLDER" Name="CaféClient" />
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="StarkFi Café Client" />
+      </Directory>
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="Café Client" Level="1">
+      <ComponentRef Id="ClientExeComponent" />
+      <ComponentRef Id="StartMenuShortcutComponent" />
+    </Feature>
+
+    <Component Id="ClientExeComponent" Directory="INSTALLFOLDER" Guid="9CCF26DA-53E0-4C66-9267-89BD9C46CCD4">
+      <File Id="StarkFiRentalClientEXE"
+            Source="..\windows-rental-client\bin\Release\net8.0-windows\win-x64\publish\StarkFiRentalClient.exe"
+            KeyPath="yes" />
+    </Component>
+
+    <Component Id="StartMenuShortcutComponent" Directory="ApplicationProgramsFolder" Guid="6F3B1E2A-9B3E-4C2D-8E9B-2A6E4C1F7D3A">
+      <Shortcut Id="StartMenuShortcut"
+                Name="Café Client"
+                Description="Launch the StarkFi Café Client"
+                Target="[#StarkFiRentalClientEXE]"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+      <!-- No file lives here, only a shortcut - a real registry key is
+           still required as this component's KeyPath so Windows Installer
+           has something concrete to track for install-state detection. -->
+      <RegistryValue Root="HKCU" Key="Software\StarkFi\CafeClient" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <!-- Finish screen's "Launch Café Client" checkbox (checked by
+         default, matching the mockup) - standard WixUI_InstallDir exit
+         dialog property + a CustomAction via the Util extension's
+         WixShellExec, the well-established pattern for "run the app
+         after Finish" rather than a hand-rolled launch action. -->
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Café Client" />
+    <Property Id="WixShellExecTarget" Value="[#StarkFiRentalClientEXE]" />
+    <CustomAction Id="LaunchApplication" DllEntry="WixShellExec" Impersonate="yes" BinaryRef="Wix4UtilCA_X86" />
+
+    <InstallExecuteSequence>
+    </InstallExecuteSequence>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+
+    <!-- Skip the License Agreement dialog entirely - Welcome's Next goes
+         straight to the install-location picker, and that screen's Back
+         returns straight to Welcome. Order="2" so this fires after (and
+         overrides) WixUI_InstallDir's own default publish entries for
+         the same controls. -->
+    <UI>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2">1</Publish>
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2">1</Publish>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+    </UI>
+
+    <WixVariable Id="WixUIBannerBmp" Overridable="yes" />
+    <WixVariable Id="WixUIDialogBmp" Overridable="yes" />
+
+  </Package>
+</Wix>
