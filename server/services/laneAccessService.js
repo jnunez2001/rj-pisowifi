@@ -16,12 +16,15 @@
 // provisioning time. This was never consulted by the coin/relay routes -
 // this service is that missing check.
 //
-// Standalone mode only for now (this is where standalone_lane_map
-// actually exists) - MikroTik/OpenWRT mode has no equivalent lane-role
-// map built yet, so this always allows there rather than guessing.
-// Same reasoning for a legacy single-lane install with no lane map at
-// all (nothing to check against, and a single-subnet install has no
-// concept of a separate open lane to begin with) - allow, don't block.
+// Covers standalone mode (reads standalone_lane_map, written by
+// setup-network.sh) and MikroTik mode (recomputes each primary lane's
+// subnet the same way mikrotikProvisioner.js's own subnetFor() does when
+// it actually configures the router - see isMikrotikOpenLaneIp() below).
+// OpenWRT mode has no equivalent lane-role concept built yet, so this
+// always allows there rather than guessing. Same reasoning for a legacy
+// single-lane install with no lane map/lanes configured at all (nothing
+// to check against, and a single-subnet install has no concept of a
+// separate open lane to begin with) - allow, don't block.
 //
 // Deliberately fails OPEN (allows the request through) on anything
 // uncertain - a parsing hiccup, a missing setting, an IP that doesn't
@@ -36,34 +39,56 @@ function getNetworkMode() {
   return db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
 }
 
+function ipInSubnet(ip, subnet) {
+  const ipParts = String(ip || '').split('.');
+  const subnetParts = String(subnet || '').split('.');
+  // Every lane in both modes is a /24 - matching the first three octets
+  // is exactly that mask.
+  return ipParts.length === 4 && subnetParts.length === 4 &&
+    ipParts[0] === subnetParts[0] && ipParts[1] === subnetParts[1] && ipParts[2] === subnetParts[2];
+}
+
+function isStandaloneOpenLaneIp(ip) {
+  const row = db.prepare("SELECT value FROM settings WHERE key = 'standalone_lane_map'").get();
+  if (!row?.value) return false;
+  const lanes = JSON.parse(row.value);
+  if (!Array.isArray(lanes) || lanes.length === 0) return false;
+  for (const lane of lanes) {
+    if (ipInSubnet(ip, lane.subnet)) return lane.role === 'open';
+  }
+  return false;
+}
+
+// Recomputes each primary lane's subnet the exact same way
+// mikrotikProvisioner.js's own subnetFor() does at the moment it actually
+// configures the router (10.50.<index>.0/24, index = that lane's 0-based
+// position among primary gated/open lanes, ordered by id) - deliberately
+// NOT importing that file itself, since it also carries the full
+// RouterOS-provisioning machinery, not something this read-only lookup
+// should drag in. If that numbering scheme in mikrotikProvisioner.js
+// ever changes, this needs to change with it.
+function isMikrotikOpenLaneIp(ip) {
+  const primaryLanes = db.prepare(`
+    SELECT role FROM router_ports
+    WHERE role IN ('gated', 'open') AND bridge_with_id IS NULL
+    ORDER BY id
+  `).all();
+  if (primaryLanes.length === 0) return false;
+  for (let i = 0; i < primaryLanes.length; i++) {
+    if (ipInSubnet(ip, `10.50.${i}.0`)) return primaryLanes[i].role === 'open';
+  }
+  return false;
+}
+
 // Returns true only when the IP positively matches a configured lane
 // whose role is 'open' (untrusted for coin/relay actions). Everything
-// else (gated lane match, no match, wrong mode, bad/missing data)
+// else (gated lane match, no match, unsupported mode, bad/missing data)
 // returns false, i.e. "not known to be an open lane" - allow it through.
 function isOpenLaneIp(ip) {
   try {
-    if (getNetworkMode() !== 'standalone') return false;
-
-    const row = db.prepare("SELECT value FROM settings WHERE key = 'standalone_lane_map'").get();
-    if (!row?.value) return false;
-
-    const lanes = JSON.parse(row.value);
-    if (!Array.isArray(lanes) || lanes.length === 0) return false;
-
-    const ipParts = String(ip || '').split('.');
-    if (ipParts.length !== 4) return false;
-
-    for (const lane of lanes) {
-      const subnetParts = String(lane.subnet || '').split('.');
-      // Every lane is a /24 on 10.<octet>.0.0 (setup-network.sh's own
-      // scheme) - matching the first three octets is exactly that mask.
-      if (subnetParts.length === 4 &&
-          ipParts[0] === subnetParts[0] &&
-          ipParts[1] === subnetParts[1] &&
-          ipParts[2] === subnetParts[2]) {
-        return lane.role === 'open';
-      }
-    }
+    const mode = getNetworkMode();
+    if (mode === 'standalone') return isStandaloneOpenLaneIp(ip);
+    if (mode === 'mikrotik') return isMikrotikOpenLaneIp(ip);
     return false;
   } catch (e) {
     console.error('[LaneAccess] isOpenLaneIp check failed, allowing by default:', e.message);
