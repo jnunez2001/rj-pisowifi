@@ -374,6 +374,14 @@ router.post('/free-claim', async (req, res) => {
       return res.status(400).json({ success: false, message: 'MAC address required' });
     }
 
+    // Same lane check as the coin/relay routes (laneAccessService.js) -
+    // this route was missed the first time around, and a device on a
+    // non-gated lane (e.g. Home WiFi) could claim a real free-minutes
+    // session even though that lane never needed gating to begin with.
+    if (require('../services/laneAccessService').isOpenLaneIp(ip)) {
+      return res.status(403).json({ success: false, message: 'Free minutes are only available on the customer WiFi.' });
+    }
+
     // Bug: free_claims.mac_address was looked up/stored with whatever case
     // the client sent, but coin.js lowercases MACs before touching the
     // sessions table, a device could dodge the once-per-day free-minutes
