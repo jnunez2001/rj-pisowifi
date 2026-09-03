@@ -2,8 +2,6 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const { getRates } = require('../services/voucherService');
-const { execSync } = require('child_process');
-const mikrotikService = require('../services/mikrotikService');
 const { parseSqliteDate } = require('../utils/sqliteDate');
 
 // Bug found live: this route used to read only the raw socket address,
@@ -35,69 +33,13 @@ function getRealClientIp(req) {
 const detectRateLimit = new Map();
 const DETECT_RATE_LIMIT_MS = 5000; // Allow 1 request per 5 seconds per IP
 
-// MAC resolution cache (Bug #33)
-const macResolutionCache = new Map();
-const MAC_CACHE_TTL_MS = 10000; // 10 seconds
-
-// Detect client MAC from IP (with caching).
-//
-// Bug found on real hardware: this used to always read this server's own
-// local dnsmasq.leases file / ARP table, which only ever has entries for
-// devices on the same Layer 2 segment as this server. Router mode disables
-// dnsmasq entirely, and a gated lane on its own separate bridge (e.g.
-// WiFi-Rental's VLAN) is a different broadcast domain this server has no L2
-// visibility into at all, local lookups could never find those clients,
-// no matter how many times a customer retried. In router mode, ask the
-// MikroTik itself instead: as the actual gateway for every lane, its own
-// DHCP lease table always has the true IP-to-MAC mapping.
-async function getMacFromIp(ip) {
-  // Check cache first (Bug #33, cache MAC resolution)
-  const cached = macResolutionCache.get(ip);
-  if (cached && Date.now() - cached.time < MAC_CACHE_TTL_MS) {
-    return cached.mac;
-  }
-
-  let mac = null;
-
-  if (mikrotikService.isMikrotikModeEnabled()) {
-    mac = await mikrotikService.getMacFromIp(ip);
-  } else {
-    try {
-      // Read dnsmasq leases file
-      const leases = require('fs').readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
-      const lines = leases.trim().split('\n');
-      for (const line of lines) {
-        const parts = line.split(' ');
-        // Format: timestamp MAC IP hostname client-id
-        if (parts[2] === ip) {
-          mac = parts[1].toLowerCase();
-          // Free capture: this device's own DHCP hostname (e.g.
-          // "Joshs-iPhone") is sitting right here every time a portal
-          // MAC-detect happens - persist it so Top Spenders/Live
-          // Sessions/Users can show a real name instead of a bare MAC.
-          // See networkDevicesService.recordObservedHostname().
-          if (parts[3] && parts[3] !== '*') {
-            require('../services/networkDevicesService').recordObservedHostname(mac, parts[3]);
-          }
-          break;
-        }
-      }
-    } catch (e) {}
-
-    if (!mac) {
-      try {
-        // Fallback: use ARP table
-        const arp = execSync(`arp -n ${ip} 2>/dev/null`).toString();
-        const match = arp.match(/([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2})/i);
-        if (match) mac = match[1].toLowerCase();
-      } catch (e) {}
-    }
-  }
-
-  // Cache the result (even null, to avoid repeated lookups)
-  macResolutionCache.set(ip, { mac, time: Date.now() });
-  return mac;
-}
+// Real IP-to-MAC resolution (router-mode-aware, dnsmasq/ARP fallback for
+// standalone) now lives in networkDevicesService.resolveMacFromIp() -
+// moved there so coin.js/promo.js/session.js can all reuse the exact
+// same lookup for cross-checking a caller-submitted MAC against the
+// caller's own real network identity, not just this route's own
+// customer-facing detect button.
+const { resolveMacFromIp: getMacFromIp } = require('../services/networkDevicesService');
 
 // GET /api/portal/detect, detect client MAC from IP
 router.get('/detect', async (req, res) => {
@@ -986,6 +928,16 @@ router.get('/credit/:mac', (req, res) => {
 router.post('/credit/use', async (req, res) => {
   const mac = String(req.body.mac || '').trim().toLowerCase();
   if (!mac) return res.status(400).json({ success: false, message: 'Valid MAC address required' });
+
+  // Movie credit is real earned balance, converted here into real WiFi
+  // time - never previously verified the submitted mac actually belonged
+  // to whoever was calling this route. See networkDevicesService's
+  // verifyMacBelongsToCaller() for the full reasoning (fails open on
+  // genuine uncertainty).
+  const { verifyMacBelongsToCaller } = require('../services/networkDevicesService');
+  if (!(await verifyMacBelongsToCaller(mac, getRealClientIp(req)))) {
+    return res.status(403).json({ success: false, message: 'This device does not match the network connection this request came from.' });
+  }
 
   const row = db.prepare('SELECT balance_pesos FROM movie_credits WHERE mac_address = ?').get(mac);
   const balance = row?.balance_pesos || 0;

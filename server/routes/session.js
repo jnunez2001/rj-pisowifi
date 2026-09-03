@@ -388,6 +388,16 @@ router.post('/free-claim', async (req, res) => {
     // limit just by hitting this endpoint with different MAC casing.
     const mac = String(req.body.mac).trim().toLowerCase();
 
+    // Free minutes are real value with a once-per-day-per-mac limit -
+    // never previously verified the submitted mac actually belonged to
+    // whoever was calling this route, only that it was a well-formed
+    // string. See networkDevicesService's verifyMacBelongsToCaller() for
+    // the full reasoning (fails open on genuine uncertainty).
+    const { verifyMacBelongsToCaller } = require('../services/networkDevicesService');
+    if (!(await verifyMacBelongsToCaller(mac, ip))) {
+      return res.status(403).json({ success: false, message: 'This device does not match the network connection this request came from.' });
+    }
+
     const enabled = db.prepare(
       "SELECT value FROM settings WHERE key = 'free_minutes_enabled'"
     ).get()?.value || '1';
