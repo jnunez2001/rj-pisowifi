@@ -93,6 +93,18 @@
 // healthy device.
 #define HEARTBEAT_STUCK_REBOOT_MS  600000
 
+// How long WiFi can stay GENUINELY disconnected (WiFi.status() != WL_CONNECTED,
+// not the "stuck associated" case above) before an already-adopted device
+// force-reboots itself, instead of retrying WiFi.begin() in software forever.
+// Real brownout report: after the outage, this device kept retrying
+// indefinitely and never reconnected on its own - only a physical unplug/
+// replug fixed it, meaning the WiFi radio came out of the brownout in a bad
+// state that plain WiFi.begin() calls couldn't clear. This is the software
+// equivalent of that power cycle. Deliberately longer than
+// WIFI_RECONNECT_TIMEOUT_MS (that timeout only matters for a device that
+// isn't adopted yet, where the fallback is opening setup mode instead).
+#define WIFI_DISCONNECTED_REBOOT_MS  600000
+
 // How many CONSECUTIVE postCoin() failures (coin.cpp - either a network
 // failure after all retries, or the server itself rejecting the credit)
 // before this device stops opening the coin gate at all. A single failure
