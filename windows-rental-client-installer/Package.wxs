@@ -40,9 +40,9 @@
          under StandardDirectory ProgramFilesFolder. -->
     <StandardDirectory Id="TARGETDIR">
       <Directory Id="INSTALLFOLDER" Name="CaféClient" />
-      <Directory Id="ProgramMenuFolder">
-        <Directory Id="ApplicationProgramsFolder" Name="StarkFi Café Client" />
-      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="StarkFi Café Client" />
     </StandardDirectory>
 
     <Feature Id="MainFeature" Title="Café Client" Level="1">
@@ -78,9 +78,6 @@
     <Property Id="WixShellExecTarget" Value="[#StarkFiRentalClientEXE]" />
     <CustomAction Id="LaunchApplication" DllEntry="WixShellExec" Impersonate="yes" BinaryRef="Wix4UtilCA_X86" />
 
-    <InstallExecuteSequence>
-    </InstallExecuteSequence>
-
     <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
 
     <!-- Skip the License Agreement dialog entirely - Welcome's Next goes
@@ -89,13 +86,10 @@
          overrides) WixUI_InstallDir's own default publish entries for
          the same controls. -->
     <UI>
-      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2">1</Publish>
-      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2">1</Publish>
-      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication">WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed</Publish>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="InstallDirDlg" Order="2" Condition="1" />
+      <Publish Dialog="InstallDirDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" Order="2" Condition="1" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApplication" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
     </UI>
-
-    <WixVariable Id="WixUIBannerBmp" Overridable="yes" />
-    <WixVariable Id="WixUIDialogBmp" Overridable="yes" />
 
   </Package>
 </Wix>
