@@ -197,6 +197,17 @@ void checkWiFiReconnect() {
           queueDeviceLog("WiFi still down after adoption - skipped auto setup mode, kept retrying");
           lastAdoptedRetryLog = millis();
         }
+        // Real brownout report: retrying WiFi.begin() in software alone
+        // never recovered, only a physical unplug/replug did - the radio
+        // came out of the outage in a bad state plain retries can't clear.
+        // This self-heals with a real reboot instead of waiting on someone
+        // to physically visit the machine.
+        if (millis() - wifiLostAt >= WIFI_DISCONNECTED_REBOOT_MS) {
+          Serial.println("WiFi has been fully disconnected for " + String(WIFI_DISCONNECTED_REBOOT_MS / 60000) + " min - self-healing with a reboot");
+          queueDeviceLog("Self-heal reboot: WiFi disconnected too long");
+          delay(200);
+          ESP.restart();
+        }
       } else {
         Serial.println("WiFi still unreachable after " + String(WIFI_RECONNECT_TIMEOUT_MS / 60000) + " min - opening setup hotspot automatically");
         startSetupMode();
