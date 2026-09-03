@@ -1,0 +1,59 @@
+name: Build Café Client + Installer
+
+# The actual .msi can only be produced on real Windows - WiX's own
+# MSI-writing step depends on Windows Installer's native APIs, which
+# don't exist on macOS/Linux (confirmed directly, not assumed - see
+# windows-rental-client-installer/README.md). This runs the build on a
+# real (free, hosted) Windows runner so nobody needs their own Windows
+# machine just to get a working .msi out of a code change.
+on:
+  push:
+    branches: [feature/network-tab-full, main]
+    paths:
+      - 'windows-rental-client/**'
+      - 'windows-rental-client-installer/**'
+      - '.github/workflows/build-rental-client-installer.yml'
+  workflow_dispatch: {} # manual "run now" button in the Actions tab
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Client EXE first - the installer packages this published output,
+      # same "publish before packaging" order as building it by hand
+      # locally (see both projects' own READMEs).
+      - name: Publish Café Client
+        run: dotnet publish -c Release -r win-x64
+        working-directory: windows-rental-client
+
+      - name: Install WiX v5 (not v7 - v7 requires accepting a paid EULA)
+        run: dotnet tool install --global wix --version 5.0.2
+
+      - name: Add WiX UI/Util extensions
+        run: |
+          wix extension add WixToolset.UI.wixext/5.0.2
+          wix extension add WixToolset.Util.wixext/5.0.2
+
+      - name: Build installer
+        run: dotnet build -c Release
+        working-directory: windows-rental-client-installer
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarkFiCafeClientSetup
+          path: windows-rental-client-installer/bin/Release/en-US/*.msi
+          if-no-files-found: error
+
+      - name: Upload client exe artifact (for manual distribution too)
+        uses: actions/upload-artifact@v4
+        with:
+          name: StarkFiRentalClient-exe
+          path: windows-rental-client/bin/Release/net8.0-windows/win-x64/publish/StarkFiRentalClient.exe
+          if-no-files-found: error
