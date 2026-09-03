@@ -6,7 +6,7 @@
 #include <DNSServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.21"
+#define FIRMWARE_VERSION "v1.0.22"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
@@ -280,6 +280,7 @@ bool discoverServer();
 // web_server.cpp
 void setupWebServer();
 void startSetupMode();
+void restartCleanly();
 String getFallbackHTML();
 
 // coin.cpp

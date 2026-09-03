@@ -154,7 +154,7 @@ void setupWebServer() {
     server.send(200, "application/json",
       "{\"success\":true,\"message\":\"Saved! Rebooting...\"}");
     delay(1000);
-    ESP.restart();
+    restartCleanly();
   });
 
   // POST reboot
@@ -163,7 +163,7 @@ void setupWebServer() {
     server.send(200, "application/json",
       "{\"success\":true,\"message\":\"Rebooting...\"}");
     delay(500);
-    ESP.restart();
+    restartCleanly();
   });
 
   // POST factory reset
@@ -173,7 +173,7 @@ void setupWebServer() {
       "{\"success\":true,\"message\":\"Reset! Rebooting...\"}");
     clearConfig();
     delay(500);
-    ESP.restart();
+    restartCleanly();
   });
 
   // POST relay on
@@ -348,6 +348,22 @@ void setupWebServer() {
     json += "}";
     server.send(200, "application/json", json);
   });
+}
+
+// Real report: from setup mode, Save showed "Saved! Rebooting..." (proving
+// the request reached the device and saveConfig() ran) but the device then
+// just stayed up with its own setup hotspot still broadcasting - no actual
+// reboot ever happened. Plain ESP.restart() alone is a known-unreliable
+// ESP8266 SDK quirk while still in dual AP+STA mode with an active DNS
+// server (startSetupMode()'s captive-portal hijack) - tearing that state
+// down cleanly first makes the restart that follows actually take effect.
+// Used by every restart path reachable from setup mode (Save, Reboot,
+// Factory Reset), all of which hit this same state.
+void restartCleanly() {
+  dnsServer.stop();
+  WiFi.softAPdisconnect(true);
+  delay(100);
+  ESP.restart();
 }
 
 void startSetupMode() {
