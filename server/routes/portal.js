@@ -157,6 +157,35 @@ router.post('/relay/:action', async (req, res) => {
     return res.status(403).json({ success: false, message: 'Coin insertion is only available on the customer WiFi.' });
   }
 
+  // Real gap: this route only ever checked WHICH NETWORK the request came
+  // from, never WHETHER a real customer transaction was actually in
+  // progress. The portal's own JS never calls this without first opening
+  // a pending window via POST /api/coin/pending, but that's only a
+  // client-side courtesy - a request straight to this route (skipping
+  // /pending entirely) still physically opened the coin gate with zero
+  // valid customer behind it. Requiring the same coin_pending_state
+  // coin.js already persists (see its own POST /pending) means the
+  // physical relay can only ever arm when the server itself has an
+  // actual, currently-valid customer transaction on record - not just
+  // "this device asked nicely."
+  if (action === 'on') {
+    const row = db.prepare("SELECT value FROM settings WHERE key = 'coin_pending_state'").get();
+    let hasValidWindow = false;
+    if (row?.value) {
+      try {
+        const state = JSON.parse(row.value);
+        // 40000ms must match coin.js's own PENDING_TIMEOUT_MS - duplicated
+        // here rather than importing coin.js's router module for one
+        // constant, same "must match" convention already used elsewhere
+        // in this codebase (e.g. the ESP32 firmware's own coin timer).
+        hasValidWindow = !!state?.pendingCoinMac && (Date.now() - (state.pendingSetAt || 0) < 40000);
+      } catch (e) {}
+    }
+    if (!hasValidWindow) {
+      return res.status(409).json({ success: false, message: 'No coin window is currently open for this device.' });
+    }
+  }
+
   const vendoIp = db.prepare("SELECT value FROM settings WHERE key = 'vendo_ip'").get()?.value;
   if (!vendoIp) {
     return res.status(400).json({ success: false, message: 'No vendo configured' });
