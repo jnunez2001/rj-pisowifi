@@ -202,6 +202,19 @@ router.post('/relay/:action', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Invalid action' });
   }
 
+  // Real incident: a device on the operator's separate, ungated "Home"
+  // WiFi could still open this portal page and arm the coin relay for
+  // real, since nothing here ever checked which physical network the
+  // request actually came from. Only refuses arming - 'off' still goes
+  // through unconditionally, since letting an armed relay stay open too
+  // long is worse than a harmless extra deactivate call. See
+  // laneAccessService.js for the "open" vs "gated" lane concept this
+  // checks against (standalone mode only - allows through anywhere else,
+  // matching that service's own fail-open design).
+  if (action === 'on' && require('../services/laneAccessService').isOpenLaneIp(getRealClientIp(req))) {
+    return res.status(403).json({ success: false, message: 'Coin insertion is only available on the customer WiFi.' });
+  }
+
   const vendoIp = db.prepare("SELECT value FROM settings WHERE key = 'vendo_ip'").get()?.value;
   if (!vendoIp) {
     return res.status(400).json({ success: false, message: 'No vendo configured' });

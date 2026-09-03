@@ -11,6 +11,20 @@ function isValidMac(mac) {
   return /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(String(mac || '').trim());
 }
 
+// Same loopback-aware real-IP resolution already used in portal.js/
+// admin.js/session.js - only trusts X-Forwarded-For when the TCP
+// connection itself is from loopback (nginx sets this correctly; a
+// remote client can't fake their own raw socket address to BE loopback).
+function getRealClientIp(req) {
+  const raw = (req.connection.remoteAddress || req.socket.remoteAddress || '')
+    .replace('::ffff:', '').trim();
+  if (raw === '127.0.0.1' || raw === '::1') {
+    const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (forwarded) return forwarded;
+  }
+  return raw;
+}
+
 // Movie-credit balance (database.js's movie_credits table) - see the
 // 'online_movie' branch of finalizePendingCoins() below and
 // GET/POST /api/portal/credit/* in server/routes/portal.js, which is what
@@ -508,6 +522,16 @@ router.post('/pending', (req, res) => {
   const { mac, is_premium, mode, movie_id, online_movie_id, tv_series_id, username, password } = req.body;
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
+  }
+
+  // Same "which physical network did this actually come from" check as
+  // portal.js's relay-arming route - see laneAccessService.js. Refused
+  // here too, not just at the relay, since this is the earlier of the
+  // two calls the portal fires when Insert Coin is tapped (both run in
+  // parallel - see portal.js's handleInsertCoin()), and it's the one
+  // that actually opens the server-side pending-credit window.
+  if (require('../services/laneAccessService').isOpenLaneIp(getRealClientIp(req))) {
+    return res.status(403).json({ success: false, message: 'Coin insertion is only available on the customer WiFi.' });
   }
   // mode is the current contract ('regular'|'premium'|'convert'|'movie'|
   // 'online_movie'|'tv_series'|'pc_rental'|'pc_rental_create_account');
