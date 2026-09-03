@@ -896,6 +896,13 @@ router.post('/gpio/register', (req, res) => {
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
+  // Same lane check as POST /pending (the ESP32-relay equivalent of this
+  // route) - this was missing here entirely, meaning an install wired for
+  // direct-GPIO coin credit (Main Kiosk, no ESP32 relay) had no protection
+  // at all against a device on an open/Home lane opening a coin window.
+  if (require('../services/laneAccessService').isOpenLaneIp(getRealClientIp(req))) {
+    return res.status(403).json({ success: false, message: 'Coin insertion is only available on the customer WiFi.' });
+  }
   const coinslotGpio = require('../services/coinslotGpio');
   const { status, windowSeconds } = coinslotGpio.registerWaitingClient(mac, !!is_premium);
   if (status === coinslotGpio.REGISTER_BUSY) {
