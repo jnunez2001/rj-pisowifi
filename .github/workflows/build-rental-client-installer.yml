@@ -48,7 +48,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: StarkFiCafeClientSetup
-          path: windows-rental-client-installer/bin/Release/en-US/*.msi
+          path: windows-rental-client-installer/bin/Release/*.msi
           if-no-files-found: error
 
       - name: Upload client exe artifact (for manual distribution too)

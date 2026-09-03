@@ -77,7 +77,7 @@ cd ..\windows-rental-client-installer
 dotnet build -c Release
 ```
 
-Output lands in `bin\Release\en-US\StarkFiCafeClientSetup.msi`.
+Output lands in `bin\Release\StarkFiCafeClientSetup.msi`.
 
 ## Install location
 
