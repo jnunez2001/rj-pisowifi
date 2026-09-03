@@ -1,7 +1,7 @@
 {
   "esp8266": {
     "chipNamePrefixes": ["ESP8266EX", "ESP8285"],
-    "version": "v1.0.22",
+    "version": "v1.0.23",
     "files": [
       { "file": "esp8266-vendo.bin", "address": 0 }
     ]
