@@ -588,7 +588,17 @@ function playPortalSound(sound) {
 async function registerPendingCoin() {
   pendingRegistered = false;
   const mac = getMac();
-  if (!mac) return false;
+  // Bug found live, real money lost: this used to return false here - the
+  // exact same value as "not busy, safe to proceed" - so a customer whose
+  // browser had a stale/cached portal page open with no valid MAC (device
+  // not actually connected right now, or reopened from a bookmark) still
+  // got the Insert Coin modal to open normally. A real coin landing after
+  // that had no pending window to credit against, and either silently
+  // fell through to the deviceMac fallback (coin.js) or just sat there
+  // with the customer's payment going nowhere. Returning a distinct
+  // 'no_mac' value lets handleInsertCoin() refuse outright instead of
+  // silently proceeding.
+  if (!mac) return 'no_mac';
   try {
     const res = await fetch(`${SERVER}/api/coin/pending`, {
       method: 'POST',
@@ -637,7 +647,9 @@ async function registerPendingCoin() {
 // contract as registerPendingCoin() above.
 async function registerPendingGpioCoin() {
   const mac = getMac();
-  if (!mac) return false;
+  // Same fix as registerPendingCoin() above - a missing MAC must refuse
+  // outright, not silently look identical to "not busy."
+  if (!mac) return 'no_mac';
   try {
     // Direct-GPIO coin credit doesn't support Convert mode yet (only the
     // ESP32-relay path does, see coin.js's pendingMode) - a Convert tap
@@ -827,6 +839,17 @@ async function handleInsertCoin(mode) {
     registerPendingCoin(),
     registerPendingGpioCoin()
   ]);
+  if (espResult === 'no_mac' || gpioResult === 'no_mac') {
+    // Real protection, not just a nicer message: without this, the coin
+    // modal would open with no server-side pending window behind it at
+    // all (see registerPendingCoin()'s comment) - a real coin landing
+    // right then has no valid customer to credit. Try to recover the MAC
+    // immediately so a retry right after this toast has a real chance of
+    // working, instead of failing the same way again.
+    showToast('Could not detect your device on the network. Please reconnect to the WiFi and try again.', 'error');
+    detectDevice();
+    return;
+  }
   if (espResult === 'blocked' || gpioResult === 'blocked') {
     showToast(laneBlockedMessage || 'Coin insertion is only available on the customer WiFi.', 'error');
     return;
@@ -2185,3 +2208,31 @@ async function init() {
 }
 
 init();
+
+// Real report: a customer who has this page saved/bookmarked in Chrome
+// (or just left the tab open from a previous visit) can reopen it while
+// genuinely disconnected from the gated WiFi - detectDevice() only ever
+// ran once, at page load, so detectedMac stayed empty (or stale) for the
+// entire lifetime of that page even after they actually reconnected,
+// until they manually refreshed. That's exactly the state
+// registerPendingCoin()'s 'no_mac' guard above now protects against, but
+// the customer experience should be "reconnect and it just works," not
+// "reconnect, then figure out you need to manually reload." Re-running
+// detectDevice() on the two real signals that a stale MAC might now be
+// fixable - the browser regaining network connectivity, or the tab
+// becoming visible again after being backgrounded (Android/iOS often
+// only actually reassociate WiFi once a backgrounded tab wakes back up)
+// - and doing a full reload the moment a previously-missing MAC actually
+// resolves, so every dependent piece of state (session, rates, coin
+// health) re-initializes cleanly instead of being patched piecemeal.
+async function recheckMacOnReconnect() {
+  if (detectedMac) return; // already have a valid one, nothing to fix
+  const mac = await detectDevice();
+  if (mac) {
+    location.reload();
+  }
+}
+window.addEventListener('online', recheckMacOnReconnect);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') recheckMacOnReconnect();
+});
