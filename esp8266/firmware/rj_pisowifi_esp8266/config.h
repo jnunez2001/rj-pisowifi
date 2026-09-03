@@ -6,7 +6,7 @@
 #include <DNSServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.23"
+#define FIRMWARE_VERSION "v1.0.24"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
@@ -187,7 +187,12 @@
 // brownout report: the radio got stuck "associated" after the AP itself
 // power-cycled, and only a full power cycle fixed it. This is the
 // software equivalent, self-healing automatically.
-#define HEARTBEAT_STUCK_REBOOT_MS  600000
+// Shortened from 10 min after a real report that even this self-heal
+// reboot alone wasn't enough - waiting a full 10 minutes for a real
+// business's coin slot to fix itself is too long regardless, so this is
+// tightened to 5 while the deeper fix (tearing down the radio state
+// before restarting, see wifi_manager.cpp) has a real chance to work.
+#define HEARTBEAT_STUCK_REBOOT_MS  300000
 
 // How long WiFi can stay GENUINELY disconnected (WiFi.status() != WL_CONNECTED,
 // not the "stuck associated" case above) before an already-adopted device
@@ -199,7 +204,9 @@
 // equivalent of that power cycle. Deliberately longer than
 // WIFI_RECONNECT_TIMEOUT_MS (that timeout only matters for a device that
 // isn't adopted yet, where the fallback is opening setup mode instead).
-#define WIFI_DISCONNECTED_REBOOT_MS  600000
+// Same shortening as HEARTBEAT_STUCK_REBOOT_MS above - 10 min was too
+// long for a real business to tolerate a dead coin slot, tightened to 5.
+#define WIFI_DISCONNECTED_REBOOT_MS  300000
 
 // How many CONSECUTIVE postCoin() failures (coin.cpp - either a network
 // failure after all retries, or the server itself rejecting the credit)

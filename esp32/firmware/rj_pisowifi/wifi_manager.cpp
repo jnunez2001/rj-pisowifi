@@ -215,7 +215,16 @@ void checkWiFiReconnect() {
         if (millis() - wifiLostAt >= WIFI_DISCONNECTED_REBOOT_MS) {
           Serial.println("WiFi has been fully disconnected for " + String(WIFI_DISCONNECTED_REBOOT_MS / 60000) + " min - self-healing with a reboot");
           queueDeviceLog("Self-heal reboot: WiFi disconnected too long");
-          delay(200);
+          // Real report: even this self-heal reboot didn't fix a real
+          // brownout-stuck device - a bare ESP.restart() alone may not be
+          // resetting the WiFi radio's own hardware state deeply enough
+          // after a brownout leaves it corrupted, the same class of issue
+          // already found and fixed for the ESP8266 sibling's setup-mode
+          // reboot. Explicitly turning the radio off before restarting
+          // forces a real re-init of it on the way back up, instead of
+          // whatever bad state survived a plain CPU-level restart.
+          WiFi.disconnect(true);
+          delay(100);
           ESP.restart();
         }
       } else {
@@ -267,7 +276,11 @@ void checkWiFiReconnect() {
         if (millis() - heartbeatStuckSince >= HEARTBEAT_STUCK_REBOOT_MS) {
           Serial.println("Heartbeat has failed for " + String(HEARTBEAT_STUCK_REBOOT_MS / 60000) + " min despite WiFi reporting connected - self-healing with a reboot");
           queueDeviceLog("Self-heal reboot: heartbeat stuck failing despite WiFi reporting connected");
-          delay(200);
+          // Same reasoning as the disconnected-branch fix above - force a
+          // real radio teardown before restarting, not just a bare
+          // CPU-level restart.
+          WiFi.disconnect(true);
+          delay(100);
           ESP.restart();
         }
       } else {
