@@ -358,6 +358,34 @@ function getMac() {
   return params.get('mac') || detectedMac || '';
 }
 
+// Real gap found live, beyond the plain "no mac at all" case: getMac()
+// always trusts a ?mac= URL param first, permanently, with no live
+// re-check - a customer who bookmarked (or the router's own redirect
+// re-served) a URL with a MAC baked in months ago would keep using that
+// exact value forever, never falling through to fresh detection at all.
+// Separately, most modern phones (iOS 14+/Android 10+) randomize their
+// WiFi MAC by default on every reconnect, so even the cached detectedMac
+// itself can go stale between page load and the moment a customer
+// actually presses Insert Coin. Real money is on the line at that exact
+// moment - not worth trusting anything cached or URL-supplied, however
+// recent, when a single fresh /api/portal/detect call settles it for
+// certain. Used right before opening a coin window, not on every
+// render, since it's one extra round trip only where it actually
+// matters.
+async function getVerifiedMacForTransaction() {
+  try {
+    const res = await fetch('/api/portal/detect');
+    const data = await res.json();
+    if (data.success && data.mac) {
+      detectedMac = data.mac; // keep the rest of the page's own getMac() calls current too
+      return data.mac;
+    }
+  } catch (e) {
+    console.error('Live MAC verification failed:', e);
+  }
+  return '';
+}
+
 function formatTime(minutes) {
   const total = Math.max(0, Math.floor(minutes * 60));
   const h = Math.floor(total / 3600);
@@ -587,7 +615,13 @@ function playPortalSound(sound) {
 // silently proceeding as if a window was actually registered.
 async function registerPendingCoin() {
   pendingRegistered = false;
-  const mac = getMac();
+  // Verified fresh right here, not the plain cached getMac() - a stale
+  // ?mac= URL param (a months-old bookmark) or a phone that randomized
+  // its WiFi MAC since page load would both otherwise sail through
+  // silently. Real money is on the line the moment this fires; one extra
+  // round trip here is worth it. See getVerifiedMacForTransaction()'s own
+  // comment for the full story.
+  const mac = await getVerifiedMacForTransaction();
   // Bug found live, real money lost: this used to return false here - the
   // exact same value as "not busy, safe to proceed" - so a customer whose
   // browser had a stale/cached portal page open with no valid MAC (device
@@ -646,7 +680,9 @@ async function registerPendingCoin() {
 // Returns true if the GPIO coin window is busy with another customer, same
 // contract as registerPendingCoin() above.
 async function registerPendingGpioCoin() {
-  const mac = getMac();
+  // Same live re-verification as registerPendingCoin() above - not the
+  // plain cached getMac().
+  const mac = await getVerifiedMacForTransaction();
   // Same fix as registerPendingCoin() above - a missing MAC must refuse
   // outright, not silently look identical to "not busy."
   if (!mac) return 'no_mac';
