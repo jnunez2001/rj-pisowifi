@@ -35,6 +35,36 @@ const { getMikrotikConfig } = require('./mikrotikConfigHelper');
 // touching this app's own lowercase convention anywhere else.
 const mikMac = (mac) => String(mac).toUpperCase();
 
+// Per-client simple queues (setClientBandwidth, below) were always created
+// with no explicit =queue= type, which means RouterOS silently defaulted
+// every one of them to "default-small" - a plain FIFO with no bufferbloat
+// protection at all. Confirmed live on real hardware: even though the
+// lane-wide queues use CAKE, the per-client queue is what actually enforces
+// the cap (it's narrower than the lane's /24 target), so the FIFO default
+// was the one actually queueing customer traffic under load, adding real,
+// avoidable latency. Cached for 5 minutes so this doesn't add a round trip
+// to every single setClientBandwidth() call (fired every 30s per active
+// session) - CAKE availability only changes on a RouterOS
+// upgrade/downgrade, not moment to moment.
+const CAKE_CHECK_TTL_MS = 5 * 60 * 1000;
+let cakeAvailableCache = { value: null, checkedAt: 0 };
+
+async function isCakeAvailable(client) {
+  if (cakeAvailableCache.value !== null && Date.now() - cakeAvailableCache.checkedAt < CAKE_CHECK_TTL_MS) {
+    return cakeAvailableCache.value;
+  }
+  try {
+    const res = await client.talk(['/queue/type/print']);
+    const available = res.re.some((r) => r.name === 'cake' || r.kind === 'cake');
+    cakeAvailableCache = { value: available, checkedAt: Date.now() };
+    return available;
+  } catch (e) {
+    // Unknown - don't cache a failed check, and don't claim CAKE is
+    // available when we couldn't actually confirm it.
+    return false;
+  }
+}
+
 /**
  * Looks up the existing ip-binding record for a MAC, if any.
  * Returns the full record (including its .id), or null if genuinely not
@@ -472,7 +502,15 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
         `=burst-time=${burstSeconds}s/${burstSeconds}s`,
       ] : ['=burst-limit=0/0', '=burst-threshold=0/0', '=burst-time=0s/0s'];
 
-      const parentWords = ['/queue/simple/add', `=name=${baseName}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`, ...burstWords];
+      // Real traffic queues at the child level (see the comment on
+      // childBurstWords below), but CAKE is applied consistently across the
+      // parent and both children rather than just the leaves - cheap on a
+      // node that mostly just accounts/limits rather than actually holding
+      // packets, and keeps every queue in this tree behaving the same way.
+      const cake = await isCakeAvailable(client);
+      const queueType = cake ? 'cake/cake' : 'default-small/default-small';
+
+      const parentWords = ['/queue/simple/add', `=name=${baseName}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`, `=queue=${queueType}`, ...burstWords];
       if (placeBeforeId) parentWords.push(`=place-before=${placeBeforeId}`);
       await addOrUpdateQueue(client, parentWords);
 
@@ -502,16 +540,16 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
       // have an identifier RouterOS actually accepts) fixes both paths.
       await addOrUpdateQueue(client, [
         '/queue/simple/add', `=name=${baseName}-udp`, `=parent=${baseName}`, `=target=${ip}/32`,
-        '=packet-marks=rj-game-priority', `=max-limit=${upload}M/${download}M`, '=priority=1/1',
+        '=packet-marks=rj-game-priority', `=max-limit=${upload}M/${download}M`, '=priority=1/1', `=queue=${queueType}`,
         ...childBurstWords,
       ]);
       await addOrUpdateQueue(client, [
         '/queue/simple/add', `=name=${baseName}-other`, `=parent=${baseName}`, `=target=${ip}/32`,
-        `=max-limit=${upload}M/${download}M`, '=priority=8/8',
+        `=max-limit=${upload}M/${download}M`, '=priority=8/8', `=queue=${queueType}`,
         ...childBurstWords,
       ]);
 
-      console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up, game traffic prioritized${burstMbps ? ` (burst ${burstMbps}Mbps for ${burstSeconds}s)` : ''}${placeBeforeId ? '' : ' (WARNING: could not find lane queue to place before - lane-wide limit may take priority)'}`);
+      console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up, game traffic prioritized, ${cake ? 'CAKE' : 'default-small (CAKE not available on this router)'} queueing${burstMbps ? ` (burst ${burstMbps}Mbps for ${burstSeconds}s)` : ''}${placeBeforeId ? '' : ' (WARNING: could not find lane queue to place before - lane-wide limit may take priority)'}`);
       return true;
     });
   } catch (err) {
