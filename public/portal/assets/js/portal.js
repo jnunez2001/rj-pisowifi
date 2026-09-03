@@ -373,6 +373,18 @@ function getMac() {
 // render, since it's one extra round trip only where it actually
 // matters.
 async function getVerifiedMacForTransaction() {
+  // Bug found live, real customers wrongly refused: /api/portal/detect
+  // rate-limits to 1 request per 5s per IP (Bug #32 protection). This
+  // function used to treat ANY non-success response - including a
+  // perfectly ordinary rate-limit hit, e.g. from pressing Insert Coin
+  // soon after the page's own initial detect call - as "no MAC at all,"
+  // wiping out a perfectly good already-known MAC and showing a
+  // connected customer "please reconnect to the WiFi." A rate limit or
+  // transient network hiccup means "couldn't confirm just now," not "this
+  // MAC is wrong" - falling back to whatever's already cached is strictly
+  // safer than treating uncertainty as failure. Only an explicit,
+  // successful response that actively returns a DIFFERENT/no MAC should
+  // ever override what's already known.
   try {
     const res = await fetch('/api/portal/detect');
     const data = await res.json();
@@ -383,7 +395,13 @@ async function getVerifiedMacForTransaction() {
   } catch (e) {
     console.error('Live MAC verification failed:', e);
   }
-  return '';
+  // Anything other than a confirmed, successful, non-empty result - a
+  // rate limit (429) and a genuine "not found right now" both come back
+  // as an identical {success:false} shape, there's no reliable way to
+  // tell them apart from here - falls back to whatever's already known
+  // rather than actively wiping out a MAC that worked moments ago at
+  // page load. Only a fresh, confirmed success ever overrides the cache.
+  return detectedMac || '';
 }
 
 function formatTime(minutes) {
@@ -2245,56 +2263,24 @@ async function init() {
 
 init();
 
-// Real report: a customer who has this page saved/bookmarked in Chrome
-// (or just left the tab open from a previous visit) can reopen it while
-// genuinely disconnected from the gated WiFi - detectDevice() only ever
-// ran once, at page load, so detectedMac stayed empty (or stale) for the
-// entire lifetime of that page even after they actually reconnected,
-// until they manually refreshed. That's exactly the state
-// registerPendingCoin()'s 'no_mac' guard above now protects against, but
-// the customer experience should be "reconnect and it just works," not
-// "reconnect, then figure out you need to manually reload." Re-running
-// detectDevice() on the two real signals that a stale MAC might now be
-// fixable - the browser regaining network connectivity, or the tab
-// becoming visible again after being backgrounded (Android/iOS often
-// only actually reassociate WiFi once a backgrounded tab wakes back up)
-// - and doing a full reload the moment a previously-missing MAC actually
-// resolves, so every dependent piece of state (session, rates, coin
-// health) re-initializes cleanly instead of being patched piecemeal.
-async function recheckMacOnReconnect() {
-  if (detectedMac) return; // already have a valid one, nothing to fix
-  const mac = await detectDevice();
-  if (mac) {
-    location.reload();
-  }
-}
-window.addEventListener('online', recheckMacOnReconnect);
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') recheckMacOnReconnect();
-});
-
-// Backstop for the two listeners above: 'online' and 'visibilitychange'
-// are the common real-world triggers, but aren't guaranteed on every
-// phone/OS/browser combination a captive-portal flow runs on - a device
-// that reassociates WiFi without ever firing either event would
-// otherwise sit stuck showing "Could not detect your device" with no way
-// to recover except the customer manually reloading. A quiet, low-cost
-// poll only while a MAC is genuinely still missing (clears itself the
-// moment one resolves, so this never runs at all for the normal case of
-// a customer who was already properly connected) closes that gap - the
-// page fixes itself within a few seconds, no popup, no action needed
-// from the customer at all.
-let macRecoveryInterval = null;
-if (!detectedMac) {
-  macRecoveryInterval = setInterval(async () => {
-    if (detectedMac) {
-      clearInterval(macRecoveryInterval);
-      return;
-    }
-    const mac = await detectDevice();
-    if (mac) {
-      clearInterval(macRecoveryInterval);
-      location.reload();
-    }
-  }, 5000);
-}
+// Bug found live, real customers locked out: an earlier version of this
+// file auto-re-checked the MAC in the background (on network reconnect,
+// on the tab becoming visible again, and on a repeating timer) and
+// reloaded the page the moment one resolved. In practice this caused a
+// genuine infinite reload loop - the freshly reloaded page's own init()
+// immediately re-checks the MAC, which hits /api/portal/detect's 5s-per-
+// IP rate limit BECAUSE of the check that just succeeded and triggered
+// the reload, that failure looked identical to "still no MAC," so it
+// tried again 5s later, succeeded, reloaded again - forever. The
+// customer saw the welcome sound/animation loop endlessly and could
+// never actually reach the Insert Coin button.
+//
+// Removed entirely rather than patched further - detectDevice() at page
+// load (in init() above) is the only automatic check now. If a customer
+// opens this page before actually connecting, or their MAC changes
+// after load, they need to refresh it themselves for the page to notice
+// - the 'no_mac' guard on the real money-moving actions (registerPending
+// Coin/registerPendingGpioCoin) and the fresh, transaction-time check in
+// getVerifiedMacForTransaction() are what actually protect a real coin
+// from being credited to the wrong device either way, independent of
+// whether this page's own background state happens to be current.
