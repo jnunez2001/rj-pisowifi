@@ -46,6 +46,9 @@
     <div class="rental-shell-item" data-panel="members" onclick="switchRentalPanel('members')">
       <i class="fas fa-users"></i> Members
     </div>
+    <div class="rental-shell-item" data-panel="cafehome" onclick="switchRentalPanel('cafehome')">
+      <i class="fas fa-gamepad"></i> Café Home
+    </div>
     <div class="rental-shell-item" data-panel="timerrates" onclick="switchRentalPanel('timerrates')">
       <i class="fas fa-dollar-sign"></i> Timer Rates
     </div>
@@ -113,6 +116,46 @@
       </div>
       <div class="zf3-card" style="padding:0;overflow:hidden;">
         <div id="rentalMembersList" class="rental-pcs-list"></div>
+      </div>
+    </div>
+
+    <div id="rentalPanelCafehome" class="rental-panel" style="display:none;">
+      <div class="zf3-card" style="margin-bottom:16px;">
+        <div class="rental-settings-title">Categories</div>
+        <div style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">
+          Groups for the Café Home launcher screen (e.g. FPS, MOBA,
+          Racing). Order controls display order on the launcher.
+        </div>
+        <div id="rentalCategoriesList" style="margin-bottom:12px;"></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="rentalCategoryName" placeholder="Category name" style="width:160px;">
+          <input type="number" id="rentalCategoryOrder" min="0" placeholder="order" style="width:80px;">
+          <button class="btn btn-primary" onclick="addRentalCategory()"><i class="fas fa-plus"></i> Add category</button>
+        </div>
+      </div>
+      <div class="zf3-card">
+        <div class="rental-settings-title">Games &amp; Apps</div>
+        <div style="color:var(--text-muted);font-size:12px;margin-bottom:14px;">
+          The launcher's catalog. Artwork is not uploaded here - game art
+          stays local to each PC (a <code>GameArt\&lt;id&gt;\icon.png</code>
+          folder next to the client), so the launcher never depends on
+          downloading images from this server. Executable Path is the
+          same install path across every station in the fleet.
+        </div>
+        <div id="rentalAppsList" style="margin-bottom:12px;"></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="text" id="rentalAppName" placeholder="Name" style="width:140px;">
+          <select id="rentalAppCategory" style="width:140px;"></select>
+          <select id="rentalAppType" style="width:90px;">
+            <option value="game">Game</option>
+            <option value="app">App</option>
+          </select>
+          <input type="text" id="rentalAppExecutable" placeholder="Executable path" style="width:220px;">
+          <input type="text" id="rentalAppDescription" placeholder="Description (optional)" style="width:180px;">
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;"><input type="checkbox" id="rentalAppFeatured"> Featured</label>
+          <input type="number" id="rentalAppOrder" min="0" placeholder="order" style="width:80px;">
+          <button class="btn btn-primary" onclick="addRentalApp()"><i class="fas fa-plus"></i> Add</button>
+        </div>
       </div>
     </div>
 

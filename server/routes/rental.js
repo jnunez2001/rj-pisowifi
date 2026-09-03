@@ -313,6 +313,27 @@ router.get('/member-points', (req, res) => {
   return res.json({ success: true, points: member.points, redeem_rates: rates });
 });
 
+// GET /api/rental/apps - Café Home's game/app catalog (V1.0.0
+// blueprint). Metadata only, no images - see database.js's comment on
+// rental_apps for why. Changes far less often than lock state, so the
+// Windows client fetches this on a much longer interval than
+// StatusPoller's 5s status check, not every tick.
+router.get('/apps', (req, res) => {
+  const auth = authenticatePc(req.query.mac, req.query.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const categories = db.prepare('SELECT id, name, display_order FROM rental_categories WHERE enabled = 1 ORDER BY display_order ASC, name ASC').all();
+  // featured comes back from SQLite as a raw 0/1 integer - the Windows
+  // client's System.Text.Json deserializer won't coerce a JSON number
+  // into a C# bool (throws instead), so it's cast to a real boolean here
+  // rather than passed through raw.
+  const apps = db.prepare(`
+    SELECT id, name, category_id, type, executable_path, description, featured, display_order
+    FROM rental_apps WHERE enabled = 1 ORDER BY display_order ASC, name ASC
+  `).all().map((a) => ({ ...a, featured: !!a.featured }));
+  return res.json({ success: true, categories, apps });
+});
+
 // POST /api/rental/redeem - {mac, device_secret, redeem_rate_id}. Mirrors
 // POST /admin/rental/members/:id/redeem exactly, just deriving the member
 // from the calling PC's session instead of an admin-supplied :id.

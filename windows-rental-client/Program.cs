@@ -4,6 +4,7 @@ public static class Program
 {
     private static LockForm _lockForm = null!;
     private static CountdownWidget _widget = null!;
+    private static CafeHomeForm _cafeHome = null!;
     private static bool _lockShowing = true;
 
     [STAThread]
@@ -62,6 +63,7 @@ public static class Program
 
         _lockForm = new LockForm(api, config);
         _widget = new CountdownWidget(api, config);
+        _cafeHome = new CafeHomeForm(api, config);
 
         var poller = new StatusPoller(api, config);
         poller.StatusUpdated += status =>
@@ -94,12 +96,14 @@ public static class Program
             // window with paused content instead of a third window type.
             _lockShowing = false;
             _lockForm.HideLock();
+            _cafeHome.HideHome();
             _widget.ShowPaused();
             if (!_widget.Visible) _widget.Show();
         }
         else if (status.Locked)
         {
             _widget.Hide();
+            _cafeHome.HideHome();
             if (!_lockShowing)
             {
                 _lockShowing = true;
@@ -112,6 +116,9 @@ public static class Program
             _lockForm.HideLock();
             _widget.UpdateFromStatus(status);
             if (!_widget.Visible) _widget.Show();
+            // No-ops on its own (via IsProgramRunning) if a launched game
+            // is currently in the foreground - see CafeHomeForm.ShowHome().
+            _cafeHome.ShowHome();
         }
     }
 
@@ -125,6 +132,7 @@ public static class Program
         {
             _lockShowing = true;
             _widget.Hide();
+            _cafeHome.HideHome();
             _lockForm.Show();
         }
     }

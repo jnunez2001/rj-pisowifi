@@ -39,7 +39,7 @@ async function apiCall(method, endpoint, body = null) {
 
 const RENTAL_PANEL_TITLES = {
   dashboard: 'Dashboard', managepc: 'Manage PC', members: 'Members',
-  timerrates: 'Timer Rates', redeemrates: 'Redeem Rates',
+  cafehome: 'Café Home', timerrates: 'Timer Rates', redeemrates: 'Redeem Rates',
   redeemhistory: 'Redeem History', reports: 'Reports', coinslot: 'Coinslot',
   settings: 'Settings', systeminfo: 'System Info'
 };
@@ -64,6 +64,7 @@ const RENTAL_COMING_SOON = {
 // page loader.
 const RENTAL_PANEL_LOADERS = {
   members: refreshRentalMembers,
+  cafehome: refreshRentalCafeHome,
   timerrates: refreshRentalRates,
   redeemrates: refreshRentalRedeemRates,
   redeemhistory: refreshRentalRedemptions,

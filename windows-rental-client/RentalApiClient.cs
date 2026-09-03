@@ -44,6 +44,37 @@ public class RedeemRate
     [JsonPropertyName("reward_seconds")] public int RewardSeconds { get; set; }
 }
 
+// GET /api/rental/apps response - Café Home's game/app catalog.
+// Metadata only, no image URLs: the blueprint's Local Game Library
+// design explicitly says artwork must live locally on each PC, not be
+// downloaded from the server - see CafeHomeForm's GameArt\<id>\
+// folder convention for how art is actually resolved.
+public class AppCatalogResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; set; }
+    [JsonPropertyName("categories")] public List<AppCategory> Categories { get; set; } = new();
+    [JsonPropertyName("apps")] public List<AppCatalogEntry> Apps { get; set; } = new();
+}
+
+public class AppCategory
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("display_order")] public int DisplayOrder { get; set; }
+}
+
+public class AppCatalogEntry
+{
+    [JsonPropertyName("id")] public int Id { get; set; }
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("category_id")] public int? CategoryId { get; set; }
+    [JsonPropertyName("type")] public string Type { get; set; } = "game";
+    [JsonPropertyName("executable_path")] public string ExecutablePath { get; set; } = "";
+    [JsonPropertyName("description")] public string? Description { get; set; }
+    [JsonPropertyName("featured")] public bool Featured { get; set; }
+    [JsonPropertyName("display_order")] public int DisplayOrder { get; set; }
+}
+
 // GET /api/coin/pending/:mac response - a plain running-total poll, not
 // mac+device_secret gated (matches how the WiFi portal itself uses this
 // same endpoint).
@@ -153,6 +184,15 @@ public class RentalApiClient
     {
         var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/coin/finalize", new { mac });
         return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    // Café Home's game/app catalog. Fetched far less often than status
+    // (a caller polls this on its own longer interval, e.g. once at
+    // Café Home entry and every ~60s after) - see CafeHomeForm.
+    public async Task<AppCatalogResponse?> GetAppsAsync(string mac, string deviceSecret)
+    {
+        var res = await _http.GetAsync($"{_baseUrl}/api/rental/apps?mac={Uri.EscapeDataString(mac)}&device_secret={Uri.EscapeDataString(deviceSecret)}");
+        return await res.Content.ReadFromJsonAsync<AppCatalogResponse>();
     }
 
     // --- Points / account (server/routes/rental.js) ---
