@@ -209,6 +209,17 @@ bool registerVendo() {
       Serial.println("Server reports this device is no longer adopted - clearing local binding and returning to setup mode");
       config.is_adopted = false;
       config.device_secret = "";
+      // Bug this fixes: only is_adopted/device_secret were cleared, WiFi
+      // credentials stayed saved - startSetupMode() below still put the
+      // device into setup mode right away, but a later power-cycle while
+      // it sat unbound would just reconnect to the old WiFi on its own
+      // (config.wifi_ssid.isEmpty() check in the .ino's setup() would be
+      // false), silently leaving setup mode again instead of staying
+      // there for a fresh adoption. Clearing WiFi too means ANY future
+      // boot - not just this immediate one - lands in setup mode until
+      // someone actually re-configures it.
+      config.wifi_ssid = "";
+      config.wifi_pass = "";
       saveConfig();
       http.end();
       startSetupMode();
