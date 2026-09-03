@@ -58,6 +58,17 @@ router.post('/redeem', validateBody(redeemSchema), async (req, res) => {
     const mac = req.body.mac.toLowerCase();
     const code = req.body.code;
 
+    // A voucher code is real, finite, often-physical value - never
+    // previously verified that the submitted mac actually belonged to
+    // whoever was calling this route. See networkDevicesService's own
+    // comment on verifyMacBelongsToCaller() for the full reasoning
+    // (fails open on genuine uncertainty, only refuses a confident,
+    // positive mismatch).
+    const { verifyMacBelongsToCaller } = require('../services/networkDevicesService');
+    if (!(await verifyMacBelongsToCaller(mac, ip))) {
+      return res.status(403).json({ success: false, message: 'This device does not match the network connection this request came from.' });
+    }
+
     // Normalize code, accept with or without dash
     const raw = code.trim().toUpperCase();
     const normalized = raw.includes('-') ? raw : raw.replace(/^(PROMO|RJ)/, '$1-');

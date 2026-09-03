@@ -16,10 +16,93 @@
 // printer, an idle laptop, an unpaired candidate) has no traffic source at
 // all - shown as unavailable, never a fabricated 0.
 
-const { execFile } = require('child_process');
+const { execFile, execSync } = require('child_process');
 const db = require('../config/database');
 const { vendorFromMac } = require('./networkDiscoveryService');
 const { peekClassId } = require('./drivers/classIdAllocator');
+
+// Real, authoritative "what MAC is actually at this IP right now" lookup -
+// moved here from portal.js (which only used it for GET /detect) so
+// server/routes/coin.js, promo.js, and session.js can all reuse it too,
+// for cross-checking a caller-submitted MAC against the caller's own
+// real network identity on the value-transferring routes (coin credit,
+// voucher redeem, free-minutes claim, movie-credit use) - previously
+// none of those verified the submitted MAC belonged to whoever was
+// actually connecting, they just format-validated it and trusted it
+// outright. Logic and caching behavior kept identical to the original.
+const macResolutionCache = new Map();
+const MAC_CACHE_TTL_MS = 10000; // 10 seconds
+
+async function resolveMacFromIp(ip) {
+  const cached = macResolutionCache.get(ip);
+  if (cached && Date.now() - cached.time < MAC_CACHE_TTL_MS) {
+    return cached.mac;
+  }
+
+  let mac = null;
+  const mikrotikService = require('./mikrotikService');
+
+  if (mikrotikService.isMikrotikModeEnabled()) {
+    mac = await mikrotikService.getMacFromIp(ip);
+  } else {
+    try {
+      // Read dnsmasq leases file
+      const leases = require('fs').readFileSync('/var/lib/misc/dnsmasq.leases', 'utf8');
+      const lines = leases.trim().split('\n');
+      for (const line of lines) {
+        const parts = line.split(' ');
+        // Format: timestamp MAC IP hostname client-id
+        if (parts[2] === ip) {
+          mac = parts[1].toLowerCase();
+          if (parts[3] && parts[3] !== '*') {
+            recordObservedHostname(mac, parts[3]);
+          }
+          break;
+        }
+      }
+    } catch (e) {}
+
+    if (!mac) {
+      try {
+        // Fallback: use ARP table
+        const arp = execSync(`arp -n ${ip} 2>/dev/null`).toString();
+        const match = arp.match(/([0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2}:[0-9a-f]{2})/i);
+        if (match) mac = match[1].toLowerCase();
+      } catch (e) {}
+    }
+  }
+
+  macResolutionCache.set(ip, { mac, time: Date.now() });
+  return mac;
+}
+
+// Cross-checks a caller-submitted MAC against what's actually at their
+// own IP right now, for every real value-transferring portal route (coin
+// credit, voucher redeem, free-minutes claim, movie-credit use). None of
+// those previously verified this at all - they format-validated the
+// submitted MAC and trusted it outright, meaning anyone who knew (or
+// guessed, or sniffed) another customer's MAC could call these routes
+// directly - skipping the portal page/JS entirely - and have real value
+// credited to that other customer's MAC instead of their own.
+//
+// Deliberately fails OPEN (allows through) when resolution itself is
+// uncertain (returns null - an ARP-cache miss, a DHCP lease not visible
+// yet) - same "only block on a confident, positive mismatch" principle
+// laneAccessService.js already established elsewhere in this codebase.
+// A false positive here would mean refusing a real paying customer's own
+// legitimate coin/voucher/claim; that's the wrong direction to guess
+// wrong in. Only refuses when the real MAC is confidently known AND
+// definitively different from what was claimed.
+async function verifyMacBelongsToCaller(claimedMac, ip) {
+  try {
+    const realMac = await resolveMacFromIp(ip);
+    if (!realMac) return true; // couldn't confirm either way - allow
+    return realMac.toLowerCase() === String(claimedMac || '').toLowerCase();
+  } catch (e) {
+    console.error('[MAC ownership check] failed, allowing by default:', e.message);
+    return true;
+  }
+}
 
 function getNetworkMode() {
   return db.prepare("SELECT value FROM settings WHERE key = 'network_mode'").get()?.value || 'standalone';
@@ -284,4 +367,4 @@ async function unblockDevice(mac) {
   logDeviceEvent(normalizedMac, 'unblocked', 'Network access restored');
 }
 
-module.exports = { listDevices, summarize, listGroups, createGroup, deleteGroup, assignDeviceGroup, logDeviceEvent, getDeviceHistory, blockDevice, unblockDevice, getTcTraffic, recordObservedHostname, getDisplayName, getDisplayNames };
+module.exports = { listDevices, summarize, listGroups, createGroup, deleteGroup, assignDeviceGroup, logDeviceEvent, getDeviceHistory, blockDevice, unblockDevice, getTcTraffic, recordObservedHostname, getDisplayName, getDisplayNames, resolveMacFromIp, verifyMacBelongsToCaller };

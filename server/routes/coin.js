@@ -518,11 +518,13 @@ function pruneCoinEventCache() {
 }
 
 // POST /api/coin/pending, portal calls this right when INSERT COIN modal opens
-router.post('/pending', (req, res) => {
+router.post('/pending', async (req, res) => {
   const { mac, is_premium, mode, movie_id, online_movie_id, tv_series_id, username, password } = req.body;
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
+
+  const requestIp = getRealClientIp(req);
 
   // Same "which physical network did this actually come from" check as
   // portal.js's relay-arming route - see laneAccessService.js. Refused
@@ -530,8 +532,22 @@ router.post('/pending', (req, res) => {
   // two calls the portal fires when Insert Coin is tapped (both run in
   // parallel - see portal.js's handleInsertCoin()), and it's the one
   // that actually opens the server-side pending-credit window.
-  if (require('../services/laneAccessService').isOpenLaneIp(getRealClientIp(req))) {
+  if (require('../services/laneAccessService').isOpenLaneIp(requestIp)) {
     return res.status(403).json({ success: false, message: 'Coin insertion is only available on the customer WiFi.' });
+  }
+
+  // This is where real money starts - never previously verified the
+  // submitted mac actually belonged to whoever was calling this route,
+  // only that it was well-formed. Holds for pc_rental mode too (the mac
+  // there is the rental PC's own, but the Windows client calls this
+  // route directly from that same PC, so its own network identity should
+  // always match what it reports about itself). See
+  // networkDevicesService's verifyMacBelongsToCaller() for the full
+  // reasoning (fails open on genuine uncertainty, only refuses a
+  // confident, positive mismatch).
+  const { verifyMacBelongsToCaller } = require('../services/networkDevicesService');
+  if (!(await verifyMacBelongsToCaller(mac, requestIp))) {
+    return res.status(403).json({ success: false, message: 'This device does not match the network connection this request came from.' });
   }
   // mode is the current contract ('regular'|'premium'|'convert'|'movie'|
   // 'online_movie'|'tv_series'|'pc_rental'|'pc_rental_create_account');
@@ -891,17 +907,23 @@ router.post('/', async (req, res) => {
 
 // POST /api/coin/gpio/register, portal calls this when Insert Coin opens
 // in direct-GPIO mode.
-router.post('/gpio/register', (req, res) => {
+router.post('/gpio/register', async (req, res) => {
   const { mac, is_premium } = req.body;
   if (!mac || !isValidMac(mac)) {
     return res.status(400).json({ success: false, message: 'Valid MAC address required' });
   }
+  const requestIp = getRealClientIp(req);
   // Same lane check as POST /pending (the ESP32-relay equivalent of this
   // route) - this was missing here entirely, meaning an install wired for
   // direct-GPIO coin credit (Main Kiosk, no ESP32 relay) had no protection
   // at all against a device on an open/Home lane opening a coin window.
-  if (require('../services/laneAccessService').isOpenLaneIp(getRealClientIp(req))) {
+  if (require('../services/laneAccessService').isOpenLaneIp(requestIp)) {
     return res.status(403).json({ success: false, message: 'Coin insertion is only available on the customer WiFi.' });
+  }
+  // Same real-money mac-ownership check as POST /pending above.
+  const { verifyMacBelongsToCaller } = require('../services/networkDevicesService');
+  if (!(await verifyMacBelongsToCaller(mac, requestIp))) {
+    return res.status(403).json({ success: false, message: 'This device does not match the network connection this request came from.' });
   }
   const coinslotGpio = require('../services/coinslotGpio');
   const { status, windowSeconds } = coinslotGpio.registerWaitingClient(mac, !!is_premium);
