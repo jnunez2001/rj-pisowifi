@@ -19,8 +19,17 @@ surface real schema errors from the same machine, so the core tool
 runs here in a limited way, but the actual MSI-writing step does not
 work on macOS. This `Package.wxs` has been written carefully and
 reviewed, but **it has never actually been compiled or run** - you'll
-need to build and test it on real Windows hardware, then tell me what
+need to build it on real Windows to verify it, then report back what
 you see so anything that needs fixing can get fixed from there.
+
+**Recommended path: let CI build it.** `.github/workflows/build-
+rental-client-installer.yml` builds the client + this installer on a
+real (free, GitHub-hosted) Windows runner on every push, and uploads
+the `.msi` as a downloadable build artifact - nobody needs their own
+Windows machine just to get a working installer out of a code change.
+Trigger it manually from the repo's Actions tab ("Build Café Client +
+Installer" > Run workflow) any time, or it fires automatically on a
+push touching either project.
 
 ## What's deliberately NOT in this installer
 
@@ -42,10 +51,10 @@ one question ("install the Café Client on this PC?") and nothing else:
   later phase when Café Home was scoped). Add that step here once that
   project is actually built, not before.
 
-## Build (on a real Windows machine)
+## Manual build (only if you'd rather not use CI)
 
 Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download) and
-the WiX v5 tool:
+the WiX v5 tool, on a real Windows machine:
 
 ```
 dotnet tool install --global wix --version 5.0.2
