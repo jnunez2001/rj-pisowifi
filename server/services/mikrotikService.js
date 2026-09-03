@@ -47,22 +47,60 @@ const mikMac = (mac) => String(mac).toUpperCase();
 // session) - CAKE availability only changes on a RouterOS
 // upgrade/downgrade, not moment to moment.
 const CAKE_CHECK_TTL_MS = 5 * 60 * 1000;
-let cakeAvailableCache = { value: null, checkedAt: 0 };
+let cakeQueueTypeCache = { value: undefined, checkedAt: 0 };
 
-async function isCakeAvailable(client) {
-  if (cakeAvailableCache.value !== null && Date.now() - cakeAvailableCache.checkedAt < CAKE_CHECK_TTL_MS) {
-    return cakeAvailableCache.value;
+// Bug found live, real money/service impact: this used to just check
+// whether ANY queue type had kind=cake, then unconditionally referenced
+// a queue type literally NAMED "cake" (=queue=cake/cake) - correct only
+// on a router where that exact name exists. Confirmed live on a real
+// router: it has kind=cake types, just named "CAKE-UP"/"CAKE-DOWN", not
+// "cake" - referencing the non-existent literal name made every
+// /queue/simple/add call for a per-client queue fail outright, and
+// since setClientBandwidth() swallows that into a caught error/false
+// return, NO per-client bandwidth queue was ever created for ANY
+// customer - full, uncapped speed for everyone, silently, since the
+// caller only ever saw a generic failure log, not "the queue type name
+// was wrong." Returns the REAL type name(s) that actually exist, not an
+// assumed literal, so this works regardless of how CAKE happens to be
+// named on a given router.
+async function resolveCakeQueueTypes(client) {
+  if (cakeQueueTypeCache.value !== undefined && Date.now() - cakeQueueTypeCache.checkedAt < CAKE_CHECK_TTL_MS) {
+    return cakeQueueTypeCache.value;
   }
+  let result = null;
   try {
     const res = await client.talk(['/queue/type/print']);
-    const available = res.re.some((r) => r.name === 'cake' || r.kind === 'cake');
-    cakeAvailableCache = { value: available, checkedAt: Date.now() };
-    return available;
+    const cakeTypes = res.re.filter((r) => r.kind === 'cake');
+    if (cakeTypes.length > 0) {
+      // Prefer an exact literal "cake" type if one actually exists
+      // (matches what mikrotikProvisioner.js itself assumes for the
+      // lane-wide queue) - only trust that shortcut when it's actually
+      // there, never assume it.
+      const exact = cakeTypes.find((r) => r.name === 'cake');
+      if (exact) {
+        result = { upload: 'cake', download: 'cake' };
+      } else {
+        // No type literally named "cake" - look for a real upload/
+        // download-named pair (matches this app's own "CAKE-UP"/
+        // "CAKE-DOWN" naming convention, case-insensitively, in case it
+        // differs slightly router to router).
+        const up = cakeTypes.find((r) => /up/i.test(r.name));
+        const down = cakeTypes.find((r) => /down/i.test(r.name));
+        result = (up && down)
+          ? { upload: up.name, download: down.name }
+          // No recognizable up/down pair either - use whichever single
+          // cake-kind type exists for both directions rather than
+          // guessing a name that isn't there.
+          : { upload: cakeTypes[0].name, download: cakeTypes[0].name };
+      }
+    }
   } catch (e) {
-    // Unknown - don't cache a failed check, and don't claim CAKE is
+    // Unknown - don't cache a failed check, don't claim CAKE is
     // available when we couldn't actually confirm it.
-    return false;
+    return null;
   }
+  cakeQueueTypeCache = { value: result, checkedAt: Date.now() };
+  return result;
 }
 
 /**
@@ -507,8 +545,8 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
       // parent and both children rather than just the leaves - cheap on a
       // node that mostly just accounts/limits rather than actually holding
       // packets, and keeps every queue in this tree behaving the same way.
-      const cake = await isCakeAvailable(client);
-      const queueType = cake ? 'cake/cake' : 'default-small/default-small';
+      const cakeTypes = await resolveCakeQueueTypes(client);
+      const queueType = cakeTypes ? `${cakeTypes.upload}/${cakeTypes.download}` : 'default-small/default-small';
 
       const parentWords = ['/queue/simple/add', `=name=${baseName}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`, `=queue=${queueType}`, ...burstWords];
       if (placeBeforeId) parentWords.push(`=place-before=${placeBeforeId}`);
@@ -549,7 +587,7 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
         ...childBurstWords,
       ]);
 
-      console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up, game traffic prioritized, ${cake ? 'CAKE' : 'default-small (CAKE not available on this router)'} queueing${burstMbps ? ` (burst ${burstMbps}Mbps for ${burstSeconds}s)` : ''}${placeBeforeId ? '' : ' (WARNING: could not find lane queue to place before - lane-wide limit may take priority)'}`);
+      console.log(`📶 MikroTik bandwidth set: ${mac} (${ip}) → ${download}Mbps down / ${upload}Mbps up, game traffic prioritized, ${cakeTypes ? `CAKE (${queueType})` : 'default-small (CAKE not available on this router)'} queueing${burstMbps ? ` (burst ${burstMbps}Mbps for ${burstSeconds}s)` : ''}${placeBeforeId ? '' : ' (WARNING: could not find lane queue to place before - lane-wide limit may take priority)'}`);
       return true;
     });
   } catch (err) {
