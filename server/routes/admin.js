@@ -2403,8 +2403,28 @@ router.post('/spam-settings', adminAuth, (req, res) => {
   }
 });
 
+// Real bug found live: a file over the 5MB limit (or a file extension/
+// mimetype the fileFilter above rejects) throws inside multer's own
+// middleware, which - with no error-handling wired up for it - fell
+// through to Express's default error handler: a raw HTML stack-trace
+// page, not JSON. The client's `await res.json()` then threw its own
+// parse error, showing a generic "Upload error" with zero indication of
+// what actually went wrong (too big? wrong format?). Wrapping the multer
+// call directly lets this route catch that error itself and reply with
+// the same clean {success:false, message} shape every other failure
+// here already uses.
+function uploadImageMiddleware(req, res, next) {
+  upload.single('image')(req, res, (err) => {
+    if (!err) return next();
+    const message = err.code === 'LIMIT_FILE_SIZE'
+      ? 'That image is too large - max 5MB.'
+      : (err.message || 'Upload failed.');
+    res.status(400).json({ success: false, message });
+  });
+}
+
 // POST /api/admin/upload/:type
-router.post('/upload/:type', adminAuth, upload.single('image'), (req, res) => {
+router.post('/upload/:type', adminAuth, uploadImageMiddleware, (req, res) => {
   try {
     const { type } = req.params;
     if (!['logo', 'banner', 'voucher', 'promo', 'rental_logo', 'rental_wallpaper'].includes(type)) {

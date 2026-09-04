@@ -106,7 +106,8 @@ router.get('/rates', (req, res) => {
       portal_hostname: getSetting('portal_hostname', ''),
       allow_premium_to_regular_convert: getSetting('allow_premium_to_regular_convert', '0'),
       movies_open_in_chrome: getSetting('movies_open_in_chrome', '0'),
-      promo_banner_images: db.prepare('SELECT image_path FROM promo_banner_images ORDER BY sort_order ASC').all().map((r) => r.image_path)
+      promo_banner_images: db.prepare('SELECT image_path FROM promo_banner_images ORDER BY sort_order ASC').all().map((r) => r.image_path),
+      promo_carousel_interval_seconds: getSetting('promo_carousel_interval_seconds', '5')
     });
 
   } catch (err) {

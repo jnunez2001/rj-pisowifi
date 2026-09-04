@@ -1770,6 +1770,12 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('admin_2fa_enabled', '0');
   upsertIfMissing('admin_2fa_secret', '');
   upsertIfMissing('venue_type', 'piso_wifi');
+  // Promo/ad carousel auto-advance speed (Branding > Promo Carousel) -
+  // how many seconds each image stays on screen before rotating to the
+  // next one. Portal.js clamps this to a sane range on its own (see
+  // PROMO_CAROUSEL_MIN/MAX_INTERVAL_SECONDS) in case a stale value ever
+  // ends up outside it.
+  upsertIfMissing('promo_carousel_interval_seconds', '5');
   // System Terminal (admin panel > System > Terminal) - a SEPARATE
   // password from admin_password, required every time before the
   // terminal opens, on top of already being logged into the admin panel.
