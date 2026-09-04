@@ -54,32 +54,61 @@ async function loadPromoImages() {
   window._promoImagesOrder = images.map((img) => img.id);
 }
 
+// Bulk upload: the file input takes multiple selections at once (an
+// operator adding a batch of new movie posters shouldn't have to repeat
+// this one-at-a-time), but the upload endpoint itself is still the same
+// single-file POST /api/admin/upload/promo it always was - no server
+// change needed, this just loops it sequentially (one at a time, not
+// Promise.all, so the carousel's sort_order comes out in the same order
+// the files were selected, and one failed file doesn't abort the rest).
 async function uploadPromoImage() {
   const fileInput = document.getElementById('promoFile');
-  const file = fileInput.files[0];
-  if (!file) {
-    showToast('Please select an image first', 'error');
+  const files = Array.from(fileInput.files || []);
+  if (files.length === 0) {
+    showToast('Please select at least one image', 'error');
     return;
   }
-  const formData = new FormData();
-  formData.append('image', file);
-  try {
-    const res = await fetch('/api/admin/upload/promo', {
-      method: 'POST',
-      headers: { 'password': authToken },
-      body: formData
-    });
-    const data = await res.json();
-    if (data.success) {
-      showToast('Added to carousel', 'success');
-      fileInput.value = '';
-      loadPromoImages();
-    } else {
-      showToast(data.message || 'Upload failed', 'error');
+
+  const btn = document.getElementById('promoUploadBtn');
+  const originalBtnHtml = btn.innerHTML;
+  btn.disabled = true;
+
+  let succeeded = 0;
+  const failed = [];
+
+  for (let i = 0; i < files.length; i++) {
+    btn.innerHTML = files.length > 1
+      ? `<i class="fas fa-spinner fa-spin"></i> Uploading ${i + 1} of ${files.length}...`
+      : `<i class="fas fa-spinner fa-spin"></i> Uploading...`;
+
+    const formData = new FormData();
+    formData.append('image', files[i]);
+    try {
+      const res = await fetch('/api/admin/upload/promo', {
+        method: 'POST',
+        headers: { 'password': authToken },
+        body: formData
+      });
+      const data = await res.json();
+      if (data.success) succeeded++;
+      else failed.push(files[i].name);
+    } catch (e) {
+      failed.push(files[i].name);
     }
-  } catch (e) {
-    showToast('Upload error', 'error');
   }
+
+  btn.disabled = false;
+  btn.innerHTML = originalBtnHtml;
+  fileInput.value = '';
+
+  if (failed.length === 0) {
+    showToast(succeeded === 1 ? 'Added to carousel' : `Added ${succeeded} images to carousel`, 'success');
+  } else if (succeeded === 0) {
+    showToast('Upload failed', 'error');
+  } else {
+    showToast(`Added ${succeeded} image(s), ${failed.length} failed (${failed.join(', ')})`, 'error');
+  }
+  loadPromoImages();
 }
 
 async function deletePromoImage(id) {
