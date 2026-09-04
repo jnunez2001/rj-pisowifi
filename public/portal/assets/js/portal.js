@@ -91,6 +91,18 @@ let pendingPollInterval = null;
 const PENDING_POLL_MS = 1500;
 let redirectAfterCoinModal = false;
 
+// Bug found live: updateUI()'s "just connected" block (sound, vendo relay
+// off, auto-redirect) used `!prev || !prev.active` to detect a fresh
+// connection - true not only right after a coin/free-claim actually
+// lands, but also on the very first checkSession() poll after any page
+// load/reload, since `prev` (currentSession) always starts out null. A
+// customer who already had an active session and simply opened or
+// refreshed the portal page got redirected immediately, having "inserted
+// nothing yet". Gated on this instead: only the first poll's own result
+// is exempt from counting as "just connected", every later transition
+// still fires normally.
+let firstCheckDone = false;
+
 // Bug found live: a phantom ₱1 (or more) could show the instant the Insert
 // Coin modal opened, before any real coin landed. registerPendingCoin()'s
 // POST /api/coin/pending reset (server/routes/coin.js) and this client's
@@ -1004,7 +1016,12 @@ async function finishInsertingCoins() {
     });
     const data = await res.json();
     if (data.success) {
-      redirectAfterCoinModal = true;
+      // Only redirect for a genuine first connection, not a customer
+      // topping up time on a session that was already active before they
+      // opened this modal (currentSession here still reflects the
+      // pre-finalize state - checkSession()'s next poll hasn't run yet).
+      const wasAlreadyActive = !!(currentSession && currentSession.active);
+      if (!wasAlreadyActive) redirectAfterCoinModal = true;
     } else if (data.reason === 'no_matching_rate') {
       showToast(data.message || 'That amount doesn\'t match a rate yet.', 'error');
       return; // leave the modal open so they can insert more
@@ -1213,6 +1230,8 @@ function updatePausesRemainingHint(session) {
 function updateUI(session) {
   const prev = currentSession;
   currentSession = session;
+  const isFirstCheck = !firstCheckDone;
+  firstCheckDone = true;
 
   // Peso-credit toast: fires once per completed coin total (server batches
   // rapid coin pulses into one transactions row per finalizePendingCoins()
@@ -1320,7 +1339,7 @@ function updateUI(session) {
     }
 
     const coinModalOpen = document.getElementById('coinModal').classList.contains('show');
-    if (!prev || !prev.active) {
+    if (!isFirstCheck && (!prev || !prev.active)) {
       playSound('success');
       playVendoSound('connected');
       playPortalSound('connected');
@@ -1420,9 +1439,23 @@ function updateUI(session) {
 }
 
 // ===== SESSION CHECK =====
+// Bug found live: called independently by both the 8s setInterval poll and
+// every message on the SSE stream (connectEventStream()'s onmessage), with
+// zero coordination between them. Two overlapping calls race their own
+// fetches - if the OLDER call's response happens to land after the newer
+// one (ordinary network jitter, more likely on real mobile connections),
+// its now-stale data overwrote currentSession right back to whatever it
+// was before, flipping a genuinely-connected customer back to
+// "disconnected" for one tick and then back to "connected" the next -
+// replaying the welcome/coin/connected sounds and re-arming the
+// auto-redirect each time it flipped. A monotonic sequence number, only
+// ever applied by whichever call issued it most recently, makes a
+// straggling older response a no-op instead of a regression.
+let checkSessionSeq = 0;
 async function checkSession() {
+  const seq = ++checkSessionSeq;
   const mac = getMac();
-  if (!mac) { updateUI(null); return; }
+  if (!mac) { if (seq === checkSessionSeq) updateUI(null); return; }
   try {
     // Neither request depends on the other's result (the coin-spam check
     // only reads isBlocked, a UI flag from a previous poll, not anything
@@ -1435,6 +1468,7 @@ async function checkSession() {
       wantsSpamCheck ? fetch(`${SERVER}/api/coin/status/${encodeURIComponent(mac)}`) : Promise.resolve(null),
     ]);
     const data = await res.json();
+    if (seq !== checkSessionSeq) return; // a newer check already started/landed, discard this stale one
     updateConnectionBanner(false);
     updateUI(data.active ? data : null);
 
