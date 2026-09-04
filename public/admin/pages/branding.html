@@ -93,6 +93,15 @@
     Images shown above the STARKFI banner text the moment a customer connects - use this for new movies, promos, or announcements. Auto-rotates when more than one image is added.
   </p>
   <div class="form-group">
+    <label class="form-label">Carousel Speed</label>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <input type="number" id="promoCarouselSpeed" class="form-control" min="2" max="30" style="max-width:100px;">
+      <span style="font-size:13px;color:var(--text-muted);white-space:nowrap;">seconds per image</span>
+      <button class="btn btn-secondary btn-sm" onclick="savePromoCarouselSpeed()">Save</button>
+    </div>
+    <small style="color:var(--text-muted);">How long each image stays on screen before rotating to the next (2-30 seconds).</small>
+  </div>
+  <div class="form-group">
     <label class="form-label">Add Image(s)</label>
     <input type="file" id="promoFile" class="form-control" accept="image/*" multiple>
     <small style="color:var(--text-muted);">Select multiple files to add them all at once - JPG, PNG, GIF, and WebP are all supported.</small>

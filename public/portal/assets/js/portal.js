@@ -73,7 +73,8 @@ let portalSettings = {
   payment_methods: 'both',
   portal_hostname: '',
   allow_premium_to_regular_convert: '0',
-  movies_open_in_chrome: '0'
+  movies_open_in_chrome: '0',
+  promo_carousel_interval_seconds: '5'
 };
 
 // ===== COIN MODAL TIMER =====
@@ -1625,6 +1626,7 @@ async function loadSettings() {
     portalSettings.portal_hostname = data.portal_hostname || '';
     portalSettings.allow_premium_to_regular_convert = data.allow_premium_to_regular_convert || '0';
     portalSettings.movies_open_in_chrome = data.movies_open_in_chrome || '0';
+    portalSettings.promo_carousel_interval_seconds = data.promo_carousel_interval_seconds || '5';
     applyPortalSettings();
     updateNotificationsButton();
 
@@ -1664,7 +1666,14 @@ async function loadSettings() {
 // on connecting. Hidden entirely when nothing's configured.
 let promoCarouselIndex = 0;
 let promoCarouselInterval = null;
-const PROMO_CAROUSEL_INTERVAL_MS = 5000;
+// Operator-configurable (Branding > Promo Carousel > Carousel Speed),
+// portalSettings.promo_carousel_interval_seconds - clamped here rather
+// than trusted as-is, so a stale/bad value (0, negative, a typo'd huge
+// number) can't freeze the carousel on one image or flash by too fast to
+// read, regardless of what ends up in that setting.
+const PROMO_CAROUSEL_MIN_INTERVAL_SECONDS = 2;
+const PROMO_CAROUSEL_MAX_INTERVAL_SECONDS = 30;
+const PROMO_CAROUSEL_DEFAULT_INTERVAL_SECONDS = 5;
 
 function renderPromoCarousel(images) {
   const wrap = document.getElementById('promoCarousel');
@@ -1683,13 +1692,17 @@ function renderPromoCarousel(images) {
   promoCarouselIndex = 0;
 
   if (images.length > 1) {
+    const configuredSeconds = parseInt(portalSettings.promo_carousel_interval_seconds, 10);
+    const seconds = Number.isFinite(configuredSeconds)
+      ? Math.min(PROMO_CAROUSEL_MAX_INTERVAL_SECONDS, Math.max(PROMO_CAROUSEL_MIN_INTERVAL_SECONDS, configuredSeconds))
+      : PROMO_CAROUSEL_DEFAULT_INTERVAL_SECONDS;
     promoCarouselInterval = setInterval(() => {
       promoCarouselIndex = (promoCarouselIndex + 1) % images.length;
       track.style.transform = `translateX(-${promoCarouselIndex * 100}%)`;
       dots.querySelectorAll('.promo-carousel-dot').forEach((d, i) => {
         d.classList.toggle('active', i === promoCarouselIndex);
       });
-    }, PROMO_CAROUSEL_INTERVAL_MS);
+    }, seconds * 1000);
   }
 }
 

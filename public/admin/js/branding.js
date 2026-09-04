@@ -23,6 +23,8 @@ async function loadBranding() {
         (settings.settings.cafe_name || 'STARKFI').toUpperCase();
       document.getElementById('previewTagline').textContent =
         settings.settings.banner_text || 'HIGH SPEED CONNECTION!';
+      document.getElementById('promoCarouselSpeed').value =
+        settings.settings.promo_carousel_interval_seconds || '5';
     }
 
     await loadPromoImages();
@@ -89,11 +91,20 @@ async function uploadPromoImage() {
         headers: { 'password': authToken },
         body: formData
       });
-      const data = await res.json();
-      if (data.success) succeeded++;
-      else failed.push(files[i].name);
+      const data = await res.json().catch(() => null);
+      if (data && data.success) succeeded++;
+      // Real bug found live: a file over the server's 5MB limit (or a
+      // rejected format) used to throw inside multer with no error
+      // handling wired up for it, so the server sent back a raw HTML
+      // stack-trace page instead of JSON - res.json() above threw its own
+      // parse error, landing here with zero indication of what actually
+      // went wrong. The server now always replies with a real
+      // {success:false, message} for this (server/routes/admin.js's
+      // uploadImageMiddleware), so surface that real reason instead of
+      // just naming the file.
+      else failed.push(`${files[i].name} (${(data && data.message) || 'upload failed'})`);
     } catch (e) {
-      failed.push(files[i].name);
+      failed.push(`${files[i].name} (upload failed)`);
     }
   }
 
@@ -104,9 +115,9 @@ async function uploadPromoImage() {
   if (failed.length === 0) {
     showToast(succeeded === 1 ? 'Added to carousel' : `Added ${succeeded} images to carousel`, 'success');
   } else if (succeeded === 0) {
-    showToast('Upload failed', 'error');
+    showToast(failed.length === 1 ? failed[0] : `${failed.length} images failed: ${failed.join(', ')}`, 'error');
   } else {
-    showToast(`Added ${succeeded} image(s), ${failed.length} failed (${failed.join(', ')})`, 'error');
+    showToast(`Added ${succeeded} image(s). Failed: ${failed.join(', ')}`, 'error');
   }
   loadPromoImages();
 }
@@ -125,6 +136,22 @@ async function movePromoImage(id, direction) {
   [ids[index], ids[swapWith]] = [ids[swapWith], ids[index]];
   await apiCall('POST', '/api/admin/promo-banner-images/reorder', { ids });
   loadPromoImages();
+}
+
+async function savePromoCarouselSpeed() {
+  const input = document.getElementById('promoCarouselSpeed');
+  const seconds = parseInt(input.value, 10);
+  if (!Number.isFinite(seconds) || seconds < 2 || seconds > 30) {
+    showToast('Enter a number between 2 and 30 seconds', 'error');
+    return;
+  }
+  try {
+    const data = await apiCall('POST', '/api/admin/settings', { promo_carousel_interval_seconds: String(seconds) });
+    if (data.success) showToast('Carousel speed saved', 'success');
+    else showToast(data.message || 'Failed to save', 'error');
+  } catch (e) {
+    showToast('Server error', 'error');
+  }
 }
 
 function previewImage(inputId, previewId) {
