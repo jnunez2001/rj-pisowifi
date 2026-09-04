@@ -93,10 +93,11 @@
     Images shown above the STARKFI banner text the moment a customer connects - use this for new movies, promos, or announcements. Auto-rotates when more than one image is added.
   </p>
   <div class="form-group">
-    <label class="form-label">Add Image</label>
-    <input type="file" id="promoFile" class="form-control" accept="image/*">
+    <label class="form-label">Add Image(s)</label>
+    <input type="file" id="promoFile" class="form-control" accept="image/*" multiple>
+    <small style="color:var(--text-muted);">Select multiple files to add them all at once - JPG, PNG, GIF, and WebP are all supported.</small>
   </div>
-  <button class="btn btn-primary" onclick="uploadPromoImage()">
+  <button class="btn btn-primary" id="promoUploadBtn" onclick="uploadPromoImage()">
     <i class="fas fa-upload"></i> Add to Carousel
   </button>
   <div id="promoImagesList" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:16px;"></div>
