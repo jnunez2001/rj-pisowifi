@@ -63,8 +63,18 @@ let hasSweptVendoConnectivityOnce = false;
 // per-vendo mac since more than one can exist.
 let vendoInboundUnreachableSince = {};
 let vendoRemoteRestartAttemptAt = {};
-const VENDO_INBOUND_STUCK_MS = 6 * 60 * 1000; // 3 consecutive 2-min checks
-const VENDO_REMOTE_RESTART_RETRY_MS = 10 * 60 * 1000;
+// Real complaint: tying this to the main 2-minute watchdog cron meant a
+// customer hitting "Vendo offline" the instant it happened still had to
+// wait up to 6 minutes (3 consecutive checks) before the system so much as
+// tried a remote restart - far too slow for something felt instantly.
+// This check is cheap (one small HTTP request per vendo) and safe to run
+// far more often on its own, independent of the heavier 2-minute cron - see
+// VENDO_CHECK_INTERVAL_MS below. Two consecutive checks at that faster
+// cadence (~1 minute total) still rules out a single transient blip
+// without making customers wait anywhere near as long as before.
+const VENDO_INBOUND_STUCK_MS = 60 * 1000;
+const VENDO_REMOTE_RESTART_RETRY_MS = 3 * 60 * 1000;
+const VENDO_CHECK_INTERVAL_MS = 30 * 1000;
 // Outage compensation, Controller-mode half (server/services/timerService.js
 // has the server-restart half). Tracks when the MikroTik router FIRST
 // became unreachable - in-memory only is fine here, unlike the restart
@@ -72,6 +82,18 @@ const VENDO_REMOTE_RESTART_RETRY_MS = 10 * 60 * 1000;
 // same running process, nothing to survive across a restart.
 let mikrotikUnreachableSince = null;
 const VENDO_ONLINE_WINDOW_MS = 3 * 60 * 1000; // matches devices.js's isOnline() 3-minute window
+let lastOkPersistedAt = 0;
+const OK_PERSIST_INTERVAL_MS = 3 * 60 * 60 * 1000; // one "Self-heal check passed" row per ~3 hours, max
+// One-shot signal from the MikroTik-recovery branch below to the vendo
+// inbound-reachability check: a router that was JUST unreachable and has
+// now come back is real, independent evidence a brownout likely just
+// happened - the very next vendo check after that shouldn't wait through
+// its own normal multi-check "is this a real problem or a blip" grace
+// period, it should test the vendo right now and say so plainly if it
+// didn't come back cleanly. Consumed (reset to false) by that next check
+// either way, so it only ever applies to the one cycle right after a
+// recovery, never lingers.
+let mikrotikJustRecovered = false;
 
 function pruneFixTimestamps() {
   const cutoff = Date.now() - WINDOW_MS;
@@ -303,17 +325,33 @@ function checkDiskSpace() {
 
 function persistResult(status, issues) {
   lastResult = { at: new Date().toISOString(), status, issues };
-  try {
-    db.prepare('INSERT INTO watchdog_events (status, issues_json) VALUES (?, ?)')
-      .run(status, JSON.stringify(issues));
-    // Keep the table from growing unbounded on a long-running box.
-    db.prepare(`
-      DELETE FROM watchdog_events WHERE id NOT IN (
-        SELECT id FROM watchdog_events ORDER BY id DESC LIMIT ?
-      )
-    `).run(MAX_EVENTS_KEPT);
-  } catch (e) {
-    console.error('🛡️ [Watchdog] Failed to persist health check result:', e.message);
+
+  // Real complaint: the health check itself runs every 2 minutes (and
+  // still does, unchanged - nothing about the check cadence or any
+  // auto-fix/alert below is affected by this), but a clean "ok" result
+  // used to get its own watchdog_events row every single time - 30/hour,
+  // drowning out the far rarer, actually-useful rows (real issues, config
+  // changes, alerts) once GET /logs merges everything into one feed. Only
+  // a real issue (status !== 'ok') still gets logged immediately, every
+  // time; a clean pass is now persisted at most once every ~3 hours (see
+  // OK_PERSIST_INTERVAL_MS), just enough to still show the Logs page the
+  // check is alive without flooding it.
+  const isRealIssue = status !== 'ok';
+  const now = Date.now();
+  if (isRealIssue || now - lastOkPersistedAt >= OK_PERSIST_INTERVAL_MS) {
+    try {
+      db.prepare('INSERT INTO watchdog_events (status, issues_json) VALUES (?, ?)')
+        .run(status, JSON.stringify(issues));
+      // Keep the table from growing unbounded on a long-running box.
+      db.prepare(`
+        DELETE FROM watchdog_events WHERE id NOT IN (
+          SELECT id FROM watchdog_events ORDER BY id DESC LIMIT ?
+        )
+      `).run(MAX_EVENTS_KEPT);
+      if (!isRealIssue) lastOkPersistedAt = now;
+    } catch (e) {
+      console.error('🛡️ [Watchdog] Failed to persist health check result:', e.message);
+    }
   }
 
   // Edge-triggered alert log: only log a NEW issue code appearing, or a
@@ -375,10 +413,7 @@ async function checkVendoConnectivity() {
     lastOnlineVendoMacs = currentOnline;
   } catch (e) {
     console.error('🛡️ [Watchdog] Vendo connectivity sweep failed:', e.message);
-    return;
   }
-
-  await checkVendoInboundReachability(rows);
 }
 
 // A vendo whose heartbeat looks fine (checked above) can still have a
@@ -387,14 +422,106 @@ async function checkVendoConnectivity() {
 // /status (already used on-demand by the Devices page's health modal,
 // admin.js's GET /vendos/:id/health) instead of trusting the heartbeat
 // alone, since that's exactly the signal a stuck listener won't give.
-async function checkVendoInboundReachability(rows) {
+//
+// Deliberately its own loop (VENDO_CHECK_INTERVAL_MS, started separately
+// in start() below), not piggybacked on the 2-minute watchdog cron above -
+// a customer feels "Vendo offline" instantly, so this runs every 30s
+// instead of every 2 minutes and computes its own heartbeat-freshness per
+// vendo directly (same window as checkVendoConnectivity above, just not
+// borrowing its slower-updating snapshot) rather than depending on that
+// cron's own cadence for freshness.
+// Best-effort only: if the listener is genuinely wedged this may not land
+// either (same socket a /status probe would hit), but it's free to try and
+// sometimes a stuck single connection clears just enough for one more
+// request through. Its own result isn't trusted either way - the next
+// /status probe (or the customer's own retry) is what actually confirms
+// recovery. Shared by the periodic background check below and the
+// real-time trigger from an actual failed customer request
+// (reportVendoRelayFailure, called from portal.js's relay route).
+async function attemptRemoteVendoRestart(ip) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    try {
+      await fetch(`http://${ip}/restart`, { method: 'POST', signal: controller.signal });
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (e) {}
+}
+
+// Real gap: the periodic background check (30s cadence, up to 60s to
+// confirm) is what catches a vendo going bad with nobody around to notice -
+// but if a real customer is standing there right now, pressing Insert Coin
+// and getting "Vendo offline", making them wait even that long for the
+// system to react on its own is pointless when portal.js's relay route
+// already has definitive, first-hand proof of the exact same failure this
+// whole mechanism exists to catch. Called fire-and-forget from there (never
+// awaited - a slow/failing restart attempt must not delay the customer's
+// own error response) the instant a real relay request fails, this acts
+// immediately: no waiting for a second confirming check, since an actual
+// failed customer transaction already IS that confirmation.
+async function reportVendoRelayFailure(ip) {
+  if (!ip) return;
+  try {
+    const v = db.prepare("SELECT mac_address, name FROM vendos WHERE ip_address = ? AND status = 'adopted'").get(ip);
+    if (!v) return; // not a known adopted vendo (or vendo_ip is stale) - nothing to act on here
+
+    const now = Date.now();
+    if (!vendoInboundUnreachableSince[v.mac_address]) vendoInboundUnreachableSince[v.mac_address] = now;
+
+    const lastAttempt = vendoRemoteRestartAttemptAt[v.mac_address] || 0;
+    if (now - lastAttempt < VENDO_REMOTE_RESTART_RETRY_MS) return; // already tried very recently, let that attempt play out first
+    vendoRemoteRestartAttemptAt[v.mac_address] = now;
+
+    await attemptRemoteVendoRestart(v.ip_address || ip);
+
+    const label = v.name || v.mac_address;
+    require('./alertEventService').logAlertEvent(
+      'warning',
+      'vendo_inbound_unreachable',
+      `"${label}" failed a real customer's Insert Coin request`,
+      `MAC ${v.mac_address} did not respond when a customer just tried to insert a coin. Attempted a remote restart immediately; if customers still see "Vendo offline," this device needs a manual power cycle.`
+    );
+  } catch (e) {
+    console.error('🛡️ [Watchdog] reportVendoRelayFailure failed:', e.message);
+  }
+}
+
+let vendoInboundCheckRunning = false;
+async function checkVendoInboundReachability() {
+  if (vendoInboundCheckRunning) return; // previous tick still mid-flight (a slow/timed-out probe), skip rather than overlap
+  vendoInboundCheckRunning = true;
+  try {
+    await runVendoInboundReachabilityCheck();
+  } finally {
+    vendoInboundCheckRunning = false;
+  }
+}
+
+async function runVendoInboundReachabilityCheck() {
   const { logAlertEvent } = require('./alertEventService');
   const now = Date.now();
+  let rows;
+  try {
+    rows = db.prepare("SELECT mac_address, name, last_seen, ip_address FROM vendos WHERE status = 'adopted'").all();
+  } catch (e) {
+    console.error('🛡️ [Watchdog] Vendo inbound-reachability query failed:', e.message);
+    return;
+  }
+
+  // Consumed once for this whole pass, regardless of how many vendos exist
+  // or what each one's outcome is - see mikrotikJustRecovered's own comment.
+  const urgent = mikrotikJustRecovered;
+  mikrotikJustRecovered = false;
 
   for (const v of rows) {
-    if (!v.ip_address || !lastOnlineVendoMacs.has(v.mac_address)) {
+    const seenAt = v.last_seen ? new Date(v.last_seen + 'Z').getTime() : NaN;
+    const heartbeatFresh = Number.isFinite(seenAt) && (now - seenAt) < VENDO_ONLINE_WINDOW_MS;
+    if (!v.ip_address || !heartbeatFresh) {
       // No known address yet, or the heartbeat itself is already stale -
-      // that's the existing vendo_disconnected case above, not this one.
+      // that's the existing vendo_disconnected case (checkVendoConnectivity
+      // above, on its own slower cadence), not this one.
       delete vendoInboundUnreachableSince[v.mac_address];
       delete vendoRemoteRestartAttemptAt[v.mac_address];
       continue;
@@ -419,48 +546,46 @@ async function checkVendoInboundReachability(rows) {
     if (reachable) {
       if (vendoInboundUnreachableSince[v.mac_address]) {
         logAlertEvent('info', 'vendo_inbound_recovered', `"${label}" is responding to relay commands again`, `MAC ${v.mac_address} recovered on its own.`);
+      } else if (urgent) {
+        // The positive case the router-recovery check exists to confirm,
+        // not just the failure case - an operator watching the router come
+        // back deserves to know the coin machine is genuinely fine too,
+        // not just silence.
+        logAlertEvent('info', 'vendo_confirmed_ok_after_outage', `"${label}" confirmed working after the recent outage`, `MAC ${v.mac_address} responded normally to a relay/status check right after the MikroTik router recovered - no coin machine action needed.`);
       }
       delete vendoInboundUnreachableSince[v.mac_address];
       delete vendoRemoteRestartAttemptAt[v.mac_address];
       continue;
     }
 
-    if (!vendoInboundUnreachableSince[v.mac_address]) {
-      vendoInboundUnreachableSince[v.mac_address] = now;
-      continue; // one bad check is treated as a transient blip, same principle as the IP-recovery ladder above
-    }
+    // Normally one bad check is treated as a transient blip (same
+    // principle as the IP-recovery ladder above) and given a few more
+    // 2-minute cycles before acting. Skipped when urgent: independent
+    // confirmation a real outage JUST happened (the router recovery
+    // itself) means there's no ambiguity left to wait out - a stuck vendo
+    // right now almost certainly didn't come back cleanly from the same
+    // event, so act on it immediately instead of waiting up to 6 more
+    // minutes to say so.
+    const alreadyMarked = !!vendoInboundUnreachableSince[v.mac_address];
+    if (!alreadyMarked) vendoInboundUnreachableSince[v.mac_address] = now;
+    if (!urgent && !alreadyMarked) continue;
 
     const stuckForMs = now - vendoInboundUnreachableSince[v.mac_address];
-    if (stuckForMs < VENDO_INBOUND_STUCK_MS) continue;
+    if (!urgent && stuckForMs < VENDO_INBOUND_STUCK_MS) continue;
 
     const lastAttempt = vendoRemoteRestartAttemptAt[v.mac_address] || 0;
-    if (now - lastAttempt < VENDO_REMOTE_RESTART_RETRY_MS) continue;
+    if (!urgent && now - lastAttempt < VENDO_REMOTE_RESTART_RETRY_MS) continue;
 
     const isFirstAttempt = lastAttempt === 0;
     vendoRemoteRestartAttemptAt[v.mac_address] = now;
 
-    // Best-effort only: if the listener is genuinely wedged this may not
-    // land either (same socket as /status above), but it's free to try
-    // and sometimes a stuck single connection clears just enough for one
-    // more request through. Its own result isn't trusted either way - the
-    // NEXT cycle's /status probe is what actually confirms recovery.
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-      try {
-        await fetch(`http://${v.ip_address}/restart`, { method: 'POST', signal: controller.signal });
-      } finally {
-        clearTimeout(timeout);
-      }
-    } catch (e) {}
+    await attemptRemoteVendoRestart(v.ip_address);
 
-    if (isFirstAttempt) {
-      logAlertEvent(
-        'warning',
-        'vendo_inbound_unreachable',
-        `"${label}" is online but not responding to coin/relay commands`,
-        `MAC ${v.mac_address} has been checking in normally (it looks "online") but hasn't answered a real relay/status request in over ${Math.round(VENDO_INBOUND_STUCK_MS / 60000)} minutes - a known issue after a power blip where the WiFi radio comes back in a half-working state. Attempted a remote restart; if customers still see "Vendo offline," this device needs a manual power cycle.`
-      );
+    if (isFirstAttempt || urgent) {
+      const detail = urgent
+        ? `MAC ${v.mac_address} did not answer a relay/status check run right after the MikroTik router recovered - probably did not come back cleanly from the same brownout. Attempted a remote restart; if customers still see "Vendo offline," this device needs a manual power cycle.`
+        : `MAC ${v.mac_address} has been checking in normally (it looks "online") but hasn't answered a real relay/status request in over ${Math.round(VENDO_INBOUND_STUCK_MS / 1000)} seconds - a known issue after a power blip where the WiFi radio comes back in a half-working state. Attempted a remote restart; if customers still see "Vendo offline," this device needs a manual power cycle.`;
+      logAlertEvent('warning', 'vendo_inbound_unreachable', `"${label}" is online but not responding to coin/relay commands`, detail);
     }
   }
 }
@@ -528,12 +653,27 @@ async function runHealthCheck() {
       issues.push({
         severity: 'critical',
         code: 'mikrotik_router_unreachable',
-        message: 'The MikroTik router could not be reached. Customer internet access and session expiry compensation cannot be verified until it recovers.',
+        // A router that answered fine two minutes ago and now doesn't is
+        // most commonly a power interruption (a brownout) hitting it -
+        // named honestly as the likely cause, not a certainty, since a
+        // pulled cable or a router-side fault look identical from here.
+        message: 'The MikroTik router could not be reached - most likely a brief power interruption (a brownout) affecting the router, though a cable or config issue is also possible. Customer internet access and session expiry compensation cannot be verified until it recovers.',
       });
     } else if (mikrotikUnreachableSince !== null) {
       const gapMs = Date.now() - mikrotikUnreachableSince;
       mikrotikUnreachableSince = null;
       await require('./timerService').applyOutageCompensation(gapMs, 'The MikroTik router');
+      // See mikrotikJustRecovered's own comment above - real, independent
+      // evidence an outage likely just happened, so the very next vendo
+      // check gets to skip its own normal grace period instead of waiting
+      // several more minutes to find out the coin machine needs a hand too.
+      mikrotikJustRecovered = true;
+      require('./alertEventService').logAlertEvent(
+        'info',
+        'mikrotik_router_recovered',
+        'MikroTik router reconnected',
+        `Was unreachable for about ${Math.round(gapMs / 60000)} minute(s), likely a brownout - running an immediate check on the coin machine in case it needs the same recovery.`
+      );
     }
 
     // Real incident: after this exact router-power-loss-then-recovery
@@ -626,6 +766,14 @@ function start() {
   });
   // Run once immediately at boot too, not just on the first cron tick.
   runHealthCheck().catch((e) => console.error('🛡️ [Watchdog] Initial health check failed:', e.message));
+
+  // Own faster loop, not the 2-minute cron above - see
+  // runVendoInboundReachabilityCheck()'s own comment for why.
+  setInterval(() => {
+    checkVendoInboundReachability().catch((e) => console.error('🛡️ [Watchdog] Vendo inbound-reachability check crashed:', e.message));
+  }, VENDO_CHECK_INTERVAL_MS);
+  checkVendoInboundReachability().catch((e) => console.error('🛡️ [Watchdog] Initial vendo inbound-reachability check failed:', e.message));
+
   console.log('🛡️ [Watchdog] Self-heal service started');
 }
 
@@ -633,4 +781,4 @@ function getLastResult() {
   return lastResult;
 }
 
-module.exports = { start, getLastResult, runHealthCheck };
+module.exports = { start, getLastResult, runHealthCheck, reportVendoRelayFailure };

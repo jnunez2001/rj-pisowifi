@@ -888,11 +888,63 @@ function launchConfetti() {
   requestAnimationFrame(frame);
 }
 
-async function handleInsertCoin(mode) {
+// Bounded, in-page MAC re-detection for the "no valid MAC yet" case only -
+// deliberately NOT the background auto-refresh mechanism removed earlier
+// this session (that one polled unconditionally forever in the background
+// and caused a real false-disconnect + infinite-reload-loop regression,
+// see the comment further down where it used to live). This only ever
+// runs for a few seconds, only right after a customer presses Insert Coin
+// and genuinely has no MAC yet, never reloads the page, and always stops
+// itself - either on success or after a fixed attempt cap, so it can't
+// loop forever. On success it automatically resumes the exact action the
+// customer already asked for instead of making them press the button
+// again - every extra second/tap here is a real chance they give up and
+// leave a bad review over what's usually just normal WiFi-join detection
+// latency, not an actual problem.
+let macRetryInProgress = false;
+const MAC_RETRY_MAX_ATTEMPTS = 8;
+const MAC_RETRY_INTERVAL_MS = 6000; // stays safely above /api/portal/detect's own 5s-per-IP rate limit
+
+async function retryMacDetectionThenInsertCoin(mode) {
+  if (macRetryInProgress) {
+    showToast('Still detecting your device, please wait a moment...', 'error');
+    return;
+  }
+  macRetryInProgress = true;
+  showToast('Detecting your device on the network...', 'error');
+
+  let found = false;
+  try {
+    for (let attempt = 1; attempt <= MAC_RETRY_MAX_ATTEMPTS; attempt++) {
+      await new Promise((resolve) => setTimeout(resolve, MAC_RETRY_INTERVAL_MS));
+      await detectDevice();
+      if (getMac()) { found = true; break; }
+    }
+  } finally {
+    macRetryInProgress = false;
+  }
+
+  if (found) {
+    handleInsertCoin(mode, true);
+  } else {
+    showToast('Could not detect your device on the network. Please reconnect to the WiFi and try again.', 'error');
+  }
+}
+
+// isAutoResume: true only when retryMacDetectionThenInsertCoin() is
+// silently replaying the customer's original tap once a MAC finally shows
+// up - the click was already tracked and the insert sound already played
+// on their real, first tap, seconds/tens of seconds ago. Without this, a
+// successful auto-resume double-counted the click in analytics and played
+// a second, unexplained insert sound with no new tap behind it - exactly
+// the kind of confusing surprise the retry mechanism exists to avoid.
+async function handleInsertCoin(mode, isAutoResume = false) {
   if (isBlocked) return;
   if (mode === 'convert' && !convertEligible()) return; // button should already be disabled/hidden
-  trackClick(mode === 'premium' ? 'premium' : (mode === 'convert' || mode === 'convert_down') ? 'convert' : 'insert_coin');
-  playSound('insert');
+  if (!isAutoResume) {
+    trackClick(mode === 'premium' ? 'premium' : (mode === 'convert' || mode === 'convert_down') ? 'convert' : 'insert_coin');
+    playSound('insert');
+  }
   insertedTotal = 0;
   pendingRegistered = false;
   insertingMode = mode;
@@ -909,11 +961,11 @@ async function handleInsertCoin(mode) {
     // Real protection, not just a nicer message: without this, the coin
     // modal would open with no server-side pending window behind it at
     // all (see registerPendingCoin()'s comment) - a real coin landing
-    // right then has no valid customer to credit. Try to recover the MAC
-    // immediately so a retry right after this toast has a real chance of
-    // working, instead of failing the same way again.
-    showToast('Could not detect your device on the network. Please reconnect to the WiFi and try again.', 'error');
-    detectDevice();
+    // right then has no valid customer to credit. The relay is never
+    // armed here (this returns before reaching activateVendoRelay() below),
+    // so the coin slot itself stays off - nothing to accept a coin into
+    // even if someone dropped one right now.
+    retryMacDetectionThenInsertCoin(mode);
     return;
   }
   if (espResult === 'blocked' || gpioResult === 'blocked') {
