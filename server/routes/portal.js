@@ -213,12 +213,42 @@ router.post('/relay/:action', async (req, res) => {
     }
 
     if (!relayRes.ok) {
+      // Real, first-hand proof of the exact failure the watchdog's own
+      // background probe exists to catch - a customer is standing there
+      // right now, no reason to make them (or the operator) wait on that
+      // probe's own next cycle. Fire-and-forget: this must never delay or
+      // fail the customer's own error response above.
+      require('../services/watchdogService').reportVendoRelayFailure(vendoIp).catch(() => {});
       return res.status(502).json({ success: false, message: 'ESP32 relay request failed' });
+    }
+
+    // Real gap: an ESP8266 acking this POST proves its web server answered,
+    // not that the coin slot actually powered on - a relay driver fault or
+    // a miswired board could mean the physical gate never armed even
+    // though the HTTP round trip looked completely normal. A customer
+    // would otherwise drop real coins into a slot that was never actually
+    // on, with the portal telling them everything's fine. Only checked for
+    // 'on' (this is what a customer is about to act on), kept short
+    // (1.5s) so a healthy device adds negligible delay to Insert Coin.
+    if (action === 'on') {
+      let relayConfirmed = false;
+      try {
+        const statusRes = await fetch(`http://${vendoIp}/status`, { signal: AbortSignal.timeout(1500) });
+        const status = await statusRes.json().catch(() => null);
+        relayConfirmed = !!(status && status.relay === true);
+      } catch (e) {
+        relayConfirmed = false;
+      }
+      if (!relayConfirmed) {
+        require('../services/watchdogService').reportVendoRelayFailure(vendoIp).catch(() => {});
+        return res.status(502).json({ success: false, message: 'The coin slot did not confirm it turned on. Please try again.' });
+      }
     }
 
     return res.json({ success: true });
   } catch (e) {
     console.error(`[Vendo] Relay ${action} failed:`, e.message);
+    require('../services/watchdogService').reportVendoRelayFailure(vendoIp).catch(() => {});
     return res.status(502).json({ success: false, message: 'ESP32 unreachable' });
   }
 });
