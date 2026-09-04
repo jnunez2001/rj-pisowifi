@@ -50,6 +50,21 @@ let lastResult = { at: null, status: 'unknown', issues: [] };
 let lastIssueCodes = new Set();
 let lastOnlineVendoMacs = new Set();
 let hasSweptVendoConnectivityOnce = false;
+// Real brownout report: a vendo's ESP8266 can come back up with its
+// outbound heartbeat (registerVendo(), a plain HTTPClient POST) working
+// fine while its own inbound ESP8266WebServer listener stays wedged - a
+// known failure mode where the WiFi/TCP stack comes out of a brownout in a
+// half-broken state. The Devices page's "online" status is derived purely
+// from that heartbeat (last_seen), so it kept showing the vendo as online
+// while every real customer's Insert Coin press hit a generic "Vendo
+// offline" toast with nothing pointing an operator at the actual cause.
+// Tracked the same way mikrotikUnreachableSince above is (in-memory only,
+// self-heals on its own recovery, no restart-survival needed) but keyed
+// per-vendo mac since more than one can exist.
+let vendoInboundUnreachableSince = {};
+let vendoRemoteRestartAttemptAt = {};
+const VENDO_INBOUND_STUCK_MS = 6 * 60 * 1000; // 3 consecutive 2-min checks
+const VENDO_REMOTE_RESTART_RETRY_MS = 10 * 60 * 1000;
 // Outage compensation, Controller-mode half (server/services/timerService.js
 // has the server-restart half). Tracks when the MikroTik router FIRST
 // became unreachable - in-memory only is fine here, unlike the restart
@@ -331,10 +346,11 @@ function persistResult(status, issues) {
 // sweep runs on the same 2-minute cadence as the rest of the health check
 // and only logs an actual flip from online to offline or back, not every
 // tick, by comparing against the online set from the previous run.
-function checkVendoConnectivity() {
+async function checkVendoConnectivity() {
+  let rows = [];
   try {
     const { logAlertEvent } = require('./alertEventService');
-    const rows = db.prepare("SELECT mac_address, name, last_seen FROM vendos WHERE status = 'adopted'").all();
+    rows = db.prepare("SELECT mac_address, name, last_seen, ip_address FROM vendos WHERE status = 'adopted'").all();
     const now = Date.now();
     const currentOnline = new Set();
     for (const v of rows) {
@@ -359,6 +375,93 @@ function checkVendoConnectivity() {
     lastOnlineVendoMacs = currentOnline;
   } catch (e) {
     console.error('🛡️ [Watchdog] Vendo connectivity sweep failed:', e.message);
+    return;
+  }
+
+  await checkVendoInboundReachability(rows);
+}
+
+// A vendo whose heartbeat looks fine (checked above) can still have a
+// wedged inbound web server after a brownout - see the comment on
+// vendoInboundUnreachableSince above. Actively probes the device's own
+// /status (already used on-demand by the Devices page's health modal,
+// admin.js's GET /vendos/:id/health) instead of trusting the heartbeat
+// alone, since that's exactly the signal a stuck listener won't give.
+async function checkVendoInboundReachability(rows) {
+  const { logAlertEvent } = require('./alertEventService');
+  const now = Date.now();
+
+  for (const v of rows) {
+    if (!v.ip_address || !lastOnlineVendoMacs.has(v.mac_address)) {
+      // No known address yet, or the heartbeat itself is already stale -
+      // that's the existing vendo_disconnected case above, not this one.
+      delete vendoInboundUnreachableSince[v.mac_address];
+      delete vendoRemoteRestartAttemptAt[v.mac_address];
+      continue;
+    }
+
+    let reachable = false;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      try {
+        const res = await fetch(`http://${v.ip_address}/status`, { signal: controller.signal });
+        reachable = res.ok;
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (e) {
+      reachable = false;
+    }
+
+    const label = v.name || v.mac_address;
+
+    if (reachable) {
+      if (vendoInboundUnreachableSince[v.mac_address]) {
+        logAlertEvent('info', 'vendo_inbound_recovered', `"${label}" is responding to relay commands again`, `MAC ${v.mac_address} recovered on its own.`);
+      }
+      delete vendoInboundUnreachableSince[v.mac_address];
+      delete vendoRemoteRestartAttemptAt[v.mac_address];
+      continue;
+    }
+
+    if (!vendoInboundUnreachableSince[v.mac_address]) {
+      vendoInboundUnreachableSince[v.mac_address] = now;
+      continue; // one bad check is treated as a transient blip, same principle as the IP-recovery ladder above
+    }
+
+    const stuckForMs = now - vendoInboundUnreachableSince[v.mac_address];
+    if (stuckForMs < VENDO_INBOUND_STUCK_MS) continue;
+
+    const lastAttempt = vendoRemoteRestartAttemptAt[v.mac_address] || 0;
+    if (now - lastAttempt < VENDO_REMOTE_RESTART_RETRY_MS) continue;
+
+    const isFirstAttempt = lastAttempt === 0;
+    vendoRemoteRestartAttemptAt[v.mac_address] = now;
+
+    // Best-effort only: if the listener is genuinely wedged this may not
+    // land either (same socket as /status above), but it's free to try
+    // and sometimes a stuck single connection clears just enough for one
+    // more request through. Its own result isn't trusted either way - the
+    // NEXT cycle's /status probe is what actually confirms recovery.
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+      try {
+        await fetch(`http://${v.ip_address}/restart`, { method: 'POST', signal: controller.signal });
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch (e) {}
+
+    if (isFirstAttempt) {
+      logAlertEvent(
+        'warning',
+        'vendo_inbound_unreachable',
+        `"${label}" is online but not responding to coin/relay commands`,
+        `MAC ${v.mac_address} has been checking in normally (it looks "online") but hasn't answered a real relay/status request in over ${Math.round(VENDO_INBOUND_STUCK_MS / 60000)} minutes - a known issue after a power blip where the WiFi radio comes back in a half-working state. Attempted a remote restart; if customers still see "Vendo offline," this device needs a manual power cycle.`
+      );
+    }
   }
 }
 
@@ -488,7 +591,7 @@ async function runHealthCheck() {
     }
   }
 
-  checkVendoConnectivity();
+  await checkVendoConnectivity();
 
   const freeMb = await checkDiskSpace();
   if (freeMb !== null && freeMb < MIN_FREE_DISK_MB) {

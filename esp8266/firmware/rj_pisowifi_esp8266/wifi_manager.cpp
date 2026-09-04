@@ -303,6 +303,19 @@ void checkWiFiReconnect() {
     if (WiFi.status() == WL_CONNECTED) {
       wifiLostAt = 0;
       queueDeviceLog("WiFi regained");
+      // Real brownout report: this device kept sending successful
+      // heartbeats (a plain outbound HTTPClient POST, registerVendo()
+      // below) while its OWN inbound ESP8266WebServer listener stayed
+      // wedged - the portal's Insert Coin button got a generic "Vendo
+      // offline" with nothing wrong from this device's own point of view.
+      // A WiFi drop-and-reconnect is exactly the kind of event that can
+      // leave the listening socket in a bad state even though the radio
+      // itself recovers - recreating it here is cheap, safe (no
+      // self-connection, no deadlock risk, just closing and reopening the
+      // same listener), and gives every reconnect a fresh server instead
+      // of trusting whatever socket state survived the outage.
+      server.close();
+      server.begin();
       registerVendo();
       syncQueuedEvents();
       lastHeartbeat = millis();

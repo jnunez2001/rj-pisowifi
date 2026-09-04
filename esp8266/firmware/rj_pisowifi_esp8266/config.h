@@ -6,7 +6,7 @@
 #include <DNSServer.h>
 
 // ===== VERSION =====
-#define FIRMWARE_VERSION "v1.0.24"
+#define FIRMWARE_VERSION "v1.0.25"
 
 // ===== PINS =====
 // Matches a specific custom ESP8266 "hat" board (NodeMCU/ESP-12E form
