@@ -64,6 +64,33 @@ router.get('/detect', async (req, res) => {
   });
 });
 
+// Builds the customer-facing Happy Hour status for GET /api/portal/rates.
+// Deliberately returns starts_at as null when active (a customer doesn't
+// need "when does it start" while it's already running) and ends_at as
+// null when inactive (nothing counting down to show).
+function buildHappyHourStatus() {
+  const happyHourService = require('../services/happyHourService');
+  const settings = happyHourService.getSettings();
+  const active = happyHourService.isActive();
+
+  if (!settings.enabled || settings.days.size === 0) {
+    return { active: false, ends_at: null, starts_at: null, multiplier: settings.multiplier, message: settings.message };
+  }
+
+  const now = new Date();
+  const [endH, endM] = String(settings.end).split(':').map(Number);
+  const endsAt = new Date(now);
+  endsAt.setHours(endH || 0, endM || 0, 0, 0);
+
+  return {
+    active,
+    ends_at: active ? endsAt.toISOString() : null,
+    starts_at: null, // next-occurrence calculation is a nice-to-have, not required by the approved design - portal shows the schedule via the message/admin config instead
+    multiplier: settings.multiplier,
+    message: settings.message,
+  };
+}
+
 router.get('/rates', (req, res) => {
   try {
     const getSetting = (key, def) => {
@@ -107,7 +134,8 @@ router.get('/rates', (req, res) => {
       allow_premium_to_regular_convert: getSetting('allow_premium_to_regular_convert', '0'),
       movies_open_in_chrome: getSetting('movies_open_in_chrome', '0'),
       promo_banner_images: db.prepare('SELECT image_path FROM promo_banner_images ORDER BY sort_order ASC').all().map((r) => r.image_path),
-      promo_carousel_interval_seconds: getSetting('promo_carousel_interval_seconds', '5')
+      promo_carousel_interval_seconds: getSetting('promo_carousel_interval_seconds', '5'),
+      happy_hour: buildHappyHourStatus()
     });
 
   } catch (err) {
