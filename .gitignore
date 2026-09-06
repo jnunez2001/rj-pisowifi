@@ -43,6 +43,7 @@ ZENFI_ROADMAP_PLAN.md
 QUALITY_OF_LIFE_IDEAS.md
 BETA_LAUNCH_PLAN.md
 STARKFI_LITE_PLAN.md
+STARKFI_PROMOS_CHECKLIST.md
 ZENFI_MASTER_DEVELOPMENT_SPEC.md
 ZENFI_MASTER_DEVELOPER_HANDOFF.md
 
@@ -105,3 +106,6 @@ public/downloads/windows-rental-client/*.pdb
 
 # Local WiX CLI extension cache (created by 'wix extension add'), not source.
 .wix/
+
+# SDD/worktree scratch space (subagent-driven-development plan execution)
+.worktrees/
