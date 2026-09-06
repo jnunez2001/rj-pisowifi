@@ -71,4 +71,25 @@ function isActive(now = new Date()) {
   return nowMinutes >= startMinutes && nowMinutes < endMinutes;
 }
 
-module.exports = { isActive, getMultiplier, getSettings };
+// Pure function, no DB access - takes plain millisecond timestamps so it's
+// trivially unit-testable and reusable by both the sweep (Task 6) and any
+// future admin "simulate a conversion" tool. Returns null when there is
+// nothing to convert (already expired, or no bonus currently outstanding).
+function computeClawback({ nowMs, regularExpiresAtMs, expiresAtMs, multiplier }) {
+  if (expiresAtMs <= regularExpiresAtMs) return null; // no bonus outstanding
+  if (nowMs >= expiresAtMs) return null; // session already fully expired
+
+  if (nowMs < regularExpiresAtMs) {
+    // Customer hasn't touched their bonus at all yet - the whole bonus is outstanding.
+    const bonus = expiresAtMs - regularExpiresAtMs;
+    const keep = bonus / multiplier;
+    return { newExpiresAtMs: Math.round(regularExpiresAtMs + keep) };
+  }
+
+  // Customer is currently inside their bonus time.
+  const remainingBonus = expiresAtMs - nowMs;
+  const keep = remainingBonus / multiplier;
+  return { newExpiresAtMs: Math.round(nowMs + keep) };
+}
+
+module.exports = { isActive, getMultiplier, getSettings, computeClawback };
