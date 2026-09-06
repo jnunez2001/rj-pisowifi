@@ -127,6 +127,22 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
   }
   if (bandwidthOverride) bandwidthOverride.minutes = premiumMinutes;
 
+  // Happy Hour: Regular purchases only (§ "Out of scope" in the design
+  // spec - Premium/Boost use a separate premium_expires_at mechanism this
+  // does not touch). regularOnlyMinutes excludes whatever portion of this
+  // purchase matched a Premium tier, so a mixed insert (rare, but possible
+  // with greedy multi-tier matching above) only gets bonus time on its
+  // non-Premium portion.
+  let happyHourBonusMinutes = 0;
+  const regularOnlyMinutes = totalMinutes - premiumMinutes;
+  if (regularOnlyMinutes > 0) {
+    const happyHourService = require('./happyHourService');
+    if (happyHourService.isActive()) {
+      const multiplier = happyHourService.getMultiplier();
+      happyHourBonusMinutes = Math.floor(regularOnlyMinutes * (multiplier - 1));
+    }
+  }
+
   // Data-plan cap (Plans > Data type, synced onto its linked rate by
   // admin.js's syncPlanCoinVendoRate). Takes the first matched tier that
   // actually has one - a mixed insert crossing multiple Data tiers is an
@@ -150,7 +166,7 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
   // creditOrCreateSession() serializes same-mac callers through an
   // in-memory lock so this check-then-act is atomic against every other
   // caller of it (and against free-claim, which locks on the same mac).
-  const { session, created } = await creditOrCreateSession(mac, ip || '', totalMinutes, totalExpirationMinutes, bandwidthOverride, dataLimitMb);
+  const { session, created } = await creditOrCreateSession(mac, ip || '', totalMinutes, totalExpirationMinutes, bandwidthOverride, dataLimitMb, happyHourBonusMinutes);
 
   db.prepare(`
     INSERT INTO transactions
