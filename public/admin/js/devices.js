@@ -634,7 +634,7 @@ async function removeVendo(id, name) {
 // re-injected per navigateTo) - loadFirmwareInfo() kept firing on every
 // other page, throwing "Cannot set properties of null" trying to update
 // Devices-only DOM elements that no longer existed. Tracked and cleared on
-// navigation, same destroy<Page> pattern as hotspot-dashboard.js.
+// navigation, same destroy<Page> pattern as dashboard.js.
 let devicesRefreshInterval = null;
 
 function startDevicesRefresh() {

@@ -1,163 +1,200 @@
-<!-- zf3-* component classes now live in admin.css (promoted so System
-     Health/Logs/Alerts can reuse them too) - see that file's "ZF3
-     COMPONENT LIBRARY" section. -->
-<div class="zf3-header">
-  <div>
-    <div class="page-title">Dashboard</div>
-  </div>
-  <div class="zf3-header-right">
-    <div style="position:relative;">
-      <div class="zf3-date-pill" style="cursor:pointer;" onclick="toggleDashboardDateMenu()"><i class="fas fa-calendar-days"></i> <span id="dashboardDateRange">--</span> <i class="fas fa-chevron-down" style="font-size:10px;margin-left:2px;"></i></div>
-      <div id="dashboardDateMenu" class="zf3-card" style="display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:50;width:220px;padding:8px;">
-        <div class="zf3-date-menu-item" onclick="setDashboardDays(7)">Last 7 days</div>
-        <div class="zf3-date-menu-item" onclick="setDashboardDays(14)">Last 14 days</div>
-        <div class="zf3-date-menu-item" onclick="setDashboardDays(30)">Last 30 days</div>
-        <div class="zf3-date-menu-item" onclick="setDashboardDays(90)">Last 90 days</div>
-      </div>
-    </div>
-    <div class="zf3-icon-btn" onclick="loadDashboard()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
-  </div>
+<div class="page-title">
+  Dashboard
+  <span class="field-help" data-help="Coin, voucher, and promo activity for the Hotspot line only."><i class="fas fa-circle-question"></i></span>
+</div>
+
+<div id="hsOfflineKioskAlert" class="notice notice-warning" style="display:none;">
+  <i class="fas fa-tower-broadcast"></i>
+  <span id="hsOfflineKioskMessage"></span>
 </div>
 
 <!-- STAT CARDS -->
-<div class="zf3-stat-grid">
-  <div class="zf3-stat-card">
-    <div class="zf3-stat-top">
-      <div class="zf3-stat-label">Today's Revenue</div>
-      <i class="fas fa-wallet zf3-stat-icon"></i>
-    </div>
-    <div class="zf3-stat-value" id="todaySales">₱0</div>
-    <div class="zf3-stat-trend" id="revenueTrend">vs yesterday</div>
+<div class="stat-grid">
+  <div class="stat-card neutral">
+    <div class="stat-icon"><i class="fas fa-coins"></i></div>
+    <div class="stat-label">Today's Sales</div>
+    <div class="stat-value" id="hsTodaySales">₱0</div>
+    <div class="stat-desc">Daily Revenue</div>
   </div>
-  <div class="zf3-stat-card">
-    <div class="zf3-stat-top">
-      <div class="zf3-stat-label">Active Sessions</div>
-      <i class="fas fa-user-group zf3-stat-icon"></i>
-    </div>
-    <div class="zf3-stat-value" id="activeSessions">0</div>
-    <div class="zf3-stat-trend">Currently connected</div>
+  <div class="stat-card neutral">
+    <div class="stat-icon"><i class="fas fa-calendar-week"></i></div>
+    <div class="stat-label">Weekly Sales</div>
+    <div class="stat-value" id="hsWeeklySales">₱0</div>
+    <div class="stat-desc">This Week</div>
   </div>
-  <div class="zf3-stat-card">
-    <div class="zf3-stat-top">
-      <div class="zf3-stat-label">Today's Transactions</div>
-      <i class="fas fa-receipt zf3-stat-icon"></i>
-    </div>
-    <div class="zf3-stat-value" id="todayTransactions">0</div>
-    <div class="zf3-stat-trend">Coin & voucher</div>
+  <div class="stat-card neutral">
+    <div class="stat-icon"><i class="fas fa-calendar-alt"></i></div>
+    <div class="stat-label">Monthly Sales</div>
+    <div class="stat-value" id="hsMonthlySales">₱0</div>
+    <div class="stat-desc">This Month</div>
   </div>
-  <div class="zf3-stat-card">
-    <div class="zf3-stat-top">
-      <div class="zf3-stat-label">Time Sold Today</div>
-      <i class="fas fa-hourglass-half zf3-stat-icon"></i>
-    </div>
-    <div class="zf3-stat-value" id="minutesSold">0</div>
-    <div class="zf3-stat-trend">Total time</div>
-  </div>
-  <div class="zf3-stat-card">
-    <div class="zf3-stat-top">
-      <div class="zf3-stat-label">Bandwidth Usage</div>
-      <i class="fas fa-gauge-high zf3-stat-icon"></i>
-    </div>
-    <div class="zf3-stat-value"><span id="currentDownload">0</span> Mbps</div>
-    <div class="zf3-stat-trend"><i class="fas fa-arrow-down"></i> Down &nbsp; <i class="fas fa-arrow-up"></i> <span id="currentUpload">0</span> Mbps Up · whole gated port</div>
+  <div class="stat-card neutral">
+    <div class="stat-icon"><i class="fas fa-users"></i></div>
+    <div class="stat-label">Active Sessions</div>
+    <div class="stat-value" id="hsActiveSessions">0</div>
+    <div class="stat-desc">Currently Connected</div>
   </div>
 </div>
 
-<!-- BANDWIDTH + WAN STATUS + HOTSPOT OVERVIEW -->
-<div class="zf3-row3">
+<!-- REVENUE BY SOURCE + ACCESS TYPE DONUT -->
+<div class="dashboard-row" style="grid-template-columns:1.3fr 1fr;">
 
-  <div class="zf3-card">
-    <div class="zf3-card-head">
+  <div class="card">
+    <div class="card-header">
       <div>
-        <div class="zf3-card-title" style="text-transform:none;font-size:14px;">Bandwidth Usage</div>
-        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">Whole gated port's live throughput, not just tracked sessions</div>
+        <div class="card-title">Revenue by Source</div>
+        <div class="card-subtitle">Today, by how the customer paid</div>
       </div>
     </div>
-    <div style="position:relative;flex:1;min-height:220px;">
-      <canvas id="networkChart"></canvas>
-      <div id="networkChartEmpty" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;text-align:center;">
-        <div style="font-size:13px;font-weight:600;color:var(--text-secondary);">No traffic yet</div>
-        <div style="font-size:12px;color:var(--text-muted);">Bandwidth will appear here once a client connects.</div>
+    <div class="table-wrapper">
+      <table class="table-stack">
+        <thead>
+          <tr>
+            <th>Source</th>
+            <th>Amount</th>
+            <th>Transactions</th>
+            <th>% of Total</th>
+          </tr>
+        </thead>
+        <tbody id="revenueBySource">
+          <tr><td colspan="4"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Revenue by Access Type</div>
+    </div>
+    <div style="position:relative;height:180px;display:flex;align-items:center;justify-content:center;">
+      <canvas id="accessTypeDonut"></canvas>
+      <div id="accessTypeDonutCenter" style="position:absolute;text-align:center;pointer-events:none;">
+        <div style="font-size:11px;color:var(--text-muted);font-weight:600;">Total Today</div>
+        <div style="font-size:18px;font-weight:800;color:var(--text-primary);" id="accessTypeDonutTotal">₱0</div>
       </div>
     </div>
+    <div id="accessTypeLegend" style="display:flex;flex-direction:column;gap:8px;margin-top:12px;"></div>
   </div>
 
-  <div class="zf3-card">
-    <div class="zf3-card-title" style="margin-bottom:16px;">Internet / WAN Status</div>
-    <div id="wanStatusBody" style="flex:1;display:flex;flex-direction:column;justify-content:center;"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
-  </div>
-
-  <div class="zf3-card">
-    <div class="zf3-card-title" style="margin-bottom:14px;">Hotspot Overview</div>
-    <div style="flex:1;display:flex;flex-direction:column;justify-content:space-evenly;">
-      <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-user-group" style="color:var(--text-muted);width:14px;"></i> <span>Active Hotspot Users</span></div><span class="zf3-list-value" id="hoActiveUsers">0</span></div>
-      <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-receipt" style="color:var(--text-muted);width:14px;"></i> <span>Today's Transactions</span></div><span class="zf3-list-value" id="hoTransactions">0</span></div>
-      <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-hourglass-half" style="color:var(--text-muted);width:14px;"></i> <span>Time Sold Today</span></div><span class="zf3-list-value" id="hoMinutes">0</span></div>
-      <div class="zf3-list-row"><div class="zf3-list-left"><i class="fas fa-clock" style="color:var(--text-muted);width:14px;"></i> <span>Server Uptime</span></div><span class="zf3-list-value" id="uptime">--</span></div>
-    </div>
-  </div>
 </div>
 
-<!-- TOP SPENDERS + NETWORK LANES + NETWORK DEVICES -->
-<div class="zf3-row3">
-
-  <div class="zf3-card">
-    <div class="zf3-card-head">
-      <div class="zf3-card-title" style="text-transform:none;font-size:14px;">Top Spenders (Today)</div>
-    </div>
-    <div id="topSpenders"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
-  </div>
-
-  <div class="zf3-card">
-    <div class="zf3-card-title" style="margin-bottom:14px;text-transform:none;font-size:14px;">Network Lanes</div>
-    <div id="networkLanes"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
-  </div>
-
-  <div class="zf3-card">
-    <div class="zf3-card-title" style="margin-bottom:14px;text-transform:none;font-size:14px;">Network Devices</div>
-    <div class="zf3-devices-grid">
-      <div><div class="zf3-devices-stat-label">Total</div><div class="zf3-devices-stat-value" id="ndTotal">0</div></div>
-      <div><div class="zf3-devices-stat-label">Online</div><div class="zf3-devices-stat-value" style="color:var(--accent-green);" id="ndOnline">0</div></div>
-      <div><div class="zf3-devices-stat-label">Offline</div><div class="zf3-devices-stat-value" style="color:var(--accent-red);" id="ndOffline">0</div></div>
-    </div>
-    <div id="ndList"></div>
-  </div>
-</div>
-
-<!-- REVENUE CHART -->
-<div class="zf3-card" style="margin-bottom:16px;">
-  <div class="zf3-card-head">
-    <div>
-      <div class="zf3-card-title" style="text-transform:none;font-size:14px;margin-bottom:2px;">Revenue Analytics</div>
-      <div class="page-subtitle" id="chartRangeSubtitle" style="font-size:12px;">Last 7 days performance</div>
-    </div>
-    <div style="display:flex;gap:8px;">
-      <button class="btn btn-sm btn-secondary" onclick="setChartRange('daily')" id="btnDaily">Daily</button>
-      <button class="btn btn-sm btn-primary" onclick="setChartRange('weekly')" id="btnWeekly">Weekly</button>
-      <button class="btn btn-sm btn-secondary" onclick="setChartRange('monthly')" id="btnMonthly">Monthly</button>
-    </div>
-  </div>
-  <div style="position:relative;height:300px;">
-    <canvas id="revenueChart"></canvas>
-  </div>
-</div>
-
-<!-- RECENT ACTIVITY + QUICK ACTIONS -->
+<!-- CHARTS + STATUS ROW -->
 <div class="dashboard-row">
 
-  <div class="zf3-card">
-    <div class="zf3-card-title" style="margin-bottom:14px;text-transform:none;font-size:14px;">Recent Activity</div>
-    <div id="recentTransactions"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+  <!-- REVENUE CHART -->
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Revenue Analytics</div>
+        <div class="card-subtitle" id="hsChartRangeSubtitle">Last 7 days performance</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-sm btn-secondary" onclick="setHsChartRange('daily')" id="hsBtnDaily">Daily</button>
+        <button class="btn btn-sm btn-primary" onclick="setHsChartRange('weekly')" id="hsBtnWeekly">Weekly</button>
+        <button class="btn btn-sm btn-secondary" onclick="setHsChartRange('monthly')" id="hsBtnMonthly">Monthly</button>
+      </div>
+    </div>
+    <canvas id="hsRevenueChart" height="120"></canvas>
   </div>
 
-  <div class="zf3-card">
-    <div class="zf3-card-title" style="margin-bottom:14px;text-transform:none;font-size:14px;">Quick Actions</div>
-    <div class="zf3-actions-grid">
-      <div class="zf3-action-btn" onclick="navigateTo('vouchers')"><i class="fas fa-ticket"></i> Add Voucher</div>
-      <div class="zf3-action-btn" onclick="navigateTo('sessions')"><i class="fas fa-wifi"></i> View Sessions</div>
-      <div class="zf3-action-btn" onclick="navigateTo('settings')"><i class="fas fa-gear"></i> System Settings</div>
-      <div class="zf3-action-btn" onclick="openPowerConfirm('reboot')"><i class="fas fa-sync-alt"></i> Reboot Server</div>
+  <!-- SYSTEM STATUS (Hotspot-relevant subset only) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Hotspot Status</div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:14px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;" title="" id="hsWifiApRow">
+        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
+          <i class="fas fa-wifi" style="margin-right:6px;"></i>WiFi AP
+        </span>
+        <span class="badge badge-orange" id="hsWifiApStatus">Unknown</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;" id="hsCoinSlotRow">
+        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
+          <i class="fas fa-microchip" style="margin-right:6px;"></i>Coin Slot
+        </span>
+        <span class="badge badge-orange" id="hsCoinSlotStatus">Unknown</span>
+      </div>
+
+      <hr style="border:none;border-top:1px solid var(--border-color);">
+
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
+          <i class="fas fa-hourglass-half" style="margin-right:6px;"></i>Time Sold Today
+        </span>
+        <span style="font-size:13px;font-weight:700;color:var(--text-primary);" id="hsMinutesSold">0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
+          <i class="fas fa-calculator" style="margin-right:6px;"></i>Avg. per Transaction
+        </span>
+        <span style="font-size:13px;font-weight:700;color:var(--text-primary);" id="hsAvgPerTransaction">₱0</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-size:13px;color:var(--text-muted);font-weight:600;">
+          <i class="fas fa-clock" style="margin-right:6px;"></i>Avg. Session Duration
+          <span class="field-help" data-help="How long a session actually ran before ending, not how many minutes it was sold. Only counts sessions that finished today."><i class="fas fa-circle-question"></i></span>
+        </span>
+        <span style="font-size:13px;font-weight:700;color:var(--text-primary);" id="hsAvgSessionDuration">--</span>
+      </div>
     </div>
   </div>
+</div>
 
+<!-- SESSION ACTIVITY (NEW VS RETURNING) -->
+<div class="card" style="margin-bottom:16px;">
+  <div class="card-header">
+    <div>
+      <div class="card-title">
+        Session Activity
+        <span class="field-help" data-help="How many clients paying today are new versus have paid before. Follows the same date range as Revenue Analytics."><i class="fas fa-circle-question"></i></span>
+      </div>
+    </div>
+    <div style="display:flex;gap:14px;align-items:center;">
+      <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);font-weight:600;">
+        <span style="width:9px;height:9px;border-radius:50%;background:#0c8f6d;display:inline-block;"></span>New
+      </span>
+      <span style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);font-weight:600;">
+        <span style="width:9px;height:9px;border-radius:50%;background:#9e9e9e;display:inline-block;"></span>Returning
+      </span>
+    </div>
+  </div>
+  <canvas id="hsSessionActivityChart" height="70"></canvas>
+</div>
+
+<!-- RECENT TRANSACTIONS -->
+<div class="card">
+  <div class="card-header">
+    <div>
+      <div class="card-title">Recent Transactions</div>
+      <div class="card-subtitle">Latest coin, voucher, and promo activity</div>
+    </div>
+    <button class="btn btn-sm btn-secondary" onclick="navigateTo('sales')">
+      View All <i class="fas fa-arrow-right"></i>
+    </button>
+  </div>
+  <div class="table-wrapper">
+    <table class="table-stack">
+      <thead>
+        <tr>
+          <th>Session ID</th>
+          <th>Amount</th>
+          <th>Time Added</th>
+          <th>Source</th>
+          <th>Time</th>
+        </tr>
+      </thead>
+      <tbody id="hsRecentTransactions">
+        <tr>
+          <td colspan="5">
+            <div class="loading">
+              <i class="fas fa-spinner fa-spin"></i> Loading...
+            </div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 </div>

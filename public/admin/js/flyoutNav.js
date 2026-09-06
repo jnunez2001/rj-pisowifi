@@ -141,12 +141,6 @@ const FLYOUT_MENUS = {
     title: 'Hotspot',
     columns: [
       {
-        heading: 'Overview',
-        items: [
-          { page: 'hotspot-dashboard', label: 'Hotspot Dashboard', icon: 'fa-gauge-high' },
-        ],
-      },
-      {
         heading: 'Sales & Access',
         items: [
           { page: 'vouchers', label: 'Vouchers', icon: 'fa-ticket-alt' },
@@ -160,6 +154,7 @@ const FLYOUT_MENUS = {
       {
         heading: 'Portal Settings',
         items: [
+          { page: 'hotspot-settings', label: 'Hotspot Settings', icon: 'fa-bolt' },
           { page: 'security', label: 'Security', icon: 'fa-shield-alt' },
           { page: 'branding', label: 'Branding', icon: 'fa-palette' },
         ],

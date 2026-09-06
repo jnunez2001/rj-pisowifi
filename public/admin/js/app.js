@@ -352,7 +352,7 @@ const pageTitles = {
   about: 'About',
   'coin-slot-gpio': 'Main Kiosk Coin Slot',
   'satellite-kiosks': 'Satellite Kiosks',
-  'hotspot-dashboard': 'Hotspot Dashboard',
+  'hotspot-settings': 'Hotspot Settings',
   wallet: 'Wallet Overview',
   'wallet-hotspot': 'Hotspot Earnings',
   'wallet-isp': 'ISP Earnings',
@@ -406,11 +406,11 @@ async function navigateTo(page) {
   if (typeof destroyAnalytics === 'function') destroyAnalytics();
   if (typeof destroyUsersPage === 'function') destroyUsersPage();
   if (typeof destroyVouchersPage === 'function') destroyVouchersPage();
-  if (typeof destroyHotspotDashboard === 'function') destroyHotspotDashboard();
   if (typeof destroyDevices === 'function') destroyDevices();
   if (typeof destroyNetworkDevices === 'function') destroyNetworkDevices();
   if (typeof destroyReports === 'function') destroyReports();
   if (typeof destroyMovies === 'function') destroyMovies();
+  if (typeof destroySystemHealth === 'function') destroySystemHealth();
 
   currentPage = page;
 
@@ -460,7 +460,7 @@ async function navigateTo(page) {
       dashboard: () => typeof loadDashboard === 'function' && loadDashboard(),
       analytics: () => typeof loadAnalytics === 'function' && loadAnalytics(),
       users: () => typeof loadUsersPage === 'function' && loadUsersPage(),
-      'hotspot-dashboard': () => typeof loadHotspotDashboard === 'function' && loadHotspotDashboard(),
+      'hotspot-settings': () => typeof loadHotspotSettings === 'function' && loadHotspotSettings(),
       'satellite-kiosks': () => typeof loadSatelliteKiosks === 'function' && loadSatelliteKiosks(),
       'coin-slot-gpio': () => typeof loadCoinSlotGpio === 'function' && loadCoinSlotGpio(),
       sessions: () => typeof loadSessions === 'function' && loadSessions(),
@@ -580,7 +580,7 @@ function handleAuthFailure() {
   if (typeof destroyAbout === 'function') destroyAbout();
   if (typeof destroyAnalytics === 'function') destroyAnalytics();
   if (typeof destroyVouchersPage === 'function') destroyVouchersPage();
-  if (typeof destroyHotspotDashboard === 'function') destroyHotspotDashboard();
+  if (typeof destroySystemHealth === 'function') destroySystemHealth();
   sessionStorage.removeItem('rj_admin_token');
   sessionStorage.removeItem('rj_admin_user');
   document.getElementById('adminLayout').style.display = 'none';

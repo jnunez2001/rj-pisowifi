@@ -687,6 +687,11 @@ body {
 .stat-card.red .stat-icon { background: var(--card-red-bg); color: var(--card-red-text); }
 .stat-card.blue .stat-icon { background: var(--card-blue-bg); color: var(--card-blue-text); }
 .stat-card.orange .stat-icon { background: var(--card-orange-bg); color: var(--card-orange-text); }
+/* Plain, colorless icon badge - a subtle neutral square instead of a
+   colored one, for a more professional/understated look on pages that
+   want that (Dashboard's top stat row). Reuses --bg-hover/--text-muted
+   so it automatically stays correct in dark mode too. */
+.stat-card.neutral .stat-icon { background: var(--bg-hover); color: var(--text-muted); }
 
 /* ===== GRID LAYOUTS ===== */
 /* align-items: start (not the CSS Grid default of stretch) - two cards

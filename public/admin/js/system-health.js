@@ -4,7 +4,107 @@
 // manual re-run endpoint), and telemetryService.js's hardware-metrics
 // collector (os module + fs.statfsSync, no shelling out).
 async function loadSystemHealth() {
+  initNetworkChart();
+  if (!networkStatsInterval) {
+    pollNetworkStats();
+    networkStatsInterval = setInterval(pollNetworkStats, 4000);
+  }
   await Promise.all([loadPreflightChecks(), loadDiskSpace(), loadHardwareMetrics()]);
+}
+
+function destroySystemHealth() {
+  if (networkStatsInterval) {
+    clearInterval(networkStatsInterval);
+    networkStatsInterval = null;
+  }
+  if (networkChart) {
+    networkChart.destroy();
+    networkChart = null;
+  }
+}
+
+// ===== BANDWIDTH USAGE (moved here from the Dashboard) =====
+let networkChart = null;
+let networkStatsInterval = null;
+const NETWORK_CHART_MAX_POINTS = 20;
+
+function updateNetworkChartEmptyState() {
+  const empty = document.getElementById('networkChartEmpty');
+  const canvas = document.getElementById('networkChart');
+  if (!empty || !canvas || !networkChart) return;
+  const hasData = networkChart.data.datasets.some(ds => ds.data.some(v => v > 0));
+  empty.style.display = hasData ? 'none' : 'flex';
+  canvas.style.visibility = hasData ? 'visible' : 'hidden';
+}
+
+function initNetworkChart() {
+  const canvas = document.getElementById('networkChart');
+  if (!canvas || networkChart) return;
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const textColor = isDark ? '#888' : '#999';
+  const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+
+  networkChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      labels: [],
+      datasets: [
+        {
+          label: 'Download (Mbps)',
+          data: [],
+          borderColor: '#1a9c63',
+          backgroundColor: 'rgba(26,156,99,0.08)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0
+        },
+        {
+          label: 'Upload (Mbps)',
+          data: [],
+          borderColor: '#3d6d94',
+          backgroundColor: 'rgba(61,109,148,0.08)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      plugins: { legend: { display: true, labels: { color: textColor, boxWidth: 12 } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: textColor, maxTicksLimit: 6 } },
+        y: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor } }
+      }
+    }
+  });
+  updateNetworkChartEmptyState();
+}
+
+async function pollNetworkStats() {
+  try {
+    const data = await apiCall('GET', '/api/admin/network-stats');
+    if (!data.success) return;
+    document.getElementById('currentDownload').textContent = data.download_mbps;
+    document.getElementById('currentUpload').textContent = data.upload_mbps;
+
+    if (!networkChart) return;
+    const label = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    networkChart.data.labels.push(label);
+    networkChart.data.datasets[0].data.push(data.download_mbps);
+    networkChart.data.datasets[1].data.push(data.upload_mbps);
+    if (networkChart.data.labels.length > NETWORK_CHART_MAX_POINTS) {
+      networkChart.data.labels.shift();
+      networkChart.data.datasets[0].data.shift();
+      networkChart.data.datasets[1].data.shift();
+    }
+    networkChart.update('none');
+    updateNetworkChartEmptyState();
+  } catch (e) {}
 }
 
 async function loadPreflightChecks() {
