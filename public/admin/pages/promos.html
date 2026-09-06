@@ -31,6 +31,61 @@
   </button>
 </div>
 
+<!-- HAPPY HOUR -->
+<div class="card" style="margin-top:20px;">
+  <div class="card-header">
+    <div class="card-title">
+      <i class="fas fa-clock" style="margin-right:8px;color:#f59e0b;"></i>Happy Hour
+    </div>
+    <span style="font-size:12px;color:var(--text-muted);">Scheduled bonus time on Regular coin purchases</span>
+  </div>
+  <div class="grid-2">
+    <div class="form-group">
+      <label class="form-label">Enable Happy Hour</label>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px;">
+        <label class="toggle-switch">
+          <input type="checkbox" id="happyHourEnabled" onchange="updateToggleLabel('happyHourEnabled','happyHourEnabledLabel')">
+          <span class="toggle-slider"></span>
+        </label>
+        <span id="happyHourEnabledLabel" style="font-size:13px;color:var(--text-muted);">Disabled</span>
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Multiplier</label>
+      <input type="number" id="happyHourMultiplier" class="form-control" placeholder="2" min="1.1" max="10" step="0.1">
+      <small style="color:var(--text-muted);">e.g. 2 = customers get 2x the normal time. Must be greater than 1.</small>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Start Time</label>
+      <input type="time" id="happyHourStart" class="form-control">
+    </div>
+    <div class="form-group">
+      <label class="form-label">End Time</label>
+      <input type="time" id="happyHourEnd" class="form-control">
+      <small style="color:var(--text-muted);">Does not support a window spanning midnight (e.g. 10pm-2am) - end must be later than start on the same day.</small>
+    </div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Active Days</label>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;">
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" class="happyHourDay" value="mon"> Mon</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" class="happyHourDay" value="tue"> Tue</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" class="happyHourDay" value="wed"> Wed</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" class="happyHourDay" value="thu"> Thu</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" class="happyHourDay" value="fri"> Fri</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" class="happyHourDay" value="sat"> Sat</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;"><input type="checkbox" class="happyHourDay" value="sun"> Sun</label>
+    </div>
+  </div>
+  <div class="form-group">
+    <label class="form-label">Customer Message (shown when Happy Hour ends)</label>
+    <textarea id="happyHourMessage" class="form-control" rows="2"></textarea>
+  </div>
+  <button class="btn btn-primary" onclick="saveHappyHourSettings()">
+    <i class="fas fa-save"></i> Save Happy Hour Settings
+  </button>
+</div>
+
 <!-- MORE PROMOS (coming soon) -->
 <div class="card" style="margin-top:20px;">
   <div class="card-header">
