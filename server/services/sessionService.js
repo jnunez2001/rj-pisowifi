@@ -136,14 +136,14 @@ function withMacLock(mac, fn) {
 // own check-then-refuse-or-create, just wrapped in withMacLock() too, so
 // both paths serialize against each other without free-claim silently
 // topping up a session it's supposed to reject.
-async function creditOrCreateSession(mac, ip, minutes, expirationMinutes, bandwidthOverride = null, dataLimitMb = null) {
+async function creditOrCreateSession(mac, ip, minutes, expirationMinutes, bandwidthOverride = null, dataLimitMb = null, happyHourBonusMinutes = 0) {
   return withMacLock(mac, async () => {
     const existing = getSessionByMac(mac);
     if (existing) {
-      const updated = await addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverride, dataLimitMb);
+      const updated = await addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverride, dataLimitMb, happyHourBonusMinutes);
       return { session: updated, created: false };
     }
-    const created = await createSession(mac, ip, minutes, expirationMinutes, bandwidthOverride, dataLimitMb);
+    const created = await createSession(mac, ip, minutes, expirationMinutes, bandwidthOverride, dataLimitMb, happyHourBonusMinutes);
     return { session: created, created: true };
   });
 }
@@ -212,7 +212,7 @@ function effectiveBandwidth(session) {
 // from a Premium coin rate (coinCreditService.js) - `minutes` is
 // specifically the premium-tier duration, not the total credited this
 // call, so premium_expires_at reflects only what was actually paid for.
-async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverride = null, dataLimitMb = null) {
+async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverride = null, dataLimitMb = null, happyHourBonusMinutes = 0) {
   mac = normalizeMac(mac);
   const voucherCode = generateVoucherCode();
   const now = Date.now();
@@ -221,9 +221,19 @@ async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverr
   const mins = Math.floor(parseFloat(minutes) || 0);
   const expMins = Math.floor(parseFloat(expirationMinutes) || mins);
 
-  const expiresAt = new Date(
+  // regularExpiresAt tracks what expires_at would be with zero Happy Hour
+  // bonus - always set together with expiresAt, kept equal when there's no
+  // bonus (happyHourBonusMinutes === 0), diverging only when there is. See
+  // happyHourService.js for how the gap between the two gets clawed back
+  // when Happy Hour's window ends.
+  const regularExpiresAt = new Date(
     now + grantedMsForMinutes(mins)
   ).toISOString();
+
+  const hhBonusMins = Math.floor(parseFloat(happyHourBonusMinutes) || 0);
+  const expiresAt = hhBonusMins > 0
+    ? new Date(now + grantedMsForMinutes(mins) + grantedMsForMinutes(hhBonusMins)).toISOString()
+    : regularExpiresAt;
 
   const hardExpiresAt = new Date(
     now + grantedMsForMinutes(expMins)
@@ -241,9 +251,9 @@ async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverr
   db.prepare(`
     INSERT INTO sessions
     (voucher_code, mac_address, ip_address, minutes_remaining,
-     expires_at, hard_expires_at, premium_download_mbps, premium_upload_mbps, premium_expires_at, premium_started_at, data_limit_mb)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(voucherCode, mac, ip, mins, expiresAt, hardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, premiumStartedAt, dataLimitMb || null);
+     expires_at, regular_expires_at, hard_expires_at, premium_download_mbps, premium_upload_mbps, premium_expires_at, premium_started_at, data_limit_mb)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(voucherCode, mac, ip, mins, expiresAt, regularExpiresAt, hardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, premiumStartedAt, dataLimitMb || null);
 
   const session = db.prepare('SELECT * FROM sessions WHERE voucher_code = ?').get(voucherCode);
   const bw = effectiveBandwidth(session);
@@ -279,7 +289,7 @@ async function createSession(mac, ip, minutes, expirationMinutes, bandwidthOverr
 // on its own schedule) rather than reapplying it - the actual "still
 // active?" decision happens once, in effectiveBandwidth(), from whatever
 // premium_expires_at already says.
-async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverride = null, dataLimitMb = null) {
+async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverride = null, dataLimitMb = null, happyHourBonusMinutes = 0) {
   mac = normalizeMac(mac);
   const session = getSessionByMac(mac);
   if (!session) return null;
@@ -301,8 +311,31 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
   // minutes_remaining column), same pattern as coin.js's PC Rental
   // guest-credit branch.
   const currentRemainingMs = session.expires_at ? Math.max(0, new Date(session.expires_at).getTime() - now) : 0;
+  // regular_expires_at extends the same way expires_at always has (from
+  // its OWN existing value or now, whichever is later) - a session with no
+  // prior bonus keeps regular_expires_at === expires_at exactly, a session
+  // that already had one keeps tracking its own remaining regular time
+  // independently of whatever bonus sits on top of it.
+  const currentRegularRemainingMs = session.regular_expires_at
+    ? Math.max(0, new Date(session.regular_expires_at).getTime() - now)
+    : currentRemainingMs; // session predates this column - treat as if it always equaled expires_at
+  const newRegularExpiresAt = new Date(
+    now + currentRegularRemainingMs + grantedMsForMinutes(minutes)
+  ).toISOString();
+
+  // NOTE (deviation from brief, see task-4-report.md): the brief's original
+  // code here fell back to `newRegularExpiresAt` when happyHourBonusMinutes
+  // is 0, which silently collapses any Happy Hour bonus gap already sitting
+  // on expires_at from a PRIOR top-up - contradicting both the comment
+  // above (independent tracking of a pre-existing bonus) and the brief's
+  // own Step 4 verification script ("top-up with no new bonus preserves
+  // existing gap"). Always extending from currentRemainingMs (which already
+  // bakes in any prior gap) and only adding THIS call's own bonus on top
+  // keeps the gap intact and reduces to the exact same value as before
+  // when there was never a gap to begin with.
+  const hhBonusMins = Math.floor(parseFloat(happyHourBonusMinutes) || 0);
   const newExpiresAt = new Date(
-    now + currentRemainingMs + grantedMsForMinutes(minutes)
+    now + currentRemainingMs + grantedMsForMinutes(minutes) + grantedMsForMinutes(hhBonusMins)
   ).toISOString();
 
   // Bug found live: this used to be JUST now + this top-up's own
@@ -352,6 +385,7 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
     UPDATE sessions
     SET minutes_remaining = ?,
         expires_at = ?,
+        regular_expires_at = ?,
         hard_expires_at = ?,
         push_2min_sent = 0,
         premium_download_mbps = ?,
@@ -360,7 +394,7 @@ async function addTimeToSession(mac, minutes, expirationMinutes, bandwidthOverri
         premium_started_at = ?,
         data_limit_mb = ?
     WHERE mac_address = ?
-  `).run(newMinutes, newExpiresAt, newHardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, premiumStartedAt, newDataLimitMb, mac);
+  `).run(newMinutes, newExpiresAt, newRegularExpiresAt, newHardExpiresAt, premiumDownload, premiumUpload, premiumExpiresAt, premiumStartedAt, newDataLimitMb, mac);
 
   const updated = db.prepare('SELECT * FROM sessions WHERE mac_address = ?').get(mac);
   const bw = effectiveBandwidth(updated);
