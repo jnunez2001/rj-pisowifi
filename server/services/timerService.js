@@ -233,6 +233,12 @@ async function startTimer() {
 
       writeAliveHeartbeat();
 
+      try {
+        await require('./happyHourService').runEndOfWindowSweep();
+      } catch (e) {
+        console.error('Happy Hour sweep failed:', e.message);
+      }
+
       const now = new Date().toISOString();
       const getSetting = (key, def) => parseInt(db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? def, 10) || def;
 

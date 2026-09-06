@@ -92,4 +92,59 @@ function computeClawback({ nowMs, regularExpiresAtMs, expiresAtMs, multiplier })
   return { newExpiresAtMs: Math.round(nowMs + keep) };
 }
 
-module.exports = { isActive, getMultiplier, getSettings, computeClawback };
+// Tracks whether Happy Hour was active on the PREVIOUS call, so the real
+// sweep only runs once, exactly on the active->inactive transition - never
+// every tick while it stays inactive. Same in-memory edge-triggered
+// pattern already used elsewhere in this codebase for similar
+// once-per-transition detection - no restart-survival needed, this
+// condition re-evaluates correctly on its own either way (a server
+// restart mid-window just means the sweep runs on the next real
+// transition it observes, same as if it had been running the whole time).
+let wasActive = false;
+
+async function runEndOfWindowSweep() {
+  const db = require('../config/database');
+  const nowActive = isActive();
+
+  if (wasActive && !nowActive) {
+    const multiplier = getMultiplier();
+    const nowIso = new Date().toISOString();
+    const sessions = db.prepare(`
+      SELECT voucher_code, mac_address, expires_at, regular_expires_at
+      FROM sessions
+      WHERE expires_at > regular_expires_at
+        AND hard_expires_at > ?
+    `).all(nowIso);
+
+    if (sessions.length > 0) {
+      const nowMs = Date.now();
+      const update = db.prepare('UPDATE sessions SET expires_at = ?, regular_expires_at = ? WHERE voucher_code = ?');
+      const { logAlertEvent } = require('./alertEventService');
+      const sseService = require('./sseService');
+
+      for (const session of sessions) {
+        const result = computeClawback({
+          nowMs,
+          regularExpiresAtMs: new Date(session.regular_expires_at).getTime(),
+          expiresAtMs: new Date(session.expires_at).getTime(),
+          multiplier,
+        });
+        if (!result) continue;
+        const newExpiresAtIso = new Date(result.newExpiresAtMs).toISOString();
+        update.run(newExpiresAtIso, newExpiresAtIso, session.voucher_code);
+        sseService.notify(session.mac_address);
+      }
+
+      logAlertEvent(
+        'info',
+        'happy_hour_ended',
+        'Happy Hour ended',
+        `Converted unused bonus time for ${sessions.length} session(s).`
+      );
+    }
+  }
+
+  wasActive = nowActive;
+}
+
+module.exports = { isActive, getMultiplier, getSettings, computeClawback, runEndOfWindowSweep };
