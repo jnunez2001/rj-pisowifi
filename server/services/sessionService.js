@@ -641,8 +641,36 @@ async function resumeSession(voucherCode) {
     return null;
   }
 
+  // Fallback safety net: a customer reported resuming with less time than
+  // they had at pause, but it could not be reproduced (a real pause/resume
+  // cycle tested directly against this code preserved the frozen time
+  // exactly). session.minutes_remaining (frozen by pauseSession) and
+  // session.expires_at (also frozen, untouched since pause) are two
+  // independent records of the same "how much was left at pause" fact -
+  // if a session ever has anything unexpectedly change one without the
+  // other, they'll disagree. Cross-checking them costs nothing and, if
+  // they ever DO disagree, guarantees the customer gets the larger (more
+  // generous) of the two rather than silently keeping whichever happened
+  // to be smaller, and leaves a real alert_events record - the exact
+  // evidence today's field reports lacked - to investigate from.
+  const impliedRemainingMinutes = session.paused_at
+    ? Math.max(0, (new Date(session.expires_at).getTime() - new Date(session.paused_at).getTime()) / 60000)
+    : session.minutes_remaining;
+  const RESUME_MISMATCH_TOLERANCE_MINUTES = 0.5; // sub-minute rounding slack, not a real disagreement
+  let effectiveMinutesRemaining = session.minutes_remaining;
+  if (Math.abs(impliedRemainingMinutes - session.minutes_remaining) > RESUME_MISMATCH_TOLERANCE_MINUTES) {
+    effectiveMinutesRemaining = Math.max(impliedRemainingMinutes, session.minutes_remaining);
+    console.error(`⚠️ Resume mismatch caught: ${voucherCode} had minutes_remaining=${session.minutes_remaining} but expires_at/paused_at implies ${impliedRemainingMinutes.toFixed(2)}. Using the larger value.`);
+    require('./alertEventService').logAlertEvent(
+      'warning',
+      'resume_mismatch_corrected',
+      `Session ${voucherCode} resumed with a time mismatch - corrected to the larger value`,
+      `minutes_remaining said ${session.minutes_remaining} min but expires_at/paused_at implied ${impliedRemainingMinutes.toFixed(1)} min - resumed with ${effectiveMinutesRemaining.toFixed(1)} min so the customer is never shortchanged. This should not be able to happen - please report this alert if you see it.`
+    );
+  }
+
   const newExpiresAt = new Date(
-    now.getTime() + session.minutes_remaining * 60 * 1000
+    now.getTime() + effectiveMinutesRemaining * 60 * 1000
   ).toISOString();
 
   // Bug found in final review: this only ever shifted expires_at, never
@@ -930,5 +958,6 @@ module.exports = {
   repairRoamedSessions,
   effectiveBandwidth,
   reapplyBandwidth,
-  reapplyDefaultBandwidthToActiveSessions
+  reapplyDefaultBandwidthToActiveSessions,
+  grantedMsForMinutes
 };

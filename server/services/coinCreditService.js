@@ -166,7 +166,65 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
   // creditOrCreateSession() serializes same-mac callers through an
   // in-memory lock so this check-then-act is atomic against every other
   // caller of it (and against free-claim, which locks on the same mac).
+  const { getSessionByMac, grantedMsForMinutes } = require('./sessionService');
+  const priorSession = getSessionByMac(mac);
+  const priorRegularRemainingMs = priorSession
+    ? Math.max(0, new Date(priorSession.expires_at).getTime() - Date.now())
+    : 0;
+  const priorPremiumRemainingMs = priorSession && priorSession.premium_expires_at
+    ? Math.max(0, new Date(priorSession.premium_expires_at).getTime() - Date.now())
+    : 0;
+
   const { session, created } = await creditOrCreateSession(mac, ip || '', totalMinutes, totalExpirationMinutes, bandwidthOverride, dataLimitMb, happyHourBonusMinutes);
+
+  // Fallback safety net: a customer reported receiving less time than a
+  // coin's rate promises, but it could not be reproduced - every coin
+  // transaction in the field logs the correct minutes_added, and every
+  // code path here and in sessionService.js reads correct on direct
+  // testing. Rather than leave this as an unresolved "customer must be
+  // mistaken," guarantee the promised amount can never actually be
+  // shortchanged regardless of what unknown interaction might cause it,
+  // and - if this ever fires - leave a real alert_events record (the
+  // exact evidence the field reports lacked) to investigate from.
+  // Regular (non-Premium) minutes land on expires_at; a Premium purchase's
+  // separate premium_expires_at is checked the same way, independently.
+  const REGULAR_SHORTFALL_TOLERANCE_MS = 5000; // clock/rounding slack, not a real gap
+  if (regularOnlyMinutes > 0) {
+    const expectedMinExpiresAtMs = Date.now() + priorRegularRemainingMs
+      + grantedMsForMinutes(regularOnlyMinutes) + grantedMsForMinutes(happyHourBonusMinutes);
+    const actualExpiresAtMs = new Date(session.expires_at).getTime();
+    if (actualExpiresAtMs < expectedMinExpiresAtMs - REGULAR_SHORTFALL_TOLERANCE_MS) {
+      const shortfallMin = Math.round((expectedMinExpiresAtMs - actualExpiresAtMs) / 60000);
+      console.error(`⚠️ Coin-credit shortfall caught: ${session.voucher_code} (mac ${mac}) was ${shortfallMin} min short of what ₱${coinValue} promises. Correcting.`);
+      db.prepare('UPDATE sessions SET expires_at = ? WHERE voucher_code = ?')
+        .run(new Date(expectedMinExpiresAtMs).toISOString(), session.voucher_code);
+      session.expires_at = new Date(expectedMinExpiresAtMs).toISOString();
+      const expectedMinutesTotal = Math.round((priorRegularRemainingMs + grantedMsForMinutes(regularOnlyMinutes) + grantedMsForMinutes(happyHourBonusMinutes)) / 60000);
+      logAlertEvent(
+        'warning',
+        'coin_credit_shortfall_corrected',
+        `Coin credit for ${session.voucher_code} was short - corrected`,
+        `₱${coinValue} should have granted at least ${expectedMinutesTotal} min of total remaining time, but the session was only ${shortfallMin} min short of that before this correction extended it to match. This should not be able to happen - please report this alert if you see it.`
+      );
+    }
+  }
+  if (bandwidthOverride && premiumMinutes > 0 && session.premium_expires_at) {
+    const expectedMinPremiumExpiresAtMs = Date.now() + priorPremiumRemainingMs + grantedMsForMinutes(premiumMinutes);
+    const actualPremiumExpiresAtMs = new Date(session.premium_expires_at).getTime();
+    if (actualPremiumExpiresAtMs < expectedMinPremiumExpiresAtMs - REGULAR_SHORTFALL_TOLERANCE_MS) {
+      const shortfallMin = Math.round((expectedMinPremiumExpiresAtMs - actualPremiumExpiresAtMs) / 60000);
+      console.error(`⚠️ Premium coin-credit shortfall caught: ${session.voucher_code} (mac ${mac}) was ${shortfallMin} min short. Correcting.`);
+      db.prepare('UPDATE sessions SET premium_expires_at = ? WHERE voucher_code = ?')
+        .run(new Date(expectedMinPremiumExpiresAtMs).toISOString(), session.voucher_code);
+      session.premium_expires_at = new Date(expectedMinPremiumExpiresAtMs).toISOString();
+      logAlertEvent(
+        'warning',
+        'coin_credit_shortfall_corrected',
+        `Premium coin credit for ${session.voucher_code} was short - corrected`,
+        `₱${coinValue} should have granted at least ${Math.round((priorPremiumRemainingMs + grantedMsForMinutes(premiumMinutes)) / 60000)} min of Premium time but fell ${shortfallMin} min short. Corrected. This should not be able to happen - please report this alert if you see it.`
+      );
+    }
+  }
 
   db.prepare(`
     INSERT INTO transactions
