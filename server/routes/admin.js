@@ -552,9 +552,23 @@ router.post('/session/:code/addtime', adminAuth, async (req, res) => {
       Math.max(shiftedHardExpires, new Date(newExpiresAt).getTime())
     ).toISOString();
 
+    // Bug found in Happy Hour's final review: this admin grant is a
+    // literal minutes add/remove (never subject to Happy Hour's
+    // multiplier - see sessionService.js's grantedMsForMinutes comment),
+    // but it only ever moved expires_at, never regular_expires_at. Any
+    // outstanding Happy Hour bonus gap between the two got silently
+    // inflated (or, on a time removal, could go negative) by the exact
+    // amount an admin granted here. Shifting regular_expires_at by the
+    // same delta preserves whatever gap already existed - this grant is
+    // additive to whatever the customer already had, not a Happy Hour
+    // event itself.
+    const newRegularExpiresAt = session.regular_expires_at
+      ? new Date(new Date(session.regular_expires_at).getTime() + m * 60 * 1000).toISOString()
+      : null;
+
     db.prepare(`
-      UPDATE sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ? WHERE voucher_code = ?
-    `).run(newMinutes, newExpiresAt, newHardExpiresAt, code);
+      UPDATE sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ?, regular_expires_at = COALESCE(?, regular_expires_at) WHERE voucher_code = ?
+    `).run(newMinutes, newExpiresAt, newHardExpiresAt, newRegularExpiresAt, code);
 
     // Ensure MAC is unlocked (in case of reboot)
     try {
@@ -5579,10 +5593,17 @@ router.post('/reports/:id/approve-credit', adminAuth, async (req, res) => {
     const newHardExpiresAt = new Date(
       Math.max(currentHardExpires + minutes * 60 * 1000, new Date(newExpiresAt).getTime())
     ).toISOString();
+    // Same Happy Hour gap-preservation fix as POST /session/:code/addtime -
+    // this is also a literal admin-granted credit, never Happy Hour bonus
+    // itself, so regular_expires_at shifts by the same delta to keep
+    // whatever bonus gap already existed unchanged.
+    const newRegularExpiresAt = session.regular_expires_at
+      ? new Date(new Date(session.regular_expires_at).getTime() + minutes * 60 * 1000).toISOString()
+      : null;
 
     db.prepare(`
-      UPDATE sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ? WHERE voucher_code = ?
-    `).run(newMinutes, newExpiresAt, newHardExpiresAt, session.voucher_code);
+      UPDATE sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ?, regular_expires_at = COALESCE(?, regular_expires_at) WHERE voucher_code = ?
+    `).run(newMinutes, newExpiresAt, newHardExpiresAt, newRegularExpiresAt, session.voucher_code);
 
     db.prepare(`
       INSERT INTO transactions (voucher_code, coin_value, minutes_added, type, mac_address)

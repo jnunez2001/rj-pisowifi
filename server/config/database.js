@@ -1770,6 +1770,15 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('admin_2fa_enabled', '0');
   upsertIfMissing('admin_2fa_secret', '');
   upsertIfMissing('venue_type', 'piso_wifi');
+  // Happy Hour promotion (Promos page) - a scheduled multiplier ("2x
+  // time") on Regular coin purchases. Disabled by default so nothing
+  // changes for an install until an operator configures and enables it.
+  upsertIfMissing('happy_hour_enabled', '0');
+  upsertIfMissing('happy_hour_days', ''); // comma list e.g. "mon,tue,wed,thu,fri"
+  upsertIfMissing('happy_hour_start', '14:00'); // 24h HH:MM, server-local time
+  upsertIfMissing('happy_hour_end', '17:00');
+  upsertIfMissing('happy_hour_multiplier', '2');
+  upsertIfMissing('happy_hour_message', 'Happy Hour has ended. Your remaining bonus time was converted to regular time.');
   // Promo/ad carousel auto-advance speed (Branding > Promo Carousel) -
   // how many seconds each image stays on screen before rotating to the
   // next one. Portal.js clamps this to a sane range on its own (see
@@ -2087,6 +2096,17 @@ try {
 // must not call allowClient() either - there's nothing to restore.
 try {
   db.exec("ALTER TABLE sessions ADD COLUMN pause_reason TEXT DEFAULT NULL");
+} catch (e) {
+  // already applied
+}
+
+// Happy Hour: "what expires_at would be if this session had never
+// received a Happy Hour bonus." Always kept equal to expires_at on a
+// session that never gets a bonus - the gap between the two is exactly
+// how much unspent bonus time is currently outstanding. See
+// happyHourService.js for how this is used.
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN regular_expires_at TEXT');
 } catch (e) {
   // already applied
 }

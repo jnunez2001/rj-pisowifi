@@ -138,15 +138,55 @@ async function applyOutageCompensation(gapMs, sourceLabel) {
     if (!enabled) return;
     if (!Number.isFinite(gapMs) || gapMs < MIN_OUTAGE_GAP_MS) return;
 
-    const gapSeconds = Math.round(gapMs / 1000);
-    const sessionCount = db.prepare('SELECT COUNT(*) AS c FROM sessions').get()?.c || 0;
+    // Bug found in final review: SQLite's datetime(..., '+N seconds')
+    // returns 'YYYY-MM-DD HH:MM:SS' (a space before the time, no
+    // trailing Z), but expires_at/hard_expires_at/regular_expires_at are
+    // otherwise ALWAYS written as full ISO strings (sessionService.js's
+    // .toISOString()). A space sorts before 'T' byte-for-byte, so after
+    // this ran once, the Happy Hour sweep's `expires_at > regular_expires_at`
+    // string comparison went permanently false for every compensated
+    // session - the sweep silently stopped converting bonus time for
+    // them. This also never touched regular_expires_at at all, so any
+    // outstanding Happy Hour bonus gap was thrown off by the outage
+    // duration regardless. Fixed by computing the shift in JS (always
+    // produces real ISO strings) and applying it to all three columns,
+    // so the gap between expires_at and regular_expires_at - the exact
+    // thing the sweep depends on - is preserved through an outage
+    // exactly the same way it already needs to be preserved through a
+    // pause (see resumeSession's matching fix).
+    const sessions = db.prepare('SELECT voucher_code, expires_at, hard_expires_at, regular_expires_at FROM sessions').all();
+    const sessionCount = sessions.length;
     if (sessionCount === 0) return;
 
-    db.prepare(`
+    // Re-review found a real bug in the fix above: this codebase already
+    // has parseSqliteDate() (server/utils/sqliteDate.js) precisely because
+    // these columns can hold a naive SQLite-format value ("YYYY-MM-DD
+    // HH:MM:SS", no timezone) that bare `new Date()` misreads as LOCAL
+    // time instead of UTC - an 8-hour swing on a Manila-timezone box. In
+    // normal operation these three columns are always ISO
+    // (sessionService.js's .toISOString()), but this is exactly the kind
+    // of column the OLD buggy `datetime()` call above used to write to in
+    // the non-ISO format - using the same defensive parse this codebase
+    // already established elsewhere costs nothing and removes the risk
+    // entirely rather than depending on "should never happen in practice".
+    const { parseSqliteDate } = require('../utils/sqliteDate');
+    const shiftIso = (value) => (value ? new Date(parseSqliteDate(value).getTime() + gapMs).toISOString() : value);
+    const update = db.prepare(`
       UPDATE sessions
-      SET expires_at = datetime(expires_at, '+' || ? || ' seconds'),
-          hard_expires_at = datetime(hard_expires_at, '+' || ? || ' seconds')
-    `).run(gapSeconds, gapSeconds);
+      SET expires_at = ?, hard_expires_at = ?, regular_expires_at = ?
+      WHERE voucher_code = ?
+    `);
+    // Re-review also found the per-row loop replaced what used to be one
+    // atomic UPDATE - a mid-loop throw (a genuinely malformed date on one
+    // row, say) would leave some sessions compensated and others not, with
+    // no way to tell which from the outside. db.transaction() keeps the
+    // all-or-nothing guarantee the original single statement had.
+    const applyAll = db.transaction((rows) => {
+      for (const s of rows) {
+        update.run(shiftIso(s.expires_at), shiftIso(s.hard_expires_at), shiftIso(s.regular_expires_at), s.voucher_code);
+      }
+    });
+    applyAll(sessions);
 
     const minutes = Math.round(gapMs / 60000);
     console.log(`⏱️ Outage compensation: ${sourceLabel} was down ~${minutes} min - extended ${sessionCount} session(s)' expiry to compensate`);
@@ -232,6 +272,12 @@ async function startTimer() {
       const { expireSession, resumeSession, pauseSession } = require('./sessionService');
 
       writeAliveHeartbeat();
+
+      try {
+        await require('./happyHourService').runEndOfWindowSweep();
+      } catch (e) {
+        console.error('Happy Hour sweep failed:', e.message);
+      }
 
       const now = new Date().toISOString();
       const getSetting = (key, def) => parseInt(db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value ?? def, 10) || def;

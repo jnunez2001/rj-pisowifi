@@ -11,6 +11,7 @@ let lastShownCreditAt = null;
 let lastShownCreditInit = false;
 let timerInterval = null;
 let pollInterval = null;
+let happyHourRefreshInterval = null;
 let soundEnabled = true;
 let blockCountdown = null;
 let isBlocked = false;
@@ -74,7 +75,8 @@ let portalSettings = {
   portal_hostname: '',
   allow_premium_to_regular_convert: '0',
   movies_open_in_chrome: '0',
-  promo_carousel_interval_seconds: '5'
+  promo_carousel_interval_seconds: '5',
+  happy_hour: { active: false, ends_at: null, starts_at: null, multiplier: 1, message: '' }
 };
 
 // ===== COIN MODAL TIMER =====
@@ -423,6 +425,42 @@ function formatTime(minutes) {
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+let happyHourBadgeInterval = null;
+
+// Ticks the "Ends in HH:MM:SS" badge from portalSettings.happy_hour.ends_at.
+// Called once from loadSettings() after happy_hour is populated, and again
+// every 30s from refreshHappyHourStatus() (started in startPolling()), so
+// it starts/stops correctly if Happy Hour's active state changes while
+// the page stays open.
+function updateHappyHourBadge() {
+  const badge = document.getElementById('happyHourBadge');
+  const countdown = document.getElementById('happyHourCountdown');
+  if (!badge || !countdown) return;
+
+  clearInterval(happyHourBadgeInterval);
+  const hh = portalSettings.happy_hour;
+
+  if (!hh || !hh.active || !hh.ends_at) {
+    badge.style.display = 'none';
+    return;
+  }
+
+  badge.style.display = 'block';
+  const endsAtMs = new Date(hh.ends_at).getTime();
+
+  const tick = () => {
+    const remainingMinutes = (endsAtMs - Date.now()) / 60000;
+    if (remainingMinutes <= 0) {
+      clearInterval(happyHourBadgeInterval);
+      badge.style.display = 'none';
+      return;
+    }
+    countdown.textContent = formatTime(remainingMinutes);
+  };
+  tick();
+  happyHourBadgeInterval = setInterval(tick, 1000);
 }
 
 function formatSeconds(seconds) {
@@ -1392,6 +1430,35 @@ function updateUI(session) {
     }
 
     const coinModalOpen = document.getElementById('coinModal').classList.contains('show');
+
+    // Happy Hour ended while this customer had bonus time outstanding -
+    // regular_expires_at catching up to equal expires_at (the sweep
+    // always sets them equal when it converts) is the signal, compared
+    // against the PREVIOUS poll's session data so this only fires once,
+    // right when the change actually happens, not on every subsequent poll.
+    // Bug found in final review: a plain coin top-up on a session that
+    // had fully expired with an outstanding gap can ALSO produce
+    // expires_at === regular_expires_at (addTimeToSession's zero-bonus
+    // path when nothing carries over) with no real sweep conversion
+    // involved - the extra check that minutes_remaining did not increase
+    // rules that out, since a genuine clawback can only hold time steady
+    // or reduce it, never grow it the way a top-up does.
+    // Second false-fire found in re-review: Convert to/from Premium also
+    // sets regular_expires_at = expires_at (closing the gap on purpose,
+    // Premium is out of Happy Hour's scope - see convertToPremiumSession/
+    // convertToRegularSession) and its conversionRatio can easily produce
+    // a minutes_remaining that's flat or lower too, satisfying every
+    // other condition here. Requiring converted_to_premium be unchanged
+    // from the previous poll rules that transition out specifically.
+    if (prev && prev.regular_expires_at && prev.expires_at &&
+        prev.regular_expires_at !== prev.expires_at &&
+        session.regular_expires_at === session.expires_at &&
+        session.minutes_remaining <= prev.minutes_remaining &&
+        session.converted_to_premium === prev.converted_to_premium &&
+        portalSettings.happy_hour && portalSettings.happy_hour.message) {
+      showToast(portalSettings.happy_hour.message, 'success');
+    }
+
     if (!isFirstCheck && (!prev || !prev.active)) {
       playSound('success');
       playVendoSound('connected');
@@ -1627,6 +1694,8 @@ async function loadSettings() {
     portalSettings.allow_premium_to_regular_convert = data.allow_premium_to_regular_convert || '0';
     portalSettings.movies_open_in_chrome = data.movies_open_in_chrome || '0';
     portalSettings.promo_carousel_interval_seconds = data.promo_carousel_interval_seconds || '5';
+    portalSettings.happy_hour = data.happy_hour || { active: false, ends_at: null, starts_at: null, multiplier: 1, message: '' };
+    updateHappyHourBadge();
     applyPortalSettings();
     updateNotificationsButton();
 
@@ -1725,6 +1794,14 @@ function renderRateItem(r) {
     ? `<div class="rate-label" style="color:#00a844;"><i class="fas fa-bolt"></i> ${r.download_mbps}/${r.upload_mbps || r.download_mbps} Mbps</div>`
     : '';
 
+  // Happy Hour only ever applies to Regular (non-Premium) rates - see
+  // coinCreditService.js's regularOnlyMinutes. r.download_mbps truthy
+  // means this rate IS Premium, so it never gets the bonus line.
+  const hh = portalSettings.happy_hour;
+  const happyHourLine = (hh && hh.active && !r.download_mbps && hh.multiplier > 1)
+    ? `<div class="rate-label" style="color:#f59e0b;font-weight:600;"><i class="fas fa-clock"></i> Happy Hour: ${formatMinutes(Math.floor(r.minutes * hh.multiplier))}</div>`
+    : '';
+
   return `
     <div class="rate-item">
       <div class="rate-left">
@@ -1733,6 +1810,7 @@ function renderRateItem(r) {
           <div class="rate-price">₱${r.coin_value}</div>
           <div class="rate-label">${expLabel}</div>
           ${speedLine}
+          ${happyHourLine}
         </div>
       </div>
       <div>
@@ -2208,6 +2286,38 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 function startPolling() {
   if (pollInterval) clearInterval(pollInterval);
   pollInterval = setInterval(checkSession, 8000);
+
+  // Bug found in final review: portalSettings.happy_hour was only ever
+  // populated once, at page load (loadSettings() in init()) - a
+  // customer who opened the portal before Happy Hour started never saw
+  // the badge or bonus lines appear once it began, and one who was
+  // already on the page when it ENDED kept seeing "Happy Hour: 2x"
+  // advertised on every rate indefinitely (only the countdown badge
+  // itself, driven by its own client-side timer, correctly disappeared).
+  // A 30s refresh is far coarser than the 8s session poll on purpose -
+  // this is a schedule/settings check, not per-session state, and
+  // doesn't need to be nearly as fresh.
+  if (happyHourRefreshInterval) clearInterval(happyHourRefreshInterval);
+  happyHourRefreshInterval = setInterval(refreshHappyHourStatus, 30000);
+}
+
+// Re-review found that reusing the full loadSettings() for this timer was
+// a regression of its own: loadSettings() also calls renderPromoCarousel()
+// (resets promoCarouselIndex to 0 and rebuilds its DOM - a customer would
+// see the operator's promo carousel jump back to image 1 every 30s
+// forever) and rewrites cafe name/logo/banner/welcome message for no
+// reason. This fetches the exact same /api/portal/rates response but only
+// touches the Happy Hour state and the rate rows that display it -
+// everything else on the page is left alone.
+async function refreshHappyHourStatus() {
+  try {
+    const res = await fetch(`${SERVER}/api/portal/rates`);
+    const data = await res.json();
+    if (!data.success) return;
+    portalSettings.happy_hour = data.happy_hour || { active: false, ends_at: null, starts_at: null, multiplier: 1, message: '' };
+    updateHappyHourBadge();
+    if (data.rates) buildRatesUI(data.rates);
+  } catch(e) { console.error(e); }
 }
 
 // ===== FREE CLAIM =====
