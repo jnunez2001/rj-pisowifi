@@ -109,11 +109,23 @@ async function runEndOfWindowSweep() {
   if (wasActive && !nowActive) {
     const multiplier = getMultiplier();
     const nowIso = new Date().toISOString();
+    // Bug found in final review: a paused session's expires_at is a
+    // frozen snapshot (see pauseSession()), not something advancing in
+    // real time, so comparing it against a live nowMs below produced a
+    // meaningless clawback figure - and resumeSession() would partly or
+    // wholly discard that write anyway once it recomputes expires_at
+    // from minutes_remaining on resume. Excluding paused sessions here
+    // is correct, not just a workaround: resumeSession() already
+    // preserves the exact regular/bonus split through a pause (see its
+    // own fix), so a session paused when the window closes simply keeps
+    // its frozen gap intact and correct until it resumes, with nothing
+    // for this sweep to do in the meantime.
     const sessions = db.prepare(`
       SELECT voucher_code, mac_address, expires_at, regular_expires_at
       FROM sessions
       WHERE expires_at > regular_expires_at
         AND hard_expires_at > ?
+        AND is_paused = 0
     `).all(nowIso);
 
     if (sessions.length > 0) {
@@ -122,6 +134,13 @@ async function runEndOfWindowSweep() {
       const { logAlertEvent } = require('./alertEventService');
       const sseService = require('./sseService');
 
+      // Bug found in final review: this counted every row the WHERE
+      // clause matched, not every row actually converted -
+      // computeClawback() can still return null here (the
+      // "nowMs >= expiresAtMs" guard), and the operator-facing alert
+      // was overstating how many sessions were touched by counting
+      // those skipped rows too.
+      let convertedCount = 0;
       for (const session of sessions) {
         const result = computeClawback({
           nowMs,
@@ -133,14 +152,17 @@ async function runEndOfWindowSweep() {
         const newExpiresAtIso = new Date(result.newExpiresAtMs).toISOString();
         update.run(newExpiresAtIso, newExpiresAtIso, session.voucher_code);
         sseService.notify(session.mac_address);
+        convertedCount++;
       }
 
-      logAlertEvent(
-        'info',
-        'happy_hour_ended',
-        'Happy Hour ended',
-        `Converted unused bonus time for ${sessions.length} session(s).`
-      );
+      if (convertedCount > 0) {
+        logAlertEvent(
+          'info',
+          'happy_hour_ended',
+          'Happy Hour ended',
+          `Converted unused bonus time for ${convertedCount} session(s).`
+        );
+      }
     }
   }
 

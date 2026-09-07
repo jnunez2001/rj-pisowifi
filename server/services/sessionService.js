@@ -462,10 +462,22 @@ async function convertToPremiumSession(mac, newPremiumMinutes, conversionRatio, 
     const existingHardExpiresAtMs = session.hard_expires_at ? new Date(session.hard_expires_at).getTime() : 0;
     const newHardExpiresAt = new Date(Math.max(convertHardExpiresAtMs, existingHardExpiresAtMs)).toISOString();
 
+    // Bug found in Happy Hour's final review: this left regular_expires_at
+    // at its pre-conversion value, so a Regular session with an
+    // outstanding Happy Hour bonus that converted to Premium could still
+    // get part of its now-Premium time clawed back by the next
+    // end-of-window sweep - even though Happy Hour is explicitly never
+    // supposed to touch Premium (see coinCreditService.js). Any bonus
+    // baked into minutes_remaining already carried over into the new
+    // Premium minutes bucket via conversionRatio above; setting
+    // regular_expires_at to the same value as the new expires_at closes
+    // the gap entirely, so this session reads as "no bonus outstanding"
+    // to the sweep from this point on, same as any other Premium session.
     db.prepare(`
       UPDATE sessions
       SET minutes_remaining = ?,
           expires_at = ?,
+          regular_expires_at = ?,
           hard_expires_at = ?,
           push_2min_sent = 0,
           download_mbps = ?,
@@ -476,7 +488,7 @@ async function convertToPremiumSession(mac, newPremiumMinutes, conversionRatio, 
           converted_to_premium = 1,
           data_limit_mb = ?
       WHERE mac_address = ?
-    `).run(minutes, newExpiresAt, newHardExpiresAt, bandwidthOverride.download_mbps,
+    `).run(minutes, newExpiresAt, newExpiresAt, newHardExpiresAt, bandwidthOverride.download_mbps,
            bandwidthOverride.upload_mbps || bandwidthOverride.download_mbps, newDataLimitMb, mac);
 
     const updated = db.prepare('SELECT * FROM sessions WHERE mac_address = ?').get(mac);
@@ -524,10 +536,16 @@ async function convertToRegularSession(mac, newRegularMinutes, conversionRatio, 
     const existingHardExpiresAtMs = session.hard_expires_at ? new Date(session.hard_expires_at).getTime() : 0;
     const newHardExpiresAt = new Date(Math.max(convertHardExpiresAtMs, existingHardExpiresAtMs)).toISOString();
 
+    // Same Happy Hour gap-closing fix as convertToPremiumSession above:
+    // this new Regular-equivalent time bucket was never priced through
+    // coinCreditService.js's Happy Hour multiplier, so it starts with no
+    // bonus outstanding - regular_expires_at matches expires_at exactly,
+    // same as any other non-bonus session.
     db.prepare(`
       UPDATE sessions
       SET minutes_remaining = ?,
           expires_at = ?,
+          regular_expires_at = ?,
           hard_expires_at = ?,
           push_2min_sent = 0,
           download_mbps = NULL,
@@ -538,7 +556,7 @@ async function convertToRegularSession(mac, newRegularMinutes, conversionRatio, 
           converted_to_premium = 0,
           data_limit_mb = ?
       WHERE mac_address = ?
-    `).run(minutes, newExpiresAt, newHardExpiresAt, newDataLimitMb, mac);
+    `).run(minutes, newExpiresAt, newExpiresAt, newHardExpiresAt, newDataLimitMb, mac);
 
     const updated = db.prepare('SELECT * FROM sessions WHERE mac_address = ?').get(mac);
 

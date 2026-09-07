@@ -58,7 +58,20 @@ async function saveHappyHourSettings() {
     showToast('End time must be later than start time (overnight windows are not supported)', 'error');
     return;
   }
+  const enabled = document.getElementById('happyHourEnabled').checked;
   const days = Array.from(document.querySelectorAll('.happyHourDay:checked')).map((el) => el.value).join(',');
+  // Bug found in final review: saving Enabled with no days checked, or
+  // no start/end time set, was accepted with a plain success toast even
+  // though isActive() can never return true for that configuration - an
+  // operator would see "saved!" for a promo that silently never runs.
+  if (enabled && !days) {
+    showToast('Select at least one active day, or Happy Hour will never turn on', 'error');
+    return;
+  }
+  if (enabled && (!start || !end)) {
+    showToast('Set both a start and end time, or Happy Hour will never turn on', 'error');
+    return;
+  }
   try {
     const data = await apiCall('POST', '/api/admin/settings', {
       happy_hour_enabled: document.getElementById('happyHourEnabled').checked ? '1' : '0',

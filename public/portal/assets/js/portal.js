@@ -11,6 +11,7 @@ let lastShownCreditAt = null;
 let lastShownCreditInit = false;
 let timerInterval = null;
 let pollInterval = null;
+let happyHourRefreshInterval = null;
 let soundEnabled = true;
 let blockCountdown = null;
 let isBlocked = false;
@@ -1430,13 +1431,21 @@ function updateUI(session) {
     const coinModalOpen = document.getElementById('coinModal').classList.contains('show');
 
     // Happy Hour ended while this customer had bonus time outstanding -
-    // regular_expires_at catching up to equal expires_at (Task 6's sweep
+    // regular_expires_at catching up to equal expires_at (the sweep
     // always sets them equal when it converts) is the signal, compared
     // against the PREVIOUS poll's session data so this only fires once,
     // right when the change actually happens, not on every subsequent poll.
+    // Bug found in final review: a plain coin top-up on a session that
+    // had fully expired with an outstanding gap can ALSO produce
+    // expires_at === regular_expires_at (addTimeToSession's zero-bonus
+    // path when nothing carries over) with no real sweep conversion
+    // involved - the extra check that minutes_remaining did not increase
+    // rules that out, since a genuine clawback can only hold time steady
+    // or reduce it, never grow it the way a top-up does.
     if (prev && prev.regular_expires_at && prev.expires_at &&
         prev.regular_expires_at !== prev.expires_at &&
         session.regular_expires_at === session.expires_at &&
+        session.minutes_remaining <= prev.minutes_remaining &&
         portalSettings.happy_hour && portalSettings.happy_hour.message) {
       showToast(portalSettings.happy_hour.message, 'success');
     }
@@ -2268,6 +2277,19 @@ document.querySelectorAll('.modal-overlay').forEach(overlay => {
 function startPolling() {
   if (pollInterval) clearInterval(pollInterval);
   pollInterval = setInterval(checkSession, 8000);
+
+  // Bug found in final review: portalSettings.happy_hour was only ever
+  // populated once, at page load (loadSettings() in init()) - a
+  // customer who opened the portal before Happy Hour started never saw
+  // the badge or bonus lines appear once it began, and one who was
+  // already on the page when it ENDED kept seeing "Happy Hour: 2x"
+  // advertised on every rate indefinitely (only the countdown badge
+  // itself, driven by its own client-side timer, correctly disappeared).
+  // A 30s refresh is far coarser than the 8s session poll on purpose -
+  // this is a schedule/settings check, not per-session state, and
+  // doesn't need to be nearly as fresh.
+  if (happyHourRefreshInterval) clearInterval(happyHourRefreshInterval);
+  happyHourRefreshInterval = setInterval(loadSettings, 30000);
 }
 
 // ===== FREE CLAIM =====
