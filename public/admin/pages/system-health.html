@@ -8,7 +8,9 @@
   </div>
 </div>
 
-<!-- BANDWIDTH USAGE (moved here from the Dashboard) -->
+<!-- TOP STAT ROW: Bandwidth (moved here from the Dashboard), Uptime,
+     Health Score, and Memory - real data only (sysinfo/preflight
+     endpoints already backed the old text-only versions of these). -->
 <div class="zf3-stat-grid">
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
@@ -17,6 +19,30 @@
     </div>
     <div class="zf3-stat-value"><span id="currentDownload">0</span> Mbps</div>
     <div class="zf3-stat-trend"><i class="fas fa-arrow-down"></i> Down &nbsp; <i class="fas fa-arrow-up"></i> <span id="currentUpload">0</span> Mbps Up · whole gated port</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Server Uptime</div>
+      <i class="fas fa-clock-rotate-left zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="shUptime">--</div>
+    <div class="zf3-stat-trend">Since last restart</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Health Score</div>
+      <i class="fas fa-heart-pulse zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value" id="shHealthScore">--</div>
+    <div class="zf3-stat-trend" id="shHealthTrend">Preflight checks</div>
+  </div>
+  <div class="zf3-stat-card">
+    <div class="zf3-stat-top">
+      <div class="zf3-stat-label">Memory Usage</div>
+      <i class="fas fa-memory zf3-stat-icon"></i>
+    </div>
+    <div class="zf3-stat-value"><span id="shMemPercentBig">--</span>%</div>
+    <div class="zf3-stat-trend" id="shMemTrend">&nbsp;</div>
   </div>
 </div>
 

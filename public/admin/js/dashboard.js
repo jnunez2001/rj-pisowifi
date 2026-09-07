@@ -335,6 +335,17 @@ function hsFormatMins(mins) {
   return `${Math.round(mins)} mins`;
 }
 
+// Shared global used by other admin pages (users.js, analytics.js) - was
+// defined in the old dashboard.js this file replaced, dropped by mistake
+// during that swap since the Hotspot Dashboard content had its own
+// hsFormatMins instead. Restored under its original name so those other
+// pages don't need to change what they call.
+function formatMins(mins) {
+  if (mins >= 1440) return `${Math.round(mins / 1440)} days`;
+  if (mins >= 60) return `${Math.round(mins / 60)} hrs`;
+  return `${Math.round(mins)} mins`;
+}
+
 function hsInitChart() {
   const canvas = document.getElementById('hsRevenueChart');
   if (!canvas) return;

@@ -43,21 +43,45 @@ async function loadSessions() {
   if (!lsIndicatorInterval) {
     lsIndicatorInterval = setInterval(updateLiveIndicator, 1000);
   }
+  if (!lsTimeTickerInterval) {
+    lsTimeTickerInterval = setInterval(tickTimeRemaining, 1000);
+  }
 }
 
 let lsIndicatorInterval = null;
+let lsTimeTickerInterval = null;
 
 function updateLiveIndicator() {
   const el = document.getElementById('sessionsLiveIndicator');
   if (!el || !lsLastLoadedAt) return;
-  const secs = Math.floor((Date.now() - lsLastLoadedAt) / 1000);
-  const text = secs < 3 ? 'Live · updated just now' : `Live · updated ${secs}s ago`;
-  el.innerHTML = `<span class="status-dot online"></span> ${text}`;
+  el.innerHTML = `<span class="status-dot online"></span> Live`;
+}
+
+// Ticks every visible session's "Time Remaining" cell down by real
+// elapsed seconds since the last successful poll (loadSessions() runs
+// every 5s), instead of the display sitting frozen between polls. Paused
+// sessions are skipped entirely (their minutes_remaining is a frozen
+// snapshot, not something counting down in real time - ticking it would
+// show a number that isn't true). Updates existing DOM nodes directly
+// rather than re-rendering the table, so this can't disturb row
+// selection, scroll position, or an open filter/search in progress.
+function tickTimeRemaining() {
+  if (!lsLastLoadedAt) return;
+  const elapsedMinutes = (Date.now() - lsLastLoadedAt) / 60000;
+  lsAllSessions.forEach((s) => {
+    if (s.is_paused === 1) return;
+    const el = document.getElementById(`lsTimeRemaining-${s.voucher_code}`);
+    if (!el) return;
+    const baseMinutes = parseFloat(el.dataset.baseMinutes);
+    if (!Number.isFinite(baseMinutes)) return;
+    el.textContent = formatSessionTime(baseMinutes - elapsedMinutes);
+  });
 }
 
 function destroySessions() {
   if (sessionsRefreshInterval) { clearInterval(sessionsRefreshInterval); sessionsRefreshInterval = null; }
   if (lsIndicatorInterval) { clearInterval(lsIndicatorInterval); lsIndicatorInterval = null; }
+  if (lsTimeTickerInterval) { clearInterval(lsTimeTickerInterval); lsTimeTickerInterval = null; }
   lsSelected.clear();
 }
 
@@ -225,7 +249,7 @@ function renderSessionsTable() {
         </td>
         <td data-label="Duration" style="font-size:13px;color:var(--text-secondary);">${formatElapsed(s.created_at)}</td>
         <td data-label="Time Remaining">
-          <span style="font-weight:700;color:${status === 'expiring' ? 'var(--accent-red)' : 'var(--text-primary)'};">${formatSessionTime(s.minutes_remaining)}</span>
+          <span id="lsTimeRemaining-${s.voucher_code}" data-base-minutes="${s.minutes_remaining}" data-paused="${isPaused ? '1' : '0'}" style="font-weight:700;color:${status === 'expiring' ? 'var(--accent-red)' : 'var(--text-primary)'};">${formatSessionTime(s.minutes_remaining)}</span>
         </td>
         <td data-label="Rate Limit" style="font-size:12px;color:var(--text-secondary);">
           ${s.download_mbps ? `${s.download_mbps} Mbps ↓<br>${s.upload_mbps || s.download_mbps} Mbps ↑` : 'Global default'}

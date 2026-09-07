@@ -2850,7 +2850,14 @@ router.get('/hardware/gpio-capability', adminAuth, (req, res) => {
 router.get('/sysinfo', adminAuth, async (req, res) => {
   try {
     const cpus = os.cpus();
-    const cpuUsage = await getCpuUsagePercents(cpus);
+    // getCpuUsagePercents returns one percentage PER CORE (an array) -
+    // exposed as cpu_usage_per_core for a real per-core breakdown on
+    // System Health. cpu_usage stays the average of that same array (one
+    // overall figure) for anything that just wants a single number.
+    const perCoreUsage = await getCpuUsagePercents(cpus);
+    const cpuUsage = perCoreUsage.length
+      ? Math.round(perCoreUsage.reduce((sum, p) => sum + p, 0) / perCoreUsage.length)
+      : 0;
 
     const totalMem = os.totalmem();
     const freeMem = getAvailableMem();
@@ -2921,6 +2928,7 @@ router.get('/sysinfo', adminAuth, async (req, res) => {
         processor: cpus[0].model,
         cpu_cores: cpus.length,
         cpu_usage: cpuUsage,
+        cpu_usage_per_core: perCoreUsage,
         total_mem: totalMem,
         used_mem: usedMem,
         free_mem: freeMem,

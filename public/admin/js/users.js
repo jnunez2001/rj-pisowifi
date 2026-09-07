@@ -104,7 +104,7 @@ async function loadDevicesData() {
     if (!data.success) return;
     usersDevicesData = data.devices;
     document.getElementById('usersDevicesCount').textContent = data.devices.length;
-    renderDevicesTable();
+    renderUserDevicesTable();
   } catch (e) {
     // Bug found live: a render-time error here (e.g. the parseSqlDate
     // null crash) was silently swallowed with no UI feedback, leaving
@@ -115,7 +115,7 @@ async function loadDevicesData() {
   }
 }
 
-function renderDevicesTable() {
+function renderUserDevicesTable() {
   if (!usersDevicesData) return;
   const tbody = document.getElementById('devicesTable');
   const search = (document.getElementById('devicesSearch')?.value || '').toLowerCase().trim();
