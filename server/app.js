@@ -128,7 +128,16 @@ app.use(['/admin', '/api/admin'], (req, res, next) => {
 app.use('/portal/movies.html', (req, res, next) => {
   const csp = res.getHeader('Content-Security-Policy');
   if (csp) {
-    const updated = csp.replace(/frame-src[^;]*/, `frame-src 'self' https:`);
+    // script-src-elem also needs relaxing here (global default is
+    // self/unsafe-inline/cdnjs only) - the hero banner's autoplaying
+    // trailer loads YouTube's own iframe_api script (movies-online.js's
+    // ensureYtApi()) to get real onError events instead of a raw
+    // <iframe src="youtube.com/embed/...">, which just silently shows
+    // YouTube's "Video player configuration error" watermark baked into
+    // the video canvas for any trailer that isn't actually embeddable,
+    // with no JS-visible way to detect and fall back from it.
+    let updated = csp.replace(/frame-src[^;]*/, `frame-src 'self' https:`);
+    updated = updated.replace(/script-src-elem[^;]*/, (m) => `${m} https://www.youtube.com https://s.ytimg.com`);
     res.setHeader('Content-Security-Policy', updated);
   }
   next();

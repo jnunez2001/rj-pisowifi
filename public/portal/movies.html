@@ -13,7 +13,7 @@
        even after the server has a newer version, which silently breaks the
        page (mismatched element IDs between cached JS and fresh HTML) with
        no visible error. Bump the version string whenever this file changes. -->
-  <link rel="stylesheet" href="/portal/assets/css/movies-online.css?v=6">
+  <link rel="stylesheet" href="/portal/assets/css/movies-online.css?v=7">
   <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 </head>
 <body class="movies-body">
@@ -64,6 +64,26 @@
   <!-- Unified Movies view - local library + online embed catalog merged,
        see comment above. -->
   <div id="onlineMoviesSection">
+    <!-- Netflix-style hero banner - rotates among admin-curated Featured
+         picks (falls back to Top 10 #1..#5) with an autoplaying, muted
+         TMDb trailer as the background when one exists. See
+         movies-online.js's heroInit()/renderHeroSlide(). -->
+    <div id="heroBanner" class="hero-banner" style="display:none;">
+      <div id="heroBackdrop" class="hero-backdrop"></div>
+      <div id="heroTrailerWrap" class="hero-trailer-wrap"></div>
+      <div class="hero-gradient"></div>
+      <div class="hero-content">
+        <div id="heroGenrePills" class="hero-genre-pills"></div>
+        <h1 id="heroTitle" class="hero-title"></h1>
+        <p id="heroOverview" class="hero-overview"></p>
+        <div class="hero-actions">
+          <button class="btn hero-play-btn" onclick="heroPlay()"><i class="fas fa-play"></i> Play</button>
+          <button class="btn hero-info-btn" onclick="heroMoreInfo()"><i class="fas fa-circle-info"></i> More Info</button>
+        </div>
+      </div>
+      <div id="heroDots" class="hero-dots"></div>
+    </div>
+
     <div class="movies-online-search">
       <input type="text" id="onlineMoviesSearch" placeholder="Search online movies...">
     </div>
@@ -187,6 +207,29 @@
     <div class="series-detail-body">
       <div id="seriesDetailSeasonTabs" class="series-season-tabs"></div>
       <div id="seriesDetailEpisodes" class="series-episode-list"></div>
+      <div id="seriesDetailCastRow" class="detail-cast-row"></div>
+      <div id="seriesDetailMoreLikeThis" class="detail-more-row"></div>
+    </div>
+  </div>
+
+  <!-- MOVIE DETAIL (cast, overview, More Like This, then Play) - movies
+       used to skip straight from card click to the rent-confirm/embed flow
+       with no detail step; this gives them the same "More Info" landing
+       spot the hero banner and Netflix-style browsing expect, without
+       touching that existing play/rent flow (openOnlineMovie() below is
+       reused unchanged, just triggered from this overlay's Play button
+       instead of directly from the card). -->
+  <div id="movieDetailOverlay" class="movie-player-overlay">
+    <div class="movie-player-topbar">
+      <button class="movie-player-close" onclick="closeMovieDetail()"><i class="fas fa-times"></i></button>
+      <div id="movieDetailTitle" class="movie-player-title"></div>
+    </div>
+    <div class="series-detail-body">
+      <div id="movieDetailBackdrop" class="detail-backdrop"></div>
+      <p id="movieDetailOverview" class="detail-overview"></p>
+      <button class="btn hero-play-btn" id="movieDetailPlayBtn" style="margin:0 20px 10px;"><i class="fas fa-play"></i> Play</button>
+      <div id="movieDetailCastRow" class="detail-cast-row"></div>
+      <div id="movieDetailMoreLikeThis" class="detail-more-row"></div>
     </div>
   </div>
 
@@ -213,7 +256,7 @@
 
   <script src="/portal/assets/js/vendor/hls.min.js"></script>
   <script src="/portal/assets/js/movies.js?v=5"></script>
-  <script src="/portal/assets/js/movies-online.js?v=19"></script>
-  <script src="/portal/assets/js/tv-shows-online.js?v=3"></script>
+  <script src="/portal/assets/js/movies-online.js?v=21"></script>
+  <script src="/portal/assets/js/tv-shows-online.js?v=4"></script>
 </body>
 </html>

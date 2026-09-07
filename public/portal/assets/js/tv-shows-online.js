@@ -286,6 +286,9 @@ async function openSeriesDetail(series) {
   document.getElementById('seriesDetailEpisodes').innerHTML = '<div style="text-align:center;color:#aaa;padding:20px;">Loading seasons…</div>';
   document.getElementById('seriesDetailOverlay').classList.add('show');
 
+  document.getElementById('seriesDetailCastRow').innerHTML = '';
+  document.getElementById('seriesDetailMoreLikeThis').innerHTML = '';
+
   try {
     const res = await fetch(`/api/portal/tv-shows/${series.id}/seasons`);
     const data = await res.json();
@@ -296,6 +299,8 @@ async function openSeriesDetail(series) {
     tvCurrentSeasons = data.seasons;
     renderSeasonTabs(data.seasons[0].season_number);
     await loadSeriesEpisodes(data.seasons[0].season_number);
+    renderCastRow('seriesDetailCastRow', data.cast);
+    renderMoreLikeThisRow('seriesDetailMoreLikeThis', data.more_like_this, 'openSeriesCard');
   } catch (e) {
     document.getElementById('seriesDetailEpisodes').innerHTML = '<div style="text-align:center;color:#aaa;padding:20px;">Could not load seasons.</div>';
   }

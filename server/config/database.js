@@ -465,7 +465,11 @@ db.exec(`
     tmdb_id INTEGER PRIMARY KEY,
     poster_path TEXT,
     genres TEXT,
-    fetched_at DATETIME
+    fetched_at DATETIME,
+    backdrop_path TEXT, -- wide hero-banner image (public/portal's Netflix-style featured banner)
+    overview TEXT, -- short synopsis, also used as one of the fields the customer search matches against
+    trailer_key TEXT, -- YouTube video id for the hero banner's autoplaying trailer, NULL if TMDb has none
+    cast_json TEXT -- JSON array of {name, character, profile_path}, top ~10 billed cast
   );
 
   -- Real per-title play counts for the online catalog, incremented once per
@@ -606,7 +610,11 @@ db.exec(`
     poster_path TEXT,
     genres TEXT, -- JSON array of genre name strings
     origin_country TEXT, -- JSON array, e.g. '["JP"]'
-    fetched_at DATETIME
+    fetched_at DATETIME,
+    backdrop_path TEXT,
+    overview TEXT,
+    trailer_key TEXT,
+    cast_json TEXT
   );
 
   CREATE TABLE IF NOT EXISTS tv_series_feed (
@@ -2505,6 +2513,30 @@ try {
     }
   }
 }
+
+// Netflix-style hero banner data (backdrop image, autoplaying trailer, top
+// cast) - existing installs' poster caches predate these columns.
+for (const col of ['backdrop_path TEXT', 'overview TEXT', 'trailer_key TEXT', 'cast_json TEXT']) {
+  try { db.exec(`ALTER TABLE tmdb_poster_cache ADD COLUMN ${col}`); } catch (e) { /* already applied */ }
+  try { db.exec(`ALTER TABLE tv_poster_cache ADD COLUMN ${col}`); } catch (e) { /* already applied */ }
+}
+
+// Admin-curated hero banner picks (server/routes/portal.js's GET
+// /movies/hero) - separate from custom_top_picks (Top 10 row curation):
+// a title can be a great "front and center hero" pick without being one
+// of the 10 most-watched, and vice versa. Same shape as custom_top_picks
+// on purpose, just a different admin-facing list.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS featured_picks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    media_type TEXT NOT NULL CHECK(media_type IN ('movie', 'tv')),
+    tmdb_id INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(media_type, tmdb_id)
+  );
+`);
 
 console.log('✅ Database initialized successfully');
 

@@ -33,15 +33,50 @@ async function fetchWithTimeout(url) {
 }
 
 function getCached(tmdbId) {
-  return db.prepare('SELECT poster_path, genres, origin_country FROM tv_poster_cache WHERE tmdb_id = ?').get(tmdbId);
+  return db.prepare('SELECT * FROM tv_poster_cache WHERE tmdb_id = ?').get(tmdbId);
 }
 
-function setCached(tmdbId, posterPath, genres, originCountry) {
+function setCached(tmdbId, posterPath, genres, originCountry, overview) {
   db.prepare(`
-    INSERT INTO tv_poster_cache (tmdb_id, poster_path, genres, origin_country, fetched_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    INSERT INTO tv_poster_cache (tmdb_id, poster_path, genres, origin_country, overview, fetched_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     ON CONFLICT(tmdb_id) DO UPDATE SET poster_path = excluded.poster_path, genres = excluded.genres,
-      origin_country = excluded.origin_country, fetched_at = excluded.fetched_at
-  `).run(tmdbId, posterPath, genres ? JSON.stringify(genres) : null, originCountry ? JSON.stringify(originCountry) : null);
+      origin_country = excluded.origin_country, overview = COALESCE(excluded.overview, tv_poster_cache.overview),
+      fetched_at = excluded.fetched_at
+  `).run(tmdbId, posterPath, genres ? JSON.stringify(genres) : null, originCountry ? JSON.stringify(originCountry) : null, overview || null);
+}
+
+// Mirrors tmdbService.js's warmDetails() - see its comment. TMDb's TV
+// detail endpoint's videos are per-SERIES (not per-episode), which is
+// exactly what the hero banner needs (a show trailer, not one episode's).
+async function warmDetails(tmdbId) {
+  const existing = getCached(tmdbId);
+  if (existing && existing.cast_json !== null) return existing;
+  const apiKey = getApiKey();
+  if (!apiKey) return existing || null;
+  try {
+    const res = await fetchWithTimeout(`${BASE_URL}/tv/${tmdbId}?api_key=${apiKey}&append_to_response=videos,credits`);
+    if (!res.ok) return existing || null;
+    const data = await res.json();
+    const genreNames = Array.isArray(data.genres) ? data.genres.map((g) => g.name) : [];
+    const trailer = (data.videos?.results || []).find((v) => v.site === 'YouTube' && v.type === 'Trailer' && v.official)
+      || (data.videos?.results || []).find((v) => v.site === 'YouTube' && v.type === 'Trailer')
+      || (data.videos?.results || []).find((v) => v.site === 'YouTube');
+    const cast = (data.credits?.cast || []).slice(0, 10).map((c) => ({
+      name: c.name, character: c.character || c.roles?.[0]?.character || '', profile_path: c.profile_path || null,
+    }));
+    db.prepare(`
+      INSERT INTO tv_poster_cache (tmdb_id, poster_path, genres, origin_country, overview, backdrop_path, trailer_key, cast_json, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(tmdb_id) DO UPDATE SET poster_path = excluded.poster_path, genres = excluded.genres,
+        origin_country = excluded.origin_country, overview = excluded.overview, backdrop_path = excluded.backdrop_path,
+        trailer_key = excluded.trailer_key, cast_json = excluded.cast_json, fetched_at = excluded.fetched_at
+    `).run(tmdbId, data.poster_path || null, JSON.stringify(genreNames), JSON.stringify(data.origin_country || []),
+      data.overview || null, data.backdrop_path || null, trailer ? trailer.key : null, JSON.stringify(cast));
+    return getCached(tmdbId);
+  } catch (e) {
+    console.warn(`[TMDb TV] Detail warm-up failed for id ${tmdbId}:`, e.message);
+    return existing || null;
+  }
 }
 
 function getCachedPosterUrl(tmdbId) {
@@ -69,6 +104,30 @@ function getCachedOriginCountry(tmdbId) {
   }
 }
 
+function getCachedOverview(tmdbId) {
+  return getCached(tmdbId)?.overview || '';
+}
+
+const BACKDROP_BASE = 'https://image.tmdb.org/t/p/w1280';
+function getCachedBackdropUrl(tmdbId) {
+  const row = getCached(tmdbId);
+  return row && row.backdrop_path ? `${BACKDROP_BASE}${row.backdrop_path}` : null;
+}
+
+function getCachedTrailerKey(tmdbId) {
+  return getCached(tmdbId)?.trailer_key || null;
+}
+
+function getCachedCast(tmdbId) {
+  const row = getCached(tmdbId);
+  if (!row || !row.cast_json) return [];
+  try {
+    return JSON.parse(row.cast_json);
+  } catch (e) {
+    return [];
+  }
+}
+
 async function fetchOne(tmdbId, apiKey) {
   try {
     const res = await fetchWithTimeout(`${BASE_URL}/tv/${tmdbId}?api_key=${apiKey}`);
@@ -78,7 +137,7 @@ async function fetchOne(tmdbId, apiKey) {
     }
     const data = await res.json();
     const genreNames = Array.isArray(data.genres) ? data.genres.map((g) => g.name) : [];
-    setCached(tmdbId, data.poster_path || null, genreNames, data.origin_country || []);
+    setCached(tmdbId, data.poster_path || null, genreNames, data.origin_country || [], data.overview || null);
   } catch (e) {
     console.warn(`[TMDb TV] Poster lookup failed for id ${tmdbId}:`, e.message);
   }
@@ -123,7 +182,7 @@ async function getSeriesById(tmdbId) {
   if (!res.ok) throw new Error(`TMDb lookup failed (HTTP ${res.status})`);
   const data = await res.json();
   const genreNames = Array.isArray(data.genres) ? data.genres.map((g) => g.name) : [];
-  setCached(data.id, data.poster_path || null, genreNames, data.origin_country || []);
+  setCached(data.id, data.poster_path || null, genreNames, data.origin_country || [], data.overview || null);
   const seasons = (data.seasons || [])
     .filter((s) => s.season_number > 0) // TMDb's season 0 is "Specials" - excluded, not what a customer expects when picking a season
     .map((s) => ({
@@ -187,7 +246,7 @@ const FEED_LISTS = [
   { key: 'top_rated', path: '/tv/top_rated' },
 ];
 
-async function syncFeed(pages = 5) {
+async function syncFeed(pages = 10) {
   const apiKey = getApiKey();
   if (!apiKey) return { skipped: true, reason: 'no_api_key' };
 
@@ -221,7 +280,7 @@ async function syncFeed(pages = 5) {
         const genreNames = (s.genre_ids || []).map((id) => genreMap[id]).filter(Boolean);
         const originCountry = s.origin_country || [];
         upsertFeed.run(s.id, s.name, s.poster_path || null, JSON.stringify(genreNames), JSON.stringify(originCountry), key, s.first_air_date || null);
-        setCached(s.id, s.poster_path || null, genreNames, originCountry);
+        setCached(s.id, s.poster_path || null, genreNames, originCountry, s.overview || null);
         count++;
       }
       if (page >= (data.total_pages || 1)) break;
@@ -251,7 +310,7 @@ async function syncFeed(pages = 5) {
       const genreNames = (s.genre_ids || []).map((id) => genreMap[id]).filter(Boolean);
       const originCountry = s.origin_country || [];
       upsertFeed.run(s.id, s.name, s.poster_path || null, JSON.stringify(genreNames), JSON.stringify(originCountry), 'new_release', s.first_air_date || null);
-      setCached(s.id, s.poster_path || null, genreNames, originCountry);
+      setCached(s.id, s.poster_path || null, genreNames, originCountry, s.overview || null);
       newReleaseCount++;
     }
     if (page >= (data.total_pages || 1)) break;
@@ -293,4 +352,5 @@ async function getTrendingIds() {
 module.exports = {
   getCachedPosterUrl, getCachedGenres, getCachedOriginCountry, warmCache,
   searchSeries, getSeriesById, getEpisodes, syncFeed, getFeedStatus, getTrendingIds,
+  getCachedOverview, getCachedBackdropUrl, getCachedTrailerKey, getCachedCast, warmDetails,
 };

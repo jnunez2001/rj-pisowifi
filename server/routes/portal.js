@@ -613,6 +613,11 @@ router.get('/online-movies', (req, res) => {
       id: m.id, title: m.title, tier: m.tier, price_pesos: m.price_pesos, release_date: m.release_date || null,
       poster: tmdbService.getCachedPosterUrl(m.id), genres: tmdbService.getCachedGenres(m.id), unlocked,
       views: viewsById.get(m.id) || 0, priority: m.priority || 0,
+      // Search-only field (public/portal/assets/js/movies-online.js's
+      // search handler matches against this too, not just the title) -
+      // free from the same cached row genres/poster already come from, no
+      // extra TMDb call per title.
+      overview: tmdbService.getCachedOverview(m.id),
     };
   });
   res.json({ success: true, movies, session_active: true });
@@ -667,6 +672,85 @@ router.get('/online-movies/top10', async (req, res) => {
   const trendingIds = mode === 'tmdb_trending' ? await tmdbService.getTrendingIds() : [];
   const top10 = computeTop10(mode, items, trendingIds, 'movie');
   res.json({ success: true, mode, top10 });
+});
+
+// Shared by GET /online-movies/hero and GET /tv-shows/hero - the Netflix-
+// style hero banner's rotation pool. Admin-curated featured_picks win when
+// any exist (owner wants direct control over what markets on the hero);
+// otherwise falls back to whichever titles are already #1..#N in that
+// media type's Top 10 (computeTop10 above), so a fresh install with no
+// curation yet still gets a sensible, non-empty hero instead of nothing.
+// Each candidate is detail-warmed (backdrop/trailer/cast - a real network
+// call, but only for the handful of hero candidates, never the whole
+// catalog) before being returned.
+async function buildHeroItems(mediaType, items, top10Mode, trendingIds, tmdbSvc, HERO_COUNT) {
+  const byId = new Map(items.map((it) => [it.id, it]));
+  const picks = db.prepare('SELECT tmdb_id FROM featured_picks WHERE media_type = ? ORDER BY sort_order, id').all(mediaType);
+  let candidates = picks.map((p) => byId.get(p.tmdb_id)).filter(Boolean);
+  if (candidates.length === 0) {
+    candidates = computeTop10(top10Mode, items, trendingIds, mediaType);
+  }
+  candidates = candidates.slice(0, HERO_COUNT);
+
+  const hero = [];
+  for (const item of candidates) {
+    await tmdbSvc.warmDetails(item.id);
+    hero.push({
+      id: item.id, media_type: mediaType, title: item.title, tier: item.tier, price_pesos: item.price_pesos,
+      unlocked: item.unlocked, genres: item.genres,
+      overview: tmdbSvc.getCachedOverview(item.id),
+      backdrop: tmdbSvc.getCachedBackdropUrl(item.id),
+      trailer_key: tmdbSvc.getCachedTrailerKey(item.id),
+      year: (item.release_date || '').slice(0, 4) || null,
+    });
+  }
+  return hero;
+}
+const HERO_COUNT = 5;
+
+// GET /online-movies/hero - the autoplaying-trailer hero banner at the top
+// of the customer's Movies page (public/portal/movies.html). See
+// buildHeroItems() above for how the rotation pool is chosen.
+router.get('/online-movies/hero', async (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  const tmdbService = require('../services/tmdbService');
+  const viewRows = db.prepare('SELECT movie_id, views FROM online_movie_views').all();
+  const viewsById = new Map(viewRows.map((r) => [r.movie_id, r.views]));
+  const items = onlineMovieCatalog.getAll().map((m) => ({
+    id: m.id, title: m.title, tier: m.tier, price_pesos: m.price_pesos, release_date: m.release_date || null,
+    genres: tmdbService.getCachedGenres(m.id),
+    unlocked: m.tier === 'free' ? true : (mac ? hasActiveOnlineRental(m.id, mac) : false),
+    views: viewsById.get(m.id) || 0, priority: m.priority || 0,
+  }));
+  const mode = db.prepare("SELECT value FROM settings WHERE key = 'movie_top10_mode'").get()?.value || 'most_viewed';
+  const trendingIds = mode === 'tmdb_trending' ? await tmdbService.getTrendingIds() : [];
+  const hero = await buildHeroItems('movie', items, mode, trendingIds, tmdbService, HERO_COUNT);
+  res.json({ success: true, hero });
+});
+
+// GET /online-movies/:id/details - powers the Movie Detail overlay (cast,
+// trailer, "More Like This"). Separate from GET /online-movies/:id/embed
+// (which stays a fast, gate-checked, no-detail-warm call) since opening a
+// detail view is a much rarer action than loading the catalog grid.
+router.get('/online-movies/:id/details', async (req, res) => {
+  const movie = onlineMovieCatalog.getById(req.params.id);
+  if (!movie) return res.status(404).json({ success: false, message: 'Movie not found' });
+  const tmdbService = require('../services/tmdbService');
+  await tmdbService.warmDetails(movie.id);
+  const genres = tmdbService.getCachedGenres(movie.id);
+  const moreLikeThis = onlineMovieCatalog.getAll()
+    .filter((m) => m.id !== movie.id && tmdbService.getCachedGenres(m.id).some((g) => genres.includes(g)))
+    .slice(0, 20)
+    .map((m) => ({ id: m.id, title: m.title, poster: tmdbService.getCachedPosterUrl(m.id) }));
+  res.json({
+    success: true,
+    id: movie.id, title: movie.title, tier: movie.tier, price_pesos: movie.price_pesos,
+    overview: tmdbService.getCachedOverview(movie.id),
+    backdrop: tmdbService.getCachedBackdropUrl(movie.id),
+    trailer_key: tmdbService.getCachedTrailerKey(movie.id),
+    cast: tmdbService.getCachedCast(movie.id),
+    genres, more_like_this: moreLikeThis,
+  });
 });
 
 // GET /online-movies/sources - the server-switcher tabs in the player
@@ -833,6 +917,7 @@ router.get('/tv-shows', (req, res) => {
       poster: tmdbTvService.getCachedPosterUrl(s.id), genres: tmdbTvService.getCachedGenres(s.id),
       origin_country: tmdbTvService.getCachedOriginCountry(s.id), unlocked,
       views: viewsById.get(s.id) || 0, priority: s.priority || 0,
+      overview: tmdbTvService.getCachedOverview(s.id),
     };
   });
   res.json({ success: true, series });
@@ -866,15 +951,47 @@ router.get('/tv-shows/sources', (req, res) => {
   res.json({ success: true, sources });
 });
 
+// GET /tv-shows/hero - mirrors GET /online-movies/hero above, for the
+// series side of the same rotating hero banner.
+router.get('/tv-shows/hero', async (req, res) => {
+  const mac = String(req.query.mac || '').trim().toLowerCase();
+  const viewRows = db.prepare('SELECT series_id, views FROM tv_series_views').all();
+  const viewsById = new Map(viewRows.map((r) => [r.series_id, r.views]));
+  const items = tvCatalogService.getAll().map((s) => ({
+    id: s.id, title: s.title, tier: s.tier, price_pesos: s.price_pesos, release_date: s.first_air_date || null,
+    genres: tmdbTvService.getCachedGenres(s.id),
+    unlocked: s.tier === 'free' ? true : (mac ? hasActiveTvRental(s.id, mac) : false),
+    views: viewsById.get(s.id) || 0, priority: s.priority || 0,
+  }));
+  const mode = db.prepare("SELECT value FROM settings WHERE key = 'series_top10_mode'").get()?.value || 'most_viewed';
+  const trendingIds = mode === 'tmdb_trending' ? await tmdbTvService.getTrendingIds() : [];
+  const hero = await buildHeroItems('tv', items, mode, trendingIds, tmdbTvService, HERO_COUNT);
+  res.json({ success: true, hero });
+});
+
 // GET /tv-shows/:id/seasons - live TMDb lookup (not pre-synced into the
 // feed table, unlike the catalog list itself) since this is only ever
 // called when a customer actually opens one series' detail view, not on
 // every catalog page load - request volume stays comparable to opening a
-// movie's embed, not a per-row cost on the browse grid.
+// movie's embed, not a per-row cost on the browse grid. Also detail-warms
+// and returns cast/trailer/backdrop/"More Like This" for the same detail
+// overlay, so opening a series is still just this one request.
 router.get('/tv-shows/:id/seasons', async (req, res) => {
   try {
     const series = await tmdbTvService.getSeriesById(req.params.id);
-    res.json({ success: true, seasons: series.seasons, overview: series.overview });
+    await tmdbTvService.warmDetails(series.id);
+    const genres = tmdbTvService.getCachedGenres(series.id);
+    const moreLikeThis = tvCatalogService.getAll()
+      .filter((s) => s.id !== series.id && tmdbTvService.getCachedGenres(s.id).some((g) => genres.includes(g)))
+      .slice(0, 20)
+      .map((s) => ({ id: s.id, title: s.title, poster: tmdbTvService.getCachedPosterUrl(s.id) }));
+    res.json({
+      success: true, seasons: series.seasons, overview: series.overview,
+      backdrop: tmdbTvService.getCachedBackdropUrl(series.id),
+      trailer_key: tmdbTvService.getCachedTrailerKey(series.id),
+      cast: tmdbTvService.getCachedCast(series.id),
+      genres, more_like_this: moreLikeThis,
+    });
   } catch (err) {
     res.status(400).json({ success: false, message: err.message || 'Could not load seasons.' });
   }

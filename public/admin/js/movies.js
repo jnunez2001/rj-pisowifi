@@ -25,6 +25,7 @@ async function loadMoviesPage() {
   await omLoadRevenue();
   await omInit();
   await top10Init();
+  await featuredInit();
   if (typeof tvInit === 'function') await tvInit();
 
   clearInterval(moviesPollInterval);
@@ -343,6 +344,77 @@ async function top10MovePick(id, direction, mediaType) {
 async function top10RemovePick(id, mediaType) {
   await apiCall('DELETE', `/api/admin/movies/top10-picks/${id}`);
   top10LoadPicks(mediaType);
+}
+
+// ── Featured Hero Banner (server/routes/portal.js's GET */hero) ─────────
+let featuredSearchDebounce = null;
+
+async function featuredInit() {
+  await featuredLoadPicks('movie');
+  await featuredLoadPicks('tv');
+}
+
+function featuredSearchTmdb(mediaType, query) {
+  clearTimeout(featuredSearchDebounce);
+  const dropdown = document.getElementById(mediaType === 'movie' ? 'featuredMovieSearchDropdown' : 'featuredSeriesSearchDropdown');
+  if (!query.trim()) { dropdown.classList.remove('show'); return; }
+  featuredSearchDebounce = setTimeout(async () => {
+    const path = mediaType === 'movie' ? '/api/admin/movies/tmdb-search' : '/api/admin/tv-shows/tmdb-search';
+    const data = await apiCall('GET', `${path}?q=${encodeURIComponent(query)}`);
+    const results = data.success ? data.results : [];
+    if (results.length === 0) { dropdown.innerHTML = '<div class="om-search-result">No matches</div>'; dropdown.classList.add('show'); return; }
+    dropdown.innerHTML = results.map((r) => `
+      <div class="om-search-result" data-id="${r.id}" data-title="${escapeHtml(r.title).replace(/"/g, '&quot;')}" data-media-type="${mediaType}">
+        <img src="${r.poster_path ? 'https://image.tmdb.org/t/p/w92' + r.poster_path : ''}" onerror="this.style.visibility='hidden'">
+        <span>${escapeHtml(r.title)}</span>
+        <span class="yr">${r.year || ''}</span>
+      </div>
+    `).join('');
+    dropdown.classList.add('show');
+  }, 350);
+}
+
+async function featuredAddPick(mediaType, tmdbId, title) {
+  const searchInputId = mediaType === 'movie' ? 'featuredMovieSearch' : 'featuredSeriesSearch';
+  const dropdownId = mediaType === 'movie' ? 'featuredMovieSearchDropdown' : 'featuredSeriesSearchDropdown';
+  document.getElementById(dropdownId).classList.remove('show');
+  document.getElementById(searchInputId).value = '';
+  const data = await apiCall('POST', '/api/admin/movies/featured-picks', { media_type: mediaType, tmdb_id: tmdbId, title });
+  if (data.success) {
+    showToast(`Featured "${title}"`, 'success');
+    featuredLoadPicks(mediaType);
+  } else {
+    showToast(data.message || 'Could not feature this title', 'error');
+  }
+}
+
+async function featuredLoadPicks(mediaType) {
+  const data = await apiCall('GET', `/api/admin/movies/featured-picks?media_type=${mediaType}`);
+  const list = document.getElementById(mediaType === 'movie' ? 'featuredMoviePicksList' : 'featuredSeriesPicksList');
+  const picks = data.success ? data.picks : [];
+  if (picks.length === 0) {
+    list.innerHTML = '<li style="color:var(--text-muted);font-size:12.5px;padding:8px 0;">None yet - falls back to Top 10 automatically.</li>';
+    return;
+  }
+  list.innerHTML = picks.map((p, i) => `
+    <li style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-color,#eee);">
+      <span style="color:var(--text-muted);font-size:12px;width:18px;">${i + 1}.</span>
+      <span style="flex:1;font-size:13px;">${escapeHtml(p.title)}</span>
+      <button class="btn btn-secondary featured-move-btn" data-pick-id="${p.id}" data-media-type="${mediaType}" data-direction="up" style="padding:3px 7px;font-size:11px;" ${i === 0 ? 'disabled' : ''}><i class="fas fa-arrow-up"></i></button>
+      <button class="btn btn-secondary featured-move-btn" data-pick-id="${p.id}" data-media-type="${mediaType}" data-direction="down" style="padding:3px 7px;font-size:11px;" ${i === picks.length - 1 ? 'disabled' : ''}><i class="fas fa-arrow-down"></i></button>
+      <button class="btn btn-secondary featured-remove-btn" data-pick-id="${p.id}" data-media-type="${mediaType}" style="padding:3px 7px;font-size:11px;color:var(--danger,#e74c3c);"><i class="fas fa-trash"></i></button>
+    </li>
+  `).join('');
+}
+
+async function featuredMovePick(id, direction, mediaType) {
+  await apiCall('POST', `/api/admin/movies/featured-picks/${id}/move`, { direction });
+  featuredLoadPicks(mediaType);
+}
+
+async function featuredRemovePick(id, mediaType) {
+  await apiCall('DELETE', `/api/admin/movies/featured-picks/${id}`);
+  featuredLoadPicks(mediaType);
 }
 
 function omToggleReveal() {
@@ -888,6 +960,21 @@ document.addEventListener('click', (e) => {
   const top10RemoveBtn = e.target.closest('.top10-remove-btn');
   if (top10RemoveBtn) {
     top10RemovePick(parseInt(top10RemoveBtn.dataset.pickId, 10), top10RemoveBtn.dataset.mediaType);
+    return;
+  }
+  const featuredSearchResult = e.target.closest('#featuredMovieSearchDropdown .om-search-result, #featuredSeriesSearchDropdown .om-search-result');
+  if (featuredSearchResult && featuredSearchResult.dataset.id) {
+    featuredAddPick(featuredSearchResult.dataset.mediaType, parseInt(featuredSearchResult.dataset.id, 10), featuredSearchResult.dataset.title);
+    return;
+  }
+  const featuredMoveBtn = e.target.closest('.featured-move-btn');
+  if (featuredMoveBtn) {
+    featuredMovePick(parseInt(featuredMoveBtn.dataset.pickId, 10), featuredMoveBtn.dataset.direction, featuredMoveBtn.dataset.mediaType);
+    return;
+  }
+  const featuredRemoveBtn = e.target.closest('.featured-remove-btn');
+  if (featuredRemoveBtn) {
+    featuredRemovePick(parseInt(featuredRemoveBtn.dataset.pickId, 10), featuredRemoveBtn.dataset.mediaType);
     return;
   }
   const resetBtn = e.target.closest('.om-reset-btn');

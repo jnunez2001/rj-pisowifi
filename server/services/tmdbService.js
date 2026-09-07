@@ -31,14 +31,58 @@ async function fetchWithTimeout(url) {
 }
 
 function getCached(tmdbId) {
-  return db.prepare('SELECT poster_path, genres FROM tmdb_poster_cache WHERE tmdb_id = ?').get(tmdbId);
+  return db.prepare('SELECT * FROM tmdb_poster_cache WHERE tmdb_id = ?').get(tmdbId);
 }
 
-function setCached(tmdbId, posterPath, genres) {
+// overview is optional (list endpoints return it for free; older callers
+// that only have poster+genres just omit it and leave whatever was already
+// cached alone via COALESCE, rather than clobbering it with NULL).
+function setCached(tmdbId, posterPath, genres, overview) {
   db.prepare(`
-    INSERT INTO tmdb_poster_cache (tmdb_id, poster_path, genres, fetched_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(tmdb_id) DO UPDATE SET poster_path = excluded.poster_path, genres = excluded.genres, fetched_at = excluded.fetched_at
-  `).run(tmdbId, posterPath, genres ? JSON.stringify(genres) : null);
+    INSERT INTO tmdb_poster_cache (tmdb_id, poster_path, genres, overview, fetched_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(tmdb_id) DO UPDATE SET poster_path = excluded.poster_path, genres = excluded.genres,
+      overview = COALESCE(excluded.overview, tmdb_poster_cache.overview), fetched_at = excluded.fetched_at
+  `).run(tmdbId, posterPath, genres ? JSON.stringify(genres) : null, overview || null);
+}
+
+// The one-time-per-id detail fetch for hero-banner/detail-overlay data
+// (backdrop, autoplaying trailer, top cast) - NOT run for the whole synced
+// catalog (hundreds of titles) eagerly, only for whichever specific id is
+// actually about to be shown in the hero or a detail overlay. TMDb's
+// append_to_response bundles videos+credits into the same request as the
+// base movie lookup, so this is one HTTP call, not three. cast_json being
+// non-null (even '[]') is what getCachedCast() etc. below use to tell
+// "already detail-warmed" apart from "never looked up" - poster-only rows
+// from syncFeed()/warmCache() have it NULL.
+async function warmDetails(tmdbId) {
+  const existing = getCached(tmdbId);
+  if (existing && existing.cast_json !== null) return existing;
+  const apiKey = getApiKey();
+  if (!apiKey) return existing || null;
+  try {
+    const res = await fetchWithTimeout(`${BASE_URL}/movie/${tmdbId}?api_key=${apiKey}&append_to_response=videos,credits`);
+    if (!res.ok) return existing || null;
+    const data = await res.json();
+    const genreNames = Array.isArray(data.genres) ? data.genres.map((g) => g.name) : [];
+    const trailer = (data.videos?.results || []).find((v) => v.site === 'YouTube' && v.type === 'Trailer' && v.official)
+      || (data.videos?.results || []).find((v) => v.site === 'YouTube' && v.type === 'Trailer')
+      || (data.videos?.results || []).find((v) => v.site === 'YouTube');
+    const cast = (data.credits?.cast || []).slice(0, 10).map((c) => ({
+      name: c.name, character: c.character || '', profile_path: c.profile_path || null,
+    }));
+    db.prepare(`
+      INSERT INTO tmdb_poster_cache (tmdb_id, poster_path, genres, overview, backdrop_path, trailer_key, cast_json, fetched_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(tmdb_id) DO UPDATE SET poster_path = excluded.poster_path, genres = excluded.genres,
+        overview = excluded.overview, backdrop_path = excluded.backdrop_path,
+        trailer_key = excluded.trailer_key, cast_json = excluded.cast_json, fetched_at = excluded.fetched_at
+    `).run(tmdbId, data.poster_path || null, JSON.stringify(genreNames), data.overview || null,
+      data.backdrop_path || null, trailer ? trailer.key : null, JSON.stringify(cast));
+    return getCached(tmdbId);
+  } catch (e) {
+    console.warn(`[TMDb] Detail warm-up failed for id ${tmdbId}:`, e.message);
+    return existing || null;
+  }
 }
 
 // Fast, synchronous, no network - this is what the live
@@ -63,6 +107,36 @@ function getCachedGenres(tmdbId) {
   }
 }
 
+// Short synopsis - populated for free from the SAME list-endpoint response
+// syncFeed() already fetches for poster/genres, no extra TMDb call. Used
+// both as descriptive copy (hero banner, detail overlay) and as one of the
+// fields the customer's search matches against (see portal.js's search).
+function getCachedOverview(tmdbId) {
+  return getCached(tmdbId)?.overview || '';
+}
+
+const BACKDROP_BASE = 'https://image.tmdb.org/t/p/w1280';
+function getCachedBackdropUrl(tmdbId) {
+  const row = getCached(tmdbId);
+  return row && row.backdrop_path ? `${BACKDROP_BASE}${row.backdrop_path}` : null;
+}
+
+// Needs warmDetails(tmdbId) to have run for this id first (poster-only rows
+// from syncFeed/warmCache have no trailer/cast data) - null until then.
+function getCachedTrailerKey(tmdbId) {
+  return getCached(tmdbId)?.trailer_key || null;
+}
+
+function getCachedCast(tmdbId) {
+  const row = getCached(tmdbId);
+  if (!row || !row.cast_json) return [];
+  try {
+    return JSON.parse(row.cast_json);
+  } catch (e) {
+    return [];
+  }
+}
+
 async function fetchOne(tmdbId, apiKey) {
   try {
     const res = await fetchWithTimeout(`${BASE_URL}/movie/${tmdbId}?api_key=${apiKey}`);
@@ -75,7 +149,7 @@ async function fetchOne(tmdbId, apiKey) {
     }
     const data = await res.json();
     const genreNames = Array.isArray(data.genres) ? data.genres.map((g) => g.name) : [];
-    setCached(tmdbId, data.poster_path || null, genreNames);
+    setCached(tmdbId, data.poster_path || null, genreNames, data.overview || null);
   } catch (e) {
     console.warn(`[TMDb] Poster lookup failed for id ${tmdbId}:`, e.message);
   }
@@ -172,7 +246,7 @@ const FEED_LISTS = [
   { key: 'top_rated', path: '/movie/top_rated' },
 ];
 
-async function syncFeed(pages = 5) {
+async function syncFeed(pages = 10) {
   const apiKey = getApiKey();
   if (!apiKey) return { skipped: true, reason: 'no_api_key' };
 
@@ -204,7 +278,7 @@ async function syncFeed(pages = 5) {
         if (hiddenIds.has(m.id)) continue;
         const genreNames = (m.genre_ids || []).map((id) => genreMap[id]).filter(Boolean);
         upsertFeed.run(m.id, m.title, m.poster_path || null, JSON.stringify(genreNames), key, m.release_date || null);
-        setCached(m.id, m.poster_path || null, genreNames);
+        setCached(m.id, m.poster_path || null, genreNames, m.overview || null);
         count++;
       }
       if (page >= (data.total_pages || 1)) break;
@@ -238,7 +312,7 @@ async function syncFeed(pages = 5) {
       if (hiddenIds.has(m.id)) continue;
       const genreNames = (m.genre_ids || []).map((id) => genreMap[id]).filter(Boolean);
       upsertFeed.run(m.id, m.title, m.poster_path || null, JSON.stringify(genreNames), 'new_release', m.release_date || null);
-      setCached(m.id, m.poster_path || null, genreNames);
+      setCached(m.id, m.poster_path || null, genreNames, m.overview || null);
       newReleaseCount++;
     }
     if (page >= (data.total_pages || 1)) break;
@@ -283,4 +357,7 @@ async function getTrendingIds() {
   }
 }
 
-module.exports = { getCachedPosterUrl, getCachedGenres, warmCache, testConnection, searchMovies, getMovieById, syncFeed, getFeedStatus, getTrendingIds };
+module.exports = {
+  getCachedPosterUrl, getCachedGenres, warmCache, testConnection, searchMovies, getMovieById, syncFeed, getFeedStatus, getTrendingIds,
+  getCachedOverview, getCachedBackdropUrl, getCachedTrailerKey, getCachedCast, warmDetails,
+};

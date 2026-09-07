@@ -127,6 +127,210 @@ function numberedRowHtml(title, items) {
   `;
 }
 
+// ── Netflix-style hero banner (server/routes/portal.js's GET */hero) ────
+let heroSlides = [];
+let heroIndex = 0;
+let heroTimer = null;
+const HERO_ROTATE_MS = 8000;
+
+async function loadHero() {
+  try {
+    const [movieRes, tvRes] = await Promise.all([
+      fetch(`/api/portal/online-movies/hero?mac=${encodeURIComponent(onlineCurrentMac)}`),
+      fetch(`/api/portal/tv-shows/hero?mac=${encodeURIComponent(onlineCurrentMac)}`),
+    ]);
+    const movieData = await movieRes.json();
+    const tvData = await tvRes.json();
+    // Interleaved (movie, series, movie, series...) rather than all movies
+    // then all series, so the rotation itself reflects the "combined"
+    // Movies+Series home screen instead of looking movie-only for a while.
+    const movies = movieData.hero || [];
+    const series = tvData.hero || [];
+    heroSlides = [];
+    const max = Math.max(movies.length, series.length);
+    for (let i = 0; i < max; i++) {
+      if (movies[i]) heroSlides.push(movies[i]);
+      if (series[i]) heroSlides.push(series[i]);
+    }
+  } catch (e) {
+    heroSlides = [];
+  }
+}
+
+function initHeroBanner() {
+  const el = document.getElementById('heroBanner');
+  if (!el || heroSlides.length === 0) { if (el) el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  heroIndex = 0;
+  renderHeroSlide(0);
+  clearInterval(heroTimer);
+  if (heroSlides.length > 1) {
+    heroTimer = setInterval(() => {
+      heroIndex = (heroIndex + 1) % heroSlides.length;
+      renderHeroSlide(heroIndex);
+    }, HERO_ROTATE_MS);
+  }
+}
+
+// Not every TMDb-linked YouTube video is actually embeddable (private,
+// deleted, region-locked, or the uploader disabled embedding entirely) -
+// found live testing this: a raw <iframe src="youtube.com/embed/...">
+// just shows YouTube's own "Video player configuration error" watermark
+// baked into the video canvas itself with no JS-visible failure, so a
+// plain iframe can't detect or recover from it. The real YouTube IFrame
+// API (window.YT) fires a proper onError event instead, letting this fall
+// back to just the static backdrop image rather than showing that broken
+// player to a customer.
+let ytApiReady = false;
+let ytApiLoading = false;
+let heroYtPlayer = null;
+const pendingYtCallbacks = [];
+
+function ensureYtApi(callback) {
+  if (ytApiReady) { callback(); return; }
+  pendingYtCallbacks.push(callback);
+  if (ytApiLoading) return;
+  ytApiLoading = true;
+  window.onYouTubeIframeAPIReady = () => {
+    ytApiReady = true;
+    pendingYtCallbacks.splice(0).forEach((cb) => cb());
+  };
+  const tag = document.createElement('script');
+  tag.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
+}
+
+function renderHeroSlide(i) {
+  const slide = heroSlides[i];
+  if (!slide) return;
+  document.getElementById('heroBackdrop').style.backgroundImage = slide.backdrop ? `url('${slide.backdrop}')` : 'none';
+  document.getElementById('heroTitle').textContent = slide.title;
+  document.getElementById('heroOverview').textContent = slide.overview || '';
+  document.getElementById('heroGenrePills').innerHTML = (slide.genres || []).slice(0, 3)
+    .map((g) => `<span>${escapeHtmlMovies(g)}</span>`).join('') + (slide.year ? `<span>${slide.year}</span>` : '');
+
+  if (heroYtPlayer) { try { heroYtPlayer.destroy(); } catch (e) {} heroYtPlayer = null; }
+  const trailerWrap = document.getElementById('heroTrailerWrap');
+  trailerWrap.innerHTML = '';
+  if (slide.trailer_key) {
+    const mount = document.createElement('div');
+    trailerWrap.appendChild(mount);
+    ensureYtApi(() => {
+      // A slide switch (rotation, or a customer clicking a dot) may have
+      // already happened by the time the API script/this callback
+      // actually runs - only build the player if this mount point is
+      // still the one currently in the DOM, not a stale one from a
+      // slide that's since moved on.
+      if (!trailerWrap.contains(mount)) return;
+      heroYtPlayer = new YT.Player(mount, {
+        videoId: slide.trailer_key,
+        playerVars: { autoplay: 1, controls: 0, modestbranding: 1, loop: 1, playlist: slide.trailer_key, rel: 0, playsinline: 1 },
+        events: {
+          onReady: (e) => { e.target.mute(); e.target.playVideo(); },
+          onError: () => { trailerWrap.innerHTML = ''; },
+        },
+      });
+    });
+  }
+
+  const dots = document.getElementById('heroDots');
+  dots.innerHTML = heroSlides.map((_, idx) => `<button class="hero-dot ${idx === i ? 'active' : ''}" data-hero-index="${idx}"></button>`).join('');
+}
+
+function heroPlay() {
+  const slide = heroSlides[heroIndex];
+  if (!slide) return;
+  if (slide.media_type === 'tv') openSeriesCard(slide.id);
+  else openOnlineMovie(slide.id);
+}
+
+function heroMoreInfo() {
+  const slide = heroSlides[heroIndex];
+  if (!slide) return;
+  if (slide.media_type === 'tv') openSeriesCard(slide.id);
+  else openMovieDetail(slide.id);
+}
+
+document.addEventListener('click', (e) => {
+  const dot = e.target.closest('.hero-dot');
+  if (dot) {
+    clearInterval(heroTimer);
+    heroIndex = parseInt(dot.dataset.heroIndex, 10);
+    renderHeroSlide(heroIndex);
+    if (heroSlides.length > 1) {
+      heroTimer = setInterval(() => {
+        heroIndex = (heroIndex + 1) % heroSlides.length;
+        renderHeroSlide(heroIndex);
+      }, HERO_ROTATE_MS);
+    }
+  }
+});
+
+// ── Shared cast row / More Like This row (movie + series detail overlays) ──
+function renderCastRow(containerId, cast) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!cast || cast.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <h3 class="movies-online-row-title">Cast</h3>
+    <div class="detail-cast-track">
+      ${cast.map((c) => `
+        <div class="detail-cast-card">
+          <div class="detail-cast-photo" style="${c.profile_path ? `background-image:url('https://image.tmdb.org/t/p/w185${c.profile_path}')` : ''}">${c.profile_path ? '' : '<i class="fas fa-user"></i>'}</div>
+          <div class="detail-cast-name">${escapeHtmlMovies(c.name)}</div>
+          <div class="detail-cast-character">${escapeHtmlMovies(c.character || '')}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderMoreLikeThisRow(containerId, items, onClickAttr) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  if (!items || items.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = `
+    <h3 class="movies-online-row-title">More Like This</h3>
+    <div class="movies-online-row-track">
+      ${items.map((m) => `
+        <div class="movie-card" onclick="${onClickAttr}(${m.id})">
+          <div class="movie-card-thumb">${m.poster ? `<img src="${m.poster}" alt="${escapeHtmlMovies(m.title)}" loading="lazy" />` : '<i class="fas fa-film" style="font-size:24px;"></i>'}</div>
+          <div class="movie-card-title">${escapeHtmlMovies(m.title)}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ── Movie Detail overlay (cast, overview, More Like This, Play) ─────────
+async function openMovieDetail(id) {
+  const movie = onlineAllMovies.find((m) => m.id === id);
+  if (!movie) return;
+  document.getElementById('movieDetailTitle').textContent = movie.title;
+  document.getElementById('movieDetailBackdrop').style.backgroundImage = '';
+  document.getElementById('movieDetailOverview').textContent = 'Loading…';
+  document.getElementById('movieDetailCastRow').innerHTML = '';
+  document.getElementById('movieDetailMoreLikeThis').innerHTML = '';
+  document.getElementById('movieDetailPlayBtn').onclick = () => { closeMovieDetail(); openOnlineMovie(id); };
+  document.getElementById('movieDetailOverlay').classList.add('show');
+
+  try {
+    const res = await fetch(`/api/portal/online-movies/${id}/details`);
+    const data = await res.json();
+    if (!data.success) return;
+    document.getElementById('movieDetailBackdrop').style.backgroundImage = data.backdrop ? `url('${data.backdrop}')` : '';
+    document.getElementById('movieDetailOverview').textContent = data.overview || '';
+    renderCastRow('movieDetailCastRow', data.cast);
+    renderMoreLikeThisRow('movieDetailMoreLikeThis', data.more_like_this, 'openMovieDetail');
+  } catch (e) {
+    document.getElementById('movieDetailOverview').textContent = 'Could not load details.';
+  }
+}
+
+function closeMovieDetail() {
+  document.getElementById('movieDetailOverlay').classList.remove('show');
+}
+
 // Tags each item with which backend/player it came from - never shown to
 // the customer, purely internal so movieCardHtml/openMovie-vs-openOnlineMovie
 // dispatch knows which system a given card belongs to once both catalogs
@@ -736,14 +940,27 @@ async function submitMovieRequest() {
   }
 }
 
+// Matches on title, genre (so searching "horror" surfaces every Horror
+// title even if the word never appears in a single title), and overview/
+// synopsis text (catches themes, settings, and character names that show
+// up in a title's description - as close to "keyword" search as this gets
+// without pre-fetching full credits/keywords for the entire catalog, which
+// would mean hundreds of extra TMDb calls just to make search work).
+function movieMatchesQuery(m, q) {
+  if (m.title.toLowerCase().includes(q)) return true;
+  if ((m.genres || []).some((g) => g.toLowerCase().includes(q))) return true;
+  if ((m.overview || '').toLowerCase().includes(q)) return true;
+  return false;
+}
+
 document.getElementById('onlineMoviesSearch').addEventListener('input', (e) => {
-  const q = e.target.value.toLowerCase();
+  const q = e.target.value.toLowerCase().trim();
   if (!q) {
     renderOnlineMoviesRows();
     return;
   }
   const combined = [...onlineAllMovies, ...allMovies, ...(typeof tvAllSeries !== 'undefined' ? tvAllSeries : [])];
-  renderOnlineMoviesFlat(combined.filter((m) => m.title.toLowerCase().includes(q)));
+  renderOnlineMoviesFlat(combined.filter((m) => movieMatchesQuery(m, q)));
 });
 
 // Local/Online source toggle is hidden (movies.html) - the two catalogs are
@@ -772,7 +989,7 @@ function startUnifiedMoviesInit() {
   detectMacForMovies().then((mac) => {
     currentMac = mac;
     onlineCurrentMac = mac;
-    const loaders = [loadMovies(), loadOnlineMovies(), loadMovieTop10()];
+    const loaders = [loadMovies(), loadOnlineMovies(), loadMovieTop10(), loadHero()];
     if (typeof loadTvShows === 'function') loaders.push(loadTvShows());
     if (typeof loadTvTop10 === 'function') loaders.push(loadTvTop10());
     return Promise.all(loaders);
@@ -781,6 +998,7 @@ function startUnifiedMoviesInit() {
     tagKind(onlineAllMovies, 'online');
     populateGenreDropdown();
     renderOnlineMoviesRows();
+    initHeroBanner();
     refreshMovieCredit();
   });
 }

@@ -186,6 +186,35 @@
 <div class="zf3-card" style="margin-bottom:16px;">
   <div class="om-card-header">
     <div>
+      <div class="om-card-title"><span class="om-dot" style="background:var(--accent-purple,#8b5cf6);"></span>Featured Hero Banner</div>
+      <div class="om-card-desc">What plays in the big autoplaying-trailer banner at the top of the customer's Movies page. Leave empty and it automatically rotates whatever's #1 in Top 10 instead.</div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:14px;">
+    <div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px;">Featured Movies</div>
+      <div style="position:relative;">
+        <input type="text" id="featuredMovieSearch" placeholder="Search a movie to feature…" style="width:100%;" oninput="featuredSearchTmdb('movie', this.value)">
+        <div class="om-search-dropdown" id="featuredMovieSearchDropdown"></div>
+      </div>
+      <ol id="featuredMoviePicksList" style="margin:10px 0 0;padding-left:0;list-style:none;"></ol>
+    </div>
+    <div>
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px;">Featured Series</div>
+      <div style="position:relative;">
+        <input type="text" id="featuredSeriesSearch" placeholder="Search a series to feature…" style="width:100%;" oninput="featuredSearchTmdb('tv', this.value)">
+        <div class="om-search-dropdown" id="featuredSeriesSearchDropdown"></div>
+      </div>
+      <ol id="featuredSeriesPicksList" style="margin:10px 0 0;padding-left:0;list-style:none;"></ol>
+    </div>
+  </div>
+  <div class="om-help">Up to 5 titles rotate in the hero banner per media type. Requires a real TMDb trailer to autoplay - falls back to a static backdrop image if a title has none.</div>
+</div>
+
+<div class="zf3-card" style="margin-bottom:16px;">
+  <div class="om-card-header">
+    <div>
       <div class="om-card-title"><span class="om-dot" style="background:var(--accent-blue,#2563eb);"></span>TMDb Integration</div>
       <div class="om-card-desc">Powers poster art, genres, search, and the catalog sync below.</div>
     </div>

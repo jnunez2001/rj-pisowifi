@@ -5831,6 +5831,56 @@ router.delete('/movies/top10-picks/:id', adminAuth, (req, res) => {
   res.json({ success: true });
 });
 
+// ── Featured Hero Picks (server/routes/portal.js's GET /movies/hero) ────
+// Same CRUD shape as Top 10 Picks above, against featured_picks instead -
+// see that table's comment in database.js for why this is a separate list
+// from Top 10 curation.
+router.get('/movies/featured-picks', adminAuth, (req, res) => {
+  const mediaType = req.query.media_type === 'tv' ? 'tv' : 'movie';
+  const picks = db.prepare('SELECT * FROM featured_picks WHERE media_type = ? ORDER BY sort_order, id').all(mediaType);
+  res.json({ success: true, picks });
+});
+
+router.post('/movies/featured-picks', adminAuth, (req, res) => {
+  const mediaType = req.body?.media_type === 'tv' ? 'tv' : 'movie';
+  const tmdbId = parseInt(req.body?.tmdb_id, 10);
+  const title = String(req.body?.title || '').trim().slice(0, 200);
+  if (!tmdbId || !title) return res.status(400).json({ success: false, message: 'A title and TMDb ID are required.' });
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), -1) as m FROM featured_picks WHERE media_type = ?').get(mediaType).m;
+  try {
+    db.prepare('INSERT INTO featured_picks (media_type, tmdb_id, title, sort_order) VALUES (?, ?, ?, ?)')
+      .run(mediaType, tmdbId, title, maxOrder + 1);
+    res.json({ success: true });
+  } catch (err) {
+    if (String(err.message || '').includes('UNIQUE')) {
+      return res.status(400).json({ success: false, message: 'Already a Featured pick.' });
+    }
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+router.post('/movies/featured-picks/:id/move', adminAuth, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const direction = req.body?.direction === 'up' ? 'up' : 'down';
+  const current = db.prepare('SELECT * FROM featured_picks WHERE id = ?').get(id);
+  if (!current) return res.status(404).json({ success: false, message: 'Pick not found' });
+  const neighbor = direction === 'up'
+    ? db.prepare('SELECT * FROM featured_picks WHERE media_type = ? AND sort_order < ? ORDER BY sort_order DESC LIMIT 1').get(current.media_type, current.sort_order)
+    : db.prepare('SELECT * FROM featured_picks WHERE media_type = ? AND sort_order > ? ORDER BY sort_order ASC LIMIT 1').get(current.media_type, current.sort_order);
+  if (!neighbor) return res.json({ success: true });
+  const swap = db.transaction(() => {
+    db.prepare('UPDATE featured_picks SET sort_order = ? WHERE id = ?').run(neighbor.sort_order, current.id);
+    db.prepare('UPDATE featured_picks SET sort_order = ? WHERE id = ?').run(current.sort_order, neighbor.id);
+  });
+  swap();
+  res.json({ success: true });
+});
+
+router.delete('/movies/featured-picks/:id', adminAuth, (req, res) => {
+  db.prepare('DELETE FROM featured_picks WHERE id = ?').run(parseInt(req.params.id, 10));
+  res.json({ success: true });
+});
+
 router.post('/movies/tmdb-key', adminAuth, (req, res) => {
   const apiKey = String(req.body?.api_key || '').trim();
   if (!apiKey) return res.status(400).json({ success: false, message: 'Enter a key first.' });
