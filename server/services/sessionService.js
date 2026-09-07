@@ -627,14 +627,32 @@ async function resumeSession(voucherCode) {
     now.getTime() + session.minutes_remaining * 60 * 1000
   ).toISOString();
 
+  // Bug found in final review: this only ever shifted expires_at, never
+  // regular_expires_at - so every pause silently inflated the gap
+  // between them (Happy Hour's "how much bonus is still outstanding"
+  // signal) by the exact length of the pause, even though the customer
+  // spent zero real time, regular or bonus, while paused. The end-of-
+  // window sweep would then claw back part of a bonus - or worse, part
+  // of already-paid regular time - that was never actually used.
+  // regular_expires_at needs to be frozen exactly the same way
+  // expires_at already is: shifted forward by the real pause duration
+  // (now minus when it was paused), so the gap between the two columns
+  // - and therefore the true outstanding bonus - comes out unchanged
+  // across a pause/resume cycle regardless of how long the pause lasted.
+  const pauseDurationMs = session.paused_at ? now.getTime() - new Date(session.paused_at).getTime() : 0;
+  const newRegularExpiresAt = session.regular_expires_at
+    ? new Date(new Date(session.regular_expires_at).getTime() + pauseDurationMs).toISOString()
+    : null;
+
   db.prepare(`
     UPDATE sessions
     SET is_paused = 0,
         paused_at = NULL,
         pause_reason = NULL,
-        expires_at = ?
+        expires_at = ?,
+        regular_expires_at = COALESCE(?, regular_expires_at)
     WHERE voucher_code = ?
-  `).run(newExpiresAt, voucherCode);
+  `).run(newExpiresAt, newRegularExpiresAt, voucherCode);
 
   if (session.pause_reason === 'idle') {
     // Nothing to restore - an idle pause never called blockClient(), the

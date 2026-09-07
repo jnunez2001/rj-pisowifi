@@ -138,15 +138,35 @@ async function applyOutageCompensation(gapMs, sourceLabel) {
     if (!enabled) return;
     if (!Number.isFinite(gapMs) || gapMs < MIN_OUTAGE_GAP_MS) return;
 
-    const gapSeconds = Math.round(gapMs / 1000);
-    const sessionCount = db.prepare('SELECT COUNT(*) AS c FROM sessions').get()?.c || 0;
+    // Bug found in final review: SQLite's datetime(..., '+N seconds')
+    // returns 'YYYY-MM-DD HH:MM:SS' (a space before the time, no
+    // trailing Z), but expires_at/hard_expires_at/regular_expires_at are
+    // otherwise ALWAYS written as full ISO strings (sessionService.js's
+    // .toISOString()). A space sorts before 'T' byte-for-byte, so after
+    // this ran once, the Happy Hour sweep's `expires_at > regular_expires_at`
+    // string comparison went permanently false for every compensated
+    // session - the sweep silently stopped converting bonus time for
+    // them. This also never touched regular_expires_at at all, so any
+    // outstanding Happy Hour bonus gap was thrown off by the outage
+    // duration regardless. Fixed by computing the shift in JS (always
+    // produces real ISO strings) and applying it to all three columns,
+    // so the gap between expires_at and regular_expires_at - the exact
+    // thing the sweep depends on - is preserved through an outage
+    // exactly the same way it already needs to be preserved through a
+    // pause (see resumeSession's matching fix).
+    const sessions = db.prepare('SELECT voucher_code, expires_at, hard_expires_at, regular_expires_at FROM sessions').all();
+    const sessionCount = sessions.length;
     if (sessionCount === 0) return;
 
-    db.prepare(`
+    const shiftIso = (iso) => (iso ? new Date(new Date(iso).getTime() + gapMs).toISOString() : iso);
+    const update = db.prepare(`
       UPDATE sessions
-      SET expires_at = datetime(expires_at, '+' || ? || ' seconds'),
-          hard_expires_at = datetime(hard_expires_at, '+' || ? || ' seconds')
-    `).run(gapSeconds, gapSeconds);
+      SET expires_at = ?, hard_expires_at = ?, regular_expires_at = ?
+      WHERE voucher_code = ?
+    `);
+    for (const s of sessions) {
+      update.run(shiftIso(s.expires_at), shiftIso(s.hard_expires_at), shiftIso(s.regular_expires_at), s.voucher_code);
+    }
 
     const minutes = Math.round(gapMs / 60000);
     console.log(`⏱️ Outage compensation: ${sourceLabel} was down ~${minutes} min - extended ${sessionCount} session(s)' expiry to compensate`);
