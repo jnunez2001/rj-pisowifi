@@ -87,7 +87,7 @@ function renderReportThread(r) {
         <div class="report-top-row">
           <span class="report-name">${escapeHtml(r.name || 'Anonymous')}</span>
           <span class="report-category-pill">${categoryLabel}</span>
-          <span class="report-time">${new Date(r.created_at).toLocaleString()}</span>
+          <span class="report-time">${parseSqlDate(r.created_at).toLocaleString()}</span>
         </div>
         <div class="report-bubble" title="${escapeHtml(r.message)}">${escapeHtml(truncateMessage(r.message))}</div>
         <div class="report-meta-line">
@@ -134,12 +134,12 @@ async function loadReportMessages(id) {
     const initialMsg = report ? `
       <div class="report-msg report-msg-customer">
         <div class="report-msg-bubble">${escapeHtml(report.message)}</div>
-        <div class="report-msg-time">${new Date(report.created_at).toLocaleString()}</div>
+        <div class="report-msg-time">${parseSqlDate(report.created_at).toLocaleString()}</div>
       </div>` : '';
     const thread = (data.messages || []).map((m) => `
       <div class="report-msg report-msg-${m.sender}">
         <div class="report-msg-bubble">${escapeHtml(m.message)}</div>
-        <div class="report-msg-time">${new Date(m.created_at).toLocaleString()}</div>
+        <div class="report-msg-time">${parseSqlDate(m.created_at).toLocaleString()}</div>
       </div>
     `).join('');
     el.innerHTML = initialMsg + thread;
@@ -176,7 +176,7 @@ async function viewCoinProof(mac) {
   const data = await apiCall('GET', `/api/admin/coin-pulse-log?mac=${encodeURIComponent(mac)}&hours=48`);
   const rows = data.pulses || [];
   const lines = rows.length
-    ? rows.map((p) => `${new Date(p.received_at).toLocaleString()} - ₱${p.coin_value}`).join('\n')
+    ? rows.map((p) => `${parseSqlDate(p.received_at).toLocaleString()} - ₱${p.coin_value}`).join('\n')
     : 'No coin pulses received from this device in the last 48 hours - the hardware never sent a signal to the server in that window.';
   alert(`Coin activity proof for ${mac} (last 48h):\n\n${lines}`);
 }

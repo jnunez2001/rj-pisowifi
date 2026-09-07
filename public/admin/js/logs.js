@@ -17,7 +17,7 @@ async function loadLogsPage() {
         <div class="zf3-activity-dot" style="background:${dotColor[l.level] || 'var(--text-muted)'};"></div>
         <div style="min-width:0;">
           <div class="zf3-activity-text">${l.message}</div>
-          <div class="zf3-activity-meta">${l.detail ? l.detail + ' · ' : ''}${new Date(l.time).toLocaleString()}</div>
+          <div class="zf3-activity-meta">${l.detail ? l.detail + ' · ' : ''}${parseSqlDate(l.time).toLocaleString()}</div>
         </div>
       </div>
     `).join('');

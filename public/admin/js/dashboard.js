@@ -320,7 +320,7 @@ async function hsLoadRecentTransactions() {
           <span class="badge badge-blue">${sourceLabel(t)}</span>
         </td>
         <td data-label="Time" style="color:var(--text-muted);font-size:13px;">
-          ${new Date(t.created_at).toLocaleTimeString()}
+          ${parseSqlDate(t.created_at).toLocaleTimeString()}
         </td>
       </tr>
     `).join('');

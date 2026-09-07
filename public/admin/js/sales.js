@@ -171,7 +171,7 @@ function buildTransactionTable(transactions) {
         <td data-label="Time Added" style="font-weight:600;">${formatSalesMins(t.minutes_added)}</td>
         <td data-label="Type">${typeBadge}</td>
         <td data-label="Date & Time" style="font-size:13px;color:var(--text-muted);">
-          ${new Date(t.created_at).toLocaleString()}
+          ${parseSqlDate(t.created_at).toLocaleString()}
         </td>
       </tr>`;
   }).join('');
