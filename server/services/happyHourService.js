@@ -100,6 +100,14 @@ function computeClawback({ nowMs, regularExpiresAtMs, expiresAtMs, multiplier })
 // condition re-evaluates correctly on its own either way (a server
 // restart mid-window just means the sweep runs on the next real
 // transition it observes, same as if it had been running the whole time).
+// Known accepted edge case, called out explicitly during final review: a
+// bonus gap created just before a server restart, where the restart
+// crosses into the NEXT day's Happy Hour window, gets deferred to that
+// next window's close and converted using THAT day's multiplier, not the
+// one the bonus was actually earned under - potentially days after
+// purchase on a long-expiration rate. Left as-is intentionally (not a
+// code fix): correctly detecting and converting mid-restart is more
+// complexity than this edge case's real-world frequency justifies.
 let wasActive = false;
 
 async function runEndOfWindowSweep() {
@@ -114,12 +122,19 @@ async function runEndOfWindowSweep() {
     // real time, so comparing it against a live nowMs below produced a
     // meaningless clawback figure - and resumeSession() would partly or
     // wholly discard that write anyway once it recomputes expires_at
-    // from minutes_remaining on resume. Excluding paused sessions here
-    // is correct, not just a workaround: resumeSession() already
-    // preserves the exact regular/bonus split through a pause (see its
-    // own fix), so a session paused when the window closes simply keeps
-    // its frozen gap intact and correct until it resumes, with nothing
-    // for this sweep to do in the meantime.
+    // from minutes_remaining on resume. Excluding paused sessions fixes
+    // that: resumeSession() already preserves the exact regular/bonus
+    // split through a pause (see its own fix), so a session paused when
+    // the window closes keeps its frozen gap intact until it resumes.
+    // Known accepted tradeoff (same class as the cross-day-restart note
+    // below): because this sweep only ever fires once, on the
+    // active->inactive transition, a session that stays paused across
+    // that exact moment is never revisited by a later sweep - it keeps
+    // its full outstanding bonus at the original multiplier for as long
+    // as it stays paused (bounded by hard_expires_at and max_pauses).
+    // Not fixed here; flagged for the operator/business-decision layer
+    // rather than papered over with a guess at the "right" clawback
+    // amount for a still-frozen session.
     const sessions = db.prepare(`
       SELECT voucher_code, mac_address, expires_at, regular_expires_at
       FROM sessions

@@ -431,8 +431,9 @@ let happyHourBadgeInterval = null;
 
 // Ticks the "Ends in HH:MM:SS" badge from portalSettings.happy_hour.ends_at.
 // Called once from loadSettings() after happy_hour is populated, and again
-// any time checkSession() refreshes portalSettings (so it starts/stops
-// correctly if Happy Hour's active state changes while the page is open).
+// every 30s from refreshHappyHourStatus() (started in startPolling()), so
+// it starts/stops correctly if Happy Hour's active state changes while
+// the page stays open.
 function updateHappyHourBadge() {
   const badge = document.getElementById('happyHourBadge');
   const countdown = document.getElementById('happyHourCountdown');
@@ -1442,10 +1443,18 @@ function updateUI(session) {
     // involved - the extra check that minutes_remaining did not increase
     // rules that out, since a genuine clawback can only hold time steady
     // or reduce it, never grow it the way a top-up does.
+    // Second false-fire found in re-review: Convert to/from Premium also
+    // sets regular_expires_at = expires_at (closing the gap on purpose,
+    // Premium is out of Happy Hour's scope - see convertToPremiumSession/
+    // convertToRegularSession) and its conversionRatio can easily produce
+    // a minutes_remaining that's flat or lower too, satisfying every
+    // other condition here. Requiring converted_to_premium be unchanged
+    // from the previous poll rules that transition out specifically.
     if (prev && prev.regular_expires_at && prev.expires_at &&
         prev.regular_expires_at !== prev.expires_at &&
         session.regular_expires_at === session.expires_at &&
         session.minutes_remaining <= prev.minutes_remaining &&
+        session.converted_to_premium === prev.converted_to_premium &&
         portalSettings.happy_hour && portalSettings.happy_hour.message) {
       showToast(portalSettings.happy_hour.message, 'success');
     }
@@ -2289,7 +2298,26 @@ function startPolling() {
   // this is a schedule/settings check, not per-session state, and
   // doesn't need to be nearly as fresh.
   if (happyHourRefreshInterval) clearInterval(happyHourRefreshInterval);
-  happyHourRefreshInterval = setInterval(loadSettings, 30000);
+  happyHourRefreshInterval = setInterval(refreshHappyHourStatus, 30000);
+}
+
+// Re-review found that reusing the full loadSettings() for this timer was
+// a regression of its own: loadSettings() also calls renderPromoCarousel()
+// (resets promoCarouselIndex to 0 and rebuilds its DOM - a customer would
+// see the operator's promo carousel jump back to image 1 every 30s
+// forever) and rewrites cafe name/logo/banner/welcome message for no
+// reason. This fetches the exact same /api/portal/rates response but only
+// touches the Happy Hour state and the rate rows that display it -
+// everything else on the page is left alone.
+async function refreshHappyHourStatus() {
+  try {
+    const res = await fetch(`${SERVER}/api/portal/rates`);
+    const data = await res.json();
+    if (!data.success) return;
+    portalSettings.happy_hour = data.happy_hour || { active: false, ends_at: null, starts_at: null, multiplier: 1, message: '' };
+    updateHappyHourBadge();
+    if (data.rates) buildRatesUI(data.rates);
+  } catch(e) { console.error(e); }
 }
 
 // ===== FREE CLAIM =====

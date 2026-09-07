@@ -158,15 +158,35 @@ async function applyOutageCompensation(gapMs, sourceLabel) {
     const sessionCount = sessions.length;
     if (sessionCount === 0) return;
 
-    const shiftIso = (iso) => (iso ? new Date(new Date(iso).getTime() + gapMs).toISOString() : iso);
+    // Re-review found a real bug in the fix above: this codebase already
+    // has parseSqliteDate() (server/utils/sqliteDate.js) precisely because
+    // these columns can hold a naive SQLite-format value ("YYYY-MM-DD
+    // HH:MM:SS", no timezone) that bare `new Date()` misreads as LOCAL
+    // time instead of UTC - an 8-hour swing on a Manila-timezone box. In
+    // normal operation these three columns are always ISO
+    // (sessionService.js's .toISOString()), but this is exactly the kind
+    // of column the OLD buggy `datetime()` call above used to write to in
+    // the non-ISO format - using the same defensive parse this codebase
+    // already established elsewhere costs nothing and removes the risk
+    // entirely rather than depending on "should never happen in practice".
+    const { parseSqliteDate } = require('../utils/sqliteDate');
+    const shiftIso = (value) => (value ? new Date(parseSqliteDate(value).getTime() + gapMs).toISOString() : value);
     const update = db.prepare(`
       UPDATE sessions
       SET expires_at = ?, hard_expires_at = ?, regular_expires_at = ?
       WHERE voucher_code = ?
     `);
-    for (const s of sessions) {
-      update.run(shiftIso(s.expires_at), shiftIso(s.hard_expires_at), shiftIso(s.regular_expires_at), s.voucher_code);
-    }
+    // Re-review also found the per-row loop replaced what used to be one
+    // atomic UPDATE - a mid-loop throw (a genuinely malformed date on one
+    // row, say) would leave some sessions compensated and others not, with
+    // no way to tell which from the outside. db.transaction() keeps the
+    // all-or-nothing guarantee the original single statement had.
+    const applyAll = db.transaction((rows) => {
+      for (const s of rows) {
+        update.run(shiftIso(s.expires_at), shiftIso(s.hard_expires_at), shiftIso(s.regular_expires_at), s.voucher_code);
+      }
+    });
+    applyAll(sessions);
 
     const minutes = Math.round(gapMs / 60000);
     console.log(`⏱️ Outage compensation: ${sourceLabel} was down ~${minutes} min - extended ${sessionCount} session(s)' expiry to compensate`);
