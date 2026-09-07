@@ -1415,7 +1415,7 @@ function updateUI(session) {
           }, 3000);
         }
       }
-    } else if (prev.voucher_code === session.voucher_code &&
+    } else if (prev && prev.voucher_code === session.voucher_code &&
                session.minutes_remaining > prev.minutes_remaining) {
       playSound('coin');
       if (coinModalOpen) {
