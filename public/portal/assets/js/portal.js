@@ -74,7 +74,8 @@ let portalSettings = {
   portal_hostname: '',
   allow_premium_to_regular_convert: '0',
   movies_open_in_chrome: '0',
-  promo_carousel_interval_seconds: '5'
+  promo_carousel_interval_seconds: '5',
+  happy_hour: { active: false, ends_at: null, starts_at: null, multiplier: 1, message: '' }
 };
 
 // ===== COIN MODAL TIMER =====
@@ -423,6 +424,41 @@ function formatTime(minutes) {
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
   return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+let happyHourBadgeInterval = null;
+
+// Ticks the "Ends in HH:MM:SS" badge from portalSettings.happy_hour.ends_at.
+// Called once from loadSettings() after happy_hour is populated, and again
+// any time checkSession() refreshes portalSettings (so it starts/stops
+// correctly if Happy Hour's active state changes while the page is open).
+function updateHappyHourBadge() {
+  const badge = document.getElementById('happyHourBadge');
+  const countdown = document.getElementById('happyHourCountdown');
+  if (!badge || !countdown) return;
+
+  clearInterval(happyHourBadgeInterval);
+  const hh = portalSettings.happy_hour;
+
+  if (!hh || !hh.active || !hh.ends_at) {
+    badge.style.display = 'none';
+    return;
+  }
+
+  badge.style.display = 'block';
+  const endsAtMs = new Date(hh.ends_at).getTime();
+
+  const tick = () => {
+    const remainingMinutes = (endsAtMs - Date.now()) / 60000;
+    if (remainingMinutes <= 0) {
+      clearInterval(happyHourBadgeInterval);
+      badge.style.display = 'none';
+      return;
+    }
+    countdown.textContent = formatTime(remainingMinutes);
+  };
+  tick();
+  happyHourBadgeInterval = setInterval(tick, 1000);
 }
 
 function formatSeconds(seconds) {
@@ -1392,6 +1428,19 @@ function updateUI(session) {
     }
 
     const coinModalOpen = document.getElementById('coinModal').classList.contains('show');
+
+    // Happy Hour ended while this customer had bonus time outstanding -
+    // regular_expires_at catching up to equal expires_at (Task 6's sweep
+    // always sets them equal when it converts) is the signal, compared
+    // against the PREVIOUS poll's session data so this only fires once,
+    // right when the change actually happens, not on every subsequent poll.
+    if (prev && prev.regular_expires_at && prev.expires_at &&
+        prev.regular_expires_at !== prev.expires_at &&
+        session.regular_expires_at === session.expires_at &&
+        portalSettings.happy_hour && portalSettings.happy_hour.message) {
+      showToast(portalSettings.happy_hour.message, 'success');
+    }
+
     if (!isFirstCheck && (!prev || !prev.active)) {
       playSound('success');
       playVendoSound('connected');
@@ -1627,6 +1676,8 @@ async function loadSettings() {
     portalSettings.allow_premium_to_regular_convert = data.allow_premium_to_regular_convert || '0';
     portalSettings.movies_open_in_chrome = data.movies_open_in_chrome || '0';
     portalSettings.promo_carousel_interval_seconds = data.promo_carousel_interval_seconds || '5';
+    portalSettings.happy_hour = data.happy_hour || { active: false, ends_at: null, starts_at: null, multiplier: 1, message: '' };
+    updateHappyHourBadge();
     applyPortalSettings();
     updateNotificationsButton();
 
@@ -1725,6 +1776,14 @@ function renderRateItem(r) {
     ? `<div class="rate-label" style="color:#00a844;"><i class="fas fa-bolt"></i> ${r.download_mbps}/${r.upload_mbps || r.download_mbps} Mbps</div>`
     : '';
 
+  // Happy Hour only ever applies to Regular (non-Premium) rates - see
+  // coinCreditService.js's regularOnlyMinutes. r.download_mbps truthy
+  // means this rate IS Premium, so it never gets the bonus line.
+  const hh = portalSettings.happy_hour;
+  const happyHourLine = (hh && hh.active && !r.download_mbps && hh.multiplier > 1)
+    ? `<div class="rate-label" style="color:#f59e0b;font-weight:600;"><i class="fas fa-clock"></i> Happy Hour: ${formatMinutes(Math.floor(r.minutes * hh.multiplier))}</div>`
+    : '';
+
   return `
     <div class="rate-item">
       <div class="rate-left">
@@ -1733,6 +1792,7 @@ function renderRateItem(r) {
           <div class="rate-price">₱${r.coin_value}</div>
           <div class="rate-label">${expLabel}</div>
           ${speedLine}
+          ${happyHourLine}
         </div>
       </div>
       <div>

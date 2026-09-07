@@ -142,6 +142,7 @@ router.get('/mac/:mac', async (req, res) => {
       minutes_remaining: remaining,
       is_paused: session.is_paused === 1,
       expires_at: session.expires_at,
+      regular_expires_at: session.regular_expires_at,
       hard_expires_at: session.hard_expires_at,
       created_at: session.created_at,
       pauses_remaining: pausesRemaining(session),
