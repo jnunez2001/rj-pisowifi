@@ -3,9 +3,44 @@ let plAllPlans = [];
 let plCurrentType = '';
 let plEditingId = null;
 
+let plIsMikrotikMode = false;
+
 async function loadPlansPage() {
   await loadPlansList();
   await loadBandwidthProfilesForPlans();
+  await loadQueueTypesForPlans();
+}
+
+// Queue Algorithm (network power / MikroTik AQM feature) - only meaningful
+// on a MikroTik router, mirrors the same network_mode check the
+// Bandwidth Profiles page's own Queue Type picker uses.
+async function loadQueueTypesForPlans() {
+  const group = document.getElementById('planQueueTypeGroup');
+  if (!group) return;
+  try {
+    const settingsData = await apiCall('GET', '/api/admin/settings');
+    plIsMikrotikMode = !!(settingsData.settings && settingsData.settings.network_mode === 'mikrotik');
+    if (!plIsMikrotikMode) {
+      group.style.display = 'none';
+      return;
+    }
+    const select = document.getElementById('planQueueType');
+    select.innerHTML = '<option value="">Auto (use global setting)</option>';
+    const typesData = await apiCall('GET', '/api/admin/network/mikrotik/queue-types');
+    if (typesData.success && Array.isArray(typesData.queueTypes)) {
+      typesData.queueTypes
+        .filter(t => t.kind === 'cake' || t.kind === 'fq-codel')
+        .forEach(t => {
+          const opt = document.createElement('option');
+          opt.value = t.name;
+          opt.textContent = `${t.name} (${t.kind})`;
+          select.appendChild(opt);
+        });
+    }
+    group.style.display = 'block';
+  } catch (e) {
+    console.error('Queue types load error:', e);
+  }
 }
 
 // Bandwidth Profiles (Network > Bandwidth Profiles) are just a named
@@ -38,6 +73,10 @@ function onPlanBandwidthProfileChange() {
   if (!profile) return;
   document.getElementById('planDownload').value = profile.download_mbps;
   document.getElementById('planUpload').value = profile.upload_mbps;
+  const queueTypeEl = document.getElementById('planQueueType');
+  if (queueTypeEl && profile.queue_type && profile.queue_type !== 'auto') {
+    queueTypeEl.value = profile.queue_type;
+  }
   if (document.getElementById('planIsPremium').checked) onPlanCoinVendoChannelChange();
 }
 
@@ -309,6 +348,8 @@ function resetPlanForm() {
   document.getElementById('planBandwidthProfile').value = '';
   document.getElementById('planDownload').value = '';
   document.getElementById('planUpload').value = '';
+  const resetQueueTypeEl = document.getElementById('planQueueType');
+  if (resetQueueTypeEl) resetQueueTypeEl.value = '';
   document.getElementById('planDataLimit').value = '';
   document.getElementById('planDeviceLimit').value = 1;
   document.getElementById('planScheduleStart').value = '';
@@ -343,6 +384,17 @@ async function editPlan(id) {
   document.getElementById('planIsPremium').checked = !!plan.is_premium;
   document.getElementById('planDownload').value = plan.download_mbps ?? '';
   document.getElementById('planUpload').value = plan.upload_mbps ?? '';
+  const editQueueTypeEl = document.getElementById('planQueueType');
+  if (editQueueTypeEl) {
+    editQueueTypeEl.value = plan.queue_type || '';
+    if (plan.queue_type && editQueueTypeEl.value !== plan.queue_type) {
+      const opt = document.createElement('option');
+      opt.value = plan.queue_type;
+      opt.textContent = plan.queue_type;
+      editQueueTypeEl.appendChild(opt);
+      editQueueTypeEl.value = plan.queue_type;
+    }
+  }
   document.getElementById('planDataLimit').value = plan.data_limit_mb ?? '';
   document.getElementById('planDeviceLimit').value = plan.device_limit || 1;
   document.getElementById('planScheduleStart').value = plan.schedule_start || '';
@@ -393,6 +445,7 @@ async function savePlan() {
     is_premium: isPremium,
     download_mbps: downloadMbps || null,
     upload_mbps: document.getElementById('planUpload').value || null,
+    queue_type: (plIsMikrotikMode && document.getElementById('planQueueType').value) || null,
     data_limit_mb: document.getElementById('planDataLimit').value || null,
     device_limit: document.getElementById('planDeviceLimit').value || 1,
     schedule_start: type === 'custom' ? (document.getElementById('planScheduleStart').value || null) : null,

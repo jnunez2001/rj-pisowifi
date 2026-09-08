@@ -55,7 +55,7 @@ async function restoreActiveSessions() {
         await allowClient(session.mac_address);
         if (session.download_mbps) {
           const upMbps = session.upload_mbps || session.download_mbps;
-          await setClientBandwidth(session.mac_address, session.download_mbps, upMbps, burstConfig);
+          await setClientBandwidth(session.mac_address, session.download_mbps, upMbps, burstConfig, false, session.queue_type);
           console.log(`✅ Restored: ${session.voucher_code} → ${session.mac_address} (${session.download_mbps}Mbps down / ${upMbps}Mbps up, voucher override)`);
         } else if (isBandwidthCapEnabled) {
           const maxMbps = db.prepare("SELECT value FROM settings WHERE key = 'bandwidth_cap_download_mbps'").get()?.value || '5';
@@ -556,7 +556,7 @@ async function startTimer() {
           try {
             await allowClient(session.mac_address);
             if (session.download_mbps) {
-              await setClientBandwidth(session.mac_address, session.download_mbps, session.upload_mbps || session.download_mbps, burstConfig, !!session.data_limit_mb);
+              await setClientBandwidth(session.mac_address, session.download_mbps, session.upload_mbps || session.download_mbps, burstConfig, !!session.data_limit_mb, session.queue_type);
             } else if (isBandwidthCapEnabled) {
               const maxMbps = getSetting('bandwidth_cap_download_mbps', 5);
               const maxUploadMbps = getSetting('bandwidth_cap_upload_mbps', 5);

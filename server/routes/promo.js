@@ -133,10 +133,11 @@ router.post('/redeem', validateBody(redeemSchema), async (req, res) => {
     // crash), same fail-open pattern the rest of this app follows.
     let profileOverride = null;
     if (!promo.download_mbps && promo.bandwidth_profile_id) {
-      profileOverride = db.prepare('SELECT download_mbps, upload_mbps FROM bandwidth_profiles WHERE id = ?').get(promo.bandwidth_profile_id);
+      profileOverride = db.prepare('SELECT download_mbps, upload_mbps, queue_type FROM bandwidth_profiles WHERE id = ?').get(promo.bandwidth_profile_id);
     }
     const effectiveDownload = promo.download_mbps || (profileOverride && profileOverride.download_mbps);
     const effectiveUpload = promo.upload_mbps || (profileOverride && profileOverride.upload_mbps);
+    const effectiveQueueType = profileOverride && profileOverride.queue_type;
 
     // createSession()/addTimeToSession() above already applied the global
     // cap (or the session's existing override, on a top-up) - this
@@ -147,10 +148,15 @@ router.post('/redeem', validateBody(redeemSchema), async (req, res) => {
     if (effectiveDownload) {
       const overrideDown = effectiveDownload;
       const overrideUp = effectiveUpload || effectiveDownload;
-      db.prepare('UPDATE sessions SET download_mbps = ?, upload_mbps = ? WHERE voucher_code = ?')
-        .run(overrideDown, overrideUp, session.voucher_code);
+      // queue_type persists on the session row too (not just this call's
+      // setClientBandwidth), so timerService.js's periodic re-assert,
+      // resume-from-pause, and roam-repair all keep applying this
+      // voucher's Queue Algorithm instead of reverting to the global
+      // default on their next tick.
+      db.prepare('UPDATE sessions SET download_mbps = ?, upload_mbps = ?, queue_type = ? WHERE voucher_code = ?')
+        .run(overrideDown, overrideUp, effectiveQueueType || null, session.voucher_code);
       try {
-        await setClientBandwidth(mac, overrideDown, overrideUp, getBurstConfig());
+        await setClientBandwidth(mac, overrideDown, overrideUp, getBurstConfig(), false, effectiveQueueType);
       } catch (e) {
         console.error(`Failed to apply voucher bandwidth override for ${mac}:`, e.message);
       }

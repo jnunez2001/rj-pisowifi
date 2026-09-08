@@ -181,6 +181,15 @@
         <input type="number" id="planUpload" class="form-control" placeholder="e.g. 5" min="0">
       </div>
     </div>
+    <div class="form-group" id="planQueueTypeGroup" style="display:none;">
+      <label class="form-label">Queue Algorithm</label>
+      <select id="planQueueType" class="form-control">
+        <option value="">Auto (use global setting)</option>
+      </select>
+      <small style="color:var(--text-muted);font-size:12px;">
+        Applies to coin-paid sessions on this plan too, not just vouchers. External Router mode only.
+      </small>
+    </div>
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Data Limit (MB)</label>

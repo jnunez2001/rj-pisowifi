@@ -128,12 +128,6 @@ const COMING_SOON_PAGES = {
     description: 'Ongoing management view of the bridge/VLAN lane setup created by the MikroTik setup wizard.',
     workstream: 'Workstream 10'
   },
-  'mikrotik-queues': {
-    icon: 'fa-gauge-high',
-    title: 'Bandwidth / Queues',
-    description: 'Browse and edit every active Simple Queue on the router, not just per-client caps.',
-    workstream: 'Workstream 10'
-  },
   'mikrotik-hotspot': {
     icon: 'fa-door-open',
     title: 'Hotspot / Captive Portal',

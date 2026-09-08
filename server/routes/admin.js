@@ -1626,6 +1626,7 @@ function planRowToJson(row) {
     validity_minutes: row.validity_minutes,
     download_mbps: row.download_mbps,
     upload_mbps: row.upload_mbps,
+    queue_type: row.queue_type,
     is_premium: !!row.is_premium,
     data_limit_mb: row.data_limit_mb,
     device_limit: row.device_limit,
@@ -1681,18 +1682,24 @@ function syncPlanCoinVendoRate(planId) {
     download_mbps: plan.is_premium ? (plan.download_mbps || null) : null,
     upload_mbps: plan.is_premium ? (plan.upload_mbps || plan.download_mbps || null) : null,
     data_limit_mb: plan.data_limit_mb || null,
+    // Unlike download/upload above, the Queue Type carries through for a
+    // Regular plan too (coinCreditService.js's creditCoinValue() only
+    // reads a Regular-tier queue_type when there's no Premium override to
+    // carry it instead) - it's the AQM algorithm, not a speed boost, so
+    // there's no reason to gate it on is_premium.
+    queue_type: plan.queue_type || null,
   };
 
   if (existing) {
     db.prepare(`
-      UPDATE rates SET coin_value = ?, minutes = ?, expiration_minutes = ?, label = ?, download_mbps = ?, upload_mbps = ?, data_limit_mb = ?
+      UPDATE rates SET coin_value = ?, minutes = ?, expiration_minutes = ?, label = ?, download_mbps = ?, upload_mbps = ?, data_limit_mb = ?, queue_type = ?
       WHERE id = ?
-    `).run(fields.coin_value, fields.minutes, fields.expiration_minutes, fields.label, fields.download_mbps, fields.upload_mbps, fields.data_limit_mb, existing.id);
+    `).run(fields.coin_value, fields.minutes, fields.expiration_minutes, fields.label, fields.download_mbps, fields.upload_mbps, fields.data_limit_mb, fields.queue_type, existing.id);
   } else {
     db.prepare(`
-      INSERT INTO rates (coin_value, minutes, expiration_minutes, label, download_mbps, upload_mbps, data_limit_mb, plan_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(fields.coin_value, fields.minutes, fields.expiration_minutes, fields.label, fields.download_mbps, fields.upload_mbps, fields.data_limit_mb, planId);
+      INSERT INTO rates (coin_value, minutes, expiration_minutes, label, download_mbps, upload_mbps, data_limit_mb, plan_id, queue_type)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(fields.coin_value, fields.minutes, fields.expiration_minutes, fields.label, fields.download_mbps, fields.upload_mbps, fields.data_limit_mb, planId, fields.queue_type);
   }
 }
 
@@ -1747,6 +1754,10 @@ function validatePlanInput(body, { partial = false } = {}) {
     const v = body.upload_mbps === null || body.upload_mbps === '' ? null : Number(body.upload_mbps);
     if (v !== null && (!Number.isFinite(v) || v < 0)) errors.push('Upload speed cannot be negative.');
     out.upload_mbps = v;
+  }
+  if (body.queue_type !== undefined) {
+    const v = body.queue_type ? String(body.queue_type).trim().slice(0, 64) : null;
+    out.queue_type = v || null;
   }
   if (body.is_premium !== undefined) {
     out.is_premium = body.is_premium ? 1 : 0;
@@ -1849,14 +1860,14 @@ router.post('/plans', adminAuth, (req, res) => {
     const result = db.prepare(`
       INSERT INTO plans (
         name, description, type, status, price, duration_minutes, validity_minutes,
-        download_mbps, upload_mbps, is_premium, data_limit_mb, device_limit, session_limit,
+        download_mbps, upload_mbps, queue_type, is_premium, data_limit_mb, device_limit, session_limit,
         schedule_start, schedule_end, channel_voucher, channel_portal, channel_coin_vendo,
         channel_account, display_order
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       out.name, out.description || null, out.type, out.status, out.price,
       out.duration_minutes ?? null, out.validity_minutes ?? null,
-      out.download_mbps ?? null, out.upload_mbps ?? null, out.is_premium ?? 0, out.data_limit_mb ?? null,
+      out.download_mbps ?? null, out.upload_mbps ?? null, out.queue_type ?? null, out.is_premium ?? 0, out.data_limit_mb ?? null,
       out.device_limit ?? 1, out.session_limit ?? null,
       out.schedule_start ?? null, out.schedule_end ?? null,
       out.channel_voucher, out.channel_portal, out.channel_coin_vendo, out.channel_account,
@@ -1912,14 +1923,14 @@ router.post('/plans/:id/duplicate', adminAuth, (req, res) => {
     const result = db.prepare(`
       INSERT INTO plans (
         name, description, type, status, price, duration_minutes, validity_minutes,
-        download_mbps, upload_mbps, is_premium, data_limit_mb, device_limit, session_limit,
+        download_mbps, upload_mbps, queue_type, is_premium, data_limit_mb, device_limit, session_limit,
         schedule_start, schedule_end, channel_voucher, channel_portal, channel_coin_vendo,
         channel_account, display_order
-      ) VALUES (?, ?, ?, 'inactive', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, 'inactive', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       newName, existing.description, existing.type, existing.price,
       existing.duration_minutes, existing.validity_minutes,
-      existing.download_mbps, existing.upload_mbps, existing.is_premium, existing.data_limit_mb,
+      existing.download_mbps, existing.upload_mbps, existing.queue_type, existing.is_premium, existing.data_limit_mb,
       existing.device_limit, existing.session_limit,
       existing.schedule_start, existing.schedule_end,
       existing.channel_voucher, existing.channel_portal, existing.channel_coin_vendo, existing.channel_account,
@@ -2374,7 +2385,8 @@ router.get('/spam-settings', adminAuth, (req, res) => {
       bandwidth_burst_seconds: getSetting('bandwidth_burst_seconds', '8'),
       max_mbps: getSetting('max_mbps', '5'),
       spam_max_attempts: getSetting('spam_max_attempts', '3'),
-      spam_block_minutes: getSetting('spam_block_minutes', '1')
+      spam_block_minutes: getSetting('spam_block_minutes', '1'),
+      mikrotik_aqm_type: getSetting('mikrotik_aqm_type', 'auto')
     });
   } catch (err) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -2384,7 +2396,7 @@ router.get('/spam-settings', adminAuth, (req, res) => {
 // POST /api/admin/spam-settings
 router.post('/spam-settings', adminAuth, (req, res) => {
   try {
-    const { enable_bandwidth_cap, bandwidth_cap_download_mbps, bandwidth_cap_upload_mbps, enable_bandwidth_burst, bandwidth_burst_mbps, bandwidth_burst_seconds, max_mbps, spam_max_attempts, spam_block_minutes } = req.body;
+    const { enable_bandwidth_cap, bandwidth_cap_download_mbps, bandwidth_cap_upload_mbps, enable_bandwidth_burst, bandwidth_burst_mbps, bandwidth_burst_seconds, max_mbps, spam_max_attempts, spam_block_minutes, mikrotik_aqm_type } = req.body;
     const updateSetting = (key, value) => {
       if (value === undefined) return;
       const existing = db.prepare('SELECT key FROM settings WHERE key = ?').get(key);
@@ -2403,6 +2415,7 @@ router.post('/spam-settings', adminAuth, (req, res) => {
     updateSetting('max_mbps', max_mbps);
     updateSetting('spam_max_attempts', spam_max_attempts);
     updateSetting('spam_block_minutes', spam_block_minutes);
+    updateSetting('mikrotik_aqm_type', mikrotik_aqm_type);
     console.log('⚙️ Spam/bandwidth settings updated');
 
     // A bandwidth-cap change only ever affected sessions created after
@@ -4563,6 +4576,76 @@ router.delete('/network/mikrotik/vlans/:id', adminAuth, async (req, res) => {
   }
 });
 
+// ===== MIKROTIK QUEUE TYPE / AQM MANAGER =====
+// Lets an operator see and manage the router's smart-queue (AQM) algorithm
+// from the admin panel instead of WinBox: which Queue Types exist, which
+// one new client sessions get assigned (mikrotik_aqm_type setting, read
+// via the generic settings endpoint), and defining custom Queue Types.
+
+const mikrotikQueueTypeSchema = z.object({
+  name: z.string().trim().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid queue type name'),
+  kind: z.enum(['cake', 'fq-codel']),
+  cakeRtt: z.string().trim().max(16).optional(),
+  cakeDiffserv: z.string().trim().max(32).optional(),
+  cakeFlowmode: z.string().trim().max(32).optional(),
+  fqCodelTarget: z.string().trim().max(16).optional(),
+  fqCodelInterval: z.string().trim().max(16).optional(),
+  fqCodelLimit: z.coerce.number().int().min(1).max(1000000).optional(),
+  fqCodelFlows: z.coerce.number().int().min(1).max(65536).optional(),
+});
+
+// GET /api/admin/network/mikrotik/queue-types
+router.get('/network/mikrotik/queue-types', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const queueTypes = await mikrotikService.listQueueTypes();
+    return res.json({ success: true, queueTypes });
+  } catch (err) {
+    console.error('MikroTik queue type list error:', err);
+    res.status(500).json({ success: false, message: 'Failed to reach router: ' + err.message });
+  }
+});
+
+// POST /api/admin/network/mikrotik/queue-types
+router.post('/network/mikrotik/queue-types', adminAuth, validateBody(mikrotikQueueTypeSchema), async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const created = await mikrotikService.createQueueType(req.body);
+    console.log(`🔀 MikroTik Queue Type created: ${created.name} (${created.kind})`);
+    return res.json({ success: true, queueType: created });
+  } catch (err) {
+    if (err instanceof (require('../services/mikrotikService').MikrotikQueueTypeConflictError)) {
+      return res.status(409).json({ success: false, message: err.message });
+    }
+    console.error('MikroTik queue type create error:', err);
+    res.status(500).json({ success: false, message: 'Failed to create queue type: ' + err.message });
+  }
+});
+
+// GET /api/admin/network/mikrotik/queues - read-only view of every active
+// Simple Queue on the router (per-client session queues, the WAN cap
+// queue, etc.), so an operator can see the whole queue tree without
+// opening WinBox.
+router.get('/network/mikrotik/queues', adminAuth, async (req, res) => {
+  try {
+    const mikrotikService = require('../services/mikrotikService');
+    if (!mikrotikService.isMikrotikModeEnabled()) {
+      return res.status(400).json({ success: false, message: 'MikroTik mode is not enabled' });
+    }
+    const queues = await mikrotikService.listSimpleQueues();
+    return res.json({ success: true, queues });
+  } catch (err) {
+    console.error('MikroTik simple queue list error:', err);
+    res.status(500).json({ success: false, message: 'Failed to reach router: ' + err.message });
+  }
+});
+
 // ===== MIKROTIK DHCP MANAGER (network power parity with Standalone) =====
 // A VLAN from the manager above is just an addressed interface until it
 // can hand out addresses - this is the other half. mikrotikService.js's
@@ -4919,6 +5002,7 @@ const bandwidthProfileSchema = z.object({
   downloadMbps: z.coerce.number().int().min(1).max(10000),
   uploadMbps: z.coerce.number().int().min(1).max(10000),
   burstMbps: z.coerce.number().int().min(0).max(10000).optional(),
+  queueType: z.string().trim().max(64).optional(),
 });
 
 // GET /api/admin/bandwidth-profiles
@@ -4939,10 +5023,10 @@ router.post('/bandwidth-profiles', adminAuth, validateBody(bandwidthProfileSchem
     if (!canUse('bandwidth_profiles')) {
       return res.status(403).json({ success: false, message: 'Named bandwidth profiles are a Pro feature. Upgrade to create custom traffic policies.' });
     }
-    const { name, downloadMbps, uploadMbps, burstMbps } = req.body;
+    const { name, downloadMbps, uploadMbps, burstMbps, queueType } = req.body;
     const result = db.prepare(
-      'INSERT INTO bandwidth_profiles (name, download_mbps, upload_mbps, burst_mbps) VALUES (?, ?, ?, ?)'
-    ).run(name, downloadMbps, uploadMbps, burstMbps || 0);
+      'INSERT INTO bandwidth_profiles (name, download_mbps, upload_mbps, burst_mbps, queue_type) VALUES (?, ?, ?, ?, ?)'
+    ).run(name, downloadMbps, uploadMbps, burstMbps || 0, queueType || 'auto');
     console.log(`📶 Bandwidth profile created: ${name} (${downloadMbps}/${uploadMbps}Mbps)`);
     return res.json({ success: true, id: result.lastInsertRowid });
   } catch (err) {

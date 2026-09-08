@@ -1,0 +1,150 @@
+<div class="zf3-header">
+  <div>
+    <div class="page-title">Bandwidth / Queues</div>
+    <div class="page-subtitle">Manage the router's smart-queue (AQM) algorithm and view every active queue, without opening the router's own web interface.</div>
+  </div>
+  <div class="zf3-header-right">
+    <div class="zf3-icon-btn" onclick="loadMikrotikQueuesPage()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
+    <button class="btn btn-primary" onclick="openAddQueueType()">
+      <i class="fas fa-plus"></i> New Queue Type
+    </button>
+  </div>
+</div>
+
+<div class="zf3-card">
+  <div class="zf3-card-title" style="margin-bottom:8px;">
+    <i class="fas fa-sliders" style="margin-right:8px;color:var(--accent-blue);"></i>
+    Global Queue Algorithm
+  </div>
+  <div class="alert alert-info">
+    <i class="fas fa-info-circle"></i>
+    Controls which smart-queue algorithm is assigned to new client sessions by default. A Bandwidth Profile can override this for its own clients on the Bandwidth Profiles page.
+  </div>
+  <div class="form-group" style="max-width:360px;">
+    <label class="form-label">Algorithm</label>
+    <select id="mqGlobalAlgorithm" class="form-control">
+      <option value="auto">Auto (recommended)</option>
+    </select>
+  </div>
+  <button class="btn btn-primary" onclick="saveMqGlobalAlgorithm()">
+    <i class="fas fa-save"></i> Save
+  </button>
+</div>
+
+<div class="zf3-card" style="margin-top:16px;">
+  <div class="zf3-card-title" style="margin-bottom:8px;">
+    <i class="fas fa-list" style="margin-right:8px;color:var(--accent-blue);"></i>
+    Queue Types
+  </div>
+  <div class="table-wrapper">
+    <table class="table-stack">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Kind</th>
+          <th>Parameters</th>
+        </tr>
+      </thead>
+      <tbody id="mqQueueTypesTable">
+        <tr><td colspan="3"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="zf3-card" style="margin-top:16px;">
+  <div class="zf3-card-title" style="margin-bottom:8px;">
+    <i class="fas fa-diagram-project" style="margin-right:8px;color:var(--accent-blue);"></i>
+    Active Simple Queues
+  </div>
+  <div class="alert alert-info">
+    <i class="fas fa-info-circle"></i>
+    Read-only view of every Simple Queue currently on the router (per-client session queues, WAN caps, and anything else set up manually).
+  </div>
+  <div class="table-wrapper">
+    <table class="table-stack">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Target</th>
+          <th>Parent</th>
+          <th>Queue (Up/Down)</th>
+          <th>Max Limit</th>
+          <th>Priority</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="mqSimpleQueuesTable">
+        <tr><td colspan="7"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- NEW QUEUE TYPE MODAL -->
+<div class="modal-overlay" id="mqQueueTypeModal">
+  <div class="modal" style="max-width:480px;">
+    <div class="modal-header">
+      <div class="modal-title">New Queue Type</div>
+      <button class="modal-close" onclick="closeModal('mqQueueTypeModal')"><i class="fas fa-times"></i></button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input type="text" id="mqNewName" class="form-control" placeholder="e.g. rj-game-priority-cake">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Kind</label>
+      <select id="mqNewKind" class="form-control" onchange="toggleMqKindFields()">
+        <option value="fq-codel">fq_codel</option>
+        <option value="cake">CAKE</option>
+      </select>
+    </div>
+
+    <div id="mqCakeFields" style="display:none;">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">RTT</label>
+          <input type="text" id="mqCakeRtt" class="form-control" placeholder="100ms">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Diffserv</label>
+          <input type="text" id="mqCakeDiffserv" class="form-control" placeholder="diffserv4">
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Flow Mode</label>
+        <input type="text" id="mqCakeFlowmode" class="form-control" placeholder="triple-isolate">
+      </div>
+    </div>
+
+    <div id="mqFqCodelFields">
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Target</label>
+          <input type="text" id="mqFqTarget" class="form-control" placeholder="5ms">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Interval</label>
+          <input type="text" id="mqFqInterval" class="form-control" placeholder="100ms">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Limit</label>
+          <input type="number" id="mqFqLimit" class="form-control" placeholder="10240">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Flows</label>
+          <input type="number" id="mqFqFlows" class="form-control" placeholder="1024">
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button class="btn btn-secondary" onclick="closeModal('mqQueueTypeModal')">Cancel</button>
+      <button class="btn btn-primary" id="mqQueueTypeSaveBtn" onclick="createMqQueueType()">
+        <i class="fas fa-save"></i> Create
+      </button>
+    </div>
+  </div>
+</div>

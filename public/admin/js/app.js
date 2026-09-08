@@ -472,6 +472,7 @@ async function navigateTo(page) {
       'access-points': () => typeof loadAccessPointsPage === 'function' && loadAccessPointsPage(),
       'network-devices': () => typeof loadNetworkDevicesPage === 'function' && loadNetworkDevicesPage(),
       'bandwidth-profiles': () => typeof loadBandwidthProfilesPage === 'function' && loadBandwidthProfilesPage(),
+      'mikrotik-queues': () => typeof loadMikrotikQueuesPage === 'function' && loadMikrotikQueuesPage(),
       'firmware-flasher': () => typeof loadFirmwareFlasherPage === 'function' && loadFirmwareFlasherPage(),
       promos: () => typeof loadPromosPage === 'function' && loadPromosPage(),
       settings: () => typeof loadSettings === 'function' && loadSettings(),

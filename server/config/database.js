@@ -1787,6 +1787,14 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('happy_hour_end', '17:00');
   upsertIfMissing('happy_hour_multiplier', '2');
   upsertIfMissing('happy_hour_message', 'Happy Hour has ended. Your remaining bonus time was converted to regular time.');
+  // Which AQM algorithm mikrotikService.js applies to newly-created
+  // per-client queues on a MikroTik/Controller-mode box - 'auto' keeps the
+  // app's own detection (prefers fq-codel, falls back to cake), or an
+  // operator can pin it to 'cake', 'fq-codel', or the exact name of a
+  // custom queue type they created on the Queues page. Configurable from
+  // Security > Bandwidth Control or the Queues page itself (both edit
+  // this same setting).
+  upsertIfMissing('mikrotik_aqm_type', 'auto');
   // Promo/ad carousel auto-advance speed (Branding > Promo Carousel) -
   // how many seconds each image stays on screen before rotating to the
   // next one. Portal.js clamps this to a sane range on its own (see
@@ -2115,6 +2123,49 @@ try {
 // happyHourService.js for how this is used.
 try {
   db.exec('ALTER TABLE sessions ADD COLUMN regular_expires_at TEXT');
+} catch (e) {
+  // already applied
+}
+
+// Per-profile Queue Algorithm override (Bandwidth Profiles page) - NULL
+// (or 'auto') means "use the global mikrotik_aqm_type setting", matching
+// the same auto/cake/fq-codel/custom-name convention that setting uses.
+try {
+  db.exec("ALTER TABLE bandwidth_profiles ADD COLUMN queue_type TEXT DEFAULT 'auto'");
+} catch (e) {
+  // already applied
+}
+
+// Extends the same per-profile Queue Algorithm override to coin-paid
+// sessions, not just vouchers. Plans (server/routes/admin.js's
+// validatePlanInput/syncPlanCoinVendoRate) copy a chosen Bandwidth
+// Profile's queue_type into their own column, one-way, the same way they
+// already copy download_mbps/upload_mbps in (see plans.js's
+// onPlanBandwidthProfileChange) - not a live FK, editing the profile later
+// doesn't retroactively change plans/rates that borrowed its queue type.
+// rates.queue_type is what coinCreditService.js actually reads at insert
+// time; sessions.queue_type/premium_queue_type are where it lands once a
+// coin (or voucher) session picks it up, mirroring the existing
+// download_mbps/upload_mbps (permanent) vs premium_download_mbps/
+// premium_upload_mbps (temporary Boost, must actually expire) split - see
+// sessionService.js's effectiveBandwidth().
+try {
+  db.exec('ALTER TABLE plans ADD COLUMN queue_type TEXT');
+} catch (e) {
+  // already applied
+}
+try {
+  db.exec('ALTER TABLE rates ADD COLUMN queue_type TEXT');
+} catch (e) {
+  // already applied
+}
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN queue_type TEXT');
+} catch (e) {
+  // already applied
+}
+try {
+  db.exec('ALTER TABLE sessions ADD COLUMN premium_queue_type TEXT');
 } catch (e) {
   // already applied
 }

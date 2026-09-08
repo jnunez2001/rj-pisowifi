@@ -20,11 +20,12 @@
           <th>Download</th>
           <th>Upload</th>
           <th>Burst</th>
+          <th>Queue Type</th>
           <th style="text-align:right;">Actions</th>
         </tr>
       </thead>
       <tbody id="bwProfilesTable">
-        <tr><td colspan="5"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+        <tr><td colspan="6"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
       </tbody>
     </table>
   </div>
@@ -62,6 +63,15 @@
     <div class="form-group">
       <label class="form-label">Burst (Mbps, optional)</label>
       <input type="number" id="bwProfileBurst" class="form-control" min="0" max="10000" placeholder="Leave blank for none">
+    </div>
+    <div class="form-group" id="bwProfileQueueTypeGroup" style="display:none;">
+      <label class="form-label">Queue Type</label>
+      <select id="bwProfileQueueType" class="form-control">
+        <option value="auto">Auto (use global setting)</option>
+      </select>
+      <small style="color:var(--text-muted);font-size:12px;">
+        Overrides the global Queue Algorithm (Security page) for clients on this profile only. External Router mode only.
+      </small>
     </div>
     <div style="display:flex;gap:10px;justify-content:flex-end;">
       <button class="btn btn-secondary" onclick="closeModal('bwProfileModal')">Cancel</button>

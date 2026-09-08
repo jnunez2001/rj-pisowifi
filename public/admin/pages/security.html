@@ -118,6 +118,16 @@
       </div>
     </div>
 
+    <div class="form-group" id="queueAlgorithmGroup" style="display:none;">
+      <label class="form-label">Queue Algorithm</label>
+      <select id="queueAlgorithm" class="form-control">
+        <option value="auto">Auto (recommended)</option>
+      </select>
+      <small style="color:var(--text-muted);font-size:12px;">
+        Controls how the router smooths out congestion for every client (reduces lag spikes during heavy use). Auto picks the best available algorithm on your router. External Router mode only.
+      </small>
+    </div>
+
     <button class="btn btn-primary" onclick="saveBandwidthSettings()">
       <i class="fas fa-save"></i> Save Bandwidth Settings
     </button>

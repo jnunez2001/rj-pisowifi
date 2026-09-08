@@ -39,68 +39,231 @@ const mikMac = (mac) => String(mac).toUpperCase();
 // with no explicit =queue= type, which means RouterOS silently defaulted
 // every one of them to "default-small" - a plain FIFO with no bufferbloat
 // protection at all. Confirmed live on real hardware: even though the
-// lane-wide queues use CAKE, the per-client queue is what actually enforces
-// the cap (it's narrower than the lane's /24 target), so the FIFO default
-// was the one actually queueing customer traffic under load, adding real,
-// avoidable latency. Cached for 5 minutes so this doesn't add a round trip
-// to every single setClientBandwidth() call (fired every 30s per active
-// session) - CAKE availability only changes on a RouterOS
-// upgrade/downgrade, not moment to moment.
-const CAKE_CHECK_TTL_MS = 5 * 60 * 1000;
-let cakeQueueTypeCache = { value: undefined, checkedAt: 0 };
+// lane-wide queues use a real AQM type, the per-client queue is what
+// actually enforces the cap (it's narrower than the lane's /24 target), so
+// the FIFO default was the one actually queueing customer traffic under
+// load, adding real, avoidable latency. Cached for 5 minutes so this
+// doesn't add a round trip to every single setClientBandwidth() call
+// (fired every 30s per active session) - which AQM types are available
+// only changes on a RouterOS upgrade/downgrade or a manual queue-type
+// edit, not moment to moment.
+const AQM_CHECK_TTL_MS = 5 * 60 * 1000;
+let aqmQueueTypeCache = { value: undefined, checkedAt: 0 };
 
-// Bug found live, real money/service impact: this used to just check
-// whether ANY queue type had kind=cake, then unconditionally referenced
-// a queue type literally NAMED "cake" (=queue=cake/cake) - correct only
-// on a router where that exact name exists. Confirmed live on a real
-// router: it has kind=cake types, just named "CAKE-UP"/"CAKE-DOWN", not
-// "cake" - referencing the non-existent literal name made every
-// /queue/simple/add call for a per-client queue fail outright, and
-// since setClientBandwidth() swallows that into a caught error/false
-// return, NO per-client bandwidth queue was ever created for ANY
-// customer - full, uncapped speed for everyone, silently, since the
-// caller only ever saw a generic failure log, not "the queue type name
-// was wrong." Returns the REAL type name(s) that actually exist, not an
-// assumed literal, so this works regardless of how CAKE happens to be
-// named on a given router.
-async function resolveCakeQueueTypes(client) {
-  if (cakeQueueTypeCache.value !== undefined && Date.now() - cakeQueueTypeCache.checkedAt < CAKE_CHECK_TTL_MS) {
-    return cakeQueueTypeCache.value;
+// Bug found live, real money/service impact (original CAKE-only version):
+// this used to just check whether ANY queue type had kind=cake, then
+// unconditionally referenced a queue type literally NAMED "cake"
+// (=queue=cake/cake) - correct only on a router where that exact name
+// exists. Confirmed live on a real router: it has kind=cake types, just
+// named "CAKE-UP"/"CAKE-DOWN", not "cake" - referencing the non-existent
+// literal name made every /queue/simple/add call for a per-client queue
+// fail outright, and since setClientBandwidth() swallows that into a
+// caught error/false return, NO per-client bandwidth queue was ever
+// created for ANY customer - full, uncapped speed for everyone, silently,
+// since the caller only ever saw a generic failure log, not "the queue
+// type name was wrong."
+//
+// Second bug found live: this only ever looked for kind=cake, so an
+// operator who deliberately switched their lane-wide queues to fq-codel
+// (a real, valid AQM choice - RouterOS ships a built-in "fq-codel" type by
+// default, no custom naming needed) kept getting CAKE on every NEW
+// per-client queue anyway, since the CAKE-UP/CAKE-DOWN queue-type
+// definitions still existed on the router even after the operator's
+// simple queues stopped referencing them. New customer sessions silently
+// diverged from the operator's actual chosen AQM algorithm. Now checks
+// fq-codel first (RouterOS's own built-in default type, so an exact-name
+// match is the common case, unlike CAKE which needs custom-named
+// instances), then falls back to cake using the same real-type-name
+// resolution as before, so this always matches whichever AQM the operator
+// has actually set up rather than assuming one specific algorithm.
+function pickCakeTypePair(cakeTypes) {
+  // Prefer an exact literal "cake" type if one actually exists (matches
+  // what mikrotikProvisioner.js itself assumes for the lane-wide queue) -
+  // only trust that shortcut when it's actually there, never assume it.
+  const exact = cakeTypes.find((r) => r.name === 'cake');
+  if (exact) return { upload: 'cake', download: 'cake' };
+  // No type literally named "cake" - look for a real upload/download-named
+  // pair (matches this app's own "CAKE-UP"/"CAKE-DOWN" naming convention,
+  // case-insensitively, in case it differs slightly router to router).
+  const up = cakeTypes.find((r) => /up/i.test(r.name));
+  const down = cakeTypes.find((r) => /down/i.test(r.name));
+  return (up && down)
+    ? { upload: up.name, download: down.name }
+    // No recognizable up/down pair either - use whichever single cake-kind
+    // type exists for both directions rather than guessing a name that
+    // isn't there.
+    : { upload: cakeTypes[0].name, download: cakeTypes[0].name };
+}
+
+// Operator setting (Security > Bandwidth Control, or the Queues page) -
+// 'auto' (default) keeps the historical auto-detect behavior below;
+// 'cake' or 'fq-codel' forces that kind specifically; any other value is
+// treated as the exact name of a queue type the operator created
+// themselves (see createQueueType() below), applied to both directions.
+function getConfiguredAqmSetting() {
+  return db.prepare("SELECT value FROM settings WHERE key = 'mikrotik_aqm_type'").get()?.value || 'auto';
+}
+
+async function resolveAqmQueueTypes(client, settingOverride) {
+  // A Bandwidth Profile's own queue_type (Bandwidth Profiles page) wins
+  // over the global mikrotik_aqm_type setting when the profile has one
+  // other than 'auto' - same auto/cake/fq-codel/custom-name convention,
+  // just scoped to that profile's clients instead of every new session.
+  const setting = (settingOverride && settingOverride !== 'auto') ? settingOverride : getConfiguredAqmSetting();
+  const cacheKey = `${setting}`;
+  if (aqmQueueTypeCache.value !== undefined && aqmQueueTypeCache.key === cacheKey && Date.now() - aqmQueueTypeCache.checkedAt < AQM_CHECK_TTL_MS) {
+    return aqmQueueTypeCache.value;
   }
   let result = null;
   try {
     const res = await client.talk(['/queue/type/print']);
-    const cakeTypes = res.re.filter((r) => r.kind === 'cake');
-    if (cakeTypes.length > 0) {
-      // Prefer an exact literal "cake" type if one actually exists
-      // (matches what mikrotikProvisioner.js itself assumes for the
-      // lane-wide queue) - only trust that shortcut when it's actually
-      // there, never assume it.
-      const exact = cakeTypes.find((r) => r.name === 'cake');
-      if (exact) {
-        result = { upload: 'cake', download: 'cake' };
+
+    if (setting !== 'auto' && setting !== 'cake' && setting !== 'fq-codel') {
+      // A specific custom type name the operator picked - use it for both
+      // directions if it still actually exists (a deleted/renamed type
+      // falls through to auto below rather than silently applying no
+      // shaping at all).
+      const named = res.re.find((r) => r.name === setting);
+      if (named) result = { upload: named.name, download: named.name };
+    }
+
+    if (!result && setting === 'cake') {
+      const cakeTypes = res.re.filter((r) => r.kind === 'cake');
+      if (cakeTypes.length > 0) result = pickCakeTypePair(cakeTypes);
+    }
+
+    if (!result && setting === 'fq-codel') {
+      const fqCodelTypes = res.re.filter((r) => r.kind === 'fq-codel');
+      if (fqCodelTypes.length > 0) {
+        const exact = fqCodelTypes.find((r) => r.name === 'fq-codel');
+        result = exact
+          ? { upload: 'fq-codel', download: 'fq-codel' }
+          : { upload: fqCodelTypes[0].name, download: fqCodelTypes[0].name };
+      }
+    }
+
+    if (!result) {
+      // 'auto' (or a stale/deleted custom setting falling through) -
+      // prefer fq-codel (RouterOS's own built-in default type, no custom
+      // naming needed), then cake, matching this app's historical
+      // preference order.
+      const fqCodelTypes = res.re.filter((r) => r.kind === 'fq-codel');
+      if (fqCodelTypes.length > 0) {
+        const exact = fqCodelTypes.find((r) => r.name === 'fq-codel');
+        result = exact
+          ? { upload: 'fq-codel', download: 'fq-codel' }
+          : { upload: fqCodelTypes[0].name, download: fqCodelTypes[0].name };
       } else {
-        // No type literally named "cake" - look for a real upload/
-        // download-named pair (matches this app's own "CAKE-UP"/
-        // "CAKE-DOWN" naming convention, case-insensitively, in case it
-        // differs slightly router to router).
-        const up = cakeTypes.find((r) => /up/i.test(r.name));
-        const down = cakeTypes.find((r) => /down/i.test(r.name));
-        result = (up && down)
-          ? { upload: up.name, download: down.name }
-          // No recognizable up/down pair either - use whichever single
-          // cake-kind type exists for both directions rather than
-          // guessing a name that isn't there.
-          : { upload: cakeTypes[0].name, download: cakeTypes[0].name };
+        const cakeTypes = res.re.filter((r) => r.kind === 'cake');
+        if (cakeTypes.length > 0) result = pickCakeTypePair(cakeTypes);
       }
     }
   } catch (e) {
-    // Unknown - don't cache a failed check, don't claim CAKE is
+    // Unknown - don't cache a failed check, don't claim an AQM type is
     // available when we couldn't actually confirm it.
     return null;
   }
-  cakeQueueTypeCache = { value: result, checkedAt: Date.now() };
+  aqmQueueTypeCache = { value: result, key: cacheKey, checkedAt: Date.now() };
   return result;
+}
+
+// Lists every queue type on the router (all kinds), for the admin Queues
+// page's live view and for populating the Queue Algorithm dropdown with
+// whatever CAKE/fq-codel-kind types actually exist (built-in or operator-
+// created), rather than a fixed hardcoded list.
+async function listQueueTypes() {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const res = await client.talk(['/queue/type/print']);
+    return res.re.map((t) => ({
+      id: t['.id'],
+      name: t.name,
+      kind: t.kind,
+      is_default: t.default === 'true',
+      // Surface the handful of parameters this app actually lets an
+      // operator tune (see createQueueType()) - not every possible
+      // kind-specific field RouterOS supports.
+      cake_rtt: t['cake-rtt'],
+      cake_diffserv: t['cake-diffserv'],
+      cake_flowmode: t['cake-flowmode'],
+      fq_codel_target: t['fq-codel-target'],
+      fq_codel_interval: t['fq-codel-interval'],
+      fq_codel_limit: t['fq-codel-limit'],
+      fq_codel_flows: t['fq-codel-flows'],
+    }));
+  });
+}
+
+// Read-only live view of the router's current Simple Queue tree (Queues
+// page) - names, targets, hierarchy, and limits, so an operator can see
+// what's actually configured without opening WinBox/WebFig. Deliberately
+// not editable from here yet (this app's own automatic per-client queue
+// management already owns most of these rows - see setClientBandwidth()
+// below - so free-form editing risks fighting with that).
+async function listSimpleQueues() {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  return withMikrotik(config, async (client) => {
+    const res = await client.talk(['/queue/simple/print']);
+    return res.re.map((q) => ({
+      id: q['.id'],
+      name: q.name,
+      target: q.target,
+      parent: q.parent && q.parent !== 'none' ? q.parent : null,
+      queue_upload: (q.queue || '').split('/')[0] || null,
+      queue_download: (q.queue || '').split('/')[1] || null,
+      max_limit: q['max-limit'],
+      priority: q.priority,
+      disabled: q.disabled === 'true',
+    }));
+  });
+}
+
+class MikrotikQueueTypeConflictError extends Error {
+  constructor(msg) {
+    super(msg);
+    this.name = 'MikrotikQueueTypeConflictError';
+  }
+}
+
+// Creates a new named queue type on the router (Queues page's "Create New
+// Queue Type" form) - scoped to the two AQM kinds this app actually cares
+// about (CAKE and fq-codel), not RouterOS's full parameter surface for
+// every possible queue kind. Once created, it becomes selectable anywhere
+// the Queue Algorithm dropdown appears via the exact-name-match branch in
+// resolveAqmQueueTypes() above.
+async function createQueueType({ name, kind, cakeRtt, cakeDiffserv, cakeFlowmode, fqCodelTarget, fqCodelInterval, fqCodelLimit, fqCodelFlows }) {
+  const config = getMikrotikConfig();
+  if (!config.ip) throw new Error('MikroTik IP not configured');
+  if (kind !== 'cake' && kind !== 'fq-codel') {
+    throw new Error('Only cake and fq-codel queue types can be created here');
+  }
+
+  return withMikrotik(config, async (client) => {
+    const existing = await client.talk(['/queue/type/print', `?name=${name}`]);
+    if (existing.re.length > 0) {
+      throw new MikrotikQueueTypeConflictError(`A queue type named "${name}" already exists`);
+    }
+
+    const words = ['/queue/type/add', `=name=${name}`, `=kind=${kind}`];
+    if (kind === 'cake') {
+      // cake-bandwidth intentionally left at RouterOS's own default (0,
+      // meaning "no self-limit") - this app always applies the real cap
+      // via the Simple Queue's own max-limit, same convention the
+      // existing CAKE-UP/CAKE-DOWN types already use.
+      words.push(`=cake-rtt=${cakeRtt || '100ms'}`);
+      words.push(`=cake-diffserv=${cakeDiffserv || 'diffserv4'}`);
+      words.push(`=cake-flowmode=${cakeFlowmode || 'triple-isolate'}`);
+    } else {
+      words.push(`=fq-codel-target=${fqCodelTarget || '5ms'}`);
+      words.push(`=fq-codel-interval=${fqCodelInterval || '100ms'}`);
+      words.push(`=fq-codel-limit=${fqCodelLimit || '10240'}`);
+      words.push(`=fq-codel-flows=${fqCodelFlows || '1024'}`);
+    }
+    await client.talk(words);
+    return { name, kind };
+  });
 }
 
 /**
@@ -368,7 +531,7 @@ async function addOrUpdateQueue(client, words) {
 // is set to the sustained cap itself, so a client bursts freely from an
 // idle/light-use starting point (a page load, a short speed test) but
 // settles back to the honest cap the moment they're actually using it.
-async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst = null, trackDataUsage = false) {
+async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, burst = null, trackDataUsage = false, queueTypeOverride = null) {
   const config = getMikrotikConfig();
   if (!config.ip) return false;
 
@@ -541,12 +704,14 @@ async function setClientBandwidth(mac, downloadMbps, uploadMbps = downloadMbps, 
       ] : ['=burst-limit=0/0', '=burst-threshold=0/0', '=burst-time=0s/0s'];
 
       // Real traffic queues at the child level (see the comment on
-      // childBurstWords below), but CAKE is applied consistently across the
-      // parent and both children rather than just the leaves - cheap on a
-      // node that mostly just accounts/limits rather than actually holding
+      // childBurstWords below), but the operator's chosen AQM type (CAKE
+      // or fq-codel, whichever they've actually set up - see
+      // resolveAqmQueueTypes()) is applied consistently across the parent
+      // and both children rather than just the leaves - cheap on a node
+      // that mostly just accounts/limits rather than actually holding
       // packets, and keeps every queue in this tree behaving the same way.
-      const cakeTypes = await resolveCakeQueueTypes(client);
-      const queueType = cakeTypes ? `${cakeTypes.upload}/${cakeTypes.download}` : 'default-small/default-small';
+      const aqmTypes = await resolveAqmQueueTypes(client, queueTypeOverride);
+      const queueType = aqmTypes ? `${aqmTypes.upload}/${aqmTypes.download}` : 'default-small/default-small';
 
       const parentWords = ['/queue/simple/add', `=name=${baseName}`, `=target=${ip}/32`, `=max-limit=${upload}M/${download}M`, `=queue=${queueType}`, ...burstWords];
       if (placeBeforeId) parentWords.push(`=place-before=${placeBeforeId}`);
@@ -1599,4 +1764,8 @@ module.exports = {
   setDnsServers,
   scanForDevices,
   getClientTraffic,
+  listQueueTypes,
+  createQueueType,
+  MikrotikQueueTypeConflictError,
+  listSimpleQueues,
 };

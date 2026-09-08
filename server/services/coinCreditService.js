@@ -122,10 +122,27 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
     if (!rate.download_mbps) continue;
     premiumMinutes += rate.minutes * times;
     if (!bandwidthOverride || rate.download_mbps > bandwidthOverride.download_mbps) {
-      bandwidthOverride = { download_mbps: rate.download_mbps, upload_mbps: rate.upload_mbps };
+      bandwidthOverride = { download_mbps: rate.download_mbps, upload_mbps: rate.upload_mbps, queue_type: rate.queue_type || null };
     }
   }
   if (bandwidthOverride) bandwidthOverride.minutes = premiumMinutes;
+
+  // Queue Algorithm (network power / MikroTik AQM feature) - a coin rate's
+  // linked Plan can carry its own Queue Type (Plans page's Bandwidth
+  // Profile picker, copied in the same one-way way as its Mbps fields, see
+  // server/routes/admin.js's syncPlanCoinVendoRate). For a Premium
+  // purchase it travels on bandwidthOverride.queue_type above (temporary,
+  // tied to premium_expires_at); for a Regular one there's no
+  // bandwidthOverride object at all, so it's resolved separately here and
+  // applied to the session's PERMANENT queue_type instead - same "first
+  // matched tier that has one" rule as dataLimitMb below, there's no
+  // obvious way to combine two different tiers' queue types.
+  let queueType = null;
+  if (!bandwidthOverride) {
+    for (const { rate } of matchedRates) {
+      if (rate.queue_type) { queueType = rate.queue_type; break; }
+    }
+  }
 
   // Happy Hour: Regular purchases only (§ "Out of scope" in the design
   // spec - Premium/Boost use a separate premium_expires_at mechanism this
@@ -175,7 +192,7 @@ async function creditCoinValue(mac, coinValue, ip = '', kioskId = null, isPremiu
     ? Math.max(0, new Date(priorSession.premium_expires_at).getTime() - Date.now())
     : 0;
 
-  const { session, created } = await creditOrCreateSession(mac, ip || '', totalMinutes, totalExpirationMinutes, bandwidthOverride, dataLimitMb, happyHourBonusMinutes);
+  const { session, created } = await creditOrCreateSession(mac, ip || '', totalMinutes, totalExpirationMinutes, bandwidthOverride, dataLimitMb, happyHourBonusMinutes, queueType);
 
   // Fallback safety net: a customer reported receiving less time than a
   // coin's rate promises, but it could not be reproduced - every coin
@@ -315,7 +332,7 @@ async function convertCoinValue(mac, coinValue, ip = '', kioskId = null) {
     totalMinutes += rate.minutes * times;
     totalExpirationMinutes += rate.expiration_minutes * times;
     if (!bandwidthOverride || rate.download_mbps > bandwidthOverride.download_mbps) {
-      bandwidthOverride = { download_mbps: rate.download_mbps, upload_mbps: rate.upload_mbps };
+      bandwidthOverride = { download_mbps: rate.download_mbps, upload_mbps: rate.upload_mbps, queue_type: rate.queue_type || null };
     }
     if (!dataLimitMb && rate.data_limit_mb) dataLimitMb = rate.data_limit_mb;
   }
