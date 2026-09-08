@@ -97,7 +97,7 @@ const { z, validateBody } = require('../utils/validation');
 const { encryptSecret, decryptSecret } = require('../utils/secretCrypto');
 const totpService = require('../services/totpService');
 const crypto = require('crypto');
-const { getActiveSessions, expireSession, pauseSession, resumeSession } = require('../services/sessionService');
+const { getActiveSessions, expireSession, pauseSession, resumeSession, sessionMinutesFromRealMs } = require('../services/sessionService');
 const { getRates } = require('../services/voucherService');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
 const kioskService = require('../services/satelliteKioskService');
@@ -285,9 +285,17 @@ router.post('/login', (req, res) => {
 router.get('/sessions', adminAuth, async (req, res) => {
   try {
     const sessions = getActiveSessions();
+    // Bug found live: this recomputed minutes_remaining from a raw real-
+    // minutes-until-expires_at for EVERY session, including paused ones
+    // (whose expires_at is a frozen snapshot, not something to keep
+    // counting down) and without accounting for wifi_speed_timer_ms - see
+    // sessionMinutesFromRealMs()'s own comment. Same speed-aware,
+    // pause-aware pattern the portal's own session poll already uses.
     const sessionsWithTime = sessions.map(s => ({
       ...s,
-      minutes_remaining: Math.max(0, Math.floor((new Date(s.expires_at) - new Date()) / 60000))
+      minutes_remaining: s.is_paused === 1
+        ? s.minutes_remaining
+        : Math.max(0, Math.floor(sessionMinutesFromRealMs(new Date(s.expires_at).getTime() - Date.now())))
     }));
 
     // Live traffic snapshot per PISO WIFI session (paying customers only -

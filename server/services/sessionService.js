@@ -93,6 +93,30 @@ function grantedMsForMinutes(minutes) {
   return minutes * 60 * 1000 * (speedMs / 1000);
 }
 
+// Bug found live: expires_at is correctly speed-adjusted by
+// grantedMsForMinutes() above (a 60-minute rate at speedMs=500 sets a
+// real-world cutoff only 30 real minutes out, so the session drains
+// twice as fast as the documented "lower = faster" behavior promises).
+// But every place that then reads "how much time is left" - the portal
+// poll, the admin Live Sessions list, pauseSession's freeze, the cron's
+// minutes_remaining refresh - computed it as a raw (expires_at - now)
+// in REAL minutes, which is only equal to session-perceived minutes
+// when speedMs is exactly 1000. At any other speed, a customer whose
+// session had JUST been credited saw the compressed real-time-until-
+// cutoff (e.g. 53 minutes) instead of the full nominal amount they
+// paid for (60), counting down at a normal 1x rate instead of the
+// accelerated/decelerated one - the exact opposite of the setting's own
+// documented purpose. This is the inverse of grantedMsForMinutes: given
+// real milliseconds remaining until expires_at, returns how many
+// session-perceived minutes that represents, so a customer always sees
+// the full nominal total at the moment of purchase and watches it drain
+// at the configured rate, ending exactly when the real-world cutoff
+// arrives either way.
+function sessionMinutesFromRealMs(realMs) {
+  const speedMs = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'wifi_speed_timer_ms'").get()?.value, 10) || 1000;
+  return (realMs / 60000) * (1000 / speedMs);
+}
+
 // Bug: mac_address is looked up with a case-sensitive exact match, but
 // callers were inconsistent about casing, coin.js lowercased before
 // storing, while promo.js/session.js and the portal's own MAC
@@ -597,8 +621,14 @@ async function pauseSession(voucherCode, reason = 'manual') {
   }
 
   const now = new Date().toISOString();
+  // Bug found live: this used to freeze minutes_remaining as raw real
+  // minutes until expires_at, which only matches session-perceived time
+  // at the default wifi_speed_timer_ms=1000. At any other speed, a pause
+  // could freeze (and later resume with) a real-minutes figure instead
+  // of the actual session-minutes the customer paid for. See
+  // sessionMinutesFromRealMs()'s own comment for the full story.
   const remaining = Math.floor(
-    (new Date(session.expires_at) - new Date()) / 60000
+    sessionMinutesFromRealMs(new Date(session.expires_at).getTime() - Date.now())
   );
 
   db.prepare(`
@@ -654,7 +684,7 @@ async function resumeSession(voucherCode) {
   // to be smaller, and leaves a real alert_events record - the exact
   // evidence today's field reports lacked - to investigate from.
   const impliedRemainingMinutes = session.paused_at
-    ? Math.max(0, (new Date(session.expires_at).getTime() - new Date(session.paused_at).getTime()) / 60000)
+    ? Math.max(0, sessionMinutesFromRealMs(new Date(session.expires_at).getTime() - new Date(session.paused_at).getTime()))
     : session.minutes_remaining;
   const RESUME_MISMATCH_TOLERANCE_MINUTES = 0.5; // sub-minute rounding slack, not a real disagreement
   let effectiveMinutesRemaining = session.minutes_remaining;
@@ -669,8 +699,14 @@ async function resumeSession(voucherCode) {
     );
   }
 
+  // Bug found live: this used to reconstruct expires_at as a naive
+  // "1 minute = 60000 real ms" from effectiveMinutesRemaining, which is
+  // wrong at any wifi_speed_timer_ms other than 1000 now that
+  // minutes_remaining is frozen in session-perceived minutes (see
+  // pauseSession's matching fix) - grantedMsForMinutes() converts it
+  // back to the correct real-world cutoff at the current speed setting.
   const newExpiresAt = new Date(
-    now.getTime() + effectiveMinutesRemaining * 60 * 1000
+    now.getTime() + grantedMsForMinutes(effectiveMinutesRemaining)
   ).toISOString();
 
   // Bug found in final review: this only ever shifted expires_at, never
@@ -959,5 +995,6 @@ module.exports = {
   effectiveBandwidth,
   reapplyBandwidth,
   reapplyDefaultBandwidthToActiveSessions,
-  grantedMsForMinutes
+  grantedMsForMinutes,
+  sessionMinutesFromRealMs
 };

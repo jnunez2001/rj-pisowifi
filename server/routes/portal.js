@@ -127,6 +127,12 @@ router.get('/rates', (req, res) => {
       allow_pause: getSetting('allow_pause', '1'),
       max_pause_minutes: getSetting('max_pause_minutes', '30'),
       grace_period_minutes: getSetting('grace_period_minutes', '0'),
+      // So the portal's own client-side per-second countdown tick can
+      // match the actual rate a session drains at - without this, the
+      // visual countdown would tick at the normal 1x rate for up to 8s
+      // between polls even when the operator has this set faster/slower,
+      // only self-correcting on the next poll's server-authoritative value.
+      wifi_speed_timer_ms: getSetting('wifi_speed_timer_ms', '1000'),
       rates,
       vendo_ip: getSetting('vendo_ip', ''),
       vapid_public_key: getSetting('vapid_public_key', ''),

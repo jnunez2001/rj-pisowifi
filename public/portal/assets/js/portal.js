@@ -76,7 +76,8 @@ let portalSettings = {
   allow_premium_to_regular_convert: '0',
   movies_open_in_chrome: '0',
   promo_carousel_interval_seconds: '5',
-  happy_hour: { active: false, ends_at: null, starts_at: null, multiplier: 1, message: '' }
+  happy_hour: { active: false, ends_at: null, starts_at: null, multiplier: 1, message: '' },
+  wifi_speed_timer_ms: '1000'
 };
 
 // ===== COIN MODAL TIMER =====
@@ -1523,8 +1524,17 @@ function updateUI(session) {
     let remaining = session.minutes_remaining;
     timeDisplay.textContent = formatTime(remaining);
 
+    // Bug found live: this always decremented by exactly 1 session-second
+    // per real second (1/60 of a minute), which only matches the actual
+    // drain rate at wifi_speed_timer_ms=1000. Scaling by 1000/speedMs
+    // means the visual countdown ticks at the same accelerated/decelerated
+    // rate the server is actually draining the session at, instead of
+    // visibly ticking at the wrong speed for up to 8s until the next poll
+    // corrects it.
+    const speedMs = parseInt(portalSettings.wifi_speed_timer_ms, 10) || 1000;
+    const minutesPerRealSecond = (1 / 60) * (1000 / speedMs);
     timerInterval = setInterval(() => {
-      remaining -= 1/60;
+      remaining -= minutesPerRealSecond;
       if (remaining <= 0) {
         clearInterval(timerInterval);
         timeDisplay.textContent = '00:00:00';
@@ -1694,6 +1704,7 @@ async function loadSettings() {
     portalSettings.allow_premium_to_regular_convert = data.allow_premium_to_regular_convert || '0';
     portalSettings.movies_open_in_chrome = data.movies_open_in_chrome || '0';
     portalSettings.promo_carousel_interval_seconds = data.promo_carousel_interval_seconds || '5';
+    portalSettings.wifi_speed_timer_ms = data.wifi_speed_timer_ms || '1000';
     portalSettings.happy_hour = data.happy_hour || { active: false, ends_at: null, starts_at: null, multiplier: 1, message: '' };
     updateHappyHourBadge();
     applyPortalSettings();

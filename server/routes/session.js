@@ -5,7 +5,8 @@ const {
   getSessionByVoucher,
   pauseSession,
   resumeSession,
-  expireSession
+  expireSession,
+  sessionMinutesFromRealMs
 } = require('../services/sessionService');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
 const { parseSqliteDate } = require('../utils/sqliteDate');
@@ -117,9 +118,12 @@ router.get('/mac/:mac', async (req, res) => {
       });
     }
 
+    // Bug found live: this used to be a raw real-minutes-until-expires_at,
+    // only equal to session-perceived minutes at wifi_speed_timer_ms=1000
+    // - see sessionMinutesFromRealMs()'s own comment for the full story.
     const remaining = session.is_paused === 1
       ? session.minutes_remaining
-      : Math.max(0, (parseSqliteDate(session.expires_at) - now) / 60000);
+      : Math.max(0, sessionMinutesFromRealMs(parseSqliteDate(session.expires_at).getTime() - now.getTime()));
 
     // Latest coin credit for this session, so the portal can show "You
     // added ₱X" at the same moment the vendo speaker announces it -
@@ -180,9 +184,10 @@ router.get('/voucher/:code', (req, res) => {
       });
     }
 
+    // Same speed-aware fix as GET /mac/:mac above.
     const remaining = session.is_paused === 1
       ? session.minutes_remaining
-      : Math.max(0, (parseSqliteDate(session.expires_at) - new Date()) / 60000);
+      : Math.max(0, sessionMinutesFromRealMs(parseSqliteDate(session.expires_at).getTime() - Date.now()));
 
     return res.json({
       success: true,

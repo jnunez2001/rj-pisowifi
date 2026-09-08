@@ -457,10 +457,18 @@ async function startTimer() {
       const enableAutoPauseIdle = db.prepare("SELECT value FROM settings WHERE key = 'enable_auto_pause_idle'").get()?.value === '1';
       const autoPauseIdleMs = getSetting('auto_pause_idle_minutes', 10) * 60000;
 
+      // Bug found live: this used to be a raw real-minutes-until-
+      // expires_at, only equal to session-perceived minutes at
+      // wifi_speed_timer_ms=1000 - see sessionService.js's
+      // sessionMinutesFromRealMs() for the full story. Both the
+      // minutes_remaining column this writes and the 2-minutes-left
+      // push notification below need to reflect what the customer
+      // actually sees counting down, not the real-world clock.
+      const { sessionMinutesFromRealMs } = require('./sessionService');
       for (const session of activeSessions) {
-        const remaining = (
-          new Date(session.expires_at) - new Date()
-        ) / 60000;
+        const remaining = sessionMinutesFromRealMs(
+          new Date(session.expires_at).getTime() - Date.now()
+        );
 
         if (remaining > 0) {
           // Data-plan usage tracking, sampled BEFORE the bandwidth reassert
