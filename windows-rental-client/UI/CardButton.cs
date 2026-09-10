@@ -9,6 +9,13 @@ namespace StarkFiRentalClient.UI;
 public class CardButton : Button
 {
     public int CornerRadius { get; set; } = 10;
+
+    // Renders as a bordered, Theme.Surface-filled button instead of a
+    // solid BackColor fill - the mockup's secondary-action convention
+    // (Member Login, Cancel, Back) alongside every filled primary action.
+    // Defaults to false so every existing call site is unaffected.
+    public bool Outlined { get; set; }
+
     private bool _hovering;
 
     public CardButton()
@@ -46,10 +53,22 @@ public class CardButton : Button
     {
         e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
         var bounds = new Rectangle(0, 0, Width - 1, Height - 1);
-        var fillColor = _hovering ? Theme.Lighten(BackColor, 20) : BackColor;
         using var path = RoundedRect(bounds, CornerRadius);
-        using var fill = new SolidBrush(fillColor);
-        e.Graphics.FillPath(fill, path);
+
+        if (Outlined)
+        {
+            var fillColor = _hovering ? Theme.SurfaceAlt : Theme.Surface;
+            using var fill = new SolidBrush(fillColor);
+            e.Graphics.FillPath(fill, path);
+            using var pen = new Pen(Theme.Border, 1.5f);
+            e.Graphics.DrawPath(pen, path);
+        }
+        else
+        {
+            var fillColor = _hovering ? Theme.Lighten(BackColor, 20) : BackColor;
+            using var fill = new SolidBrush(fillColor);
+            e.Graphics.FillPath(fill, path);
+        }
 
         var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis;
         TextRenderer.DrawText(e.Graphics, Text, Font, bounds, ForeColor, flags);
