@@ -14,7 +14,7 @@ namespace StarkFiRentalClient;
 // pretending a toggle does something it doesn't is not.
 public class ClientPreferences
 {
-    public ThemeName Theme { get; set; } = ThemeName.Dark;
+    public ThemeName Theme { get; set; } = ThemeName.LightGaming;
     public bool AutoLogoutEnabled { get; set; } = true;
     public int AutoLogoutMinutes { get; set; } = 15;
     public bool StartOnBoot { get; set; }

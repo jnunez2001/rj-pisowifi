@@ -66,7 +66,13 @@ public class SettingsPage : UserControl
         _themeCombo = new ComboBox { Left = 220, Top = y, Width = 200, DropDownStyle = ComboBoxStyle.DropDownList };
         _themeCombo.Items.Add("Dark");
         _themeCombo.Items.Add("Neon Purple");
-        _themeCombo.SelectedIndex = _prefs.Theme == ThemeName.NeonPurple ? 1 : 0;
+        _themeCombo.Items.Add("Light Gaming");
+        _themeCombo.SelectedIndex = _prefs.Theme switch
+        {
+            ThemeName.NeonPurple => 1,
+            ThemeName.LightGaming => 2,
+            _ => 0,
+        };
         tab.Controls.Add(themeLabel);
         tab.Controls.Add(_themeCombo);
         y += rowHeight;
@@ -117,7 +123,12 @@ public class SettingsPage : UserControl
 
     private void SaveGeneral()
     {
-        _prefs.Theme = _themeCombo.SelectedIndex == 1 ? ThemeName.NeonPurple : ThemeName.Dark;
+        _prefs.Theme = _themeCombo.SelectedIndex switch
+        {
+            1 => ThemeName.NeonPurple,
+            2 => ThemeName.LightGaming,
+            _ => ThemeName.Dark,
+        };
         _prefs.AutoLogoutEnabled = _autoLogoutCheck.Checked;
         _prefs.AutoLogoutMinutes = (int)_autoLogoutMinutes.Value;
         _prefs.StartOnBoot = _startOnBootCheck.Checked;
