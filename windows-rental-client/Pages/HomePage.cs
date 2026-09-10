@@ -125,6 +125,7 @@ public class HomePage : UserControl
         BackColor = Theme.Background;
         _carousel.BackColor = Theme.Surface;
         _carouselFeaturedLabel.ForeColor = Theme.TextMuted;
+        _carouselTitle.ForeColor = Theme.TextPrimary;
         _carouselPlayButton.BackColor = Theme.Accent;
         _emptyLabel.ForeColor = Theme.TextMuted;
     }

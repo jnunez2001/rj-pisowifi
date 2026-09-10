@@ -307,7 +307,7 @@ public class LockForm : Form
         _passwordBox.ForeColor = Theme.TextPrimary;
         foreach (Control c in _footerRow.Controls)
         {
-            if (c is CardButton b) { b.BackColor = Theme.Surface; b.ForeColor = Theme.TextPrimary; }
+            if (c is CardButton b) { b.BackColor = Theme.Surface; b.ForeColor = Theme.TextPrimary; b.Outlined = true; }
         }
         RefreshStatusLabels();
     }

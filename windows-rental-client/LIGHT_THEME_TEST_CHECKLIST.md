@@ -31,3 +31,14 @@ available where it was built) - report anything that looks wrong.
       Lock Screen still look exactly as they did before this change (both
       filled, no unexpected outline) - this change should not have altered
       those two themes' appearance.
+- [ ] Switch themes while a screen is already open (not just at fresh app
+      start) - navigate to a page first, then change the theme from
+      Settings, and confirm every label and button on that already-open
+      page re-colors. A page you haven't visited yet always picks up the
+      right starting color regardless of whether its theme-switch logic
+      is complete, so this only catches bugs on screens left open during
+      the switch.
+- [ ] Insert Coins / Create Account: the Cancel button intentionally looks
+      different now on Dark and Neon Purple (outlined instead of solid
+      gray-filled) - this is an intended visual change from this branch,
+      not a regression to report.
