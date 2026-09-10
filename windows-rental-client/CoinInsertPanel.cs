@@ -1,3 +1,5 @@
+using StarkFiRentalClient.UI;
+
 namespace StarkFiRentalClient;
 
 // Shared by LockForm's "Insert Coins"/"Create Account", CafeHomeForm's
@@ -17,13 +19,13 @@ public class CoinInsertPanel : Panel
     private readonly Label _titleLabel;
     private readonly Label _totalLabel;
     private readonly Label _statusLabel;
-    private readonly Button _doneButton;
-    private readonly Button _cancelButton;
+    private readonly CardButton _doneButton;
+    private readonly CardButton _cancelButton;
 
     // create_account mode only - collected before the coin window opens.
     private TextBox? _usernameBox;
     private TextBox? _passwordBox;
-    private Button? _startButton;
+    private CardButton? _startButton;
 
     private System.Windows.Forms.Timer? _pollTimer;
     private bool _windowOpen;
@@ -39,12 +41,12 @@ public class CoinInsertPanel : Panel
         Height = 220;
         BackColor = Color.Transparent;
 
-        _titleLabel = new Label { ForeColor = Color.White, Font = new Font("Segoe UI", 11, FontStyle.Bold), Left = 0, Top = 0, Width = 280, Height = 24, TextAlign = ContentAlignment.MiddleCenter };
-        _totalLabel = new Label { ForeColor = Color.White, Font = new Font("Segoe UI", 20, FontStyle.Bold), Left = 0, Top = 40, Width = 280, Height = 40, TextAlign = ContentAlignment.MiddleCenter, Visible = false };
+        _titleLabel = new Label { ForeColor = Theme.TextPrimary, Font = new Font("Segoe UI", 11, FontStyle.Bold), Left = 0, Top = 0, Width = 280, Height = 24, TextAlign = ContentAlignment.MiddleCenter };
+        _totalLabel = new Label { ForeColor = Theme.TextPrimary, Font = new Font("Segoe UI", 20, FontStyle.Bold), Left = 0, Top = 40, Width = 280, Height = 40, TextAlign = ContentAlignment.MiddleCenter, Visible = false };
         _statusLabel = new Label { ForeColor = Color.OrangeRed, Font = new Font("Segoe UI", 8), Left = 0, Top = 84, Width = 280, Height = 32, TextAlign = ContentAlignment.MiddleCenter };
-        _doneButton = new Button { Text = "Done", Width = 130, Height = 30, Left = 0, Top = 160, BackColor = Color.FromArgb(12, 143, 109), ForeColor = Color.White, FlatStyle = FlatStyle.Flat, Visible = false };
+        _doneButton = new CardButton { Text = "Done", Width = 130, Height = 30, Left = 0, Top = 160, CornerRadius = 8, BackColor = Theme.Accent, ForeColor = Theme.OnAccent, Visible = false };
         _doneButton.Click += async (_, _) => await OnDoneClicked();
-        _cancelButton = new Button { Text = "Cancel", Width = 130, Height = 30, Left = 150, Top = 160, BackColor = Color.FromArgb(60, 60, 60), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+        _cancelButton = new CardButton { Text = "Cancel", Width = 130, Height = 30, Left = 150, Top = 160, CornerRadius = 8, Outlined = true, ForeColor = Theme.TextPrimary };
         _cancelButton.Click += (_, _) => OnCancelClicked();
 
         Controls.Add(_titleLabel);
@@ -58,7 +60,7 @@ public class CoinInsertPanel : Panel
             _titleLabel.Text = "Create account";
             _usernameBox = new TextBox { PlaceholderText = "Username", Left = 15, Top = 32, Width = 250 };
             _passwordBox = new TextBox { PlaceholderText = "Password", PasswordChar = '*', Left = 15, Top = 64, Width = 250 };
-            _startButton = new Button { Text = "Insert Coins to Fund It", Width = 250, Height = 30, Left = 15, Top = 100, BackColor = Color.FromArgb(12, 143, 109), ForeColor = Color.White, FlatStyle = FlatStyle.Flat };
+            _startButton = new CardButton { Text = "Insert Coins to Fund It", Width = 250, Height = 30, Left = 15, Top = 100, CornerRadius = 8, BackColor = Theme.Accent, ForeColor = Theme.OnAccent };
             _startButton.Click += async (_, _) => await OnStartClicked();
             Controls.Add(_usernameBox);
             Controls.Add(_passwordBox);
