@@ -140,8 +140,6 @@ public static class Program
             _wasLocked = false;
             _lockForm.HideLock();
             _cafeHome.UpdateFromStatus(status);
-            // No-ops on its own (via IsProgramRunning) if a launched game
-            // is currently in the foreground - see CafeHomeForm.ShowHome().
             _cafeHome.ShowHome();
         }
     }

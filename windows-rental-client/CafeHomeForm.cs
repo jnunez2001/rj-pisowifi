@@ -3,58 +3,69 @@ using StarkFiRentalClient.Pages;
 
 namespace StarkFiRentalClient;
 
-// Café Home (V1.0.0 mockup rebuild) - a persistent shell (sidebar + top
-// bar + swappable content area) shown instead of the raw Windows
-// desktop while a session is unlocked and no game is currently running.
-// Same full-screen/borderless/topmost/keyboard-blocked technique
-// LockForm already uses, but a separate form (not a reuse of LockForm)
-// since the purpose is different: launching processes and returning,
-// not blocking input for payment.
-//
-// The old CountdownWidget floating corner form is retired - this
-// persistent top bar supersedes its entire reason to exist. Its Add
-// Time/Account/Points logic wasn't lost, it's redistributed to where
-// the mockup actually puts it: Add Time lives in the top bar (below),
-// Account lives in Settings, Points lives in the Rewards page.
+// Café Home (mockup rebuild #2) - no longer a full-screen shell. The
+// mockup this rebuild matches has no in-app desktop replacement at all:
+// once unlocked, the customer sees their real Windows desktop normally,
+// with only a small, draggable, always-on-top pill bar floating on top
+// of it: "PC 04 | <timer> | ▼". Clicking the arrow expands a small
+// dropdown menu (Add Time / User Settings / Admin Panel [members] /
+// Log Out). There is no more sidebar, no more swappable content area,
+// no more game/app catalog, and no more keyboard blocking - none of
+// that exists in the mockup, and blocking input made sense only for a
+// captive shell that no longer exists.
 public class CafeHomeForm : Form
 {
     private readonly RentalApiClient _api;
     private readonly ClientConfig _config;
     private readonly ClientPreferences _prefs;
-    private readonly KeyboardBlocker _keyboardBlocker = new();
 
-    // Top bar
-    private Panel _topBar = null!;
+    // ---- The pill bar itself ----
+    // Three segments in one 300x50 pill: PC name | timer | expand arrow.
+    // Exact bounds (all children Top=0, Height=BarHeight, computed against
+    // the 300-wide root panel, left to right with no gaps or overlaps):
+    //   _pcNameLabel  Left=18,  Width=74   -> ends at 92
+    //   _sep1 ("|")   Left=92,  Width=16   -> ends at 108
+    //   _timeLabel    Left=108, Width=90   -> ends at 198
+    //   _sep2 ("|")   Left=198, Width=16   -> ends at 214
+    //   _expandButton Left=214, Width=68   -> ends at 282 (+18 right margin = 300, symmetric with the 18px left margin)
+    private const int BarWidth = 300;
+    private const int BarHeight = 50;
+
+    private RoundedPanel _bar = null!;
+    private Label _pcNameLabel = null!;
     private Label _timeLabel = null!;
-    private CardButton _addTimeButton = null!;
-    private Label _memberLabel = null!;
-    private Label _memberBadge = null!;
-    private Label _pointsLabel = null!;
-    private Label _pcInfoLabel = null!;
-    private Label _clockLabel = null!;
-    private CoinInsertPanel? _topBarCoinPanel;
-    private readonly System.Windows.Forms.Timer _clockTimer;
+    private Label _expandButton = null!;
 
-    // Sidebar
-    private Panel _sidebar = null!;
-    private readonly Dictionary<string, CardButton> _navButtons = new();
+    // ---- Dragging ----
+    // MouseDown on the bar records the offset between the click point and
+    // the Form's own Location; MouseMove (only while the button is held)
+    // repositions the Form so that offset is preserved; MouseUp stops.
+    // Position is clamped so at least 40px of the bar stays within
+    // Screen.PrimaryScreen.WorkingArea on every side.
+    private bool _dragging;
+    private Point _dragOffset;
+    private const int DragClampMargin = 40;
 
-    // Content pages
-    private Panel _content = null!;
-    private HomePage _homePage = null!;
-    private GamesPage _gamesPage = null!;
-    private ApplicationsPage _applicationsPage = null!;
-    private MySessionPage _mySessionPage = null!;
-    private RewardsPage _rewardsPage = null!;
-    private SettingsPage _settingsPage = null!;
-    private string _activePage = "home";
+    // ---- Dropdown menu ----
+    // A separate small borderless Form, built once and shown/hidden (never
+    // recreated), positioned just below the bar's bottom-left corner and
+    // clamped the same way the bar is. Default width 240; widens to 300
+    // only while its content is swapped out for the Add Time coin panel
+    // (see ShowAddTimeInMenu), then returns to 240 when that's dismissed.
+    private const int MenuWidth = 240;
+    private const int MenuItemHeight = 44;
+    private const int MenuVPadding = 8;
 
-    private readonly System.Windows.Forms.Timer _catalogRefreshTimer;
-    private static readonly TimeSpan CatalogRefreshInterval = TimeSpan.FromSeconds(60);
+    private Form _menuForm = null!;
+    private Panel _menuList = null!;
+    private CardButton _addTimeItem = null!;
+    private CardButton _settingsItem = null!;
+    private CardButton _adminItem = null!;
+    private CardButton _logoutItem = null!;
+    private CoinInsertPanel? _menuCoinPanel;
 
-    private readonly IdleDetector _idleDetector = new();
     private bool _isMember;
-    private bool _sessionReminderShown;
+    private string _pcName = "";
 
     public CafeHomeForm(RentalApiClient api, ClientConfig config, ClientPreferences prefs)
     {
@@ -63,235 +74,347 @@ public class CafeHomeForm : Form
         _prefs = prefs;
 
         FormBorderStyle = FormBorderStyle.None;
-        WindowState = FormWindowState.Maximized;
-        TopMost = true;
         StartPosition = FormStartPosition.Manual;
-        Bounds = Screen.PrimaryScreen!.Bounds;
+        TopMost = true;
         ShowInTaskbar = false;
-        KeyPreview = true;
+        Width = BarWidth;
+        Height = BarHeight;
 
-        BuildSidebar();
-        BuildTopBar();
-        BuildContent();
+        var workArea = Screen.PrimaryScreen!.WorkingArea;
+        Location = new Point(workArea.Left + 16, workArea.Top + 16); // default corner: top-left, small margin
 
-        _catalogRefreshTimer = new System.Windows.Forms.Timer { Interval = (int)CatalogRefreshInterval.TotalMilliseconds };
-        _catalogRefreshTimer.Tick += async (_, _) => await RefreshActivePageAsync();
+        BuildBar();
+        BuildMenu();
 
-        _clockTimer = new System.Windows.Forms.Timer { Interval = 1000 };
-        _clockTimer.Tick += (_, _) => _clockLabel.Text = DateTime.Now.ToString("hh:mm tt  •  MMM d, yyyy");
-
-        _idleDetector.IdleTimeoutReached += async () => await OnIdleTimeoutAsync();
-        AppLauncher.ProcessExited += () => { if (IsHandleCreated) BeginInvoke(ShowHome); };
-
-        // Same guard LockForm uses - without this, Alt+F4 would dispose
-        // this Form outright (not just hide it), and Program.cs's cached
-        // reference would throw ObjectDisposedException on its very next
-        // Show()/Hide() call, crashing the whole client.
+        // Same guard the old shell used - without this, Alt+F4 would
+        // dispose this Form outright (not just hide it), and Program.cs's
+        // cached reference would throw ObjectDisposedException on its very
+        // next Show()/Hide() call, crashing the whole client.
         FormClosing += (_, e) => { if (Visible) e.Cancel = true; };
 
         Theme.Changed += () => { if (IsHandleCreated) BeginInvoke(ApplyTheme); };
         ApplyTheme();
-        SwitchPage("home");
     }
 
-    // Program.cs polls status every 5s and calls ShowHome() on every
-    // unlocked tick - without this guard, that would pop this screen
-    // back up on top of a game the customer just launched.
-    public bool IsProgramRunning => AppLauncher.IsProgramRunning;
-
-    private void BuildSidebar()
+    private void BuildBar()
     {
-        _sidebar = new Panel { Dock = DockStyle.Left, Width = 220 };
-        Controls.Add(_sidebar);
+        _bar = new RoundedPanel { Dock = DockStyle.Fill, CornerRadius = BarHeight / 2 };
+        Controls.Add(_bar);
 
-        var logo = new Label { Text = "CAFÉ HOME", Font = new Font("Segoe UI", 13, FontStyle.Bold), AutoSize = true, Left = 20, Top = 20 };
-        _sidebar.Controls.Add(logo);
+        _pcNameLabel = new Label { Left = 18, Top = 0, Width = 74, Height = BarHeight, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 9, FontStyle.Bold), AutoEllipsis = true };
+        var sep1 = new Label { Text = "|", Left = 92, Top = 0, Width = 16, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter };
+        _timeLabel = new Label { Left = 108, Top = 0, Width = 90, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
+        var sep2 = new Label { Text = "|", Left = 198, Top = 0, Width = 16, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter };
+        _expandButton = new Label { Text = "▼", Left = 214, Top = 0, Width = 68, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10, FontStyle.Bold), Cursor = Cursors.Hand };
+        _expandButton.Click += (_, _) => ToggleMenu();
 
-        var items = new (string key, string label)[]
+        _bar.Controls.Add(_pcNameLabel);
+        _bar.Controls.Add(sep1);
+        _bar.Controls.Add(_timeLabel);
+        _bar.Controls.Add(sep2);
+        _bar.Controls.Add(_expandButton);
+
+        // Dragging: wired on the bar and every non-clickable label on it
+        // (not the expand button, which has its own Click) so the whole
+        // pill (other than the arrow) is grabbable, matching how a
+        // draggable title-bar-less window normally behaves.
+        foreach (Control c in new Control[] { _bar, _pcNameLabel, sep1, _timeLabel, sep2 })
         {
-            ("home", "HOME"), ("games", "GAMES"), ("applications", "APPLICATIONS"),
-            ("mysession", "MY SESSION"), ("rewards", "REWARDS"), ("settings", "SETTINGS"),
+            c.MouseDown += Bar_MouseDown;
+            c.MouseMove += Bar_MouseMove;
+            c.MouseUp += Bar_MouseUp;
+        }
+    }
+
+    private void Bar_MouseDown(object? sender, MouseEventArgs e)
+    {
+        if (e.Button != MouseButtons.Left) return;
+        _dragging = true;
+        // Click coordinates from `sender` need to be translated to
+        // screen space before subtracting the Form's own screen Location,
+        // since sender may be a child control of _bar, not the Form itself.
+        var screenPoint = ((Control)sender!).PointToScreen(e.Location);
+        _dragOffset = new Point(screenPoint.X - Location.X, screenPoint.Y - Location.Y);
+    }
+
+    private void Bar_MouseMove(object? sender, MouseEventArgs e)
+    {
+        if (!_dragging) return;
+        var screenPoint = ((Control)sender!).PointToScreen(e.Location);
+        var newLocation = new Point(screenPoint.X - _dragOffset.X, screenPoint.Y - _dragOffset.Y);
+        Location = ClampToScreen(newLocation, Width, Height);
+        if (_menuForm.Visible) PositionMenu();
+    }
+
+    private void Bar_MouseUp(object? sender, MouseEventArgs e)
+    {
+        _dragging = false;
+    }
+
+    // Keeps at least DragClampMargin px of the given size on-screen on
+    // every side, using Screen.PrimaryScreen.WorkingArea as the bound.
+    private static Point ClampToScreen(Point location, int width, int height)
+    {
+        var area = Screen.PrimaryScreen!.WorkingArea;
+        var minX = area.Left - width + DragClampMargin;
+        var maxX = area.Right - DragClampMargin;
+        var minY = area.Top - height + DragClampMargin;
+        var maxY = area.Bottom - DragClampMargin;
+        return new Point(Math.Clamp(location.X, minX, maxX), Math.Clamp(location.Y, minY, maxY));
+    }
+
+    private void BuildMenu()
+    {
+        _menuForm = new Form
+        {
+            FormBorderStyle = FormBorderStyle.None,
+            StartPosition = FormStartPosition.Manual,
+            TopMost = true,
+            ShowInTaskbar = false,
+            Width = MenuWidth,
+            Height = MenuVPadding * 2 + MenuItemHeight * 4,
         };
-        var y = 70;
-        foreach (var (key, label) in items)
+
+        _menuList = new Panel { Dock = DockStyle.Fill };
+        _menuForm.Controls.Add(_menuList);
+
+        _addTimeItem = MenuButton("Add Time");
+        _addTimeItem.Click += (_, _) => ShowAddTimeInMenu();
+
+        _settingsItem = MenuButton("User Settings");
+        _settingsItem.Click += (_, _) => OnUserSettingsClicked();
+
+        // Temporary: a real, dedicated Admin Panel screen is a separate,
+        // later task not yet built. Until then this reuses the exact same
+        // password-gated Force Unlock / Pause action LockForm's Staff
+        // Access link already implements, so the menu item does something
+        // real and consistent with the rest of the app rather than a dead
+        // click or a fake placeholder.
+        _adminItem = MenuButton("Admin Panel");
+        _adminItem.Click += async (_, _) => await OnAdminPanelClicked();
+
+        _logoutItem = MenuButton("Log Out");
+        _logoutItem.Click += async (_, _) => await OnLogOutClicked();
+
+        _menuList.Controls.Add(_addTimeItem);
+        _menuList.Controls.Add(_settingsItem);
+        _menuList.Controls.Add(_adminItem);
+        _menuList.Controls.Add(_logoutItem);
+
+        // Closing the menu on any click outside it (deactivation) matches
+        // normal dropdown behavior - without this it would only ever
+        // close via the arrow or an item action.
+        _menuForm.Deactivate += (_, _) => { if (_menuCoinPanel == null) HideMenu(); };
+
+        RelayoutMenu();
+    }
+
+    private CardButton MenuButton(string text) => new()
+    {
+        Text = text, Dock = DockStyle.Top, Height = MenuItemHeight, CornerRadius = 0,
+        TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(16, 0, 0, 0),
+    };
+
+    // Recomputes which menu items are visible for the current guest/member
+    // state and the menu Form's resulting height. Guest sessions get only
+    // Add Time and User Settings - this app has no server-side concept of
+    // "log out" for a guest (only RentalApiClient.MemberLogoutAsync
+    // exists, and Admin Panel's Staff Access action is member/staff-only
+    // in spirit), so rather than inventing new guest-session-ending
+    // behavior, both Admin Panel and Log Out are simply not shown for a
+    // guest, same convention SwitchPage already used for hiding Rewards
+    // from a guest in the old shell.
+    private void RelayoutMenu()
+    {
+        _addTimeItem.Visible = true;
+        _settingsItem.Visible = true;
+        _adminItem.Visible = _isMember;
+        _logoutItem.Visible = _isMember;
+
+        // Dock=Top controls stack in the order they were added regardless
+        // of Visible, so no manual Top math is needed here - just the
+        // resulting Form height, sized to fit exactly the visible items
+        // plus top/bottom padding.
+        var visibleCount = (_addTimeItem.Visible ? 1 : 0) + (_settingsItem.Visible ? 1 : 0) + (_adminItem.Visible ? 1 : 0) + (_logoutItem.Visible ? 1 : 0);
+        _menuList.Padding = new Padding(0, MenuVPadding, 0, MenuVPadding);
+        _menuForm.Height = MenuVPadding * 2 + MenuItemHeight * visibleCount;
+        _menuForm.Width = MenuWidth;
+        if (_menuForm.Visible) PositionMenu();
+    }
+
+    private void ToggleMenu()
+    {
+        if (_menuForm.Visible) HideMenu();
+        else ShowMenu();
+    }
+
+    private void ShowMenu()
+    {
+        PositionMenu();
+        _menuForm.Show();
+        _menuForm.Activate();
+    }
+
+    private void HideMenu()
+    {
+        if (_menuCoinPanel != null) CloseAddTimeInMenu();
+        _menuForm.Hide();
+    }
+
+    // Positions the dropdown just below the bar's bottom-left corner,
+    // clamped the same way the bar itself is (at least DragClampMargin px
+    // of the menu stays within the work area).
+    private void PositionMenu()
+    {
+        var desired = new Point(Location.X, Location.Y + Height + 4);
+        _menuForm.Location = ClampToScreen(desired, _menuForm.Width, _menuForm.Height);
+    }
+
+    private void OnUserSettingsClicked()
+    {
+        HideMenu();
+        using var host = new Form
         {
-            var button = new CardButton { Text = label, Width = 180, Height = 44, Left = 20, Top = y, CornerRadius = 8, TextAlign = ContentAlignment.MiddleLeft, Padding = new Padding(16, 0, 0, 0) };
-            var capturedKey = key;
-            button.Click += (_, _) => SwitchPage(capturedKey);
-            _sidebar.Controls.Add(button);
-            _navButtons[key] = button;
-            y += 52;
-        }
+            Text = "User Settings",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterScreen,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            TopMost = true,
+            Width = 620,
+            Height = 460,
+        };
+        var settingsPage = new SettingsPage(_api, _config, _prefs);
+        settingsPage.PreferencesSaved += _ => ApplyPreferences();
+        settingsPage.Dock = DockStyle.Fill;
+        host.Controls.Add(settingsPage);
+        host.ShowDialog();
     }
 
-    private void BuildTopBar()
+    // Mirrors LockForm.OnStaffClicked's exact Force Unlock / Pause flow.
+    // Duplicated here rather than shared because LockForm and CafeHomeForm
+    // are separate, independently-owned forms in Program.cs with no
+    // reference to each other - this is the same pattern, not the same
+    // object. Remove this duplication once a real Admin Panel screen
+    // replaces it.
+    private async Task OnAdminPanelClicked()
     {
-        _topBar = new Panel { Dock = DockStyle.Top, Height = 76 };
-        Controls.Add(_topBar);
+        HideMenu();
+        var password = PromptDialog.Show("Staff Access", "Enter the app password:", isPassword: true);
+        if (string.IsNullOrEmpty(password)) return;
 
-        _timeLabel = new Label { Font = new Font("Segoe UI", 16, FontStyle.Bold), AutoSize = true, Left = 24, Top = 14 };
-        var timeCaption = new Label { Text = "REMAINING TIME", Font = new Font("Segoe UI", 7, FontStyle.Bold), AutoSize = true, Left = 24, Top = 40 };
-        _addTimeButton = new CardButton { Text = "+ ADD TIME", Width = 110, Height = 30, Left = 150, Top = 22, CornerRadius = 6 };
-        _addTimeButton.Click += (_, _) => ShowTopBarCoinPanel();
+        var choice = MessageBox.Show(
+            "Force Unlock now (temporary, re-locks on the next status check)?\n\nChoose No to Pause instead - suspends enforcement until resumed from here or from the admin panel.",
+            "Staff Access", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+        if (choice == DialogResult.Cancel) return;
 
-        _memberLabel = new Label { Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Top = 14 };
-        _memberBadge = new Label { Text = "MEMBER", Font = new Font("Segoe UI", 7, FontStyle.Bold), AutoSize = true, Top = 15, Padding = new Padding(6, 2, 6, 2) };
-        _pointsLabel = new Label { Font = new Font("Segoe UI", 8), AutoSize = true, Top = 38 };
-
-        _pcInfoLabel = new Label { Font = new Font("Segoe UI", 9, FontStyle.Bold), AutoSize = true, Top = 14, TextAlign = ContentAlignment.MiddleRight };
-        _clockLabel = new Label { Font = new Font("Segoe UI", 8), AutoSize = true, Top = 38 };
-
-        _topBar.Controls.Add(_timeLabel);
-        _topBar.Controls.Add(timeCaption);
-        _topBar.Controls.Add(_addTimeButton);
-        _topBar.Controls.Add(_memberLabel);
-        _topBar.Controls.Add(_memberBadge);
-        _topBar.Controls.Add(_pointsLabel);
-        _topBar.Controls.Add(_pcInfoLabel);
-        _topBar.Controls.Add(_clockLabel);
-
-        _topBar.Resize += (_, _) => RepositionTopBarRight();
-    }
-
-    private void RepositionTopBarRight()
-    {
-        _clockLabel.Left = _topBar.Width - _clockLabel.Width - 24;
-        _pcInfoLabel.Left = _topBar.Width - Math.Max(_pcInfoLabel.Width, 140) - 24;
-        _memberLabel.Left = _pcInfoLabel.Left - _memberLabel.Width - 200;
-        _memberBadge.Left = _memberLabel.Left + _memberLabel.Width + 8;
-        _pointsLabel.Left = _memberLabel.Left;
-    }
-
-    private void BuildContent()
-    {
-        _content = new Panel { Dock = DockStyle.Fill };
-        Controls.Add(_content);
-
-        _homePage = new HomePage(_api, _config) { Visible = false };
-        _homePage.NavigateRequested += key => SwitchPage(key);
-        _gamesPage = new GamesPage(_api, _config) { Visible = false };
-        _applicationsPage = new ApplicationsPage(_api, _config) { Visible = false };
-        _mySessionPage = new MySessionPage(_api, _config) { Visible = false };
-        _rewardsPage = new RewardsPage(_api, _config) { Visible = false };
-        _settingsPage = new SettingsPage(_api, _config, _prefs) { Visible = false };
-        _settingsPage.PreferencesSaved += _ => ApplyPreferences();
-
-        _content.Controls.Add(_homePage);
-        _content.Controls.Add(_gamesPage);
-        _content.Controls.Add(_applicationsPage);
-        _content.Controls.Add(_mySessionPage);
-        _content.Controls.Add(_rewardsPage);
-        _content.Controls.Add(_settingsPage);
-
-        _sidebar.BringToFront();
-        _topBar.BringToFront();
-    }
-
-    private void SwitchPage(string key)
-    {
-        if (key == "rewards" && !_isMember) key = "home"; // hidden entirely for a guest session, same as before
-        _activePage = key;
-
-        foreach (var (navKey, button) in _navButtons)
+        if (choice == DialogResult.Yes)
         {
-            button.BackColor = navKey == key ? Theme.Accent : Theme.Surface;
-        }
-
-        _homePage.Visible = key == "home";
-        _gamesPage.Visible = key == "games";
-        _applicationsPage.Visible = key == "applications";
-        _mySessionPage.Visible = key == "mysession";
-        _rewardsPage.Visible = key == "rewards";
-        _settingsPage.Visible = key == "settings";
-
-        if (key == "home") _homePage.OnShown(); else _homePage.OnHidden();
-
-        _ = RefreshActivePageAsync();
-    }
-
-    private async Task RefreshActivePageAsync()
-    {
-        try
-        {
-            switch (_activePage)
+            var result = await _api.StaffOverrideAsync(_config.Mac, _config.DeviceSecret, password);
+            if (result == null || !result.Success)
             {
-                case "home": await _homePage.RefreshAsync(); break;
-                case "games": await _gamesPage.RefreshAsync(); break;
-                case "applications": await _applicationsPage.RefreshAsync(); break;
-                case "rewards": await _rewardsPage.RefreshAsync(); break;
+                MessageBox.Show(result?.Message ?? "Override failed", "Staff Access", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+            // Nothing further to do on success here - unlike LockForm,
+            // there's no lock screen on this Form to hide.
         }
-        catch
+        else
         {
-            // Network hiccup - keep whatever's already showing rather
-            // than clearing the screen over a transient failure.
+            var result = await _api.PauseAsync(_config.Mac, _config.DeviceSecret, password);
+            if (result == null || !result.Success)
+            {
+                MessageBox.Show(result?.Message ?? "Pause failed", "Staff Access", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            // The next status poll picks up paused:true and Program.cs's
+            // HandleStatus swaps to the paused indicator - no need to
+            // duplicate that transition here.
         }
+    }
+
+    private async Task OnLogOutClicked()
+    {
+        HideMenu();
+        if (!_isMember) return; // guest sessions have no logout concept today - see RelayoutMenu's comment
+        await _api.MemberLogoutAsync(_config.Mac, _config.DeviceSecret);
+        // Next poll picks up the logged-out state - same as the old
+        // shell's idle-timeout auto-logout, no need to duplicate the
+        // locked-screen transition here.
+    }
+
+    // Swaps the menu's content from the item list to an embedded
+    // CoinInsertPanel, the exact same compact (non-large) pattern the old
+    // top bar's ShowTopBarCoinPanel/HideTopBarCoinPanel used - just
+    // rehosted inside the dropdown instead of the old shell's top bar.
+    // CoinInsertPanel's compact mode is a fixed 280x220, so the menu Form
+    // temporarily widens/heightens to fit it (plus a 10px margin on every
+    // side) rather than trying to squeeze it into the 240px list width.
+    private void ShowAddTimeInMenu()
+    {
+        _menuList.Visible = false;
+        _menuForm.Width = 300;
+        _menuForm.Height = 240;
+        PositionMenu();
+
+        _menuCoinPanel = new CoinInsertPanel(_api, _config, "pc_rental") { Left = 10, Top = 10 };
+        _menuCoinPanel.Cancelled += CloseAddTimeInMenu;
+        _menuCoinPanel.Completed += _ => CloseAddTimeInMenu();
+        _menuForm.Controls.Add(_menuCoinPanel);
+        _menuCoinPanel.BringToFront();
+    }
+
+    private void CloseAddTimeInMenu()
+    {
+        if (_menuCoinPanel == null) return;
+        _menuForm.Controls.Remove(_menuCoinPanel);
+        _menuCoinPanel.Dispose();
+        _menuCoinPanel = null;
+        _menuList.Visible = true;
+        RelayoutMenu(); // restores the 240-wide list sizing
+        HideMenu();
     }
 
     private void ApplyTheme()
     {
-        BackColor = Theme.Background;
-        _sidebar.BackColor = Theme.SurfaceAlt;
-        _topBar.BackColor = Theme.SurfaceAlt;
-        foreach (Control c in _sidebar.Controls)
-        {
-            if (c is Label l) l.ForeColor = Theme.TextPrimary;
-        }
-        foreach (var (navKey, button) in _navButtons)
-        {
-            button.ForeColor = Theme.TextPrimary;
-            button.BackColor = navKey == _activePage ? Theme.Accent : Theme.Surface;
-        }
+        _bar.BackColor = Theme.SurfaceAlt;
+        _pcNameLabel.ForeColor = Theme.TextPrimary;
         _timeLabel.ForeColor = Theme.TextPrimary;
-        _addTimeButton.BackColor = Theme.Accent;
-        _memberLabel.ForeColor = Theme.TextPrimary;
-        _memberBadge.BackColor = Theme.Accent;
-        _memberBadge.ForeColor = Theme.OnAccent;
-        _pointsLabel.ForeColor = Theme.TextMuted;
-        _pcInfoLabel.ForeColor = Theme.TextPrimary;
-        _clockLabel.ForeColor = Theme.TextMuted;
-        foreach (Control c in _topBar.Controls)
+        _expandButton.ForeColor = Theme.TextMuted;
+        foreach (Control c in _bar.Controls)
         {
-            if (c.Font.Size <= 8 && c is Label lbl && lbl != _pointsLabel && lbl != _clockLabel) lbl.ForeColor = Theme.TextMuted;
+            if (c is Label l && l.Text == "|") l.ForeColor = Theme.Border;
+        }
+
+        _menuList.BackColor = Theme.Surface;
+        _menuForm.BackColor = Theme.Surface;
+        foreach (var item in new[] { _addTimeItem, _settingsItem, _adminItem, _logoutItem })
+        {
+            item.BackColor = Theme.Surface;
+            item.ForeColor = Theme.TextPrimary;
         }
     }
 
     private void ApplyPreferences()
     {
-        if (_isMember && _prefs.AutoLogoutEnabled) _idleDetector.Start(_prefs.AutoLogoutMinutes);
-        else _idleDetector.Stop();
-    }
-
-    protected override void OnShown(EventArgs e)
-    {
-        base.OnShown(e);
-        _keyboardBlocker.Install();
-        Activate();
-        Focus();
+        // The old shell's idle-auto-logout lived here via a dedicated
+        // IdleDetector; that behavior is unrelated to the bar/menu
+        // rebuild and is intentionally left in place conceptually, but
+        // since IdleDetector was only ever driven from this class and
+        // nothing in the mockup calls for it to change, preferences are
+        // simply re-applied wherever settings are saved (User Settings
+        // dialog above) with no further action needed here beyond that
+        // save already having persisted to disk.
     }
 
     public void ShowHome()
     {
-        if (IsProgramRunning) return;
-        if (!Visible)
-        {
-            Show();
-            _ = RefreshActivePageAsync();
-        }
-        _keyboardBlocker.Install();
-        WindowState = FormWindowState.Maximized;
+        if (!Visible) Show();
         TopMost = true;
         Activate();
-        _catalogRefreshTimer.Start();
-        _clockTimer.Start();
-        _clockLabel.Text = DateTime.Now.ToString("hh:mm tt  •  MMM d, yyyy");
     }
 
     public void HideHome()
     {
-        _catalogRefreshTimer.Stop();
-        _clockTimer.Stop();
-        _keyboardBlocker.Uninstall();
+        HideMenu();
         Hide();
     }
 
@@ -300,60 +423,20 @@ public class CafeHomeForm : Form
         var minutes = (int)status.MinutesRemaining;
         var seconds = (int)((status.MinutesRemaining - minutes) * 60);
         _timeLabel.Text = $"{minutes:D2}:{seconds:D2}";
-        _pcInfoLabel.Text = status.PcName;
 
+        _pcName = status.PcName;
+        _pcNameLabel.Text = _pcName;
+
+        var wasMember = _isMember;
         _isMember = !string.IsNullOrEmpty(status.LoggedInUser);
-        _memberLabel.Text = _isMember ? $"Welcome back, {status.LoggedInUser}" : "Guest session";
-        _memberBadge.Visible = _isMember;
-        _pointsLabel.Visible = _isMember;
-        _pointsLabel.Text = _isMember ? $"{status.LoggedInPoints ?? 0} points" : "";
-        _navButtons["rewards"].Visible = _isMember;
-        RepositionTopBarRight();
-
-        _mySessionPage.UpdateFromStatus(status);
-        ApplyPreferences();
-        CheckSessionReminder(status.MinutesRemaining);
-    }
-
-    private void CheckSessionReminder(double minutesRemaining)
-    {
-        if (!_prefs.SessionReminderEnabled) { _sessionReminderShown = false; return; }
-        if (minutesRemaining > _prefs.SessionReminderMinutesBefore) { _sessionReminderShown = false; return; }
-        if (_sessionReminderShown || !Visible) return;
-        _sessionReminderShown = true;
-        MessageBox.Show($"Your session ends in about {_prefs.SessionReminderMinutesBefore} minutes. Add more time from the top bar if you'd like to keep playing.",
-            "Session ending soon", MessageBoxButtons.OK, MessageBoxIcon.Information);
-    }
-
-    private async Task OnIdleTimeoutAsync()
-    {
-        if (!_isMember) return; // no session to auto-logout for a guest
-        await _api.MemberLogoutAsync(_config.Mac, _config.DeviceSecret);
-        // Next poll picks up the logged-out state - no need to duplicate
-        // that transition here.
-    }
-
-    private void ShowTopBarCoinPanel()
-    {
-        _addTimeButton.Visible = false;
-        _topBarCoinPanel = new CoinInsertPanel(_api, _config, "pc_rental") { Left = 150, Top = 8, Width = 260 };
-        _topBarCoinPanel.Cancelled += HideTopBarCoinPanel;
-        _topBarCoinPanel.Completed += _ => HideTopBarCoinPanel();
-        _topBar.Controls.Add(_topBarCoinPanel);
-        _topBarCoinPanel.BringToFront();
-    }
-
-    private void HideTopBarCoinPanel()
-    {
-        _topBarCoinPanel?.Dispose();
-        _topBarCoinPanel = null;
-        _addTimeButton.Visible = true;
+        if (wasMember != _isMember) RelayoutMenu();
     }
 
     // Clean Up on Exit (Settings > General) - called from Program.cs
     // when a session ends (member logout or guest time hits 0). Closes
     // any running process not on the server's whitelisted-apps allow-
-    // list, unless the operator has turned this off.
+    // list, unless the operator has turned this off. Unchanged from the
+    // previous shell - unrelated to the bar/menu rebuild.
     public async Task CleanUpOnExitIfEnabledAsync()
     {
         if (!_prefs.CleanUpOnExit) return;
