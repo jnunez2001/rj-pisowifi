@@ -39,3 +39,14 @@ STANDALONE_ARCHITECTURE_PLAN.md
 # something that should ship to a client device or be visible in a public
 # repo history.
 docs/
+
+# windows-rental-client (C#/.NET) build output - never source, always
+# regenerable via `dotnet build`/`dotnet publish`. This folder went
+# uncommitted long enough that its actual source was lost from disk with
+# no backup (recovered only by decompiling an old build) - keep committing
+# the real .cs/.csproj/.bat/.md files, never the generated bin/obj/publish
+# artifacts.
+windows-rental-client/bin/
+windows-rental-client/obj/
+windows-rental-client-installer/bin/
+windows-rental-client-installer/obj/
