@@ -49,7 +49,7 @@ public class HomePage : UserControl
         _carousel.Controls.Add(_carouselArt);
 
         _carouselFeaturedLabel = new Label { Text = "FEATURED GAME", ForeColor = Theme.TextMuted, Font = new Font("Segoe UI", 9, FontStyle.Bold), AutoSize = true, Left = 30, Top = 30 };
-        _carouselTitle = new Label { ForeColor = Color.White, Font = new Font("Segoe UI", 26, FontStyle.Bold), AutoSize = true, Left = 30, Top = 56 };
+        _carouselTitle = new Label { ForeColor = Theme.TextPrimary, Font = new Font("Segoe UI", 26, FontStyle.Bold), AutoSize = true, Left = 30, Top = 56 };
         _carouselPlayButton = new CardButton { Text = "PLAY NOW", Width = 160, Height = 40, Left = 30, Top = 130, CornerRadius = 8, BackColor = Theme.Accent };
         _carouselPlayButton.Click += (_, _) => { if (_featured.Count > 0) AppLauncher.Launch(_featured[_carouselIndex]); };
         _emptyLabel = new Label { Text = "No featured games yet.", ForeColor = Theme.TextMuted, Font = new Font("Segoe UI", 12), AutoSize = true, Left = 30, Top = 30, Visible = false };
