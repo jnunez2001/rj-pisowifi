@@ -246,7 +246,7 @@ public class CafeHomeForm : Form
         _addTimeButton.BackColor = Theme.Accent;
         _memberLabel.ForeColor = Theme.TextPrimary;
         _memberBadge.BackColor = Theme.Accent;
-        _memberBadge.ForeColor = Color.White;
+        _memberBadge.ForeColor = Theme.OnAccent;
         _pointsLabel.ForeColor = Theme.TextMuted;
         _pcInfoLabel.ForeColor = Theme.TextPrimary;
         _clockLabel.ForeColor = Theme.TextMuted;
