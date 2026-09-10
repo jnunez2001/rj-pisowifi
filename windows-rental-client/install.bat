@@ -1,51 +1,59 @@
 @echo off
 setlocal enabledelayedexpansion
 
-REM ===== StarkFi Rental Client - Installer =====
-REM Reconstructed script (see README.md's note at the top) - not yet
-REM re-verified on real hardware after reconstruction. Run as
-REM Administrator (right-click > Run as administrator).
+rem StarkFi Rental Client setup wizard.
+rem Run this from the same folder as StarkFiRentalClient.exe (the
+rem published single-file exe - see README.md's "Publishing" section).
+rem Right-click this file and "Run as administrator" - the Task Manager
+rem lock and the startup shortcut both need admin rights.
 
-net session >nul 2>&1
-if %errorlevel% neq 0 (
-    echo This installer must be run as Administrator.
-    echo Right-click install.bat and choose "Run as administrator".
+set EXE_NAME=StarkFiRentalClient.exe
+set STARTUP_DIR=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup
+set MARKER_DIR=%ProgramData%\StarkFiRental
+set MARKER_FILE=%MARKER_DIR%\install_path.txt
+
+if not exist "%~dp0%EXE_NAME%" (
+    echo Could not find %EXE_NAME% next to this script.
+    echo Publish it first with: dotnet publish -c Release -r win-x64
     pause
     exit /b 1
 )
 
-set "SRC_EXE=%~dp0StarkFiRentalClient.exe"
-set "INSTALL_DIR=%ProgramFiles%\StarkFiRental"
-set "DEST_EXE=%INSTALL_DIR%\StarkFiRentalClient.exe"
-set "STARTUP_DIR=%ProgramData%\Microsoft\Windows\Start Menu\Programs\StartUp"
-set "SHORTCUT=%STARTUP_DIR%\StarkFiRentalClient.lnk"
+echo ================================================
+echo   StarkFi Rental Client - Setup
+echo ================================================
+echo.
+set /p INSTALL_DIR="Install folder [%ProgramFiles%\StarkFiRental]: "
+if "%INSTALL_DIR%"=="" set INSTALL_DIR=%ProgramFiles%\StarkFiRental
 
-if not exist "%SRC_EXE%" (
-    echo Could not find StarkFiRentalClient.exe next to this script.
-    echo Publish it first: dotnet publish -c Release -r win-x64
-    pause
-    exit /b 1
-)
-
-echo Installing to %INSTALL_DIR% ...
+echo.
+echo Installing to "%INSTALL_DIR%" ...
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-copy /Y "%SRC_EXE%" "%DEST_EXE%" >nul
+copy /Y "%~dp0%EXE_NAME%" "%INSTALL_DIR%\%EXE_NAME%" >nul
 
-echo Adding startup shortcut for all users ...
-powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-    "$s = (New-Object -ComObject WScript.Shell).CreateShortcut('%SHORTCUT%');" ^
-    "$s.TargetPath = '%DEST_EXE%';" ^
-    "$s.WorkingDirectory = '%INSTALL_DIR%';" ^
-    "$s.Save()"
+rem Remember exactly where this was installed, so uninstall.bat never has
+rem to guess or assume the default Program Files path - it just reads
+rem this file back. Kept in %ProgramData% since it needs to survive and
+rem be readable regardless of which install folder was chosen.
+if not exist "%MARKER_DIR%" mkdir "%MARKER_DIR%"
+echo %INSTALL_DIR%> "%MARKER_FILE%"
 
-echo Disabling Task Manager ...
+echo Creating startup shortcut ...
+powershell -NoProfile -Command ^
+    "$s = (New-Object -COM WScript.Shell).CreateShortcut('%STARTUP_DIR%\StarkFiRentalClient.lnk'); $s.TargetPath = '%INSTALL_DIR%\%EXE_NAME%'; $s.Save()"
+
+echo Locking Task Manager ...
 reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Policies\System" /v DisableTaskMgr /t REG_DWORD /d 1 /f >nul
 
 echo.
-echo Done. StarkFi Rental Client will launch automatically at next login.
+echo Done. StarkFiRentalClient will start automatically at next login.
+echo To run it right now: "%INSTALL_DIR%\%EXE_NAME%"
 echo.
-echo To make it survive Alt+F4 / a plain reboot (real kiosk lockdown),
-echo see the "Making it survive Alt+F4" section in README.md - that
-echo step is deliberately manual, not automated by this script.
+echo This did NOT set up shell replacement (the step that makes the app
+echo unclosable via Alt+F4/reboot) - that's still a separate, deliberate
+echo step, see README.md.
+echo.
+echo To uninstall later, run uninstall.bat as administrator - it reads
+echo "%MARKER_FILE%" to find this exact install folder automatically.
 echo.
 pause

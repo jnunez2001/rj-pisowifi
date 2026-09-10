@@ -1,17 +1,30 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <Nullable>disable</Nullable>
-    <UseWindowsForms>True</UseWindowsForms>
-    <ImplicitUsings>disable</ImplicitUsings>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <ApplicationIcon></ApplicationIcon>
     <AssemblyName>StarkFiRentalClient</AssemblyName>
-    <RootNamespace>StarkFiRentalClient</RootNamespace>
-    <PlatformTarget>x64</PlatformTarget>
+    <!-- Lets the SDK build a Windows-targeted (net8.0-windows) app from a
+         non-Windows build machine, like the macOS box this is cross-
+         compiled from. Has no effect once actually building on Windows. -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- Runs continuously as the machine's lock enforcement - shouldn't
+         need a console window ever, including during development. -->
+    <StartupObject>StarkFiRentalClient.Program</StartupObject>
+
+    <!-- Lets `dotnet publish` produce one self-contained .exe with no
+         separate .NET runtime install needed on the rental PC. Doesn't
+         affect a plain `dotnet build` - these only kick in when the
+         matching publish switches are passed (see README). -->
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SelfContained>true</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
+
 </Project>

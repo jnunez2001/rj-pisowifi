@@ -1,95 +1,103 @@
-using System;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace StarkFiRentalClient;
 
+// Low-level keyboard hook blocking the common desktop-escape combos while
+// the lock screen is showing: Alt+Tab, the Windows key, and Ctrl+Esc
+// (Start menu). This is the genuinely novel systems-level piece flagged
+// in the plan as most likely to need iteration once tested on real
+// hardware.
+//
+// Honest limitation: Ctrl+Alt+Del is Windows' own Secure Attention
+// Sequence (SAS) - by design, NO user-mode application, hook, or driver
+// can intercept or block it (this is intentional OS security, not a gap
+// in this implementation). A customer pressing it will still reach the
+// real Windows security screen (Task Manager, Sign out, etc), and from
+// there could potentially get around the lock. Fully preventing that
+// needs either the "custom Shell" registry replacement (documented in
+// README.md - makes explorer.exe itself not the shell, which changes
+// what Ctrl+Alt+Del's options even lead to) or a Group Policy /
+// Software Restriction Policy on the machine - neither of those are
+// things this app can silently apply on your behalf, they're
+// deliberate, documented setup steps for the operator.
 public class KeyboardBlocker : IDisposable
 {
-	private struct KBDLLHOOKSTRUCT
-	{
-		public int vkCode;
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WM_KEYDOWN = 0x0100;
+    private const int WM_SYSKEYDOWN = 0x0104;
 
-		public int scanCode;
+    private const int VK_TAB = 0x09;
+    private const int VK_ESCAPE = 0x1B;
+    private const int VK_LWIN = 0x5B;
+    private const int VK_RWIN = 0x5C;
 
-		public int flags;
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KBDLLHOOKSTRUCT
+    {
+        public int vkCode;
+        public int scanCode;
+        public int flags;
+        public int time;
+        public IntPtr dwExtraInfo;
+    }
 
-		public int time;
+    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
 
-		public nint dwExtraInfo;
-	}
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
 
-	private delegate nint LowLevelKeyboardProc(int nCode, nint wParam, nint lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
 
-	private const int WH_KEYBOARD_LL = 13;
+    [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
 
-	private const int WM_KEYDOWN = 256;
+    [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
+    private static extern IntPtr GetModuleHandle(string lpModuleName);
 
-	private const int WM_SYSKEYDOWN = 260;
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int vKey);
 
-	private const int VK_TAB = 9;
+    private IntPtr _hookId = IntPtr.Zero;
+    private readonly LowLevelKeyboardProc _proc;
 
-	private const int VK_ESCAPE = 27;
+    public KeyboardBlocker()
+    {
+        _proc = HookCallback;
+    }
 
-	private const int VK_LWIN = 91;
+    public void Install()
+    {
+        using var curProcess = System.Diagnostics.Process.GetCurrentProcess();
+        using var curModule = curProcess.MainModule!;
+        _hookId = SetWindowsHookEx(WH_KEYBOARD_LL, _proc, GetModuleHandle(curModule.ModuleName!), 0);
+    }
 
-	private const int VK_RWIN = 92;
+    public void Uninstall()
+    {
+        if (_hookId != IntPtr.Zero)
+        {
+            UnhookWindowsHookEx(_hookId);
+            _hookId = IntPtr.Zero;
+        }
+    }
 
-	private nint _hookId = IntPtr.Zero;
+    private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        if (nCode >= 0 && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN))
+        {
+            var data = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
+            var altPressed = (GetAsyncKeyState(0x12) & 0x8000) != 0; // VK_MENU
 
-	private readonly LowLevelKeyboardProc _proc;
+            bool block =
+                (altPressed && data.vkCode == VK_TAB) ||
+                data.vkCode == VK_LWIN || data.vkCode == VK_RWIN ||
+                ((GetAsyncKeyState(0x11) & 0x8000) != 0 && data.vkCode == VK_ESCAPE); // Ctrl+Esc
 
-	[DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-	private static extern nint SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, nint hMod, uint dwThreadId);
+            if (block) return (IntPtr)1; // non-zero = swallow the key
+        }
+        return CallNextHookEx(_hookId, nCode, wParam, lParam);
+    }
 
-	[DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-	private static extern bool UnhookWindowsHookEx(nint hhk);
-
-	[DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-	private static extern nint CallNextHookEx(nint hhk, int nCode, nint wParam, nint lParam);
-
-	[DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-	private static extern nint GetModuleHandle(string lpModuleName);
-
-	[DllImport("user32.dll")]
-	private static extern short GetAsyncKeyState(int vKey);
-
-	public KeyboardBlocker()
-	{
-		_proc = HookCallback;
-	}
-
-	public void Install()
-	{
-		using Process process = Process.GetCurrentProcess();
-		using ProcessModule processModule = process.MainModule;
-		_hookId = SetWindowsHookEx(13, _proc, GetModuleHandle(processModule.ModuleName), 0u);
-	}
-
-	public void Uninstall()
-	{
-		if (_hookId != IntPtr.Zero)
-		{
-			UnhookWindowsHookEx(_hookId);
-			_hookId = IntPtr.Zero;
-		}
-	}
-
-	private nint HookCallback(int nCode, nint wParam, nint lParam)
-	{
-		if (nCode >= 0 && (wParam == 256 || wParam == 260))
-		{
-			KBDLLHOOKSTRUCT kBDLLHOOKSTRUCT = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-			if (((GetAsyncKeyState(18) & 0x8000) != 0 && kBDLLHOOKSTRUCT.vkCode == 9) || kBDLLHOOKSTRUCT.vkCode == 91 || kBDLLHOOKSTRUCT.vkCode == 92 || ((GetAsyncKeyState(17) & 0x8000) != 0 && kBDLLHOOKSTRUCT.vkCode == 27))
-			{
-				return 1;
-			}
-		}
-		return CallNextHookEx(_hookId, nCode, wParam, lParam);
-	}
-
-	public void Dispose()
-	{
-		Uninstall();
-	}
+    public void Dispose() => Uninstall();
 }

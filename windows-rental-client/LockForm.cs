@@ -1,751 +1,507 @@
-using System;
-using System.Drawing;
-using System.IO;
-using System.Net.Http;
-using System.Threading.Tasks;
-using System.Windows.Forms;
 using StarkFiRentalClient.UI;
 
 namespace StarkFiRentalClient;
 
+// Full-screen branded locked splash (V1.0.0 mockup rebuild) - reuses
+// the Lock Screen Logo/Wallpaper/Announcement settings already built in
+// the admin panel (public/admin/rental > Settings), fetched fresh on
+// every status poll via StatusResponse so a branding change in admin
+// shows up here within one poll interval, no client restart needed.
+//
+// Default view is the mockup's two-card layout (Guest / Member Login);
+// each swaps the panel's content in place rather than opening a
+// separate window, so the keyboard-hook/topmost/borderless lock stays
+// intact throughout every sub-view - same principle the original menu-
+// based layout already used, just restyled.
 public class LockForm : Form
 {
-	private readonly RentalApiClient _api;
+    private readonly RentalApiClient _api;
+    private readonly ClientConfig _config;
+    private readonly KeyboardBlocker _keyboardBlocker = new();
+    private readonly System.Windows.Forms.Timer _clockTimer;
 
-	private readonly ClientConfig _config;
+    private PictureBox _wallpaperBox = null!;
 
-	private readonly KeyboardBlocker _keyboardBlocker = new KeyboardBlocker();
+    // Header
+    private Label _pcNameLabel = null!;
+    private Label _statusDotLabel = null!;
+    private Label _clockLabel = null!;
 
-	private readonly Timer _clockTimer;
+    private Panel _centerPanel = null!;
+    private PictureBox _logoBox = null!;
+    private Label _welcomeLabel = null!;
+    private Label _cafeNameLabel = null!;
+    private Label _announcementLabel = null!;
 
-	private PictureBox _wallpaperBox;
+    // Home view (two cards)
+    private Panel _homeView = null!;
+    private RoundedPanel _guestCard = null!;
+    private RoundedPanel _memberCard = null!;
 
-	private Label _pcNameLabel;
+    // Footer row (Register / How to Play / Call Staff)
+    private FlowLayoutPanel _footerRow = null!;
 
-	private Label _statusDotLabel;
+    // Status footer (Server/Secure/Network)
+    private Label _serverStatusLabel = null!;
+    private Label _networkStatusLabel = null!;
 
-	private Label _clockLabel;
+    // Login sub-view controls
+    private Panel _loginView = null!;
+    private TextBox _usernameBox = null!;
+    private TextBox _passwordBox = null!;
+    private Button _loginButton = null!;
+    private Button _loginBackButton = null!;
+    private Label _loginErrorLabel = null!;
 
-	private Panel _centerPanel;
+    // Coin-insert sub-view (Insert Coins / Create Account), built fresh
+    // each time it's opened so it always starts from a clean state.
+    private CoinInsertPanel? _coinPanel;
 
-	private PictureBox _logoBox;
+    private bool _connected = true;
+    private string? _instructionsText;
 
-	private Label _welcomeLabel;
+    public LockForm(RentalApiClient api, ClientConfig config)
+    {
+        _api = api;
+        _config = config;
+        _clockTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+        _clockTimer.Tick += (_, _) => _clockLabel.Text = DateTime.Now.ToString("hh:mm tt\nMMM d, yyyy");
+        Theme.Changed += () => { if (IsHandleCreated) BeginInvoke(ApplyTheme); };
+        BuildUi();
+    }
 
-	private Label _cafeNameLabel;
+    private void BuildUi()
+    {
+        FormBorderStyle = FormBorderStyle.None;
+        WindowState = FormWindowState.Maximized;
+        TopMost = true;
+        StartPosition = FormStartPosition.Manual;
+        Bounds = Screen.PrimaryScreen!.Bounds;
+        ShowInTaskbar = false;
+        KeyPreview = true;
 
-	private Label _announcementLabel;
+        _wallpaperBox = new PictureBox { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.StretchImage };
+        Controls.Add(_wallpaperBox);
 
-	private Panel _homeView;
+        BuildHeader();
+        BuildCenter();
+        BuildFooter();
 
-	private RoundedPanel _guestCard;
+        FormClosing += (_, e) => { /* prevent Alt+F4 closing the lock while it's supposed to be showing */
+            if (Visible) e.Cancel = true;
+        };
 
-	private RoundedPanel _memberCard;
+        _clockTimer.Start();
+        _clockLabel.Text = DateTime.Now.ToString("hh:mm tt\nMMM d, yyyy");
+        ApplyTheme();
+        ShowHomeView();
+    }
 
-	private FlowLayoutPanel _footerRow;
+    private void BuildHeader()
+    {
+        var header = new Panel { Dock = DockStyle.Top, Height = 70 };
+        Controls.Add(header);
 
-	private Label _serverStatusLabel;
+        _pcNameLabel = new Label { Font = new Font("Segoe UI", 13, FontStyle.Bold), AutoSize = true, Left = 24, Top = 22 };
+        header.Controls.Add(_pcNameLabel);
 
-	private Label _networkStatusLabel;
+        _statusDotLabel = new Label { Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = true, Top = 26 };
+        header.Controls.Add(_statusDotLabel);
 
-	private Panel _loginView;
+        _clockLabel = new Label { Font = new Font("Segoe UI", 10), AutoSize = false, Width = 220, Height = 44, TextAlign = ContentAlignment.MiddleRight, Top = 12 };
+        header.Controls.Add(_clockLabel);
+        header.Resize += (_, _) => { _clockLabel.Left = header.Width - _clockLabel.Width - 24; };
+        header.Resize += (_, _) => RepositionStatusDot();
 
-	private TextBox _usernameBox;
+        header.BringToFront();
+        _wallpaperBox.SendToBack();
+    }
 
-	private TextBox _passwordBox;
+    private void RepositionStatusDot()
+    {
+        _statusDotLabel.Left = _pcNameLabel.Right + 14;
+    }
 
-	private Button _loginButton;
+    private void BuildCenter()
+    {
+        _centerPanel = new Panel { Width = 900, Height = 560 };
+        Controls.Add(_centerPanel);
+        _centerPanel.BringToFront();
 
-	private Button _loginBackButton;
+        _logoBox = new PictureBox { SizeMode = PictureBoxSizeMode.Zoom, Width = 140, Height = 70, Left = (_centerPanel.Width - 140) / 2, Top = 0 };
+        _centerPanel.Controls.Add(_logoBox);
 
-	private Label _loginErrorLabel;
+        _welcomeLabel = new Label { Text = "WELCOME TO", Font = new Font("Segoe UI", 11, FontStyle.Bold), AutoSize = false, Width = _centerPanel.Width, Height = 24, Top = 82, TextAlign = ContentAlignment.MiddleCenter };
+        _centerPanel.Controls.Add(_welcomeLabel);
 
-	private CoinInsertPanel? _coinPanel;
+        _cafeNameLabel = new Label { Font = new Font("Segoe UI", 24, FontStyle.Bold), AutoSize = false, Width = _centerPanel.Width, Height = 44, Top = 106, TextAlign = ContentAlignment.MiddleCenter };
+        _centerPanel.Controls.Add(_cafeNameLabel);
 
-	private bool _connected = true;
+        _announcementLabel = new Label { Font = new Font("Segoe UI", 9), AutoSize = false, Width = _centerPanel.Width - 80, Height = 30, Left = 40, Top = 154, TextAlign = ContentAlignment.MiddleCenter };
+        _centerPanel.Controls.Add(_announcementLabel);
 
-	private string? _instructionsText;
+        BuildHomeView();
+        BuildLoginView();
+    }
 
-	public LockForm(RentalApiClient api, ClientConfig config)
-	{
-		_api = api;
-		_config = config;
-		_clockTimer = new Timer
-		{
-			Interval = 1000
-		};
-		_clockTimer.Tick += delegate
-		{
-			_clockLabel.Text = DateTime.Now.ToString("hh:mm tt\nMMM d, yyyy");
-		};
-		Theme.Changed += delegate
-		{
-			if (base.IsHandleCreated)
-			{
-				BeginInvoke(ApplyTheme);
-			}
-		};
-		BuildUi();
-	}
+    private void BuildHomeView()
+    {
+        _homeView = new Panel { Left = 0, Top = 200, Width = _centerPanel.Width, Height = 320 };
+        _centerPanel.Controls.Add(_homeView);
 
-	private void BuildUi()
-	{
-		base.FormBorderStyle = FormBorderStyle.None;
-		base.WindowState = FormWindowState.Maximized;
-		base.TopMost = true;
-		base.StartPosition = FormStartPosition.Manual;
-		base.Bounds = Screen.PrimaryScreen.Bounds;
-		base.ShowInTaskbar = false;
-		base.KeyPreview = true;
-		_wallpaperBox = new PictureBox
-		{
-			Dock = DockStyle.Fill,
-			SizeMode = PictureBoxSizeMode.StretchImage
-		};
-		base.Controls.Add(_wallpaperBox);
-		BuildHeader();
-		BuildCenter();
-		BuildFooter();
-		base.FormClosing += delegate(object? _, FormClosingEventArgs e)
-		{
-			if (base.Visible)
-			{
-				e.Cancel = true;
-			}
-		};
-		_clockTimer.Start();
-		_clockLabel.Text = DateTime.Now.ToString("hh:mm tt\nMMM d, yyyy");
-		ApplyTheme();
-		ShowHomeView();
-	}
+        var cardWidth = 420;
+        var cardHeight = 300;
+        var gap = 40;
+        var totalWidth = cardWidth * 2 + gap;
+        var startLeft = (_homeView.Width - totalWidth) / 2;
 
-	private void BuildHeader()
-	{
-		Panel header = new Panel
-		{
-			Dock = DockStyle.Top,
-			Height = 70
-		};
-		base.Controls.Add(header);
-		_pcNameLabel = new Label
-		{
-			Font = new Font("Segoe UI", 13f, FontStyle.Bold),
-			AutoSize = true,
-			Left = 24,
-			Top = 22
-		};
-		header.Controls.Add(_pcNameLabel);
-		_statusDotLabel = new Label
-		{
-			Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-			AutoSize = true,
-			Top = 26
-		};
-		header.Controls.Add(_statusDotLabel);
-		_clockLabel = new Label
-		{
-			Font = new Font("Segoe UI", 10f),
-			AutoSize = false,
-			Width = 220,
-			Height = 44,
-			TextAlign = ContentAlignment.MiddleRight,
-			Top = 12
-		};
-		header.Controls.Add(_clockLabel);
-		header.Resize += delegate
-		{
-			_clockLabel.Left = header.Width - _clockLabel.Width - 24;
-		};
-		header.Resize += delegate
-		{
-			RepositionStatusDot();
-		};
-		header.BringToFront();
-		_wallpaperBox.SendToBack();
-	}
+        _guestCard = BuildCard("GUEST", "Play without an account", "Insert credits and start playing", "CONTINUE AS GUEST",
+            startLeft, cardWidth, cardHeight, () => ShowCoinPanel("pc_rental"));
 
-	private void RepositionStatusDot()
-	{
-		_statusDotLabel.Left = _pcNameLabel.Right + 14;
-	}
+        _memberCard = BuildCard("MEMBER LOGIN", "Login to your account", "Save time, earn points, unlock rewards", "LOGIN",
+            startLeft + cardWidth + gap, cardWidth, cardHeight, ShowLoginView);
 
-	private void BuildCenter()
-	{
-		_centerPanel = new Panel
-		{
-			Width = 900,
-			Height = 560
-		};
-		base.Controls.Add(_centerPanel);
-		_centerPanel.BringToFront();
-		_logoBox = new PictureBox
-		{
-			SizeMode = PictureBoxSizeMode.Zoom,
-			Width = 140,
-			Height = 70,
-			Left = (_centerPanel.Width - 140) / 2,
-			Top = 0
-		};
-		_centerPanel.Controls.Add(_logoBox);
-		_welcomeLabel = new Label
-		{
-			Text = "WELCOME TO",
-			Font = new Font("Segoe UI", 11f, FontStyle.Bold),
-			AutoSize = false,
-			Width = _centerPanel.Width,
-			Height = 24,
-			Top = 82,
-			TextAlign = ContentAlignment.MiddleCenter
-		};
-		_centerPanel.Controls.Add(_welcomeLabel);
-		_cafeNameLabel = new Label
-		{
-			Font = new Font("Segoe UI", 24f, FontStyle.Bold),
-			AutoSize = false,
-			Width = _centerPanel.Width,
-			Height = 44,
-			Top = 106,
-			TextAlign = ContentAlignment.MiddleCenter
-		};
-		_centerPanel.Controls.Add(_cafeNameLabel);
-		_announcementLabel = new Label
-		{
-			Font = new Font("Segoe UI", 9f),
-			AutoSize = false,
-			Width = _centerPanel.Width - 80,
-			Height = 30,
-			Left = 40,
-			Top = 154,
-			TextAlign = ContentAlignment.MiddleCenter
-		};
-		_centerPanel.Controls.Add(_announcementLabel);
-		BuildHomeView();
-		BuildLoginView();
-	}
+        _homeView.Controls.Add(_guestCard);
+        _homeView.Controls.Add(_memberCard);
+    }
 
-	private void BuildHomeView()
-	{
-		_homeView = new Panel
-		{
-			Left = 0,
-			Top = 200,
-			Width = _centerPanel.Width,
-			Height = 320
-		};
-		_centerPanel.Controls.Add(_homeView);
-		int num = 420;
-		int height = 300;
-		int num2 = 40;
-		int num3 = num * 2 + num2;
-		int num4 = (_homeView.Width - num3) / 2;
-		_guestCard = BuildCard("GUEST", "Play without an account", "Insert credits and start playing", "CONTINUE AS GUEST", num4, num, height, delegate
-		{
-			ShowCoinPanel("pc_rental");
-		});
-		_memberCard = BuildCard("MEMBER LOGIN", "Login to your account", "Save time, earn points, unlock rewards", "LOGIN", num4 + num + num2, num, height, ShowLoginView);
-		_homeView.Controls.Add(_guestCard);
-		_homeView.Controls.Add(_memberCard);
-	}
+    // Every child control in the card needs the same click handler as the
+    // card itself, since a click on a label/button doesn't bubble up to
+    // the parent Panel's own Click event in WinForms - onClick is applied
+    // directly to the card and every child, rather than trying to
+    // forward through Control.OnClick (protected, not callable from here).
+    private RoundedPanel BuildCard(string title, string subtitle, string description, string buttonText, int left, int width, int height, Action onClick)
+    {
+        var card = new RoundedPanel { Left = left, Top = 0, Width = width, Height = height, Cursor = Cursors.Hand, CornerRadius = 16 };
 
-	private RoundedPanel BuildCard(string title, string subtitle, string description, string buttonText, int left, int width, int height, Action onClick)
-	{
-		RoundedPanel roundedPanel = new RoundedPanel();
-		roundedPanel.Left = left;
-		roundedPanel.Top = 0;
-		roundedPanel.Width = width;
-		roundedPanel.Height = height;
-		roundedPanel.Cursor = Cursors.Hand;
-		roundedPanel.CornerRadius = 16;
-		Label label = new Label
-		{
-			Text = title,
-			Font = new Font("Segoe UI", 16f, FontStyle.Bold),
-			AutoSize = false,
-			Width = width,
-			Height = 30,
-			Top = 90,
-			TextAlign = ContentAlignment.MiddleCenter,
-			Cursor = Cursors.Hand
-		};
-		Label label2 = new Label
-		{
-			Text = subtitle,
-			Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-			AutoSize = false,
-			Width = width,
-			Height = 22,
-			Top = 130,
-			TextAlign = ContentAlignment.MiddleCenter,
-			Cursor = Cursors.Hand
-		};
-		Label label3 = new Label
-		{
-			Text = description,
-			Font = new Font("Segoe UI", 8f),
-			AutoSize = false,
-			Width = width,
-			Height = 20,
-			Top = 152,
-			TextAlign = ContentAlignment.MiddleCenter,
-			Cursor = Cursors.Hand
-		};
-		CardButton cardButton = new CardButton
-		{
-			Text = buttonText,
-			Width = width - 60,
-			Height = 42,
-			Left = 30,
-			Top = 220,
-			CornerRadius = 8
-		};
-		roundedPanel.Controls.Add(label);
-		roundedPanel.Controls.Add(label2);
-		roundedPanel.Controls.Add(label3);
-		roundedPanel.Controls.Add(cardButton);
-		roundedPanel.Click += delegate
-		{
-			onClick();
-		};
-		label.Click += delegate
-		{
-			onClick();
-		};
-		label2.Click += delegate
-		{
-			onClick();
-		};
-		label3.Click += delegate
-		{
-			onClick();
-		};
-		cardButton.Click += delegate
-		{
-			onClick();
-		};
-		return roundedPanel;
-	}
+        var titleLabel = new Label { Text = title, Font = new Font("Segoe UI", 16, FontStyle.Bold), AutoSize = false, Width = width, Height = 30, Top = 90, TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
+        var subtitleLabel = new Label { Text = subtitle, Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = false, Width = width, Height = 22, Top = 130, TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
+        var descLabel = new Label { Text = description, Font = new Font("Segoe UI", 8), AutoSize = false, Width = width, Height = 20, Top = 152, TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
+        var button = new CardButton { Text = buttonText, Width = width - 60, Height = 42, Left = 30, Top = 220, CornerRadius = 8 };
 
-	private void BuildLoginView()
-	{
-		_loginView = new Panel
-		{
-			Left = 0,
-			Top = 200,
-			Width = _centerPanel.Width,
-			Height = 320,
-			Visible = false
-		};
-		_centerPanel.Controls.Add(_loginView);
-		int num = 320;
-		int left = (_centerPanel.Width - num) / 2;
-		_usernameBox = new TextBox
-		{
-			PlaceholderText = "Username",
-			Width = num,
-			Left = left,
-			Top = 20,
-			Font = new Font("Segoe UI", 11f)
-		};
-		_loginView.Controls.Add(_usernameBox);
-		_passwordBox = new TextBox
-		{
-			PlaceholderText = "Password",
-			PasswordChar = '*',
-			Width = num,
-			Left = left,
-			Top = 60,
-			Font = new Font("Segoe UI", 11f)
-		};
-		_loginView.Controls.Add(_passwordBox);
-		_loginButton = new CardButton
-		{
-			Text = "LOG IN",
-			Width = num,
-			Height = 42,
-			Left = left,
-			Top = 100,
-			CornerRadius = 8
-		};
-		_loginButton.Click += async delegate
-		{
-			await OnLoginClicked();
-		};
-		_loginView.Controls.Add(_loginButton);
-		_loginErrorLabel = new Label
-		{
-			ForeColor = Color.OrangeRed,
-			Width = num,
-			Left = left,
-			Top = 150,
-			TextAlign = ContentAlignment.MiddleCenter,
-			Height = 24
-		};
-		_loginView.Controls.Add(_loginErrorLabel);
-		Button button = new Button();
-		button.Text = "Back";
-		button.Width = num;
-		button.Left = left;
-		button.Top = 184;
-		button.FlatStyle = FlatStyle.Flat;
-		button.FlatAppearance.BorderSize = 0;
-		_loginBackButton = button;
-		_loginBackButton.Click += delegate
-		{
-			ShowHomeView();
-		};
-		_loginView.Controls.Add(_loginBackButton);
-	}
+        card.Controls.Add(titleLabel);
+        card.Controls.Add(subtitleLabel);
+        card.Controls.Add(descLabel);
+        card.Controls.Add(button);
 
-	private void BuildFooter()
-	{
-		_footerRow = new FlowLayoutPanel
-		{
-			FlowDirection = FlowDirection.LeftToRight,
-			AutoSize = true,
-			WrapContents = false,
-			Width = 700,
-			Height = 60
-		};
-		base.Controls.Add(_footerRow);
-		_footerRow.Location = new Point((base.Bounds.Width - _footerRow.Width) / 2, base.Bounds.Height - 180);
-		CardButton cardButton = SmallFooterButton("REGISTER\nAS MEMBER");
-		cardButton.Click += delegate
-		{
-			ShowCoinPanel("pc_rental_create_account");
-		};
-		CardButton cardButton2 = SmallFooterButton("HOW TO PLAY\n(INSTRUCTIONS)");
-		cardButton2.Click += delegate
-		{
-			ShowInstructions();
-		};
-		CardButton cardButton3 = SmallFooterButton("NEED HELP?\nCALL STAFF");
-		cardButton3.Click += async delegate
-		{
-			await OnCallStaffClicked();
-		};
-		_footerRow.Controls.Add(cardButton);
-		_footerRow.Controls.Add(cardButton2);
-		_footerRow.Controls.Add(cardButton3);
-		_footerRow.BringToFront();
-		Panel statusFooter = new Panel
-		{
-			Dock = DockStyle.Bottom,
-			Height = 44
-		};
-		base.Controls.Add(statusFooter);
-		_serverStatusLabel = new Label
-		{
-			Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-			AutoSize = true,
-			Left = 24,
-			Top = 14
-		};
-		statusFooter.Controls.Add(_serverStatusLabel);
-		Label secureLabel = new Label
-		{
-			Text = "SECURE ENVIRONMENT - MONITORED & PROTECTED",
-			Font = new Font("Segoe UI", 8f),
-			AutoSize = true,
-			Top = 14
-		};
-		statusFooter.Controls.Add(secureLabel);
-		statusFooter.Resize += delegate
-		{
-			secureLabel.Left = (statusFooter.Width - secureLabel.Width) / 2;
-		};
-		_networkStatusLabel = new Label
-		{
-			Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-			AutoSize = true,
-			Top = 14
-		};
-		statusFooter.Controls.Add(_networkStatusLabel);
-		statusFooter.Resize += delegate
-		{
-			_networkStatusLabel.Left = statusFooter.Width - _networkStatusLabel.Width - 100;
-		};
-		Label versionLabel = new Label
-		{
-			Text = "v1.0.0",
-			Font = new Font("Segoe UI", 8f),
-			AutoSize = true,
-			Top = 14
-		};
-		statusFooter.Controls.Add(versionLabel);
-		statusFooter.Resize += delegate
-		{
-			versionLabel.Left = statusFooter.Width - 60;
-		};
-		statusFooter.BringToFront();
-		Button button = new Button();
-		button.Text = "Staff";
-		button.Width = 70;
-		button.Height = 26;
-		button.FlatStyle = FlatStyle.Flat;
-		button.FlatAppearance.BorderSize = 0;
-		Button button2 = button;
-		button2.Click += async delegate
-		{
-			await OnStaffClicked();
-		};
-		base.Controls.Add(button2);
-		button2.Location = new Point(base.Bounds.Width - 90, 20);
-		button2.BringToFront();
-	}
+        card.Click += (_, _) => onClick();
+        titleLabel.Click += (_, _) => onClick();
+        subtitleLabel.Click += (_, _) => onClick();
+        descLabel.Click += (_, _) => onClick();
+        button.Click += (_, _) => onClick();
 
-	private CardButton SmallFooterButton(string text)
-	{
-		return new CardButton
-		{
-			Text = text,
-			Width = 180,
-			Height = 56,
-			Margin = new Padding(10, 0, 10, 0),
-			Font = new Font("Segoe UI", 8f, FontStyle.Bold),
-			CornerRadius = 8
-		};
-	}
+        return card;
+    }
 
-	private void ApplyTheme()
-	{
-		BackColor = Theme.Background;
-		_pcNameLabel.ForeColor = Theme.TextPrimary;
-		_clockLabel.ForeColor = Theme.TextMuted;
-		_welcomeLabel.ForeColor = Theme.TextMuted;
-		_cafeNameLabel.ForeColor = Theme.TextPrimary;
-		_announcementLabel.ForeColor = Theme.TextMuted;
-		_guestCard.BackColor = Theme.Surface;
-		_guestCard.BorderColor = Theme.Accent;
-		_memberCard.BackColor = Theme.Surface;
-		_memberCard.BorderColor = Theme.AccentAlt;
-		foreach (Control control in _guestCard.Controls)
-		{
-			if (control is Label label)
-			{
-				label.ForeColor = Theme.TextPrimary;
-			}
-			if (control is CardButton cardButton)
-			{
-				cardButton.BackColor = Theme.Accent;
-				cardButton.ForeColor = Color.White;
-			}
-		}
-		foreach (Control control2 in _memberCard.Controls)
-		{
-			if (control2 is Label label2)
-			{
-				label2.ForeColor = Theme.TextPrimary;
-			}
-			if (control2 is CardButton cardButton2)
-			{
-				cardButton2.BackColor = Theme.AccentAlt;
-				cardButton2.ForeColor = Color.White;
-			}
-		}
-		_loginErrorLabel.ForeColor = Theme.Danger;
-		_loginButton.BackColor = Theme.Accent;
-		_usernameBox.BackColor = Theme.Surface;
-		_usernameBox.ForeColor = Theme.TextPrimary;
-		_passwordBox.BackColor = Theme.Surface;
-		_passwordBox.ForeColor = Theme.TextPrimary;
-		foreach (Control control3 in _footerRow.Controls)
-		{
-			if (control3 is CardButton cardButton3)
-			{
-				cardButton3.BackColor = Theme.Surface;
-				cardButton3.ForeColor = Theme.TextPrimary;
-			}
-		}
-		RefreshStatusLabels();
-	}
+    private void BuildLoginView()
+    {
+        _loginView = new Panel { Left = 0, Top = 200, Width = _centerPanel.Width, Height = 320, Visible = false };
+        _centerPanel.Controls.Add(_loginView);
 
-	private void RefreshStatusLabels()
-	{
-		_serverStatusLabel.Text = (_connected ? "SERVER STATUS: ONLINE" : "SERVER STATUS: OFFLINE");
-		_serverStatusLabel.ForeColor = (_connected ? Theme.Success : Theme.Danger);
-		_networkStatusLabel.Text = (_connected ? "NETWORK: CONNECTED" : "NETWORK: DISCONNECTED");
-		_networkStatusLabel.ForeColor = (_connected ? Theme.Success : Theme.Danger);
-	}
+        var fieldWidth = 320;
+        var fieldLeft = (_centerPanel.Width - fieldWidth) / 2;
 
-	public void SetConnected(bool connected)
-	{
-		if (_connected != connected)
-		{
-			_connected = connected;
-			RefreshStatusLabels();
-		}
-	}
+        _usernameBox = new TextBox { PlaceholderText = "Username", Width = fieldWidth, Left = fieldLeft, Top = 20, Font = new Font("Segoe UI", 11) };
+        _loginView.Controls.Add(_usernameBox);
 
-	private void ShowHomeView()
-	{
-		_coinPanel?.Dispose();
-		_coinPanel = null;
-		_loginErrorLabel.Text = "";
-		_usernameBox.Text = "";
-		_passwordBox.Text = "";
-		_homeView.Visible = true;
-		_loginView.Visible = false;
-		RecenterHomeView();
-	}
+        _passwordBox = new TextBox { PlaceholderText = "Password", PasswordChar = '*', Width = fieldWidth, Left = fieldLeft, Top = 60, Font = new Font("Segoe UI", 11) };
+        _loginView.Controls.Add(_passwordBox);
 
-	private void RecenterHomeView()
-	{
-		_centerPanel.Left = (base.Bounds.Width - _centerPanel.Width) / 2;
-		_centerPanel.Top = (base.Bounds.Height - _centerPanel.Height) / 2 - 40;
-		RepositionStatusDot();
-	}
+        _loginButton = new CardButton { Text = "LOG IN", Width = fieldWidth, Height = 42, Left = fieldLeft, Top = 100, CornerRadius = 8 };
+        _loginButton.Click += async (_, _) => await OnLoginClicked();
+        _loginView.Controls.Add(_loginButton);
 
-	private void ShowLoginView()
-	{
-		_homeView.Visible = false;
-		_loginView.Visible = true;
-	}
+        _loginErrorLabel = new Label { ForeColor = Color.OrangeRed, Width = fieldWidth, Left = fieldLeft, Top = 150, TextAlign = ContentAlignment.MiddleCenter, Height = 24 };
+        _loginView.Controls.Add(_loginErrorLabel);
 
-	private void ShowCoinPanel(string mode)
-	{
-		_homeView.Visible = false;
-		_loginView.Visible = false;
-		_coinPanel = new CoinInsertPanel(_api, _config, mode)
-		{
-			Left = (_centerPanel.Width - 280) / 2,
-			Top = 20
-		};
-		_coinPanel.Cancelled += ShowHomeView;
-		_coinPanel.Completed += OnCoinPanelCompleted;
-		_centerPanel.Controls.Add(_coinPanel);
-		_coinPanel.BringToFront();
-	}
+        _loginBackButton = new Button { Text = "Back", Width = fieldWidth, Left = fieldLeft, Top = 184, FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 } };
+        _loginBackButton.Click += (_, _) => ShowHomeView();
+        _loginView.Controls.Add(_loginBackButton);
+    }
 
-	private void OnCoinPanelCompleted(ApiResult result)
-	{
-		if (result.AccountCreated)
-		{
-			MessageBox.Show($"Account \"{result.Username}\" created with {result.Seconds / 60} minutes. You can log in now.", "Account created", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
-		}
-		ShowHomeView();
-	}
+    private void BuildFooter()
+    {
+        _footerRow = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.LeftToRight, AutoSize = true, WrapContents = false,
+            Width = 700, Height = 60
+        };
+        Controls.Add(_footerRow);
+        _footerRow.Location = new Point((Bounds.Width - _footerRow.Width) / 2, Bounds.Height - 180);
 
-	private void ShowInstructions()
-	{
-		MessageBox.Show(string.IsNullOrWhiteSpace(_instructionsText) ? "Insert coins on the Guest card, or log in with your member account. Ask staff if you need help." : _instructionsText, "How to Play", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
-	}
+        var registerBtn = SmallFooterButton("REGISTER\nAS MEMBER");
+        registerBtn.Click += (_, _) => ShowCoinPanel("pc_rental_create_account");
+        var howToBtn = SmallFooterButton("HOW TO PLAY\n(INSTRUCTIONS)");
+        howToBtn.Click += (_, _) => ShowInstructions();
+        var callStaffBtn = SmallFooterButton("NEED HELP?\nCALL STAFF");
+        callStaffBtn.Click += async (_, _) => await OnCallStaffClicked();
 
-	private async Task OnCallStaffClicked()
-	{
-		MessageBox.Show((await _api.RequestHelpAsync(_config.Mac, _config.DeviceSecret))?.Message ?? "Staff has been notified.", "Call Staff", MessageBoxButtons.OK, MessageBoxIcon.Asterisk);
-	}
+        _footerRow.Controls.Add(registerBtn);
+        _footerRow.Controls.Add(howToBtn);
+        _footerRow.Controls.Add(callStaffBtn);
+        _footerRow.BringToFront();
 
-	protected override void OnShown(EventArgs e)
-	{
-		base.OnShown(e);
-		_keyboardBlocker.Install();
-		Activate();
-		Focus();
-	}
+        var statusFooter = new Panel { Dock = DockStyle.Bottom, Height = 44 };
+        Controls.Add(statusFooter);
+        _serverStatusLabel = new Label { Font = new Font("Segoe UI", 8, FontStyle.Bold), AutoSize = true, Left = 24, Top = 14 };
+        statusFooter.Controls.Add(_serverStatusLabel);
+        var secureLabel = new Label { Text = "SECURE ENVIRONMENT - MONITORED & PROTECTED", Font = new Font("Segoe UI", 8), AutoSize = true, Top = 14 };
+        statusFooter.Controls.Add(secureLabel);
+        statusFooter.Resize += (_, _) => { secureLabel.Left = (statusFooter.Width - secureLabel.Width) / 2; };
+        _networkStatusLabel = new Label { Font = new Font("Segoe UI", 8, FontStyle.Bold), AutoSize = true, Top = 14 };
+        statusFooter.Controls.Add(_networkStatusLabel);
+        statusFooter.Resize += (_, _) => { _networkStatusLabel.Left = statusFooter.Width - _networkStatusLabel.Width - 100; };
+        var versionLabel = new Label { Text = "v1.0.0", Font = new Font("Segoe UI", 8), AutoSize = true, Top = 14 };
+        statusFooter.Controls.Add(versionLabel);
+        statusFooter.Resize += (_, _) => { versionLabel.Left = statusFooter.Width - 60; };
+        statusFooter.BringToFront();
 
-	public void HideLock()
-	{
-		_keyboardBlocker.Uninstall();
-		Hide();
-	}
+        // Small, unobtrusive - not part of the mockup's own customer-
+        // facing footer row (that's Register/How to Play/Call Staff),
+        // this is the pre-existing password-gated force-unlock/pause for
+        // staff, kept out of the way in the corner.
+        var staffButton = new Button { Text = "Staff", Width = 70, Height = 26, FlatStyle = FlatStyle.Flat, FlatAppearance = { BorderSize = 0 } };
+        staffButton.Click += async (_, _) => await OnStaffClicked();
+        Controls.Add(staffButton);
+        staffButton.Location = new Point(Bounds.Width - 90, 20);
+        staffButton.BringToFront();
+    }
 
-	public void ShowLock(StatusResponse status)
-	{
-		_pcNameLabel.Text = status.PcName;
-		_statusDotLabel.Text = (status.Locked ? "● LOCKED" : "● AVAILABLE");
-		_statusDotLabel.ForeColor = (status.Locked ? Theme.Danger : Theme.Success);
-		RepositionStatusDot();
-		_cafeNameLabel.Text = (string.IsNullOrWhiteSpace(status.PcName) ? "STARKFI ESPORTS CAFÉ" : status.PcName);
-		_announcementLabel.Text = status.LockAnnouncement ?? "";
-		_instructionsText = status.InstructionsText;
-		LoadImageAsync(_wallpaperBox, status.WallpaperUrl);
-		LoadImageAsync(_logoBox, status.LogoUrl);
-		if (!base.Visible)
-		{
-			ShowHomeView();
-		}
-		Show();
-		_keyboardBlocker.Install();
-		base.WindowState = FormWindowState.Maximized;
-		base.TopMost = true;
-		RecenterHomeView();
-		Activate();
-	}
+    private CardButton SmallFooterButton(string text)
+    {
+        return new CardButton
+        {
+            Text = text, Width = 180, Height = 56, Margin = new Padding(10, 0, 10, 0),
+            Font = new Font("Segoe UI", 8, FontStyle.Bold), CornerRadius = 8
+        };
+    }
 
-	private async void LoadImageAsync(PictureBox box, string? url)
-	{
-		if (string.IsNullOrEmpty(url))
-		{
-			box.Image = null;
-			return;
-		}
-		try
-		{
-			string requestUri = (url.StartsWith("http") ? url : (_config.ServerUrl.TrimEnd('/') + url));
-			using HttpClient client = new HttpClient();
-			using MemoryStream stream = new MemoryStream(await client.GetByteArrayAsync(requestUri));
-			box.Image = Image.FromStream(stream);
-		}
-		catch
-		{
-		}
-	}
+    private void ApplyTheme()
+    {
+        BackColor = Theme.Background;
+        _pcNameLabel.ForeColor = Theme.TextPrimary;
+        _clockLabel.ForeColor = Theme.TextMuted;
+        _welcomeLabel.ForeColor = Theme.TextMuted;
+        _cafeNameLabel.ForeColor = Theme.TextPrimary;
+        _announcementLabel.ForeColor = Theme.TextMuted;
+        _guestCard.BackColor = Theme.Surface;
+        _guestCard.BorderColor = Theme.Accent;
+        _memberCard.BackColor = Theme.Surface;
+        _memberCard.BorderColor = Theme.AccentAlt;
+        foreach (Control c in _guestCard.Controls)
+        {
+            if (c is Label l) l.ForeColor = Theme.TextPrimary;
+            if (c is CardButton b) { b.BackColor = Theme.Accent; b.ForeColor = Color.White; }
+        }
+        foreach (Control c in _memberCard.Controls)
+        {
+            if (c is Label l) l.ForeColor = Theme.TextPrimary;
+            if (c is CardButton b) { b.BackColor = Theme.AccentAlt; b.ForeColor = Color.White; }
+        }
+        _loginErrorLabel.ForeColor = Theme.Danger;
+        _loginButton.BackColor = Theme.Accent;
+        _usernameBox.BackColor = Theme.Surface;
+        _usernameBox.ForeColor = Theme.TextPrimary;
+        _passwordBox.BackColor = Theme.Surface;
+        _passwordBox.ForeColor = Theme.TextPrimary;
+        foreach (Control c in _footerRow.Controls)
+        {
+            if (c is CardButton b) { b.BackColor = Theme.Surface; b.ForeColor = Theme.TextPrimary; }
+        }
+        RefreshStatusLabels();
+    }
 
-	private async Task OnLoginClicked()
-	{
-		_loginErrorLabel.Text = "";
-		_loginButton.Enabled = false;
-		try
-		{
-			ApiResult apiResult = await _api.MemberLoginAsync(_config.Mac, _config.DeviceSecret, _usernameBox.Text, _passwordBox.Text);
-			if (apiResult == null || !apiResult.Success)
-			{
-				_loginErrorLabel.Text = apiResult?.Message ?? "Login failed";
-			}
-			else
-			{
-				_passwordBox.Text = "";
-			}
-		}
-		finally
-		{
-			_loginButton.Enabled = true;
-		}
-	}
+    private void RefreshStatusLabels()
+    {
+        _serverStatusLabel.Text = _connected ? "SERVER STATUS: ONLINE" : "SERVER STATUS: OFFLINE";
+        _serverStatusLabel.ForeColor = _connected ? Theme.Success : Theme.Danger;
+        _networkStatusLabel.Text = _connected ? "NETWORK: CONNECTED" : "NETWORK: DISCONNECTED";
+        _networkStatusLabel.ForeColor = _connected ? Theme.Success : Theme.Danger;
+    }
 
-	public async Task OnStaffClicked()
-	{
-		string text = PromptDialog.Show("Staff Access", "Enter the app password:", isPassword: true);
-		if (string.IsNullOrEmpty(text))
-		{
-			return;
-		}
-		switch (MessageBox.Show("Force Unlock now (temporary, re-locks on the next status check)?\n\nChoose No to Pause instead - suspends enforcement until resumed from here or from the admin panel.", "Staff Access", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question))
-		{
-		case DialogResult.Cancel:
-			break;
-		case DialogResult.Yes:
-		{
-			ApiResult apiResult2 = await _api.StaffOverrideAsync(_config.Mac, _config.DeviceSecret, text);
-			if (apiResult2 == null || !apiResult2.Success)
-			{
-				MessageBox.Show(apiResult2?.Message ?? "Override failed", "Staff Access", MessageBoxButtons.OK, MessageBoxIcon.Hand);
-			}
-			else
-			{
-				HideLock();
-			}
-			break;
-		}
-		default:
-		{
-			ApiResult apiResult = await _api.PauseAsync(_config.Mac, _config.DeviceSecret, text);
-			if (apiResult == null || !apiResult.Success)
-			{
-				MessageBox.Show(apiResult?.Message ?? "Pause failed", "Staff Access", MessageBoxButtons.OK, MessageBoxIcon.Hand);
-			}
-			break;
-		}
-		}
-	}
+    // Called by StatusPoller's ConnectionLost/recovered signal via
+    // Program.cs, so the status footer reflects reality instead of
+    // always claiming "Online."
+    public void SetConnected(bool connected)
+    {
+        if (_connected == connected) return;
+        _connected = connected;
+        RefreshStatusLabels();
+    }
+
+    private void ShowHomeView()
+    {
+        _coinPanel?.Dispose();
+        _coinPanel = null;
+        _loginErrorLabel.Text = "";
+        _usernameBox.Text = "";
+        _passwordBox.Text = "";
+        _homeView.Visible = true;
+        _loginView.Visible = false;
+        RecenterHomeView();
+    }
+
+    private void RecenterHomeView()
+    {
+        _centerPanel.Left = (Bounds.Width - _centerPanel.Width) / 2;
+        _centerPanel.Top = (Bounds.Height - _centerPanel.Height) / 2 - 40;
+        RepositionStatusDot();
+    }
+
+    private void ShowLoginView()
+    {
+        _homeView.Visible = false;
+        _loginView.Visible = true;
+    }
+
+    private void ShowCoinPanel(string mode)
+    {
+        _homeView.Visible = false;
+        _loginView.Visible = false;
+
+        _coinPanel = new CoinInsertPanel(_api, _config, mode) { Left = (_centerPanel.Width - 280) / 2, Top = 20 };
+        _coinPanel.Cancelled += ShowHomeView;
+        _coinPanel.Completed += OnCoinPanelCompleted;
+        _centerPanel.Controls.Add(_coinPanel);
+        _coinPanel.BringToFront();
+    }
+
+    private void OnCoinPanelCompleted(ApiResult result)
+    {
+        if (result.AccountCreated)
+        {
+            MessageBox.Show($"Account \"{result.Username}\" created with {result.Seconds / 60} minutes. You can log in now.",
+                "Account created", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        // Guest credit and the "username taken, credited as guest
+        // instead" fallback both just return to the home view - the next
+        // status poll (~5s) picks up the newly-unlocked state on its
+        // own, no need to duplicate that transition here.
+        ShowHomeView();
+    }
+
+    private void ShowInstructions()
+    {
+        var text = string.IsNullOrWhiteSpace(_instructionsText)
+            ? "Insert coins on the Guest card, or log in with your member account. Ask staff if you need help."
+            : _instructionsText;
+        MessageBox.Show(text, "How to Play", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private async Task OnCallStaffClicked()
+    {
+        var result = await _api.RequestHelpAsync(_config.Mac, _config.DeviceSecret);
+        MessageBox.Show(result?.Message ?? "Staff has been notified.", "Call Staff", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        _keyboardBlocker.Install();
+        Activate();
+        Focus();
+    }
+
+    public void HideLock()
+    {
+        _keyboardBlocker.Uninstall();
+        Hide();
+    }
+
+    public void ShowLock(StatusResponse status)
+    {
+        _pcNameLabel.Text = status.PcName;
+        _statusDotLabel.Text = status.Locked ? "● LOCKED" : "● AVAILABLE";
+        _statusDotLabel.ForeColor = status.Locked ? Theme.Danger : Theme.Success;
+        RepositionStatusDot();
+        _cafeNameLabel.Text = string.IsNullOrWhiteSpace(status.PcName) ? "STARKFI ESPORTS CAFÉ" : status.PcName;
+        _announcementLabel.Text = status.LockAnnouncement ?? "";
+        _instructionsText = status.InstructionsText;
+        LoadImageAsync(_wallpaperBox, status.WallpaperUrl);
+        LoadImageAsync(_logoBox, status.LogoUrl);
+        if (!Visible) ShowHomeView();
+        Show();
+        _keyboardBlocker.Install();
+        WindowState = FormWindowState.Maximized;
+        TopMost = true;
+        RecenterHomeView();
+        Activate();
+    }
+
+    private async void LoadImageAsync(PictureBox box, string? url)
+    {
+        if (string.IsNullOrEmpty(url)) { box.Image = null; return; }
+        try
+        {
+            var fullUrl = url.StartsWith("http") ? url : _config.ServerUrl.TrimEnd('/') + url;
+            using var client = new HttpClient();
+            var bytes = await client.GetByteArrayAsync(fullUrl);
+            using var ms = new MemoryStream(bytes);
+            box.Image = Image.FromStream(ms);
+        }
+        catch
+        {
+            // Missing/unreachable branding image shouldn't block the lock
+            // screen from showing - just leave that box blank.
+        }
+    }
+
+    private async Task OnLoginClicked()
+    {
+        _loginErrorLabel.Text = "";
+        _loginButton.Enabled = false;
+        try
+        {
+            var result = await _api.MemberLoginAsync(_config.Mac, _config.DeviceSecret, _usernameBox.Text, _passwordBox.Text);
+            if (result == null || !result.Success)
+            {
+                _loginErrorLabel.Text = result?.Message ?? "Login failed";
+                return;
+            }
+            _passwordBox.Text = "";
+            // The next status poll (within ~5s) will pick up the newly-
+            // unlocked state and transition away from this screen - no
+            // need to duplicate that logic here.
+        }
+        finally
+        {
+            _loginButton.Enabled = true;
+        }
+    }
+
+    // Staff Access stays reachable but out of the way (small corner
+    // button, not part of the mockup's own customer-facing footer row) -
+    // password-gated force-unlock/pause, unchanged from before.
+    public async Task OnStaffClicked()
+    {
+        var password = PromptDialog.Show("Staff Access", "Enter the app password:", isPassword: true);
+        if (string.IsNullOrEmpty(password)) return;
+
+        var choice = MessageBox.Show(
+            "Force Unlock now (temporary, re-locks on the next status check)?\n\nChoose No to Pause instead - suspends enforcement until resumed from here or from the admin panel.",
+            "Staff Access", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+        if (choice == DialogResult.Cancel) return;
+
+        if (choice == DialogResult.Yes)
+        {
+            var result = await _api.StaffOverrideAsync(_config.Mac, _config.DeviceSecret, password);
+            if (result == null || !result.Success)
+            {
+                MessageBox.Show(result?.Message ?? "Override failed", "Staff Access", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+            HideLock();
+        }
+        else
+        {
+            var result = await _api.PauseAsync(_config.Mac, _config.DeviceSecret, password);
+            if (result == null || !result.Success)
+            {
+                MessageBox.Show(result?.Message ?? "Pause failed", "Staff Access", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            // The next status poll picks up paused:true and Program.cs's
+            // HandleStatus swaps to the paused indicator - no need to
+            // duplicate that transition here.
+        }
+    }
 }

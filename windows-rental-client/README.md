@@ -6,17 +6,6 @@ their own banked time). Talks to the same StarkFi server as the WiFi
 side, over the `POST /api/rental/*` device-facing routes in
 `server/routes/rental.js`.
 
-> **Note:** this README, `install.bat`, and `uninstall.bat` were
-> reconstructed after the original files were lost from disk (never
-> committed to git). All `.cs` source in this folder was recovered by
-> decompiling the last known-good build
-> (`bin/Release/net8.0-windows/win-x64/StarkFiRentalClient.dll`,
-> built 2026-09-04) with `ilspycmd`, then verified to compile cleanly.
-> The source itself is functionally intact; this README and the two
-> `.bat` scripts are rewritten from documented behavior, not restored
-> byte-for-byte, since they aren't part of the compiled binary. Treat
-> the `.bat` scripts as unverified until tested on real hardware.
-
 ## What this is NOT
 
 `dotnet build` runs and succeeds from this Mac (the .csproj is set up
