@@ -165,7 +165,7 @@ public class LockForm : Form
         _announcementLabel = new Label { AutoSize = false, Font = new Font("Segoe UI", 9), Width = _centerPanel.Width, Height = 24, Top = 150, TextAlign = ContentAlignment.MiddleCenter };
         _centerPanel.Controls.Add(_announcementLabel);
 
-        _pcPill = new RoundedPanel { Width = 110, Height = 36, CornerRadius = 100, Top = 190, Left = (_centerPanel.Width - 110) / 2 };
+        _pcPill = new RoundedPanel { Width = 110, Height = 36, CornerRadius = 18, Top = 190, Left = (_centerPanel.Width - 110) / 2 };
         _centerPanel.Controls.Add(_pcPill);
         _pcPillLabel = new Label { Font = new Font("Segoe UI", 10, FontStyle.Bold), AutoSize = false, Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter };
         _pcPill.Controls.Add(_pcPillLabel);
@@ -208,30 +208,35 @@ public class LockForm : Form
 
     private void BuildLoginView()
     {
-        _loginView = new Panel { Left = 0, Top = 200, Width = _centerPanel.Width, Height = 320, Visible = false };
+        // All Top offsets below are relative to _loginView's own bounds
+        // (it clips its children) - not to _centerPanel, where the panel
+        // itself sits at Top = 200. Panel enlarged to 360 to fit the
+        // close X, title, both fields, the button, and the error label
+        // with reasonable spacing, all within Top >= 0.
+        _loginView = new Panel { Left = 0, Top = 200, Width = _centerPanel.Width, Height = 360, Visible = false };
         _centerPanel.Controls.Add(_loginView);
 
-        _loginCloseX = new Label { Text = "✕", AutoSize = true, Cursor = Cursors.Hand, Font = new Font("Segoe UI", 12), Left = _centerPanel.Width - 40, Top = -170 };
+        _loginCloseX = new Label { Text = "✕", AutoSize = true, Cursor = Cursors.Hand, Font = new Font("Segoe UI", 12), Left = _centerPanel.Width - 40, Top = 10 };
         _loginCloseX.Click += (_, _) => ShowHomeView();
         _loginView.Controls.Add(_loginCloseX);
 
-        _loginTitleLabel = new Label { Text = "MEMBER LOGIN", Font = new Font("Segoe UI", 16, FontStyle.Bold), AutoSize = false, Width = _centerPanel.Width, Height = 30, Top = -80, TextAlign = ContentAlignment.MiddleCenter };
+        _loginTitleLabel = new Label { Text = "MEMBER LOGIN", Font = new Font("Segoe UI", 16, FontStyle.Bold), AutoSize = false, Width = _centerPanel.Width, Height = 30, Top = 50, TextAlign = ContentAlignment.MiddleCenter };
         _loginView.Controls.Add(_loginTitleLabel);
 
         var fieldWidth = 320;
         var fieldLeft = (_centerPanel.Width - fieldWidth) / 2;
 
-        _usernameBox = new TextBox { PlaceholderText = "Username", Width = fieldWidth, Left = fieldLeft, Top = -30, Font = new Font("Segoe UI", 11) };
+        _usernameBox = new TextBox { PlaceholderText = "Username", Width = fieldWidth, Left = fieldLeft, Top = 100, Font = new Font("Segoe UI", 11) };
         _loginView.Controls.Add(_usernameBox);
 
-        _passwordBox = new TextBox { PlaceholderText = "Password", PasswordChar = '*', Width = fieldWidth, Left = fieldLeft, Top = 10, Font = new Font("Segoe UI", 11) };
+        _passwordBox = new TextBox { PlaceholderText = "Password", PasswordChar = '*', Width = fieldWidth, Left = fieldLeft, Top = 140, Font = new Font("Segoe UI", 11) };
         _loginView.Controls.Add(_passwordBox);
 
-        _loginButton = new CardButton { Text = "LOG IN", Width = fieldWidth, Height = 48, Left = fieldLeft, Top = 54, CornerRadius = 12, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
+        _loginButton = new CardButton { Text = "LOG IN", Width = fieldWidth, Height = 48, Left = fieldLeft, Top = 184, CornerRadius = 12, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
         _loginButton.Click += async (_, _) => await OnLoginClicked();
         _loginView.Controls.Add(_loginButton);
 
-        _loginErrorLabel = new Label { ForeColor = Color.OrangeRed, Width = fieldWidth, Left = fieldLeft, Top = 110, TextAlign = ContentAlignment.MiddleCenter, Height = 24 };
+        _loginErrorLabel = new Label { ForeColor = Color.OrangeRed, Width = fieldWidth, Left = fieldLeft, Top = 240, TextAlign = ContentAlignment.MiddleCenter, Height = 24 };
         _loginView.Controls.Add(_loginErrorLabel);
     }
 
@@ -364,7 +369,12 @@ public class LockForm : Form
     public void ShowLock(StatusResponse status)
     {
         _pcPillLabel.Text = string.IsNullOrWhiteSpace(status.PcName) ? "PC" : status.PcName;
-        _cafeNameLabel.Text = string.IsNullOrWhiteSpace(status.PcName) ? "STARKFI ESPORTS CAFÉ" : status.PcName;
+        // StatusResponse has no separate café-name field - only PcName.
+        // Showing PcName on both the wordmark and the pill duplicated the
+        // same string; the wordmark now always shows this fixed brand
+        // text (was previously just the empty-name fallback) so it stops
+        // repeating the PC's own identifier below it.
+        _cafeNameLabel.Text = "STARKFI ESPORTS CAFÉ";
         _announcementLabel.Text = status.LockAnnouncement ?? "";
         _announcementLabel.Visible = !string.IsNullOrWhiteSpace(status.LockAnnouncement);
         _instructionsText = status.InstructionsText;
@@ -406,7 +416,12 @@ public class LockForm : Form
         catch
         {
             // Missing/unreachable branding image shouldn't block the lock
-            // screen from showing - just leave that box blank.
+            // screen from showing - just leave that box blank. This also
+            // covers a later failed poll after an earlier one succeeded,
+            // so a stale image/visibility state isn't left on screen.
+            box.Image = null;
+            box.Visible = false;
+            if (box == _logoBox) _logoMarkInner.Visible = true;
         }
     }
 
