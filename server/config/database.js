@@ -1867,6 +1867,16 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('rental_antiabuse_max_attempt', '3');
   upsertIfMissing('rental_antiabuse_lock_minutes', '5');
   upsertIfMissing('rental_antiabuse_penalty_minutes', '5');
+  // Guest -> Member Conversion (kiosk Admin Panel screen, mockup section)
+  // - settings only for now, no enforcement logic yet. A later, separate
+  // task will build the actual "prompt a guest to become a member at
+  // logout" flow that reads these. rental_admin_panel_password itself is
+  // NOT seeded here, same reasoning as rental_app_password just above:
+  // it simply doesn't exist until an operator sets one via POST
+  // /rental/admin-panel-password, and routes that need it check for its
+  // absence and return a clear "not set yet" message.
+  upsertIfMissing('rental_enable_guest_conversion', '0');
+  upsertIfMissing('rental_guest_conversion_min_minutes', '20');
   upsertIfMissing('rental_lock_announcement', '');
   upsertIfMissing('rental_close_announcement', '');
   // Windows client's lock-screen "How to Play" button (V1.0.0 mockup

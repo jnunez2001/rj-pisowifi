@@ -7082,6 +7082,32 @@ router.post('/rental/app-password', adminAuth, (req, res) => {
   res.json({ success: true, message: 'App password updated' });
 });
 
+// Separate, revocable credential for the kiosk client's own "Admin Panel"
+// screen (Windows desktop app) - distinct from BOTH the site's real global
+// admin password (adminAuth below) and rental_app_password (Staff Access /
+// Force Unlock / Pause above). The real admin password must never need to
+// be typed on a physically-exposed kiosk PC, so the kiosk's Admin Panel
+// screen authenticates against this narrower credential instead (see the
+// device-scoped /api/rental/admin-panel/* routes in routes/rental.js).
+// This route itself lives in the trusted web admin panel and is gated by
+// the real adminAuth - only the credential it manages is meant for
+// kiosk-side use. Exact same set/verify pattern as rental_app_password
+// just above, deliberately NOT part of the generic bulk /api/admin/
+// settings save for the same reason.
+router.post('/rental/admin-panel-password', adminAuth, (req, res) => {
+  const { current_password, new_password } = req.body || {};
+  if (!new_password || String(new_password).length < 6) {
+    return res.status(400).json({ success: false, message: 'New password must be at least 6 characters' });
+  }
+  const existing = db.prepare("SELECT value FROM settings WHERE key = 'rental_admin_panel_password'").get()?.value;
+  if (existing && !verifyPassword(current_password, existing)) {
+    return res.status(401).json({ success: false, message: 'Current admin panel password is incorrect' });
+  }
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('rental_admin_panel_password', ?)")
+    .run(hashPassword(String(new_password)));
+  res.json({ success: true, message: 'Admin panel password updated' });
+});
+
 router.get('/rental/whitelisted-apps', adminAuth, (req, res) => {
   try {
     const apps = db.prepare('SELECT * FROM rental_whitelisted_apps ORDER BY app_name ASC').all();

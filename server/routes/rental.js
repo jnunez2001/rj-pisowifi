@@ -436,4 +436,118 @@ router.post('/change-password', (req, res) => {
   return res.json({ success: true });
 });
 
+// ── Kiosk Admin Panel (device-scoped, NOT adminAuth) ────────────────────
+// The Windows client's new "Admin Panel" screen (mockup) needs authenticated
+// access to a handful of settings, but must never require typing the site's
+// real global admin password on a physically-exposed kiosk PC. These routes
+// authenticate the SAME way every other route in this file does - via
+// authenticatePc(mac, device_secret) - PLUS a second, narrower credential:
+// rental_admin_panel_password (set/rotated only from the trusted web admin
+// panel, see POST /api/admin/rental/admin-panel-password). This is
+// deliberately NOT adminAuth and deliberately NOT a generic settings
+// passthrough - it can only ever read/touch the specific settings and table
+// listed below, since it's guarded by a much weaker credential than the
+// real admin password and must not become a backdoor to arbitrary settings.
+function requireAdminPanelAuth(req) {
+  const auth = authenticatePc(req.body?.mac ?? req.query?.mac, req.body?.device_secret ?? req.query?.device_secret);
+  if (auth.error) return auth;
+  const stored = db.prepare("SELECT value FROM settings WHERE key = 'rental_admin_panel_password'").get()?.value;
+  if (!stored) {
+    return { error: 400, message: 'No admin panel password has been set yet - set one in PC Rental > Settings' };
+  }
+  const password = req.body?.password ?? req.query?.password;
+  if (!password || !verifyPassword(password, stored)) {
+    return { error: 401, message: 'Incorrect admin panel password' };
+  }
+  return { pc: auth.pc };
+}
+
+// POST /api/rental/admin-panel/verify - {mac, device_secret, password}.
+// The Admin Panel screen's own login step - just confirms the password is
+// correct, nothing else.
+router.post('/admin-panel/verify', (req, res) => {
+  const auth = requireAdminPanelAuth(req);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+  return res.json({ success: true });
+});
+
+// GET /api/rental/admin-panel/settings?mac=&device_secret=&password= -
+// read-only bundle for the Admin Panel screen: a few existing operator
+// settings (display only, not editable here) plus the two real Guest ->
+// Member Conversion settings and the redeem-rate tiers.
+router.get('/admin-panel/settings', (req, res) => {
+  const auth = requireAdminPanelAuth(req);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const getSetting = (key) => db.prepare('SELECT value FROM settings WHERE key = ?').get(key)?.value;
+  const rates = db.prepare('SELECT id, points, reward_seconds FROM rental_redeem_rates ORDER BY points ASC').all();
+
+  return res.json({
+    success: true,
+    min_credit_to_register: parseInt(getSetting('rental_create_account_min_credit'), 10) || 0,
+    idle_shutdown_secs: parseInt(getSetting('rental_shutdown_timer_secs'), 10) || 0,
+    guest_conversion_enabled: getSetting('rental_enable_guest_conversion') === '1',
+    guest_conversion_min_minutes: parseInt(getSetting('rental_guest_conversion_min_minutes'), 10) || 0,
+    redeem_rates: rates
+  });
+});
+
+// POST /api/rental/admin-panel/settings - {mac, device_secret, password,
+// guest_conversion_enabled?, guest_conversion_min_minutes?}. Updates only
+// whichever of these two exact keys is provided, independently - NOT a
+// generic bulk settings writer (see the security note above the block).
+router.post('/admin-panel/settings', (req, res) => {
+  const auth = requireAdminPanelAuth(req);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+
+  if (req.body?.guest_conversion_enabled !== undefined) {
+    upsert.run('rental_enable_guest_conversion', req.body.guest_conversion_enabled ? '1' : '0');
+  }
+  if (req.body?.guest_conversion_min_minutes !== undefined) {
+    const minutes = parseInt(req.body.guest_conversion_min_minutes, 10);
+    if (!Number.isFinite(minutes) || minutes < 0) {
+      return res.status(400).json({ success: false, message: 'guest_conversion_min_minutes must be a non-negative number' });
+    }
+    upsert.run('rental_guest_conversion_min_minutes', String(minutes));
+  }
+
+  return res.json({ success: true });
+});
+
+// POST /api/rental/admin-panel/redeem-rates - {mac, device_secret, password,
+// points, reward_seconds}. Mirrors POST /api/admin/rental/redeem-rates'
+// validation exactly, just re-authenticated via this device-scoped path.
+router.post('/admin-panel/redeem-rates', (req, res) => {
+  const auth = requireAdminPanelAuth(req);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const points = parseInt(req.body?.points, 10);
+  const rewardSeconds = parseInt(req.body?.reward_seconds, 10);
+  if (!Number.isFinite(points) || points <= 0) {
+    return res.status(400).json({ success: false, message: 'points must be a positive number' });
+  }
+  if (!Number.isFinite(rewardSeconds) || rewardSeconds <= 0) {
+    return res.status(400).json({ success: false, message: 'reward_seconds must be a positive number' });
+  }
+  db.prepare('INSERT INTO rental_redeem_rates (points, reward_seconds) VALUES (?, ?)').run(points, rewardSeconds);
+  return res.json({ success: true });
+});
+
+// DELETE /api/rental/admin-panel/redeem-rates/:id - {mac, device_secret,
+// password} in the JSON body. No existing DELETE route in this file to
+// match a mac/device_secret-in-query-vs-body precedent against (the only
+// other DELETE-shaped admin-side route, /api/admin/rental/redeem-rates/:id,
+// is adminAuth-gated and carries no device credentials at all) - body is
+// used here since Express/fetch both support a JSON body on DELETE and it
+// keeps the device_secret/password out of any URL/query string or logs.
+router.delete('/admin-panel/redeem-rates/:id', (req, res) => {
+  const auth = requireAdminPanelAuth(req);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  db.prepare('DELETE FROM rental_redeem_rates WHERE id = ?').run(req.params.id);
+  return res.json({ success: true });
+});
+
 module.exports = router;
