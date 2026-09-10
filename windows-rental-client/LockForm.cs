@@ -308,7 +308,16 @@ public class LockForm : Form
         _homeView.Visible = false;
         _loginView.Visible = false;
 
-        _coinPanel = new CoinInsertPanel(_api, _config, mode) { Left = (_centerPanel.Width - 280) / 2, Top = 60 };
+        // Large mode's panel (480x500) is taller than _centerPanel's own
+        // fixed 480x620 bounds would leave room for if placed the same
+        // way the small compact panel used to be (Top = 60 would put its
+        // bottom at 560, still inside 620 - but centering it properly
+        // here rather than reusing the old compact-panel offset, since
+        // that offset was sized for the 280x220 panel, not this one).
+        var coinPanel = new CoinInsertPanel(_api, _config, mode, large: true);
+        coinPanel.Left = (_centerPanel.Width - coinPanel.Width) / 2;
+        coinPanel.Top = (_centerPanel.Height - coinPanel.Height) / 2;
+        _coinPanel = coinPanel;
         _coinPanel.Cancelled += ShowHomeView;
         _coinPanel.Completed += OnCoinPanelCompleted;
         _centerPanel.Controls.Add(_coinPanel);
