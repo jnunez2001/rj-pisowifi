@@ -288,15 +288,16 @@ public class LockForm : Form
         _guestCard.BorderColor = Theme.Accent;
         _memberCard.BackColor = Theme.Surface;
         _memberCard.BorderColor = Theme.AccentAlt;
+        var memberOutlined = Theme.Current == ThemeName.LightGaming;
         foreach (Control c in _guestCard.Controls)
         {
             if (c is Label l) l.ForeColor = Theme.TextPrimary;
-            if (c is CardButton b) { b.BackColor = Theme.Accent; b.ForeColor = Color.White; }
+            if (c is CardButton b) { b.BackColor = Theme.Accent; b.ForeColor = Theme.OnAccent; }
         }
         foreach (Control c in _memberCard.Controls)
         {
             if (c is Label l) l.ForeColor = Theme.TextPrimary;
-            if (c is CardButton b) { b.BackColor = Theme.AccentAlt; b.ForeColor = Color.White; }
+            if (c is CardButton b) { b.BackColor = Theme.AccentAlt; b.ForeColor = Theme.OnAccentAlt; b.Outlined = memberOutlined; }
         }
         _loginErrorLabel.ForeColor = Theme.Danger;
         _loginButton.BackColor = Theme.Accent;
