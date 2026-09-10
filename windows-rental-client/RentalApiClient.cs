@@ -46,6 +46,19 @@ public class RedeemRate
     [JsonPropertyName("reward_seconds")] public int RewardSeconds { get; set; }
 }
 
+// GET /api/rental/admin-panel/settings response - the Admin Panel
+// screen's read-only settings bundle (server/routes/rental.js).
+public class AdminPanelSettingsResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; set; }
+    [JsonPropertyName("message")] public string? Message { get; set; }
+    [JsonPropertyName("min_credit_to_register")] public int MinCreditToRegister { get; set; }
+    [JsonPropertyName("idle_shutdown_secs")] public int IdleShutdownSecs { get; set; }
+    [JsonPropertyName("guest_conversion_enabled")] public bool GuestConversionEnabled { get; set; }
+    [JsonPropertyName("guest_conversion_min_minutes")] public int GuestConversionMinMinutes { get; set; }
+    [JsonPropertyName("redeem_rates")] public List<RedeemRate> RedeemRates { get; set; } = new();
+}
+
 // GET /api/rental/apps response - Café Home's game/app catalog.
 // Metadata only, no image URLs: the blueprint's Local Game Library
 // design explicitly says artwork must live locally on each PC, not be
@@ -238,6 +251,58 @@ public class RentalApiClient
     public async Task<ApiResult?> ChangePasswordAsync(string mac, string deviceSecret, string currentPassword, string newPassword)
     {
         var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/change-password", new { mac, device_secret = deviceSecret, current_password = currentPassword, new_password = newPassword });
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    // --- Kiosk Admin Panel (server/routes/rental.js's device-scoped
+    // "Kiosk Admin Panel" block) - authenticated by mac+device_secret
+    // exactly like every other call above, PLUS a password checked
+    // against the separate rental_admin_panel_password setting (never the
+    // site's real global admin password). Deliberately narrow: only the
+    // settings/redeem-rate fields these five endpoints expose, never a
+    // generic passthrough.
+
+    public async Task<ApiResult?> VerifyAdminPanelPasswordAsync(string mac, string deviceSecret, string password)
+    {
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/admin-panel/verify", new { mac, device_secret = deviceSecret, password });
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    public async Task<AdminPanelSettingsResponse?> GetAdminPanelSettingsAsync(string mac, string deviceSecret, string password)
+    {
+        var res = await _http.GetAsync($"{_baseUrl}/api/rental/admin-panel/settings?mac={Uri.EscapeDataString(mac)}&device_secret={Uri.EscapeDataString(deviceSecret)}&password={Uri.EscapeDataString(password)}");
+        return await res.Content.ReadFromJsonAsync<AdminPanelSettingsResponse>();
+    }
+
+    // Partial update - only pass the field(s) that actually changed, since
+    // the endpoint only ever touches whichever of these two exact keys is
+    // present in the body (see server/routes/rental.js's comment on this
+    // route).
+    public async Task<ApiResult?> SaveAdminPanelSettingsAsync(string mac, string deviceSecret, string password, bool? guestConversionEnabled = null, int? guestConversionMinMinutes = null)
+    {
+        var body = new Dictionary<string, object?> { ["mac"] = mac, ["device_secret"] = deviceSecret, ["password"] = password };
+        if (guestConversionEnabled.HasValue) body["guest_conversion_enabled"] = guestConversionEnabled.Value;
+        if (guestConversionMinMinutes.HasValue) body["guest_conversion_min_minutes"] = guestConversionMinMinutes.Value;
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/admin-panel/settings", body);
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    public async Task<ApiResult?> AddAdminPanelRedeemRateAsync(string mac, string deviceSecret, string password, int points, int rewardSeconds)
+    {
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/admin-panel/redeem-rates", new { mac, device_secret = deviceSecret, password, points, reward_seconds = rewardSeconds });
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    // DELETE with mac/device_secret/password in the JSON body (not query) -
+    // matches the server route's own reasoning for keeping credentials out
+    // of any URL/query string or logs.
+    public async Task<ApiResult?> DeleteAdminPanelRedeemRateAsync(string mac, string deviceSecret, string password, int id)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Delete, $"{_baseUrl}/api/rental/admin-panel/redeem-rates/{id}")
+        {
+            Content = JsonContent.Create(new { mac, device_secret = deviceSecret, password })
+        };
+        var res = await _http.SendAsync(request);
         return await res.Content.ReadFromJsonAsync<ApiResult>();
     }
 

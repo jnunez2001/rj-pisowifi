@@ -237,12 +237,10 @@ public class CafeHomeForm : Form
         _settingsItem = MenuButton("User Settings");
         _settingsItem.Click += (_, _) => OnUserSettingsClicked();
 
-        // Temporary: a real, dedicated Admin Panel screen is a separate,
-        // later task not yet built. Until then this reuses the exact same
-        // password-gated Force Unlock / Pause action LockForm's Staff
-        // Access link already implements, so the menu item does something
-        // real and consistent with the rest of the app rather than a dead
-        // click or a fake placeholder.
+        // Opens the real Admin Panel (AdminLoginForm -> AdminPanelPage),
+        // gated by the separate rental_admin_panel_password credential -
+        // never LockForm's Force Unlock/Pause app password and never the
+        // site's real admin password. See OnAdminPanelClicked below.
         _adminItem = MenuButton("Admin Panel");
         _adminItem.Click += async (_, _) => await OnAdminPanelClicked();
 
@@ -377,44 +375,37 @@ public class CafeHomeForm : Form
         host.ShowDialog();
     }
 
-    // Mirrors LockForm.OnStaffClicked's exact Force Unlock / Pause flow.
-    // Duplicated here rather than shared because LockForm and CafeHomeForm
-    // are separate, independently-owned forms in Program.cs with no
-    // reference to each other - this is the same pattern, not the same
-    // object. Remove this duplication once a real Admin Panel screen
-    // replaces it.
+    // Real Admin Panel entry point - gates on AdminLoginForm (the separate
+    // rental_admin_panel_password credential), then hosts AdminPanelPage
+    // in a plain dialog Form, same "host Form + UserControl content"
+    // pattern OnUserSettingsClicked already uses for SettingsPage above.
+    // Replaces the old temporary placeholder that reused LockForm's Force
+    // Unlock/Pause flow for this menu item (that flow is untouched and
+    // still reachable from LockForm's own "Staff / Admin" corner link).
     private async Task OnAdminPanelClicked()
     {
         HideMenu();
-        var password = PromptDialog.Show("Staff Access", "Enter the app password:", isPassword: true);
-        if (string.IsNullOrEmpty(password)) return;
 
-        var choice = MessageBox.Show(
-            "Force Unlock now (temporary, re-locks on the next status check)?\n\nChoose No to Pause instead - suspends enforcement until resumed from here or from the admin panel.",
-            "Staff Access", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
-        if (choice == DialogResult.Cancel) return;
+        using var loginForm = new AdminLoginForm(_api, _config);
+        if (loginForm.ShowDialog() != DialogResult.OK || string.IsNullOrEmpty(loginForm.VerifiedPassword))
+        {
+            return;
+        }
 
-        if (choice == DialogResult.Yes)
+        using var host = new Form
         {
-            var result = await _api.StaffOverrideAsync(_config.Mac, _config.DeviceSecret, password);
-            if (result == null || !result.Success)
-            {
-                MessageBox.Show(result?.Message ?? "Override failed", "Staff Access", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            // Nothing further to do on success here - unlike LockForm,
-            // there's no lock screen on this Form to hide.
-        }
-        else
-        {
-            var result = await _api.PauseAsync(_config.Mac, _config.DeviceSecret, password);
-            if (result == null || !result.Success)
-            {
-                MessageBox.Show(result?.Message ?? "Pause failed", "Staff Access", MessageBoxButtons.OK, MessageBoxIcon.Error);
-            }
-            // The next status poll picks up paused:true and Program.cs's
-            // HandleStatus swaps to the paused indicator - no need to
-            // duplicate that transition here.
-        }
+            Text = "Admin Panel",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterScreen,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            TopMost = true,
+            ClientSize = new Size(720, 640),
+        };
+        var adminPage = new AdminPanelPage(_api, _config, _prefs, loginForm.VerifiedPassword);
+        adminPage.Dock = DockStyle.Fill;
+        host.Controls.Add(adminPage);
+        host.ShowDialog();
     }
 
     private async Task OnLogOutClicked()

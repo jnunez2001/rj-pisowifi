@@ -1,5 +1,25 @@
 namespace StarkFiRentalClient;
 
+// Tiny global read of the same connected/disconnected signal StatusPoller
+// already computes (successful poll vs. ConnectionLost below) - exposed
+// here so a screen with no poller reference of its own (the Admin Panel's
+// Server Connection section) can show a live indicator without building a
+// second, competing connectivity check. Program.cs is the only writer
+// (see HandleStatus/ShowLockDefensively), matching where this state was
+// already being tracked (LockForm.SetConnected) before this existed.
+public static class ConnectionStatus
+{
+    public static bool IsConnected { get; private set; } = true;
+    public static event Action<bool>? Changed;
+
+    public static void Set(bool connected)
+    {
+        if (IsConnected == connected) return;
+        IsConnected = connected;
+        Changed?.Invoke(connected);
+    }
+}
+
 public class StatusPoller
 {
     private const int PollIntervalMs = 5000;

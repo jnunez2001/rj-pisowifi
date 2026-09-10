@@ -26,6 +26,12 @@ public class ClientPreferences
     public bool SessionReminderEnabled { get; set; } = true;
     public int SessionReminderMinutesBefore { get; set; } = 5;
     public bool CleanUpOnExit { get; set; } = true;
+    // Admin Panel > Client Status "Café Client Enabled" kill switch -
+    // false means Program.cs's status handler skips ALL lock/session
+    // enforcement (no lock screen, no pill bar), giving the customer their
+    // normal desktop back. Real and consequential (unlike the notification
+    // toggles above), not a decorative preference.
+    public bool ClientEnabled { get; set; } = true;
 
     private static readonly string PreferencesDir =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "StarkFiRental");

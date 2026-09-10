@@ -6,6 +6,7 @@ public static class Program
 {
     private static LockForm _lockForm = null!;
     private static CafeHomeForm _cafeHome = null!;
+    private static ClientPreferences _prefs = null!;
     private static bool _lockShowing = true;
     private static bool _wasLocked = true; // tracks the transition INTO Locked, for Clean Up on Exit
 
@@ -21,6 +22,7 @@ public static class Program
         Application.SetCompatibleTextRenderingDefault(false);
 
         var prefs = ClientPreferences.Load();
+        _prefs = prefs;
         Theme.Apply(prefs.Theme);
 
         var config = ClientConfig.Load();
@@ -100,6 +102,24 @@ public static class Program
     private static void HandleStatus(StatusResponse status)
     {
         _lockForm.SetConnected(true);
+        ConnectionStatus.Set(true);
+
+        if (!_prefs.ClientEnabled)
+        {
+            // Admin Panel's Client Status "Café Client Enabled" toggle,
+            // switched off - skip ALL lock/session enforcement entirely so
+            // the customer gets their normal desktop back, no kiosk
+            // behavior at all. Server-side session/timer state underneath
+            // (status, whatever the member/guest balance is doing) is left
+            // completely untouched, so flipping this back on picks up
+            // exactly where enforcement left off on the very next poll -
+            // no app restart needed.
+            _lockShowing = false;
+            _wasLocked = false;
+            _lockForm.HideLock();
+            _cafeHome.HideHome();
+            return;
+        }
 
         if (status.Paused)
         {
@@ -151,6 +171,8 @@ public static class Program
         // poller keeps trying in the background; the moment it succeeds
         // again, HandleStatus takes over normally.
         _lockForm.SetConnected(false);
+        ConnectionStatus.Set(false);
+        if (!_prefs.ClientEnabled) return; // enforcement fully disabled - don't lock a customer's desktop just because the server is unreachable
         if (!_lockShowing)
         {
             _lockShowing = true;
