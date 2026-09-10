@@ -285,7 +285,18 @@ public class LockForm : Form
         _noTimeView = new Panel { Width = 480, AutoScroll = true, Visible = false };
         Controls.Add(_noTimeView);
 
-        _noTimeCloseX = new Label { Text = "✕", AutoSize = false, Width = 28, Height = 28, Left = 440, Top = 12, Font = new Font("Segoe UI", 12), TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
+        // Left pulled in by the vertical scrollbar's reserved width - this
+        // panel is always AutoScroll=true with content taller than its
+        // visible area (see the class-level geometry comment), so a
+        // scrollbar reliably renders starting around
+        // (Width - VerticalScrollBarWidth). At the default Width=480 with
+        // a typical ~17px scrollbar, the close X's old Left=440/Width=28
+        // (spanning to x=468) overlapped the scrollbar's reserved area
+        // (starting ~x=463) by several pixels, partially covering the
+        // member's only way to log out of this screen. Shifting left by
+        // the same VerticalScrollBarWidth keeps its right edge clear of
+        // the scrollbar with margin to spare.
+        _noTimeCloseX = new Label { Text = "✕", AutoSize = false, Width = 28, Height = 28, Left = 440 - SystemInformation.VerticalScrollBarWidth, Top = 12, Font = new Font("Segoe UI", 12), TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
         _noTimeCloseX.Click += async (_, _) => await OnNoTimeCloseClicked();
         _noTimeView.Controls.Add(_noTimeCloseX);
 
@@ -308,9 +319,13 @@ public class LockForm : Form
         _noTimeRedeemStatusLabel = new Label { Font = new Font("Segoe UI", 9), AutoSize = false, Width = 460, Left = 10, Height = 20, Top = 726, TextAlign = ContentAlignment.MiddleCenter };
         _noTimeView.Controls.Add(_noTimeRedeemStatusLabel);
 
+        // AutoScroll = true (ported from Pages/RewardsPage.cs's
+        // _ratesPanel) - the fixed 230px height only fits 3 of the 60px
+        // rows (50px row + 10px bottom margin) before clipping the rest
+        // with no way to reach them.
         _noTimeRatesPanel = new FlowLayoutPanel
         {
-            FlowDirection = FlowDirection.TopDown, AutoScroll = false, WrapContents = false,
+            FlowDirection = FlowDirection.TopDown, AutoScroll = true, WrapContents = false,
             Left = 10, Top = 750, Width = 460, Height = 230
         };
         _noTimeView.Controls.Add(_noTimeRatesPanel);
@@ -373,7 +388,17 @@ public class LockForm : Form
 
         _noTimeTitleLabel.Text = $"WELCOME, {username.ToUpperInvariant()}";
         _noTimeBalanceLabel.Text = knownPoints.HasValue ? $"{knownPoints} POINTS" : "-- POINTS";
+        // _noTimeView is a sibling of _centerPanel (added straight to the
+        // Form's Controls, not to _centerPanel - see the field comment),
+        // so it needs its own BringToFront: otherwise it sits behind the
+        // always-Dock=Fill _wallpaperBox whenever a wallpaper is set, and
+        // behind the opaque _centerPanel even without one. Every other
+        // sub-view here (login, coin panel) lives INSIDE _centerPanel, so
+        // hiding _homeView/_loginView was enough for them - _centerPanel
+        // itself also has to be hidden explicitly for this one.
+        _centerPanel.Visible = false;
         _noTimeView.Visible = true;
+        _noTimeView.BringToFront();
         RepositionNoTimeView();
         EmbedNoTimeCoinPanel();
         _ = RefreshNoTimeRedeemAsync();
@@ -518,6 +543,7 @@ public class LockForm : Form
         _noTimeCoinPanel = null;
         _noTimeView.Visible = false;
         _noTimeUsername = null;
+        _centerPanel.Visible = true;
 
         RecenterHomeView();
     }
@@ -596,6 +622,23 @@ public class LockForm : Form
     {
         _keyboardBlocker.Uninstall();
         Hide();
+
+        // ShowNoTimeView()'s repeat-call guard (`_noTimeView.Visible &&
+        // _noTimeUsername == username`) exists to avoid tearing down an
+        // in-progress coin insertion on every ~5s poll while it's showing
+        // - but that guard reads state this method never used to clear.
+        // Without resetting it here, a member who redeems/unlocks/plays
+        // and later runs out of time again in the SAME login session hits
+        // that guard on their first zero-balance poll after the restart
+        // and gets a stale panel back (old points balance, old claim
+        // affordability, a leftover CoinInsertPanel) instead of a fresh
+        // rebuild. Dispose the embedded coin panel and clear the tracked
+        // username/visibility so the next ShowNoTimeView() call always
+        // rebuilds from scratch.
+        _noTimeCoinPanel?.Dispose();
+        _noTimeCoinPanel = null;
+        _noTimeView.Visible = false;
+        _noTimeUsername = null;
     }
 
     // The mockup this screen was rebuilt to match has no connectivity
@@ -702,7 +745,14 @@ public class LockForm : Form
         _loginButton.Enabled = false;
         try
         {
-            var username = _usernameBox.Text;
+            // Trimmed to match the canonical username the server returns
+            // (server/routes/rental.js trims on login and GET /status
+            // echoes back the trimmed value as LoggedInUser) - otherwise a
+            // trailing space typed into the login form would make
+            // ShowNoTimeView's repeat-call guard (_noTimeUsername ==
+            // username) mismatch on the very next poll and force one
+            // avoidable rebuild.
+            var username = _usernameBox.Text.Trim();
             var result = await _api.MemberLoginAsync(_config.Mac, _config.DeviceSecret, username, _passwordBox.Text);
             if (result == null || !result.Success)
             {

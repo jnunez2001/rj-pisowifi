@@ -319,14 +319,30 @@ async function finalizePendingCoins(mac) {
     // in real wall-clock terms than its nominal minutes would suggest.
     const speedMs = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'rental_speed_timer_secs'").get()?.value, 10) || 1000;
     const grantedMs = minutes * 60000 * (speedMs / 1000);
-    const newExpiresAt = new Date(Date.now() + currentRemainingMs + grantedMs).toISOString();
 
-    if (existingSession) {
-      db.prepare('UPDATE rental_sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE pc_id = ?')
-        .run(minutes, newExpiresAt, newExpiresAt, pc.id);
+    if (existingSession?.member_id) {
+      // A logged-in member's time is their portable rental_members.seconds
+      // balance, not this PC's guest session fields - GET /status only
+      // reads hard_expires_at for guests (session?.member_id ? ... :
+      // hard_expires_at branch above), so crediting the guest fields here
+      // would silently strand the coin's value somewhere /status never
+      // looks again once a member is logged in. Credit the member's
+      // balance directly instead, and refresh updated_at so /status's
+      // next elapsed-time calc (Date.now() - parseSqliteDate(updated_at))
+      // doesn't treat the gap since the member's last poll as elapsed
+      // drain and immediately burn part of what was just added.
+      const grantedSeconds = Math.round(grantedMs / 1000);
+      db.prepare('UPDATE rental_members SET seconds = seconds + ? WHERE id = ?').run(grantedSeconds, existingSession.member_id);
+      db.prepare('UPDATE rental_sessions SET updated_at = ? WHERE pc_id = ?').run(new Date().toISOString(), pc.id);
     } else {
-      db.prepare('INSERT INTO rental_sessions (pc_id, minutes_remaining, expires_at, hard_expires_at) VALUES (?, ?, ?, ?)')
-        .run(pc.id, minutes, newExpiresAt, newExpiresAt);
+      const newExpiresAt = new Date(Date.now() + currentRemainingMs + grantedMs).toISOString();
+      if (existingSession) {
+        db.prepare('UPDATE rental_sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE pc_id = ?')
+          .run(minutes, newExpiresAt, newExpiresAt, pc.id);
+      } else {
+        db.prepare('INSERT INTO rental_sessions (pc_id, minutes_remaining, expires_at, hard_expires_at) VALUES (?, ?, ?, ?)')
+          .run(pc.id, minutes, newExpiresAt, newExpiresAt);
+      }
     }
     db.prepare("INSERT INTO rental_transactions (pc_id, coin_value, minutes_added, type) VALUES (?, ?, ?, 'coin')")
       .run(pc.id, total, minutes);
