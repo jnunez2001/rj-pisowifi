@@ -1,3 +1,4 @@
+using System.Drawing.Drawing2D;
 using StarkFiRentalClient.UI;
 using StarkFiRentalClient.Pages;
 
@@ -58,6 +59,14 @@ public class CafeHomeForm : Form
 
     private Form _menuForm = null!;
     private Panel _menuList = null!;
+    // Set whenever _menuForm.Deactivate closes the menu (see BuildMenu).
+    // The arrow's own Click always fires just after a click-triggered
+    // Deactivate on this Form, so without this guard ToggleMenu sees the
+    // menu already closed and immediately reopens it - the arrow could
+    // open the menu but never close it. A click within this window is
+    // treated as "that deactivate already closed it", not a re-open.
+    private DateTime _menuClosedByDeactivateAt = DateTime.MinValue;
+    private static readonly TimeSpan MenuReopenSuppressWindow = TimeSpan.FromMilliseconds(250);
     private CardButton _addTimeItem = null!;
     private CardButton _settingsItem = null!;
     private CardButton _adminItem = null!;
@@ -66,6 +75,17 @@ public class CafeHomeForm : Form
 
     private bool _isMember;
     private string _pcName = "";
+
+    // ---- Idle auto-logout / session-ending reminder ----
+    // Restores behavior the old full-screen shell had via the same
+    // IdleDetector class (still present, just no longer instantiated
+    // anywhere after the bar/menu rebuild) and a CheckSessionReminder
+    // method that was dropped entirely during that rewrite, even though
+    // SettingsPage.cs still exposes both toggles ("Auto logout when
+    // idle", "Remind me before my session ends") - silently doing nothing
+    // is worse than not having the settings at all.
+    private readonly IdleDetector _idleDetector = new();
+    private bool _sessionReminderShown;
 
     public CafeHomeForm(RentalApiClient api, ClientConfig config, ClientPreferences prefs)
     {
@@ -83,8 +103,19 @@ public class CafeHomeForm : Form
         var workArea = Screen.PrimaryScreen!.WorkingArea;
         Location = new Point(workArea.Left + 16, workArea.Top + 16); // default corner: top-left, small margin
 
+        // Without this, only RoundedPanel's own painted corners look
+        // rounded - the Form itself stays a plain grey rectangle behind
+        // them, visible wherever the panel's rounded corners don't cover.
+        // Setting a matching rounded Region on the Form makes everything
+        // outside the pill shape genuinely transparent to the desktop
+        // underneath, not just visually covered by a themed color.
+        ApplyRoundedRegion();
+        Resize += (_, _) => ApplyRoundedRegion(); // the bar isn't expected to resize, but keep this correct if it ever does
+
         BuildBar();
         BuildMenu();
+
+        _idleDetector.IdleTimeoutReached += async () => await OnIdleTimeoutAsync();
 
         // Same guard the old shell used - without this, Alt+F4 would
         // dispose this Form outright (not just hide it), and Program.cs's
@@ -101,11 +132,11 @@ public class CafeHomeForm : Form
         _bar = new RoundedPanel { Dock = DockStyle.Fill, CornerRadius = BarHeight / 2 };
         Controls.Add(_bar);
 
-        _pcNameLabel = new Label { Left = 18, Top = 0, Width = 74, Height = BarHeight, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 9, FontStyle.Bold), AutoEllipsis = true };
-        var sep1 = new Label { Text = "|", Left = 92, Top = 0, Width = 16, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter };
-        _timeLabel = new Label { Left = 108, Top = 0, Width = 90, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
-        var sep2 = new Label { Text = "|", Left = 198, Top = 0, Width = 16, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter };
-        _expandButton = new Label { Text = "▼", Left = 214, Top = 0, Width = 68, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10, FontStyle.Bold), Cursor = Cursors.Hand };
+        _pcNameLabel = new Label { AutoSize = false, Left = 18, Top = 0, Width = 74, Height = BarHeight, TextAlign = ContentAlignment.MiddleLeft, Font = new Font("Segoe UI", 9, FontStyle.Bold), AutoEllipsis = true };
+        var sep1 = new Label { Text = "|", AutoSize = false, Left = 92, Top = 0, Width = 16, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter };
+        _timeLabel = new Label { AutoSize = false, Left = 108, Top = 0, Width = 90, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 12, FontStyle.Bold) };
+        var sep2 = new Label { Text = "|", AutoSize = false, Left = 198, Top = 0, Width = 16, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter };
+        _expandButton = new Label { Text = "▼", AutoSize = false, Left = 214, Top = 0, Width = 68, Height = BarHeight, TextAlign = ContentAlignment.MiddleCenter, Font = new Font("Segoe UI", 10, FontStyle.Bold), Cursor = Cursors.Hand };
         _expandButton.Click += (_, _) => ToggleMenu();
 
         _bar.Controls.Add(_pcNameLabel);
@@ -163,6 +194,28 @@ public class CafeHomeForm : Form
         return new Point(Math.Clamp(location.X, minX, maxX), Math.Clamp(location.Y, minY, maxY));
     }
 
+    // Same rounded-rect GraphicsPath technique RoundedPanel.RoundedRect
+    // already uses to paint the pill's corners, reused here (not shared -
+    // that method is private to RoundedPanel) so the Form's own Region
+    // matches the panel's painted shape exactly.
+    private void ApplyRoundedRegion()
+    {
+        using var path = RoundedRectPath(new Rectangle(0, 0, Width, Height), BarHeight / 2);
+        Region = new Region(path);
+    }
+
+    private static GraphicsPath RoundedRectPath(Rectangle bounds, int radius)
+    {
+        var path = new GraphicsPath();
+        var d = radius * 2;
+        path.AddArc(bounds.X, bounds.Y, d, d, 180, 90);
+        path.AddArc(bounds.Right - d, bounds.Y, d, d, 270, 90);
+        path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
+        path.AddArc(bounds.X, bounds.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
     private void BuildMenu()
     {
         _menuForm = new Form
@@ -196,15 +249,24 @@ public class CafeHomeForm : Form
         _logoutItem = MenuButton("Log Out");
         _logoutItem.Click += async (_, _) => await OnLogOutClicked();
 
-        _menuList.Controls.Add(_addTimeItem);
-        _menuList.Controls.Add(_settingsItem);
-        _menuList.Controls.Add(_adminItem);
+        // DockStyle.Top siblings dock closest-to-edge-first-added-last, so
+        // adding in this (reversed) order renders them top-to-bottom as
+        // Add Time / User Settings / Admin Panel / Log Out - the order the
+        // mockup actually shows, not the order they're declared above.
         _menuList.Controls.Add(_logoutItem);
+        _menuList.Controls.Add(_adminItem);
+        _menuList.Controls.Add(_settingsItem);
+        _menuList.Controls.Add(_addTimeItem);
 
         // Closing the menu on any click outside it (deactivation) matches
         // normal dropdown behavior - without this it would only ever
         // close via the arrow or an item action.
-        _menuForm.Deactivate += (_, _) => { if (_menuCoinPanel == null) HideMenu(); };
+        _menuForm.Deactivate += (_, _) =>
+        {
+            if (_menuCoinPanel != null) return;
+            _menuClosedByDeactivateAt = DateTime.UtcNow;
+            HideMenu();
+        };
 
         RelayoutMenu();
     }
@@ -244,8 +306,17 @@ public class CafeHomeForm : Form
 
     private void ToggleMenu()
     {
-        if (_menuForm.Visible) HideMenu();
-        else ShowMenu();
+        if (_menuForm.Visible)
+        {
+            HideMenu();
+            return;
+        }
+        // The click that just landed here already activated CafeHomeForm,
+        // which fired _menuForm.Deactivate and closed the menu a moment
+        // ago - this Click is the same physical click, not a new request
+        // to open it. Let it count as the close and stop here.
+        if (DateTime.UtcNow - _menuClosedByDeactivateAt < MenuReopenSuppressWindow) return;
+        ShowMenu();
     }
 
     private void ShowMenu()
@@ -261,18 +332,34 @@ public class CafeHomeForm : Form
         _menuForm.Hide();
     }
 
-    // Positions the dropdown just below the bar's bottom-left corner,
-    // clamped the same way the bar itself is (at least DragClampMargin px
-    // of the menu stays within the work area).
+    // Positions the dropdown just below the bar's bottom-left corner, or
+    // above it when the bar is parked low enough on screen that the full
+    // menu wouldn't fit below (a perfectly normal place to leave a
+    // floating bar) - the old always-below placement plus the small
+    // DragClampMargin allowance left most of a tall menu off-screen and
+    // unusable in that case, not just imperfectly positioned. Horizontal
+    // position still uses the same clamping logic as the bar itself.
     private void PositionMenu()
     {
-        var desired = new Point(Location.X, Location.Y + Height + 4);
-        _menuForm.Location = ClampToScreen(desired, _menuForm.Width, _menuForm.Height);
+        var area = Screen.PrimaryScreen!.WorkingArea;
+        var fitsBelow = Location.Y + Height + 4 + _menuForm.Height <= area.Bottom;
+        var desiredY = fitsBelow ? Location.Y + Height + 4 : Location.Y - _menuForm.Height - 4;
+        var clampedX = ClampToScreen(new Point(Location.X, desiredY), _menuForm.Width, _menuForm.Height).X;
+        _menuForm.Location = new Point(clampedX, desiredY);
     }
 
     private void OnUserSettingsClicked()
     {
         HideMenu();
+        // SettingsPage.BuildGeneralTab() (its tallest tab) lays its last
+        // control - the Save button - at Top ~384, Height 40, so content
+        // bottom is ~424px within the TabPage's own client area. Add the
+        // TabControl's tab-strip header (~30px) plus a margin (~40px)
+        // beyond that content bottom: ~424 + 30 + 40 = ~494px of usable
+        // client height needed. Using ClientSize instead of Width/Height
+        // sizes the actual usable area directly rather than guessing how
+        // much the FixedDialog title bar/borders eat into an outer Height,
+        // which is what left the Save button clipped before.
         using var host = new Form
         {
             Text = "User Settings",
@@ -281,8 +368,7 @@ public class CafeHomeForm : Form
             MaximizeBox = false,
             MinimizeBox = false,
             TopMost = true,
-            Width = 620,
-            Height = 460,
+            ClientSize = new Size(620, 500),
         };
         var settingsPage = new SettingsPage(_api, _config, _prefs);
         settingsPage.PreferencesSaved += _ => ApplyPreferences();
@@ -395,19 +481,45 @@ public class CafeHomeForm : Form
 
     private void ApplyPreferences()
     {
-        // The old shell's idle-auto-logout lived here via a dedicated
-        // IdleDetector; that behavior is unrelated to the bar/menu
-        // rebuild and is intentionally left in place conceptually, but
-        // since IdleDetector was only ever driven from this class and
-        // nothing in the mockup calls for it to change, preferences are
-        // simply re-applied wherever settings are saved (User Settings
-        // dialog above) with no further action needed here beyond that
-        // save already having persisted to disk.
+        if (_isMember && _prefs.AutoLogoutEnabled) _idleDetector.Start(_prefs.AutoLogoutMinutes);
+        else _idleDetector.Stop();
     }
 
+    // Shows a one-time-per-approach reminder once the remaining time drops
+    // to or below the configured threshold; resets as soon as it's no
+    // longer below threshold (e.g. the member added time) so a later
+    // approach shows it again.
+    private void CheckSessionReminder(double minutesRemaining)
+    {
+        if (!_prefs.SessionReminderEnabled) { _sessionReminderShown = false; return; }
+        if (minutesRemaining > _prefs.SessionReminderMinutesBefore) { _sessionReminderShown = false; return; }
+        if (_sessionReminderShown || !Visible) return;
+        _sessionReminderShown = true;
+        MessageBox.Show($"Your session ends in about {_prefs.SessionReminderMinutesBefore} minutes. Add more time from the menu if you'd like to keep playing.",
+            "Session ending soon", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    private async Task OnIdleTimeoutAsync()
+    {
+        if (!_isMember) return; // no session to auto-logout for a guest
+        await _api.MemberLogoutAsync(_config.Mac, _config.DeviceSecret);
+        // Next poll picks up the logged-out state - no need to duplicate
+        // that transition here.
+    }
+
+    // Called on every ~5s status poll (Program.cs), not just when a
+    // session actually starts - so first-show setup (Show/TopMost/
+    // Activate) must only run on the hidden-to-visible transition. Under
+    // the old full-screen shell, calling Activate() unconditionally was
+    // harmless (the shell WAS the foreground app); now that the real
+    // desktop shows through under this small bar, activating on every
+    // poll would steal keyboard/mouse focus from whatever the customer is
+    // doing every few seconds, and would also fire _menuForm's Deactivate
+    // handler and close any menu the customer just opened.
     public void ShowHome()
     {
-        if (!Visible) Show();
+        if (Visible) return;
+        Show();
         TopMost = true;
         Activate();
     }
@@ -430,6 +542,9 @@ public class CafeHomeForm : Form
         var wasMember = _isMember;
         _isMember = !string.IsNullOrEmpty(status.LoggedInUser);
         if (wasMember != _isMember) RelayoutMenu();
+
+        ApplyPreferences();
+        CheckSessionReminder(status.MinutesRemaining);
     }
 
     // Clean Up on Exit (Settings > General) - called from Program.cs
