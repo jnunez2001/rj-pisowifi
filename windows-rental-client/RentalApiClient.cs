@@ -46,7 +46,7 @@ public class RedeemRate
     [JsonPropertyName("reward_seconds")] public int RewardSeconds { get; set; }
 }
 
-// GET /api/rental/admin-panel/settings response - the Admin Panel
+// POST /api/rental/admin-panel/settings/read response - the Admin Panel
 // screen's read-only settings bundle (server/routes/rental.js).
 public class AdminPanelSettingsResponse
 {
@@ -268,9 +268,13 @@ public class RentalApiClient
         return await res.Content.ReadFromJsonAsync<ApiResult>();
     }
 
+    // POST, not GET - device_secret/password are carried in the JSON body
+    // rather than the URL query string, matching the reasoning already used
+    // for the other admin-panel calls below (keeps credentials out of any
+    // proxy/access logs or browser history).
     public async Task<AdminPanelSettingsResponse?> GetAdminPanelSettingsAsync(string mac, string deviceSecret, string password)
     {
-        var res = await _http.GetAsync($"{_baseUrl}/api/rental/admin-panel/settings?mac={Uri.EscapeDataString(mac)}&device_secret={Uri.EscapeDataString(deviceSecret)}&password={Uri.EscapeDataString(password)}");
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/admin-panel/settings/read", new { mac, device_secret = deviceSecret, password });
         return await res.Content.ReadFromJsonAsync<AdminPanelSettingsResponse>();
     }
 

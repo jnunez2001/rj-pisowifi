@@ -44,6 +44,10 @@ public class AdminPanelPage : UserControl
 
     private Panel _scroll = null!;
     private System.Windows.Forms.Timer? _pingTimer;
+    // Shared across every 5-second ping tick - creating/disposing a fresh
+    // HttpClient per tick is a socket-exhaustion anti-pattern (each one
+    // leaves its underlying socket in TIME_WAIT for a while after Dispose).
+    private readonly HttpClient _pingHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
 
     // Server Connection
     private Label _connectionUrlLabel = null!;
@@ -68,10 +72,14 @@ public class AdminPanelPage : UserControl
     private Label _ratesStatusLabel = null!;
 
     // Security
+    private Label _elevationBannerLabel = null!;
     private CheckBox _taskMgrCheck = null!;
+    private Label _taskMgrStatusLabel = null!;
     private CheckBox _usbCheck = null!;
+    private Label _usbStatusLabel = null!;
     private CheckBox _protectFolderCheck = null!;
-    private Label _securityStatusLabel = null!;
+    private Label _installFolderPathLabel = null!;
+    private Label _protectFolderStatusLabel = null!;
     private bool _loadingSecurity = true; // guards CheckedChanged from firing writes while we set initial state
 
     // Client Status
@@ -103,6 +111,7 @@ public class AdminPanelPage : UserControl
             ConnectionStatus.Changed -= OnConnectionStatusChanged;
             _pingTimer?.Stop();
             _pingTimer?.Dispose();
+            _pingHttp.Dispose();
         };
     }
 
@@ -203,8 +212,7 @@ public class AdminPanelPage : UserControl
         var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-            using var response = await http.GetAsync(_config.ServerUrl);
+            using var response = await _pingHttp.GetAsync(_config.ServerUrl);
             sw.Stop();
             if (IsDisposed) return;
             _pingLabel.Text = $"Ping: {sw.ElapsedMilliseconds} ms";
@@ -483,50 +491,94 @@ public class AdminPanelPage : UserControl
     }
 
     // ---- Section 5: Security ----
-    // Card: Top=y, Height=190.
-    //   header                 Top=12  H=22 -> bottom=34
-    //   _taskMgrCheck          Top=44  H=24 -> bottom=68
-    //   _usbCheck              Top=76  H=24 -> bottom=100
-    //   _protectFolderCheck    Top=108 H=24 -> bottom=132
-    //   _securityStatusLabel   Top=140 H=40 -> bottom=180
+    // Card: Top=y, Height=220.
+    //   header                    Top=12  H=22 -> bottom=34
+    //   _elevationBannerLabel     Top=38  H=18 -> bottom=56 (persistent banner, shown only when not elevated)
+    //   _taskMgrCheck             Top=60  H=24 -> bottom=84
+    //   _taskMgrStatusLabel       Top=84  H=16 -> bottom=100
+    //   _usbCheck                 Top=104 H=24 -> bottom=128
+    //   _usbStatusLabel           Top=128 H=16 -> bottom=144
+    //   _protectFolderCheck       Top=148 H=24 -> bottom=172
+    //   _installFolderPathLabel   Top=172 H=16 -> bottom=188
+    //   _protectFolderStatusLabel Top=188 H=16 -> bottom=204
+    //
+    // Each toggle gets its own small status/caption label directly under
+    // it, rather than one label shared by all three - otherwise a message
+    // from one toggle (e.g. "Applied.") clobbers a different toggle's
+    // "state could not be read" caveat. The elevation warning is a
+    // separate, persistent banner at the top of the card instead, so it
+    // never gets overwritten by any toggle's own message either.
     private int BuildSecuritySection(int y)
     {
-        const int height = 190;
+        const int height = 220;
         var card = AddCard(y, height);
         AddHeader(card, "SECURITY");
+
+        _elevationBannerLabel = new Label
+        {
+            Text = "Running without Administrator rights - USB Ports and Protect Install Folder require the app to be elevated to change.",
+            ForeColor = DarkDanger, AutoSize = false, Left = 16, Top = 38, Width = CardWidth - 32, Height = 18,
+            Visible = false,
+        };
+        card.Controls.Add(_elevationBannerLabel);
 
         _taskMgrCheck = new CheckBox
         {
             Text = "Disable Task Manager", ForeColor = DarkTextPrimary, BackColor = DarkSurface,
-            AutoSize = false, Left = 16, Top = 44, Width = 500, Height = 24,
+            AutoSize = false, Left = 16, Top = 60, Width = 500, Height = 24,
         };
         _taskMgrCheck.CheckedChanged += async (_, _) => await OnTaskManagerToggledAsync();
         card.Controls.Add(_taskMgrCheck);
+
+        _taskMgrStatusLabel = new Label
+        {
+            AutoSize = false, Left = 16, Top = 84, Width = CardWidth - 32, Height = 16,
+            ForeColor = DarkTextMuted, Font = new Font("Segoe UI", 8),
+        };
+        card.Controls.Add(_taskMgrStatusLabel);
 
         _usbCheck = new CheckBox
         {
             Text = "Disable USB mass storage (flash drives) - keyboard/mouse/coin acceptor unaffected",
             ForeColor = DarkTextPrimary, BackColor = DarkSurface,
-            AutoSize = false, Left = 16, Top = 76, Width = 620, Height = 24,
+            AutoSize = false, Left = 16, Top = 104, Width = 620, Height = 24,
         };
         _usbCheck.CheckedChanged += async (_, _) => await OnUsbToggledAsync();
         card.Controls.Add(_usbCheck);
+
+        _usbStatusLabel = new Label
+        {
+            AutoSize = false, Left = 16, Top = 128, Width = CardWidth - 32, Height = 16,
+            ForeColor = DarkTextMuted, Font = new Font("Segoe UI", 8),
+        };
+        card.Controls.Add(_usbStatusLabel);
 
         _protectFolderCheck = new CheckBox
         {
             Text = "Protect install folder (block writing/deleting its files)",
             ForeColor = DarkTextPrimary, BackColor = DarkSurface,
-            AutoSize = false, Left = 16, Top = 108, Width = 500, Height = 24,
+            AutoSize = false, Left = 16, Top = 148, Width = 500, Height = 24,
         };
         _protectFolderCheck.CheckedChanged += async (_, _) => await OnProtectFolderToggledAsync();
         card.Controls.Add(_protectFolderCheck);
 
-        _securityStatusLabel = new Label
+        // Shows the operator exactly which folder this toggle will protect
+        // before they turn it on - resolved from the ProgramData install
+        // marker when present, see SecurityToggles.GetInstallFolder.
+        _installFolderPathLabel = new Label
         {
-            AutoSize = false, Left = 16, Top = 140, Width = CardWidth - 32, Height = 40,
-            ForeColor = DarkTextMuted,
+            Text = $"Folder: {SecurityToggles.GetInstallFolder()}",
+            AutoSize = false, Left = 16, Top = 172, Width = CardWidth - 32, Height = 16,
+            ForeColor = DarkTextMuted, Font = new Font("Segoe UI", 8),
         };
-        card.Controls.Add(_securityStatusLabel);
+        card.Controls.Add(_installFolderPathLabel);
+
+        _protectFolderStatusLabel = new Label
+        {
+            AutoSize = false, Left = 16, Top = 188, Width = CardWidth - 32, Height = 16,
+            ForeColor = DarkTextMuted, Font = new Font("Segoe UI", 8),
+        };
+        card.Controls.Add(_protectFolderStatusLabel);
 
         return y + height + 16;
     }
@@ -534,7 +586,7 @@ public class AdminPanelPage : UserControl
     // Reads the ACTUAL current state of all three registry/ACL toggles
     // (never a remembered preference) and reflects it in the checkboxes.
     // USB/Protect Folder are disabled outright when not elevated, since
-    // writing them would just fail - the status label explains why.
+    // writing them would just fail - the elevation banner explains why.
     private void LoadSecuritySection()
     {
         _loadingSecurity = true;
@@ -551,16 +603,15 @@ public class AdminPanelPage : UserControl
         _protectFolderCheck.Checked = protectState ?? false;
         _protectFolderCheck.Enabled = elevated;
 
-        if (!elevated)
-        {
-            _securityStatusLabel.ForeColor = DarkDanger;
-            _securityStatusLabel.Text = "Running without Administrator rights - USB Ports and Protect Install Folder require the app to be elevated to change.";
-        }
-        else if (usbState == null || protectState == null)
-        {
-            _securityStatusLabel.ForeColor = DarkTextMuted;
-            _securityStatusLabel.Text = "Some settings' current state could not be read - shown as off until toggled.";
-        }
+        _elevationBannerLabel.Visible = !elevated;
+
+        // Per-toggle "state could not be read" caveats - independent of the
+        // elevation banner and of each other, so one doesn't clobber another.
+        _usbStatusLabel.ForeColor = DarkTextMuted;
+        _usbStatusLabel.Text = usbState == null ? "Current state could not be read - shown as off until toggled." : "";
+
+        _protectFolderStatusLabel.ForeColor = DarkTextMuted;
+        _protectFolderStatusLabel.Text = protectState == null ? "Current state could not be read - shown as off until toggled." : "";
 
         _loadingSecurity = false;
     }
@@ -574,11 +625,11 @@ public class AdminPanelPage : UserControl
             _loadingSecurity = true;
             _taskMgrCheck.Checked = !_taskMgrCheck.Checked; // revert the checkbox to match reality
             _loadingSecurity = false;
-            ShowSecurityError(error);
+            ShowSecurityResult(_taskMgrStatusLabel, false, error);
         }
         else
         {
-            ShowSecuritySuccess();
+            ShowSecurityResult(_taskMgrStatusLabel, true, null);
         }
         await Task.CompletedTask;
     }
@@ -592,11 +643,11 @@ public class AdminPanelPage : UserControl
             _loadingSecurity = true;
             _usbCheck.Checked = !_usbCheck.Checked;
             _loadingSecurity = false;
-            ShowSecurityError(error);
+            ShowSecurityResult(_usbStatusLabel, false, error);
         }
         else
         {
-            ShowSecuritySuccess();
+            ShowSecurityResult(_usbStatusLabel, true, null);
         }
         await Task.CompletedTask;
     }
@@ -611,35 +662,29 @@ public class AdminPanelPage : UserControl
             _loadingSecurity = true;
             _protectFolderCheck.Checked = !_protectFolderCheck.Checked;
             _loadingSecurity = false;
-            ShowSecurityError(error);
+            ShowSecurityResult(_protectFolderStatusLabel, false, error);
         }
         else
         {
-            ShowSecuritySuccess();
+            ShowSecurityResult(_protectFolderStatusLabel, true, null);
         }
         await Task.CompletedTask;
     }
 
-    private void ShowSecurityError(string? error)
+    private void ShowSecurityResult(Label label, bool ok, string? error)
     {
-        _securityStatusLabel.ForeColor = DarkDanger;
-        _securityStatusLabel.Text = error ?? "Could not apply that setting.";
-    }
-
-    private void ShowSecuritySuccess()
-    {
-        _securityStatusLabel.ForeColor = DarkSuccess;
-        _securityStatusLabel.Text = "Applied.";
+        label.ForeColor = ok ? DarkSuccess : DarkDanger;
+        label.Text = ok ? "Applied." : (error ?? "Could not apply that setting.");
     }
 
     // ---- Section 6: Client Status ----
-    // Card: Top=y, Height=110.
+    // Card: Top=y, Height=126.
     //   header                Top=12 H=22 -> bottom=34
     //   _clientEnabledCheck   Top=44 H=24 -> bottom=68
-    //   note label            Top=76 H=28 -> bottom=104
+    //   note label            Top=76 H=44 -> bottom=120
     private void BuildClientStatusSection(int y)
     {
-        const int height = 110;
+        const int height = 126;
         var card = AddCard(y, height);
         AddHeader(card, "CLIENT STATUS");
 
@@ -658,8 +703,8 @@ public class AdminPanelPage : UserControl
 
         var note = new Label
         {
-            Text = "Unchecking this turns off all lock-screen/session enforcement (customer gets a normal desktop). Takes effect within about 5 seconds - no restart needed.",
-            ForeColor = DarkTextMuted, AutoSize = false, Left = 16, Top = 76, Width = CardWidth - 32, Height = 28,
+            Text = "Unchecking pauses all lock/session enforcement on this PC. On installs where the desktop shell itself was replaced, the customer will see a blank desktop rather than a normal one until re-enabled or the PC is restarted. Takes effect within about 5 seconds - no restart needed.",
+            ForeColor = DarkTextMuted, AutoSize = false, Left = 16, Top = 76, Width = CardWidth - 32, Height = 44,
         };
         card.Controls.Add(note);
     }

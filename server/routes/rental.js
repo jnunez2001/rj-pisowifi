@@ -4,6 +4,7 @@ const db = require('../config/database');
 const crypto = require('crypto');
 const { verifyPassword, hashPassword } = require('../utils/passwordHash');
 const { parseSqliteDate } = require('../utils/sqliteDate');
+const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
 
 // Every device-facing route here (register/status/member-login/logout/
 // staff-override) authenticates the CALLING PC via its own device_secret
@@ -464,18 +465,37 @@ function requireAdminPanelAuth(req) {
 
 // POST /api/rental/admin-panel/verify - {mac, device_secret, password}.
 // The Admin Panel screen's own login step - just confirms the password is
-// correct, nothing else.
+// correct, nothing else. Rate-limited via the same spamService already
+// used for coin/session/admin-login abuse (see spamService.js) - this is a
+// physically-exposed kiosk PC guessing a password with only a 6-character
+// minimum, so it needs its own lockout counter distinct from admin-auth's
+// (keyed by mac, not IP, since this route is device-scoped).
 router.post('/admin-panel/verify', (req, res) => {
+  const mac = req.body?.mac;
+  const spamKey = `admin-panel-verify:${mac}`;
+  const spamCheck = checkSpam(spamKey);
+  if (spamCheck.blocked) {
+    return res.status(429).json({ success: false, message: spamCheck.message });
+  }
+
   const auth = requireAdminPanelAuth(req);
-  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+  if (auth.error) {
+    recordAttempt(spamKey);
+    return res.status(auth.error).json({ success: false, message: auth.message });
+  }
+  clearAttempts(spamKey);
   return res.json({ success: true });
 });
 
-// GET /api/rental/admin-panel/settings?mac=&device_secret=&password= -
-// read-only bundle for the Admin Panel screen: a few existing operator
-// settings (display only, not editable here) plus the two real Guest ->
-// Member Conversion settings and the redeem-rate tiers.
-router.get('/admin-panel/settings', (req, res) => {
+// POST /api/rental/admin-panel/settings/read - {mac, device_secret,
+// password}. Read-only bundle for the Admin Panel screen: a few existing
+// operator settings (display only, not editable here) plus the two real
+// Guest -> Member Conversion settings and the redeem-rate tiers.
+// Deliberately POST (not GET) and on its own /read path, distinct from the
+// POST /admin-panel/settings update route below - a body is needed to keep
+// device_secret/password out of the URL/query string (same reasoning as
+// the other admin-panel routes), and a GET-shaped route can't carry one.
+router.post('/admin-panel/settings/read', (req, res) => {
   const auth = requireAdminPanelAuth(req);
   if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
 

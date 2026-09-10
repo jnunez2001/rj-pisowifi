@@ -117,11 +117,45 @@ public static class SecurityToggles
     // are never touched, so the running app (and anything else reading its
     // files) keeps working normally either way. Modifying ACLs under
     // Program Files requires elevation.
+    //
+    // BUILTIN\Users transitively includes Authenticated Users/INTERACTIVE,
+    // so an elevated administrator's token still carries that SID - a bare
+    // Deny for Users would silently block install.bat's upgrade `copy /Y`
+    // and uninstall.bat's `rmdir` even when run elevated. To keep this safe
+    // for admins, an explicit Allow-FullControl ACE for
+    // BuiltinAdministratorsSid is always added/removed in lockstep with the
+    // Users Deny ACE below (Windows/.NET canonicalizes explicit ACEs with
+    // deny-before-allow regardless of the order they're added in, so this
+    // Allow rule is not shadowed by the Deny rule for the broader group).
     private static readonly FileSystemRights ProtectDenyRights =
         FileSystemRights.WriteData | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles;
+    private const InheritanceFlags ProtectInheritanceFlags = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
+    private const PropagationFlags ProtectPropagationFlags = PropagationFlags.None;
+
+    // %ProgramData%\StarkFiRental\install_path.txt is the authoritative
+    // install location, written by install.bat and read back by
+    // uninstall.bat - this mirrors that so the folder this toggle protects
+    // is always the real install folder, not wherever the running exe
+    // happens to be launched from (a dev build launched straight out of
+    // bin\Debug, for instance).
+    private static readonly string InstallMarkerFile =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "StarkFiRental", "install_path.txt");
 
     public static string GetInstallFolder()
     {
+        try
+        {
+            if (File.Exists(InstallMarkerFile))
+            {
+                var marked = File.ReadAllText(InstallMarkerFile).Trim();
+                if (!string.IsNullOrWhiteSpace(marked) && Directory.Exists(marked)) return marked;
+            }
+        }
+        catch
+        {
+            // fall through to the exe-directory fallback below
+        }
+
         try
         {
             var exePath = Environment.ProcessPath ?? Application.ExecutablePath;
@@ -143,11 +177,16 @@ public static class SecurityToggles
             var info = new DirectoryInfo(folder);
             var security = info.GetAccessControl(AccessControlSections.Access);
             var usersSid = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
+            // Match only the exact rights/inheritance this app itself writes,
+            // not any Deny-for-Users-with-WriteData ACE that could have been
+            // set by the operator through some other means.
             foreach (FileSystemAccessRule rule in security.GetAccessRules(true, false, typeof(SecurityIdentifier)))
             {
                 if (rule.AccessControlType == AccessControlType.Deny &&
                     rule.IdentityReference is SecurityIdentifier sid && sid == usersSid &&
-                    (rule.FileSystemRights & FileSystemRights.WriteData) == FileSystemRights.WriteData)
+                    rule.FileSystemRights == ProtectDenyRights &&
+                    rule.InheritanceFlags == ProtectInheritanceFlags &&
+                    rule.PropagationFlags == ProtectPropagationFlags)
                 {
                     return true;
                 }
@@ -169,12 +208,25 @@ public static class SecurityToggles
             var info = new DirectoryInfo(folder);
             var security = info.GetAccessControl(AccessControlSections.Access);
             var usersSid = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-            var rule = new FileSystemAccessRule(
+            var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
+            var denyRule = new FileSystemAccessRule(
                 usersSid, ProtectDenyRights,
-                InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None,
+                ProtectInheritanceFlags, ProtectPropagationFlags,
                 AccessControlType.Deny);
-            if (protect) security.AddAccessRule(rule);
-            else security.RemoveAccessRule(rule);
+            var adminsAllowRule = new FileSystemAccessRule(
+                adminsSid, FileSystemRights.FullControl,
+                ProtectInheritanceFlags, ProtectPropagationFlags,
+                AccessControlType.Allow);
+            if (protect)
+            {
+                security.AddAccessRule(adminsAllowRule);
+                security.AddAccessRule(denyRule);
+            }
+            else
+            {
+                security.RemoveAccessRule(denyRule);
+                security.RemoveAccessRule(adminsAllowRule);
+            }
             info.SetAccessControl(security);
             return (true, null);
         }
