@@ -132,29 +132,25 @@ router.get('/status', (req, res) => {
       const newSeconds = Math.max(0, member.seconds - elapsedSeconds);
       db.prepare('UPDATE rental_members SET seconds = ?, last_active = CURRENT_TIMESTAMP WHERE id = ?').run(Math.round(newSeconds), member.id);
 
-      if (newSeconds <= 0) {
-        // Ran out while logged in - same as an explicit logout, just
-        // triggered by hitting zero instead of the member choosing to end
-        // it. Nothing left to preserve either way.
-        db.prepare('UPDATE rental_sessions SET member_id = NULL WHERE pc_id = ?').run(pc.id);
-        session = { ...session, member_id: null };
-        remainingMinutes = 0;
-      } else {
-        // Bug found live: writing this via SQL's own CURRENT_TIMESTAMP
-        // produces a naive "YYYY-MM-DD HH:MM:SS" string in UTC, but
-        // JS's `new Date(str)` parses that space-separated (non-ISO)
-        // format as LOCAL time, not UTC - reading it back for the
-        // elapsed-time math above silently shifted it by the server's
-        // UTC offset, draining a member's whole balance in a single
-        // poll regardless of how much time had actually passed. Every
-        // other timestamp this file/coin.js relies on for real math
-        // (expires_at, hard_expires_at) is already built as a real ISO
-        // string in JS for exactly this reason - matching that here.
-        db.prepare('UPDATE rental_sessions SET updated_at = ? WHERE pc_id = ?').run(new Date().toISOString(), pc.id);
-        remainingMinutes = newSeconds / 60;
-        loggedInUser = member.username;
-        loggedInPoints = member.points;
-      }
+      // A member who drains to exactly zero stays logged in (locked, not
+      // logged out) - "active" below already correctly requires
+      // remainingMinutes > 0, so there's nothing left to special-case here.
+      // They only leave rental_sessions.member_id via an explicit
+      // POST /member-logout, or the "member row gone" branch below if the
+      // account itself is deleted. Bug found live: writing this via SQL's
+      // own CURRENT_TIMESTAMP produces a naive "YYYY-MM-DD HH:MM:SS" string
+      // in UTC, but JS's `new Date(str)` parses that space-separated
+      // (non-ISO) format as LOCAL time, not UTC - reading it back for the
+      // elapsed-time math above silently shifted it by the server's UTC
+      // offset, draining a member's whole balance in a single poll
+      // regardless of how much time had actually passed. Every other
+      // timestamp this file/coin.js relies on for real math (expires_at,
+      // hard_expires_at) is already built as a real ISO string in JS for
+      // exactly this reason - matching that here.
+      db.prepare('UPDATE rental_sessions SET updated_at = ? WHERE pc_id = ?').run(new Date().toISOString(), pc.id);
+      remainingMinutes = newSeconds / 60;
+      loggedInUser = member.username;
+      loggedInPoints = member.points;
     } else {
       // Member row gone (deleted) but the session still pointed at it -
       // clear the dangling reference rather than crash on it.
@@ -197,8 +193,11 @@ router.get('/status', (req, res) => {
 
 // POST /api/rental/member-login - {mac, device_secret, username, password}.
 // The lock screen's login form. Rejects if the PC already has a DIFFERENT
-// member logged in (one login at a time per PC) or if this member has
-// nothing left to spend.
+// member logged in (one login at a time per PC). Succeeds regardless of
+// balance - a member with 0 seconds still logs in (locked, since GET
+// /status's `active` requires remainingMinutes > 0) so they can see their
+// points and redeem/top-up from the Member No-Time panel instead of being
+// turned away at the door.
 router.post('/member-login', (req, res) => {
   const { username, password } = req.body || {};
   const auth = authenticatePc(req.body?.mac, req.body?.device_secret);
@@ -209,10 +208,6 @@ router.post('/member-login', (req, res) => {
   if (!member || !verifyPassword(password, member.password_hash)) {
     return res.status(401).json({ success: false, message: 'Incorrect username or password' });
   }
-  if (member.seconds <= 0) {
-    return res.status(400).json({ success: false, message: 'No time remaining on this account' });
-  }
-
   const session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
   if (session?.member_id && session.member_id !== member.id) {
     return res.status(409).json({ success: false, message: 'Another member is already logged in on this PC' });

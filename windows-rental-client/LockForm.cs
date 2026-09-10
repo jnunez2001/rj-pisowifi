@@ -71,6 +71,28 @@ public class LockForm : Form
     // each time it's opened so it always starts from a clean state.
     private CoinInsertPanel? _coinPanel;
 
+    // Member No-Time view: shown whenever a logged-in member has 0 minutes
+    // remaining, whether that's discovered right after MemberLoginAsync or
+    // on a later status poll (see ShowLock). Added directly to the Form's
+    // Controls (like _staffLink), NOT as a child of _centerPanel - its
+    // content (heading + balance + message + a full large-mode
+    // CoinInsertPanel + a redeem list) is taller than _centerPanel's fixed
+    // 480x620 bounds and would be silently clipped by it (a Windows child
+    // control is clipped to its immediate parent's client area). Instead
+    // it's its own AutoScroll panel, sized to the visible screen at show
+    // time (see RepositionNoTimeView), so content that doesn't fit simply
+    // scrolls rather than getting cut off invisibly.
+    private Panel _noTimeView = null!;
+    private Label _noTimeCloseX = null!;
+    private Label _noTimeTitleLabel = null!;
+    private Label _noTimeBalanceLabel = null!;
+    private Label _noTimeMessageLabel = null!;
+    private Label _noTimeRedeemTitleLabel = null!;
+    private Label _noTimeRedeemStatusLabel = null!;
+    private FlowLayoutPanel _noTimeRatesPanel = null!;
+    private CoinInsertPanel? _noTimeCoinPanel;
+    private string? _noTimeUsername;
+
     private string? _instructionsText;
     private bool _connected = true;
 
@@ -98,11 +120,12 @@ public class LockForm : Form
 
         BuildStaffLink();
         BuildCenter();
+        BuildNoTimeView();
 
         FormClosing += (_, e) => { /* prevent Alt+F4 closing the lock while it's supposed to be showing */
             if (Visible) e.Cancel = true;
         };
-        Resize += (_, _) => RecenterHomeView();
+        Resize += (_, _) => { RecenterHomeView(); RepositionNoTimeView(); };
 
         ApplyTheme();
         ShowHomeView();
@@ -240,6 +263,197 @@ public class LockForm : Form
         _loginView.Controls.Add(_loginErrorLabel);
     }
 
+    // All Top offsets below are relative to _noTimeView's own (scrollable)
+    // coordinate space, width 480 throughout to match _centerPanel's own
+    // width so it reads as the same column even though it isn't a child
+    // of _centerPanel. Geometry (Top, Height, computed Bottom):
+    //   _noTimeCloseX          Top=12   H=28   -> Bottom=40
+    //   _noTimeTitleLabel      Top=54   H=30   -> Bottom=84
+    //   _noTimeBalanceLabel    Top=90   H=50   -> Bottom=140
+    //   _noTimeMessageLabel    Top=146  H=24   -> Bottom=170
+    //   _noTimeCoinPanel       Top=180  H=500  -> Bottom=680  (large CoinInsertPanel, added in EmbedNoTimeCoinPanel)
+    //   _noTimeRedeemTitleLabel Top=696 H=26   -> Bottom=722
+    //   _noTimeRedeemStatusLabel Top=726 H=20  -> Bottom=746
+    //   _noTimeRatesPanel      Top=750  H=230+ -> Bottom=980+ (grows with rate count)
+    // Total content (~980px) exceeds every child's Top+Height <= parent's
+    // assigned Height once the assigned Height is capped to fit the
+    // screen (see RepositionNoTimeView) - that's expected and handled by
+    // _noTimeView.AutoScroll = true below, not a clipping bug: nothing is
+    // rendered outside a scrollable, reachable area.
+    private void BuildNoTimeView()
+    {
+        _noTimeView = new Panel { Width = 480, AutoScroll = true, Visible = false };
+        Controls.Add(_noTimeView);
+
+        _noTimeCloseX = new Label { Text = "✕", AutoSize = false, Width = 28, Height = 28, Left = 440, Top = 12, Font = new Font("Segoe UI", 12), TextAlign = ContentAlignment.MiddleCenter, Cursor = Cursors.Hand };
+        _noTimeCloseX.Click += async (_, _) => await OnNoTimeCloseClicked();
+        _noTimeView.Controls.Add(_noTimeCloseX);
+
+        _noTimeTitleLabel = new Label { Text = "WELCOME, MEMBER", Font = new Font("Segoe UI", 16, FontStyle.Bold), AutoSize = false, Width = 480, Height = 30, Top = 54, TextAlign = ContentAlignment.MiddleCenter };
+        _noTimeView.Controls.Add(_noTimeTitleLabel);
+
+        _noTimeBalanceLabel = new Label { Text = "-- POINTS", Font = new Font("Segoe UI", 32, FontStyle.Bold), AutoSize = false, Width = 480, Height = 50, Top = 90, TextAlign = ContentAlignment.MiddleCenter };
+        _noTimeView.Controls.Add(_noTimeBalanceLabel);
+
+        _noTimeMessageLabel = new Label { Text = "You have no remaining time", Font = new Font("Segoe UI", 10), AutoSize = false, Width = 480, Height = 24, Top = 146, TextAlign = ContentAlignment.MiddleCenter };
+        _noTimeView.Controls.Add(_noTimeMessageLabel);
+
+        // The embedded large-mode CoinInsertPanel goes at Top=180 (added
+        // dynamically by EmbedNoTimeCoinPanel, disposed/recreated per
+        // show - same pattern ShowCoinPanel already uses for _coinPanel).
+
+        _noTimeRedeemTitleLabel = new Label { Text = "REDEEM POINTS", Font = new Font("Segoe UI", 12, FontStyle.Bold), AutoSize = false, Width = 480, Height = 26, Top = 696, TextAlign = ContentAlignment.MiddleCenter };
+        _noTimeView.Controls.Add(_noTimeRedeemTitleLabel);
+
+        _noTimeRedeemStatusLabel = new Label { Font = new Font("Segoe UI", 9), AutoSize = false, Width = 460, Left = 10, Height = 20, Top = 726, TextAlign = ContentAlignment.MiddleCenter };
+        _noTimeView.Controls.Add(_noTimeRedeemStatusLabel);
+
+        _noTimeRatesPanel = new FlowLayoutPanel
+        {
+            FlowDirection = FlowDirection.TopDown, AutoScroll = false, WrapContents = false,
+            Left = 10, Top = 750, Width = 460, Height = 230
+        };
+        _noTimeView.Controls.Add(_noTimeRatesPanel);
+    }
+
+    // Sizes/centers _noTimeView against the current screen bounds rather
+    // than _centerPanel's fixed 480x620 (see the field comment above for
+    // why). Capped at 760 tall so it never exceeds a small screen; content
+    // beyond that scrolls (_noTimeView.AutoScroll = true).
+    private void RepositionNoTimeView()
+    {
+        var maxHeight = Math.Max(300, Bounds.Height - 80);
+        _noTimeView.Height = Math.Min(760, maxHeight);
+        _noTimeView.Left = (Bounds.Width - _noTimeView.Width) / 2;
+        _noTimeView.Top = (Bounds.Height - _noTimeView.Height) / 2;
+    }
+
+    // (Re)creates the embedded large-mode CoinInsertPanel - same mode
+    // ("pc_rental") and large:true the top-bar "Add Time" flow already
+    // uses elsewhere, so adding time to an already-logged-in zero-balance
+    // member goes through the exact same server-side coin-insert path,
+    // nothing new. Recreated (rather than reused) after Cancelled/
+    // Completed because CoinInsertPanel doesn't reset its own UI back to
+    // a fresh state after either - same reason ShowCoinPanel() below
+    // always builds a new instance instead of reusing one.
+    private void EmbedNoTimeCoinPanel()
+    {
+        _noTimeCoinPanel?.Dispose();
+        var panel = new CoinInsertPanel(_api, _config, "pc_rental", large: true)
+        {
+            Left = 0,
+            Top = 180
+        };
+        // Deferred via BeginInvoke: both events fire from inside this same
+        // panel's own click/timer handlers, so disposing it synchronously
+        // inside its own event would tear down the control mid-callback.
+        panel.Cancelled += () => BeginInvoke(new Action(EmbedNoTimeCoinPanel));
+        panel.Completed += (_) => BeginInvoke(new Action(EmbedNoTimeCoinPanel));
+        _noTimeCoinPanel = panel;
+        _noTimeView.Controls.Add(panel);
+    }
+
+    // Shows (or refreshes) the Member No-Time panel. Called both right
+    // after a fresh zero-balance login (OnLoginClicked) and from every
+    // status poll while a member is logged in at zero minutes (ShowLock) -
+    // guarded so a same-member repeat call (the normal ~5s poll case)
+    // doesn't recreate the embedded coin panel/redeem list and blow away
+    // an in-progress coin insertion the customer is mid-way through.
+    private void ShowNoTimeView(string username, int? knownPoints)
+    {
+        if (_noTimeView.Visible && _noTimeUsername == username)
+        {
+            return; // already showing for this member - leave it alone
+        }
+        _noTimeUsername = username;
+        _coinPanel?.Dispose();
+        _coinPanel = null;
+        _homeView.Visible = false;
+        _loginView.Visible = false;
+
+        _noTimeTitleLabel.Text = $"WELCOME, {username.ToUpperInvariant()}";
+        _noTimeBalanceLabel.Text = knownPoints.HasValue ? $"{knownPoints} POINTS" : "-- POINTS";
+        _noTimeView.Visible = true;
+        RepositionNoTimeView();
+        EmbedNoTimeCoinPanel();
+        _ = RefreshNoTimeRedeemAsync();
+    }
+
+    // Ported from Pages/RewardsPage.cs's RefreshAsync() - same balance +
+    // redeem-rate-list + affordability logic, rendered into _noTimeRatesPanel
+    // instead of a full page.
+    private async Task RefreshNoTimeRedeemAsync()
+    {
+        var result = await _api.GetMemberPointsAsync(_config.Mac, _config.DeviceSecret);
+        if (!_noTimeView.Visible || IsDisposed) return; // left the view while this was in flight
+
+        _noTimeRatesPanel.Controls.Clear();
+        if (result == null || !result.Success)
+        {
+            _noTimeBalanceLabel.Text = "-- POINTS";
+            _noTimeRedeemStatusLabel.Text = result?.Message ?? "Could not load rewards.";
+            return;
+        }
+
+        _noTimeBalanceLabel.Text = $"{result.Points} POINTS";
+        var rates = result.RedeemRates ?? new List<RedeemRate>();
+        _noTimeRedeemStatusLabel.Text = rates.Count == 0 ? "No promos set up yet." : "";
+
+        foreach (var rate in rates)
+        {
+            var minutes = rate.RewardSeconds / 60;
+            var row = new RoundedPanel { Width = 440, Height = 50, Margin = new Padding(0, 0, 0, 10), BackColor = Theme.Surface, CornerRadius = 8 };
+            var label = new Label { Text = $"{rate.Points} pts  →  {minutes} min", ForeColor = Theme.TextPrimary, Font = new Font("Segoe UI", 10), Left = 16, Top = 14, AutoSize = true };
+            var claimButton = new CardButton { Text = "CLAIM", Width = 90, Height = 34, Left = 440 - 106, Top = 8, CornerRadius = 6, BackColor = Theme.Accent, Enabled = result.Points >= rate.Points };
+            claimButton.Click += async (_, _) => await OnNoTimeClaimClicked(rate, claimButton);
+            row.Controls.Add(label);
+            row.Controls.Add(claimButton);
+            _noTimeRatesPanel.Controls.Add(row);
+        }
+    }
+
+    // Ported from Pages/RewardsPage.cs's OnClaimClicked().
+    private async Task OnNoTimeClaimClicked(RedeemRate rate, CardButton claimButton)
+    {
+        claimButton.Enabled = false;
+        var result = await _api.RedeemAsync(_config.Mac, _config.DeviceSecret, rate.Id);
+        if (!_noTimeView.Visible || IsDisposed) return;
+
+        if (result != null && result.Success)
+        {
+            _noTimeBalanceLabel.Text = $"{result.RemainingPoints} POINTS";
+            foreach (Control c in _noTimeRatesPanel.Controls)
+            {
+                if (c is RoundedPanel row)
+                {
+                    foreach (Control rc in row.Controls)
+                    {
+                        if (rc is CardButton b) b.Enabled = false;
+                    }
+                }
+            }
+            await RefreshNoTimeRedeemAsync(); // re-evaluate affordability against the new balance
+            // If this claim brought the balance above zero, the next
+            // status poll (~5s) picks that up and unlocks normally (see
+            // ShowLock) - no need to force a transition here.
+        }
+        else
+        {
+            MessageBox.Show(result?.Message ?? "Claim failed", "Rewards", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            claimButton.Enabled = true;
+        }
+    }
+
+    // The only "cancel" affordance on this panel is logging the member
+    // out entirely - there's nothing to fall back to since they got here
+    // by successfully authenticating with zero balance, not by choosing
+    // an option from Home.
+    private async Task OnNoTimeCloseClicked()
+    {
+        await _api.MemberLogoutAsync(_config.Mac, _config.DeviceSecret);
+        ShowHomeView();
+    }
+
     private void ApplyTheme()
     {
         BackColor = Theme.Background;
@@ -276,6 +490,14 @@ public class LockForm : Form
         _usernameBox.ForeColor = Theme.TextPrimary;
         _passwordBox.BackColor = Theme.Surface;
         _passwordBox.ForeColor = Theme.TextPrimary;
+
+        _noTimeView.BackColor = Theme.Background;
+        _noTimeCloseX.ForeColor = Theme.TextMuted;
+        _noTimeTitleLabel.ForeColor = Theme.TextPrimary;
+        _noTimeBalanceLabel.ForeColor = Theme.Accent;
+        _noTimeMessageLabel.ForeColor = Theme.TextMuted;
+        _noTimeRedeemTitleLabel.ForeColor = Theme.TextPrimary;
+        _noTimeRedeemStatusLabel.ForeColor = Theme.TextMuted;
     }
 
     private void ShowHomeView()
@@ -287,6 +509,16 @@ public class LockForm : Form
         _passwordBox.Text = "";
         _homeView.Visible = true;
         _loginView.Visible = false;
+
+        // Make sure the No-Time panel doesn't get "stuck" visually once
+        // the member logs out or the balance is topped up (this is the
+        // one place both OnNoTimeCloseClicked and the poll-driven "member
+        // no longer needs it" branch in ShowLock route back through).
+        _noTimeCoinPanel?.Dispose();
+        _noTimeCoinPanel = null;
+        _noTimeView.Visible = false;
+        _noTimeUsername = null;
+
         RecenterHomeView();
     }
 
@@ -393,7 +625,37 @@ public class LockForm : Form
             _logoBox.Visible = true;
             _logoMarkInner.Visible = false;
         });
-        if (!Visible) ShowHomeView();
+
+        // A member logged in at zero minutes stays logged in (locked, not
+        // logged out - see the matching GET /status change in
+        // server/routes/rental.js), so this has to be checked on every
+        // poll, not just right after a fresh login: they may have run out
+        // mid-session, or the app may have restarted while they were
+        // already at zero. ShowNoTimeView() itself no-ops on a repeat call
+        // for the same member so this doesn't fight an in-progress coin
+        // insertion. Checked BEFORE the "!Visible -> ShowHomeView()" fresh-
+        // open fallback below (Form.Visible is still false at that point
+        // on the very first poll after a restart) so a zero-balance member
+        // discovered on app start lands on the No-Time panel, not Home.
+        var isZeroBalanceMember = !string.IsNullOrEmpty(status.LoggedInUser) && status.MinutesRemaining <= 0;
+        if (isZeroBalanceMember)
+        {
+            ShowNoTimeView(status.LoggedInUser!, status.LoggedInPoints);
+        }
+        else if (_noTimeView.Visible)
+        {
+            // Member added time, redeemed enough points, or logged out
+            // elsewhere while this panel was showing - fall back to Home
+            // (in practice the form itself is about to be hidden by the
+            // caller once `locked` goes false, this just avoids leaving
+            // the No-Time panel visible underneath in the meantime).
+            ShowHomeView();
+        }
+        else if (!Visible)
+        {
+            ShowHomeView();
+        }
+
         Show();
         _keyboardBlocker.Install();
         WindowState = FormWindowState.Maximized;
@@ -440,16 +702,29 @@ public class LockForm : Form
         _loginButton.Enabled = false;
         try
         {
-            var result = await _api.MemberLoginAsync(_config.Mac, _config.DeviceSecret, _usernameBox.Text, _passwordBox.Text);
+            var username = _usernameBox.Text;
+            var result = await _api.MemberLoginAsync(_config.Mac, _config.DeviceSecret, username, _passwordBox.Text);
             if (result == null || !result.Success)
             {
                 _loginErrorLabel.Text = result?.Message ?? "Login failed";
                 return;
             }
             _passwordBox.Text = "";
-            // The next status poll (within ~5s) will pick up the newly-
-            // unlocked state and transition away from this screen - no
-            // need to duplicate that logic here.
+
+            if (result.MinutesRemaining <= 0)
+            {
+                // Login now always succeeds regardless of balance (see the
+                // matching server/routes/rental.js change) - a member with
+                // nothing left shouldn't just sit on a blank screen waiting
+                // for the next poll, show the No-Time panel immediately.
+                // MemberLoginAsync's response has no points field (only
+                // minutes_remaining), so pass null and let
+                // RefreshNoTimeRedeemAsync fetch the real balance.
+                ShowNoTimeView(username, null);
+            }
+            // Otherwise the next status poll (within ~5s) will pick up the
+            // newly-unlocked state and transition away from this screen -
+            // no need to duplicate that logic here.
         }
         finally
         {
