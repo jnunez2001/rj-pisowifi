@@ -439,6 +439,154 @@ router.post('/change-password', (req, res) => {
   return res.json({ success: true });
 });
 
+// GET /api/rental/share-time/targets?mac=&device_secret= - Share Time's PC
+// picker. Lists every OTHER adopted PC (never the caller's own pc_id) with a
+// short occupant_label mirroring the same vocabulary GET /status and
+// admin.js's rentalStatusFor already use for "who's on this PC": the
+// member's username when one is logged in, 'Guest' for an active guest
+// credit, 'Idle' when there's nothing to show (no session row at all, or a
+// guest session that's already expired).
+router.get('/share-time/targets', (req, res) => {
+  const auth = authenticatePc(req.query.mac, req.query.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const pcs = db.prepare("SELECT * FROM rental_pcs WHERE status = 'adopted' AND id != ? ORDER BY name ASC").all(auth.pc.id);
+  const targets = pcs.map((pc) => {
+    const session = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(pc.id);
+    let occupantLabel;
+    if (!session) {
+      occupantLabel = 'Idle';
+    } else if (session.member_id) {
+      const member = db.prepare('SELECT username FROM rental_members WHERE id = ?').get(session.member_id);
+      occupantLabel = member ? member.username : 'Idle';
+    } else {
+      const remainingMs = session.hard_expires_at ? parseSqliteDate(session.hard_expires_at).getTime() - Date.now() : 0;
+      occupantLabel = remainingMs > 0 ? 'Guest' : 'Idle';
+    }
+    return { pc_id: pc.id, name: pc.name, occupant_label: occupantLabel };
+  });
+
+  return res.json({ success: true, targets });
+});
+
+// POST /api/rental/share-time - {mac, device_secret, minutes, target_type,
+// target_pc_id, target_username}. Lets a logged-in member send some of
+// their own rental_members.seconds balance to either another active PC's
+// current occupant (target_type 'pc') or straight to another member's
+// account by username (target_type 'member'). Only a logged-in MEMBER can
+// send - a guest's time is a fixed session, not a shareable balance, so the
+// sender is always resolved via the calling PC's own active session, same
+// as requireLoggedInMember above (not duplicated as a shared helper since
+// this needs the raw session row too, for the member_id presence check).
+router.post('/share-time', (req, res) => {
+  const auth = authenticatePc(req.body?.mac, req.body?.device_secret);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+  const senderPc = auth.pc;
+
+  const senderSession = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(senderPc.id);
+  if (!senderSession?.member_id) {
+    return res.status(403).json({ success: false, message: 'Only a logged-in member can share time' });
+  }
+  const senderMember = db.prepare('SELECT * FROM rental_members WHERE id = ?').get(senderSession.member_id);
+  if (!senderMember) {
+    return res.status(404).json({ success: false, message: 'Member account not found' });
+  }
+
+  const minutes = Number(req.body?.minutes);
+  if (!Number.isFinite(minutes) || minutes <= 0) {
+    return res.status(400).json({ success: false, message: 'minutes must be a positive number' });
+  }
+  const secondsToShare = Math.round(minutes * 60);
+  if (secondsToShare > senderMember.seconds) {
+    return res.status(400).json({ success: false, message: 'Not enough time to share' });
+  }
+
+  const targetType = req.body?.target_type;
+  if (targetType !== 'pc' && targetType !== 'member') {
+    return res.status(400).json({ success: false, message: "target_type must be 'pc' or 'member'" });
+  }
+
+  try {
+    if (targetType === 'member') {
+      const targetUsername = String(req.body?.target_username || '').trim();
+      if (!targetUsername) {
+        return res.status(400).json({ success: false, message: 'target_username is required' });
+      }
+      const targetMember = db.prepare('SELECT * FROM rental_members WHERE username = ?').get(targetUsername);
+      if (!targetMember) {
+        return res.status(404).json({ success: false, message: 'Member not found' });
+      }
+      if (targetMember.id === senderMember.id) {
+        return res.status(400).json({ success: false, message: "Can't share time with yourself" });
+      }
+
+      // A member's seconds balance is persistent and portable across PCs -
+      // no rental_sessions row needs touching here, GET /status picks up
+      // the new balance next time either member is logged in anywhere.
+      const shareToMember = db.transaction(() => {
+        db.prepare('UPDATE rental_members SET seconds = seconds - ? WHERE id = ?').run(secondsToShare, senderMember.id);
+        db.prepare('UPDATE rental_members SET seconds = seconds + ? WHERE id = ?').run(secondsToShare, targetMember.id);
+      });
+      shareToMember();
+
+      console.log(`🤝 "${senderMember.username}" shared ${minutes} min directly with member "${targetMember.username}"`);
+      return res.json({ success: true });
+    }
+
+    // target_type === 'pc'
+    const targetPcId = parseInt(req.body?.target_pc_id, 10);
+    if (!Number.isFinite(targetPcId)) {
+      return res.status(400).json({ success: false, message: 'target_pc_id is required' });
+    }
+    if (targetPcId === senderPc.id) {
+      return res.status(400).json({ success: false, message: "Can't share time with your own PC" });
+    }
+    const targetPc = db.prepare('SELECT * FROM rental_pcs WHERE id = ?').get(targetPcId);
+    if (!targetPc) {
+      return res.status(404).json({ success: false, message: 'PC not found' });
+    }
+    const targetSession = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(targetPcId);
+
+    const shareToPc = db.transaction(() => {
+      db.prepare('UPDATE rental_members SET seconds = seconds - ? WHERE id = ?').run(secondsToShare, senderMember.id);
+
+      if (targetSession?.member_id) {
+        // Target PC's occupant is itself a logged-in member - credit their
+        // portable balance directly (same as the member-target branch
+        // above), and refresh their session's updated_at so their next
+        // GET /status elapsed-time calc doesn't mistake the gap since
+        // their last poll for drain on top of what was just added - same
+        // reasoning as coin.js's mode === 'pc_rental' member branch.
+        db.prepare('UPDATE rental_members SET seconds = seconds + ? WHERE id = ?').run(secondsToShare, targetSession.member_id);
+        db.prepare('UPDATE rental_sessions SET updated_at = ? WHERE pc_id = ?').run(new Date().toISOString(), targetPcId);
+      } else {
+        // Guest (or no session row yet) - reproduce coin.js's mode ===
+        // 'pc_rental' guest-credit math exactly: hard_expires_at is the
+        // source of truth, extended by the granted ms on top of whatever
+        // real time is already left.
+        const currentRemainingMs = targetSession?.hard_expires_at
+          ? Math.max(0, new Date(targetSession.hard_expires_at).getTime() - Date.now()) : 0;
+        const grantedMs = secondsToShare * 1000;
+        const newExpiresAt = new Date(Date.now() + currentRemainingMs + grantedMs).toISOString();
+        if (targetSession) {
+          db.prepare('UPDATE rental_sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE pc_id = ?')
+            .run(minutes, newExpiresAt, newExpiresAt, targetPcId);
+        } else {
+          db.prepare('INSERT INTO rental_sessions (pc_id, minutes_remaining, expires_at, hard_expires_at) VALUES (?, ?, ?, ?)')
+            .run(targetPcId, minutes, newExpiresAt, newExpiresAt);
+        }
+      }
+    });
+    shareToPc();
+
+    console.log(`🤝 "${senderMember.username}" shared ${minutes} min from "${senderPc.name}" to "${targetPc.name}"`);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Share time error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
 // ── Kiosk Admin Panel (device-scoped, NOT adminAuth) ────────────────────
 // The Windows client's new "Admin Panel" screen (mockup) needs authenticated
 // access to a handful of settings, but must never require typing the site's

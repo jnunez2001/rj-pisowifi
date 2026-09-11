@@ -69,6 +69,7 @@ public class CafeHomeForm : Form
     private static readonly TimeSpan MenuReopenSuppressWindow = TimeSpan.FromMilliseconds(250);
     private CardButton _addTimeItem = null!;
     private CardButton _settingsItem = null!;
+    private CardButton _shareTimeItem = null!;
     private CardButton _adminItem = null!;
     private CardButton _logoutItem = null!;
     private CoinInsertPanel? _menuCoinPanel;
@@ -229,7 +230,7 @@ public class CafeHomeForm : Form
             TopMost = true,
             ShowInTaskbar = false,
             Width = MenuWidth,
-            Height = MenuVPadding * 2 + MenuItemHeight * 4,
+            Height = MenuVPadding * 2 + MenuItemHeight * 5,
         };
 
         _menuList = new Panel { Dock = DockStyle.Fill };
@@ -240,6 +241,12 @@ public class CafeHomeForm : Form
 
         _settingsItem = MenuButton("User Settings");
         _settingsItem.Click += (_, _) => OnUserSettingsClicked();
+
+        // Member-only (see RelayoutMenu) - a guest's time is a fixed
+        // session, not a shareable balance like a member's rental_members.
+        // seconds, so there's nothing for a guest to send.
+        _shareTimeItem = MenuButton("Share Time");
+        _shareTimeItem.Click += (_, _) => OnShareTimeClicked();
 
         // Opens the real Admin Panel (AdminLoginForm -> AdminPanelPage),
         // gated by the separate rental_admin_panel_password credential -
@@ -253,10 +260,13 @@ public class CafeHomeForm : Form
 
         // DockStyle.Top siblings dock closest-to-edge-first-added-last, so
         // adding in this (reversed) order renders them top-to-bottom as
-        // Add Time / User Settings / Admin Panel / Log Out - the order the
-        // mockup actually shows, not the order they're declared above.
+        // Add Time / User Settings / Share Time / Admin Panel / Log Out -
+        // Share Time sits right before Admin Panel since it's another
+        // member-time-management action like Add Time, not a settings/
+        // account item.
         _menuList.Controls.Add(_logoutItem);
         _menuList.Controls.Add(_adminItem);
+        _menuList.Controls.Add(_shareTimeItem);
         _menuList.Controls.Add(_settingsItem);
         _menuList.Controls.Add(_addTimeItem);
 
@@ -292,6 +302,7 @@ public class CafeHomeForm : Form
     {
         _addTimeItem.Visible = true;
         _settingsItem.Visible = true;
+        _shareTimeItem.Visible = _isMember;
         _adminItem.Visible = _isMember;
         _logoutItem.Visible = _isMember;
 
@@ -299,7 +310,7 @@ public class CafeHomeForm : Form
         // of Visible, so no manual Top math is needed here - just the
         // resulting Form height, sized to fit exactly the visible items
         // plus top/bottom padding.
-        var visibleCount = (_addTimeItem.Visible ? 1 : 0) + (_settingsItem.Visible ? 1 : 0) + (_adminItem.Visible ? 1 : 0) + (_logoutItem.Visible ? 1 : 0);
+        var visibleCount = (_addTimeItem.Visible ? 1 : 0) + (_settingsItem.Visible ? 1 : 0) + (_shareTimeItem.Visible ? 1 : 0) + (_adminItem.Visible ? 1 : 0) + (_logoutItem.Visible ? 1 : 0);
         _menuList.Padding = new Padding(0, MenuVPadding, 0, MenuVPadding);
         _menuForm.Height = MenuVPadding * 2 + MenuItemHeight * visibleCount;
         _menuForm.Width = MenuWidth;
@@ -376,6 +387,30 @@ public class CafeHomeForm : Form
         settingsPage.PreferencesSaved += _ => ApplyPreferences();
         settingsPage.Dock = DockStyle.Fill;
         host.Controls.Add(settingsPage);
+        host.ShowDialog();
+    }
+
+    // Share Time (member-only, see RelayoutMenu) - same "host Form +
+    // UserControl content" modal pattern as OnUserSettingsClicked above,
+    // sized just tall enough for ShareTimePage's minutes input, the two
+    // radio choices, one target field, the Send button and its result
+    // label.
+    private void OnShareTimeClicked()
+    {
+        HideMenu();
+        using var host = new Form
+        {
+            Text = "Share Time",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterScreen,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            TopMost = true,
+            ClientSize = new Size(440, 320),
+        };
+        var shareTimePage = new ShareTimePage(_api, _config);
+        shareTimePage.Dock = DockStyle.Fill;
+        host.Controls.Add(shareTimePage);
         host.ShowDialog();
     }
 
@@ -467,7 +502,7 @@ public class CafeHomeForm : Form
 
         _menuList.BackColor = Theme.Surface;
         _menuForm.BackColor = Theme.Surface;
-        foreach (var item in new[] { _addTimeItem, _settingsItem, _adminItem, _logoutItem })
+        foreach (var item in new[] { _addTimeItem, _settingsItem, _shareTimeItem, _adminItem, _logoutItem })
         {
             item.BackColor = Theme.Surface;
             item.ForeColor = Theme.TextPrimary;

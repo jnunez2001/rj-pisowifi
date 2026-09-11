@@ -117,6 +117,22 @@ public class PendingCoinStatus
     [JsonPropertyName("total")] public int Total { get; set; }
 }
 
+// GET /api/rental/share-time/targets response - Share Time's "Send to PC"
+// picker (server/routes/rental.js).
+public class ShareTimeTargetsResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; set; }
+    [JsonPropertyName("message")] public string? Message { get; set; }
+    [JsonPropertyName("targets")] public List<ShareTimeTarget> Targets { get; set; } = new();
+}
+
+public class ShareTimeTarget
+{
+    [JsonPropertyName("pc_id")] public int PcId { get; set; }
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("occupant_label")] public string OccupantLabel { get; set; } = "";
+}
+
 // Thin wrapper over the device-facing endpoints in server/routes/
 // rental.js - every call here authenticates with mac+device_secret,
 // never an admin session (this client can't have one). Mirrors the
@@ -260,6 +276,32 @@ public class RentalApiClient
     public async Task<ApiResult?> ChangePasswordAsync(string mac, string deviceSecret, string currentPassword, string newPassword)
     {
         var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/change-password", new { mac, device_secret = deviceSecret, current_password = currentPassword, new_password = newPassword });
+        return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    // --- Share Time (server/routes/rental.js) - a logged-in member sending
+    // some of their own rental_members.seconds balance to another active
+    // PC's occupant or directly to another member by username. Member-only
+    // at the server (a guest has no shareable balance) - see CafeHomeForm's
+    // member-only menu visibility for the client-side mirror of that rule.
+
+    public async Task<ShareTimeTargetsResponse?> GetShareTimeTargetsAsync(string mac, string deviceSecret)
+    {
+        var res = await _http.GetAsync($"{_baseUrl}/api/rental/share-time/targets?mac={Uri.EscapeDataString(mac)}&device_secret={Uri.EscapeDataString(deviceSecret)}");
+        return await res.Content.ReadFromJsonAsync<ShareTimeTargetsResponse>();
+    }
+
+    public async Task<ApiResult?> ShareTimeAsync(string mac, string deviceSecret, int minutes, string targetType, int? targetPcId, string? targetUsername)
+    {
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/share-time", new
+        {
+            mac,
+            device_secret = deviceSecret,
+            minutes,
+            target_type = targetType,
+            target_pc_id = targetPcId,
+            target_username = targetUsername
+        });
         return await res.Content.ReadFromJsonAsync<ApiResult>();
     }
 
