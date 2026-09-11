@@ -38,13 +38,13 @@ public class ShareTimePage : UserControl
 
     private void BuildUi()
     {
-        var minutesLabel = new Label { Text = "Minutes", AutoSize = true, Left = 20, Top = 24 };
+        var minutesLabel = new Label { Text = "Minutes", AutoSize = false, Left = 20, Top = 24, Width = 100, Height = 20 };
         _minutesInput = new NumericUpDown { Left = 20, Top = 48, Width = 100, Minimum = 1, Maximum = 100000, Value = 5 };
         Controls.Add(minutesLabel);
         Controls.Add(_minutesInput);
 
-        _sendToPcRadio = new RadioButton { Text = "Send to PC", AutoSize = true, Left = 20, Top = 90, Checked = true };
-        _sendToMemberRadio = new RadioButton { Text = "Send to Member", AutoSize = true, Left = 20, Top = 118 };
+        _sendToPcRadio = new RadioButton { Text = "Send to PC", AutoSize = false, Left = 20, Top = 90, Width = 150, Height = 24, Checked = true };
+        _sendToMemberRadio = new RadioButton { Text = "Send to Member", AutoSize = false, Left = 20, Top = 118, Width = 150, Height = 24 };
         _sendToPcRadio.CheckedChanged += (_, _) => UpdateTargetVisibility();
         Controls.Add(_sendToPcRadio);
         Controls.Add(_sendToMemberRadio);

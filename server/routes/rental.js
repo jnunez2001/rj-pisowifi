@@ -493,8 +493,8 @@ router.post('/share-time', (req, res) => {
   }
 
   const minutes = Number(req.body?.minutes);
-  if (!Number.isFinite(minutes) || minutes <= 0) {
-    return res.status(400).json({ success: false, message: 'minutes must be a positive number' });
+  if (!Number.isFinite(minutes) || minutes <= 0 || !Number.isInteger(minutes)) {
+    return res.status(400).json({ success: false, message: 'minutes must be a positive whole number' });
   }
   const secondsToShare = Math.round(minutes * 60);
   if (secondsToShare > senderMember.seconds) {
@@ -526,6 +526,11 @@ router.post('/share-time', (req, res) => {
       const shareToMember = db.transaction(() => {
         db.prepare('UPDATE rental_members SET seconds = seconds - ? WHERE id = ?').run(secondsToShare, senderMember.id);
         db.prepare('UPDATE rental_members SET seconds = seconds + ? WHERE id = ?').run(secondsToShare, targetMember.id);
+        // Audit trail - see the matching insert in the PC-target branch
+        // below for why (mirrors coin.js's existing rental_transactions
+        // pattern rather than leaving this as console.log-only).
+        db.prepare("INSERT INTO rental_transactions (pc_id, coin_value, minutes_added, type, note) VALUES (?, 0, ?, 'share_sent', ?)")
+          .run(senderPc.id, minutes, `"${senderMember.username}" -> member "${targetMember.username}"`);
       });
       shareToMember();
 
@@ -541,11 +546,14 @@ router.post('/share-time', (req, res) => {
     if (targetPcId === senderPc.id) {
       return res.status(400).json({ success: false, message: "Can't share time with your own PC" });
     }
-    const targetPc = db.prepare('SELECT * FROM rental_pcs WHERE id = ?').get(targetPcId);
+    const targetPc = db.prepare("SELECT * FROM rental_pcs WHERE id = ? AND status = 'adopted'").get(targetPcId);
     if (!targetPc) {
       return res.status(404).json({ success: false, message: 'PC not found' });
     }
     const targetSession = db.prepare('SELECT * FROM rental_sessions WHERE pc_id = ?').get(targetPcId);
+    if (targetSession?.member_id === senderMember.id) {
+      return res.status(400).json({ success: false, message: "Can't share time with yourself" });
+    }
 
     const shareToPc = db.transaction(() => {
       db.prepare('UPDATE rental_members SET seconds = seconds - ? WHERE id = ?').run(secondsToShare, senderMember.id);
@@ -563,10 +571,18 @@ router.post('/share-time', (req, res) => {
         // Guest (or no session row yet) - reproduce coin.js's mode ===
         // 'pc_rental' guest-credit math exactly: hard_expires_at is the
         // source of truth, extended by the granted ms on top of whatever
-        // real time is already left.
+        // real time is already left. secondsToShare is denominated in
+        // BILLED seconds (drained from rental_members.seconds using the
+        // site's rental_speed_timer_secs setting - see GET /status), while
+        // a guest session's hard_expires_at is raw wall-clock time, so the
+        // same billed-seconds-to-real-ms conversion coin.js's mode ===
+        // 'pc_rental' branch uses is required here too - a flat * 1000
+        // would mint or destroy real time whenever the site's speed
+        // setting isn't the 1000ms (real-time) default.
+        const speedMs = parseInt(db.prepare("SELECT value FROM settings WHERE key = 'rental_speed_timer_secs'").get()?.value, 10) || 1000;
         const currentRemainingMs = targetSession?.hard_expires_at
           ? Math.max(0, new Date(targetSession.hard_expires_at).getTime() - Date.now()) : 0;
-        const grantedMs = secondsToShare * 1000;
+        const grantedMs = secondsToShare * 1000 * (speedMs / 1000);
         const newExpiresAt = new Date(Date.now() + currentRemainingMs + grantedMs).toISOString();
         if (targetSession) {
           db.prepare('UPDATE rental_sessions SET minutes_remaining = ?, expires_at = ?, hard_expires_at = ?, updated_at = CURRENT_TIMESTAMP WHERE pc_id = ?')
@@ -576,6 +592,14 @@ router.post('/share-time', (req, res) => {
             .run(targetPcId, minutes, newExpiresAt, newExpiresAt);
         }
       }
+
+      // Audit trail - every other credit path in this codebase (coin.js,
+      // admin.js's Add Time) writes a rental_transactions row rather than
+      // just logging to console; this mirrors that. coin_value is 0 (no
+      // money changed hands, this moves an existing balance), note carries
+      // who sent it to whom since the table has no sender/target columns.
+      db.prepare("INSERT INTO rental_transactions (pc_id, coin_value, minutes_added, type, note) VALUES (?, 0, ?, 'share_sent', ?)")
+        .run(senderPc.id, minutes, `"${senderMember.username}" -> PC "${targetPc.name}"${targetSession?.member_id ? ` (member "${db.prepare('SELECT username FROM rental_members WHERE id = ?').get(targetSession.member_id)?.username}")` : ' (guest)'}`);
     });
     shareToPc();
 

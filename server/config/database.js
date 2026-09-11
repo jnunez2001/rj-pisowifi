@@ -779,7 +779,7 @@ db.exec(`
     pc_id INTEGER NOT NULL REFERENCES rental_pcs(id),
     coin_value INTEGER NOT NULL,
     minutes_added REAL NOT NULL,
-    type TEXT NOT NULL DEFAULT 'coin', -- 'coin' | 'admin_credit'
+    type TEXT NOT NULL DEFAULT 'coin', -- 'coin' | 'admin_credit' | 'share_sent'
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 
@@ -2603,6 +2603,20 @@ db.exec(`
     UNIQUE(media_type, tmdb_id)
   );
 `);
+
+// Share Time (server/routes/rental.js's POST /share-time) moves an existing
+// balance between members/PCs rather than crediting from a coin or an
+// admin action, so it has no natural pc_id-scoped "other side" the way
+// coin_value already does - note carries the sender/target detail instead
+// of adding several new nullable id columns for a single feature. NULL for
+// every pre-existing row (coin/admin_credit), same "existing rows just
+// don't have it" pattern as the other ALTER TABLE ADD COLUMN migrations
+// above.
+try {
+  db.exec('ALTER TABLE rental_transactions ADD COLUMN note TEXT');
+} catch (e) {
+  // already applied
+}
 
 console.log('✅ Database initialized successfully');
 
