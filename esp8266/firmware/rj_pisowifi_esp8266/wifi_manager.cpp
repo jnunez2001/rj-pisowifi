@@ -22,7 +22,7 @@ static String extractJsonString(const String& json, const String& key) {
 }
 
 // Zero-config discovery (server/services/vendoDiscoveryService.js) - lets
-// this device find the ZenFi server's address on its own instead of
+// this device find the StarkFi server's address on its own instead of
 // someone typing it into the setup page by hand. Can only run once this
 // device has actually joined the target WiFi (setup mode's own isolated
 // AP has no path to the real server), so this is called from setup() right
@@ -46,8 +46,9 @@ bool discoverServer() {
   IPAddress broadcastIp = WiFi.localIP();
   broadcastIp[3] = 255;
 
+  const char* discoveryRequest = "STARKFI_DISCOVER_V1";
   udp.beginPacket(broadcastIp, 6970);
-  udp.write((const uint8_t*)"ZENFI_DISCOVER_V1", 17);
+  udp.write((const uint8_t*)discoveryRequest, strlen(discoveryRequest));
   udp.endPacket();
   Serial.println("UDP discovery: broadcast sent to " + broadcastIp.toString() + ":6970, waiting for reply...");
 
