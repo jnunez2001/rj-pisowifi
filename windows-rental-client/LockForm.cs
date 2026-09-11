@@ -1,5 +1,6 @@
 using System.Drawing.Drawing2D;
 using StarkFiRentalClient.UI;
+using StarkFiRentalClient.Pages;
 
 namespace StarkFiRentalClient;
 
@@ -33,6 +34,7 @@ public class LockForm : Form
 {
     private readonly RentalApiClient _api;
     private readonly ClientConfig _config;
+    private readonly ClientPreferences _prefs;
     private readonly KeyboardBlocker _keyboardBlocker = new();
 
     private PictureBox _wallpaperBox = null!;
@@ -96,10 +98,11 @@ public class LockForm : Form
     private string? _instructionsText;
     private bool _connected = true;
 
-    public LockForm(RentalApiClient api, ClientConfig config)
+    public LockForm(RentalApiClient api, ClientConfig config, ClientPreferences prefs)
     {
         _api = api;
         _config = config;
+        _prefs = prefs;
         Theme.Changed += () => { if (IsHandleCreated) BeginInvoke(ApplyTheme); };
         BuildUi();
     }
@@ -786,19 +789,36 @@ public class LockForm : Form
     }
 
     // Staff Access stays reachable but out of the way (small corner text
-    // link, matching the mockup's "Staff / Admin" corner link) -
-    // password-gated force-unlock/pause, unchanged from before.
+    // link, matching the mockup's "Staff / Admin" corner link). Two
+    // completely different authenticated flows live behind this one link
+    // now, gated by two different passwords (rental_app_password for
+    // Force-Unlock/Pause vs. the separate rental_admin_panel_password for
+    // the real Admin Panel), so an upfront 3-way choice picks which one
+    // to run before either password is ever asked for - they must not be
+    // conflated into a single prompt. The Force-Unlock/Pause branch below
+    // (Yes) is completely unchanged from before this task.
     public async Task OnStaffClicked()
     {
-        var password = PromptDialog.Show("Staff Access", "Enter the app password:", isPassword: true);
-        if (string.IsNullOrEmpty(password)) return;
-
         var choice = MessageBox.Show(
-            "Force Unlock now (temporary, re-locks on the next status check)?\n\nChoose No to Pause instead - suspends enforcement until resumed from here or from the admin panel.",
+            "Staff Access (Force Unlock / Pause) or Admin Panel?\n\nYes = Staff Access, No = Admin Panel, Cancel to close.",
             "Staff Access", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
         if (choice == DialogResult.Cancel) return;
 
-        if (choice == DialogResult.Yes)
+        if (choice == DialogResult.No)
+        {
+            await OnAdminPanelClicked();
+            return;
+        }
+
+        var password = PromptDialog.Show("Staff Access", "Enter the app password:", isPassword: true);
+        if (string.IsNullOrEmpty(password)) return;
+
+        var action = MessageBox.Show(
+            "Force Unlock now (temporary, re-locks on the next status check)?\n\nChoose No to Pause instead - suspends enforcement until resumed from here or from the admin panel.",
+            "Staff Access", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
+        if (action == DialogResult.Cancel) return;
+
+        if (action == DialogResult.Yes)
         {
             var result = await _api.StaffOverrideAsync(_config.Mac, _config.DeviceSecret, password);
             if (result == null || !result.Success)
@@ -819,5 +839,36 @@ public class LockForm : Form
             // HandleStatus swaps to the paused indicator - no need to
             // duplicate that transition here.
         }
+    }
+
+    // Real Admin Panel entry point, reached from the Staff / Admin corner
+    // link's "Admin Panel" choice above. Mirrors CafeHomeForm's own
+    // OnAdminPanelClicked() (same AdminLoginForm -> AdminPanelPage flow,
+    // same host Form setup) - kept as a small duplicate here rather than
+    // extracting a shared helper, since there's no existing shared static
+    // helper class between the two forms and this is the only piece they'd
+    // need to share.
+    private async Task OnAdminPanelClicked()
+    {
+        using var loginForm = new AdminLoginForm(_api, _config);
+        if (loginForm.ShowDialog() != DialogResult.OK || string.IsNullOrEmpty(loginForm.VerifiedPassword))
+        {
+            return;
+        }
+
+        using var host = new Form
+        {
+            Text = "Admin Panel",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterScreen,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            TopMost = true,
+            ClientSize = new Size(720, 640),
+        };
+        var adminPage = new AdminPanelPage(_api, _config, _prefs, loginForm.VerifiedPassword);
+        adminPage.Dock = DockStyle.Fill;
+        host.Controls.Add(adminPage);
+        host.ShowDialog();
     }
 }

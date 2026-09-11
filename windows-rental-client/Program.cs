@@ -83,7 +83,7 @@ public static class Program
                 "StarkFi Rental", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
 
-        _lockForm = new LockForm(api, config);
+        _lockForm = new LockForm(api, config, prefs);
         _cafeHome = new CafeHomeForm(api, config, prefs);
 
         // Registry Run key should match whatever Settings > Start on Boot
