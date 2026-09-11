@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { verifyPassword, hashPassword } = require('../utils/passwordHash');
 const { parseSqliteDate } = require('../utils/sqliteDate');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
@@ -568,6 +570,53 @@ router.delete('/admin-panel/redeem-rates/:id', (req, res) => {
 
   db.prepare('DELETE FROM rental_redeem_rates WHERE id = ?').run(req.params.id);
   return res.json({ success: true });
+});
+
+// --- Windows Rental Client OTA self-update -------------------------------
+// Same idea as the ESP8266 vendo firmware's own version-check/download pair
+// (esp8266/firmware/rj_pisowifi_esp8266/ota.cpp), just for the Windows
+// Admin Panel's "Update" button instead of the vendo hardware. Device-scoped
+// via requireAdminPanelAuth exactly like every other admin-panel/* route
+// above - credentials stay in the POST body, never a query string, so they
+// never leak into logs.
+const rentalClientDir = process.env.RENTAL_CLIENT_DIR || path.join(__dirname, '../../data/rental-client');
+try {
+  fs.mkdirSync(rentalClientDir, { recursive: true });
+} catch (e) {
+  console.warn('Warning: could not create rental client update directory:', e.message);
+}
+const rentalClientExePath = path.join(rentalClientDir, 'latest.exe');
+
+// POST /api/rental/admin-panel/client-version - {mac, device_secret,
+// password}. Returns the currently published client version, or an empty
+// string when nothing has ever been published (never an error) - a fresh
+// install with no update staged must read as "already current", exactly
+// like the vendo firmware's version-check falls back to "" when unset.
+router.post('/admin-panel/client-version', (req, res) => {
+  const auth = requireAdminPanelAuth(req);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  const version = db.prepare("SELECT value FROM settings WHERE key = 'rental_client_version'").get()?.value || '';
+  return res.json({ success: true, version });
+});
+
+// POST /api/rental/admin-panel/client-download - {mac, device_secret,
+// password}. Streams back the published .exe. Same fs.existsSync-then-
+// res.sendFile pattern as GET /api/admin/vendo/firmware/download in
+// server/routes/admin.js - POST here (not GET) purely so credentials stay
+// in the body like every other admin-panel/* route in this file.
+router.post('/admin-panel/client-download', (req, res) => {
+  const auth = requireAdminPanelAuth(req);
+  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+
+  if (!fs.existsSync(rentalClientExePath)) {
+    return res.status(404).json({ success: false, message: 'No client update uploaded yet' });
+  }
+  res.sendFile(rentalClientExePath, (err) => {
+    if (err && !res.headersSent) {
+      res.status(500).json({ success: false, message: 'Failed to send client update' });
+    }
+  });
 });
 
 module.exports = router;

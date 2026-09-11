@@ -321,6 +321,15 @@
           <button class="btn btn-primary" onclick="saveRentalAdminPanelPassword()">Save</button>
         </div>
       </div>
+
+      <div class="zf3-card">
+        <div class="rental-settings-title">Client Update</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input type="text" id="rentalClientUpdateVersion" placeholder="e.g. v1.0.1" style="width:120px;">
+          <input type="file" id="rentalClientUpdateFile" accept=".exe">
+          <button class="btn btn-primary" onclick="uploadRentalClientUpdate()"><i class="fas fa-upload"></i> Publish</button>
+        </div>
+      </div>
     </div>
 
     <div id="rentalPanelSysteminfo" class="rental-panel" style="display:none;"></div>

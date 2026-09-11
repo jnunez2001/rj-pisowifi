@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Diagnostics;
 using StarkFiRentalClient.UI;
 
 namespace StarkFiRentalClient.Pages;
@@ -84,6 +86,9 @@ public class AdminPanelPage : UserControl
 
     // Client Status
     private CheckBox _clientEnabledCheck = null!;
+    private Button _uninstallButton = null!;
+    private Button _updateButton = null!;
+    private Label _updateStatusLabel = null!;
 
     public AdminPanelPage(RentalApiClient api, ClientConfig config, ClientPreferences prefs, string password)
     {
@@ -678,13 +683,16 @@ public class AdminPanelPage : UserControl
     }
 
     // ---- Section 6: Client Status ----
-    // Card: Top=y, Height=126.
-    //   header                Top=12 H=22 -> bottom=34
-    //   _clientEnabledCheck   Top=44 H=24 -> bottom=68
-    //   note label            Top=76 H=44 -> bottom=120
+    // Card: Top=y, Height=180.
+    //   header                Top=12  H=22 -> bottom=34
+    //   _clientEnabledCheck   Top=44  H=24 -> bottom=68
+    //   note label            Top=76  H=44 -> bottom=120
+    //   _uninstallButton      Top=130 H=34, Left=16  W=140 -> bottom=164
+    //   _updateButton         Top=130 H=34, Left=166 W=140 -> bottom=164
+    //   _updateStatusLabel    Top=136 H=22, Left=316 W=(CardWidth-316-16) -> bottom=158
     private void BuildClientStatusSection(int y)
     {
-        const int height = 126;
+        const int height = 180;
         var card = AddCard(y, height);
         AddHeader(card, "CLIENT STATUS");
 
@@ -707,6 +715,150 @@ public class AdminPanelPage : UserControl
             ForeColor = DarkTextMuted, AutoSize = false, Left = 16, Top = 76, Width = CardWidth - 32, Height = 44,
         };
         card.Controls.Add(note);
+
+        _uninstallButton = new CardButton
+        {
+            Text = "UNINSTALL", Left = 16, Top = 130, Width = 140, Height = 34,
+            CornerRadius = 6, BackColor = DarkDanger, ForeColor = Color.White,
+            Font = new Font("Segoe UI", 9, FontStyle.Bold),
+        };
+        _uninstallButton.Click += (_, _) => OnUninstallClicked();
+        card.Controls.Add(_uninstallButton);
+
+        _updateButton = new CardButton
+        {
+            Text = "UPDATE", Left = 166, Top = 130, Width = 140, Height = 34,
+            CornerRadius = 6, BackColor = DarkAccent, ForeColor = Color.White,
+            Font = new Font("Segoe UI", 9, FontStyle.Bold),
+        };
+        _updateButton.Click += async (_, _) => await OnUpdateClickedAsync();
+        card.Controls.Add(_updateButton);
+
+        _updateStatusLabel = new Label
+        {
+            Text = $"Current: {ClientVersion.Current}", ForeColor = DarkTextMuted,
+            AutoSize = false, Left = 316, Top = 136, Width = CardWidth - 316 - 16, Height = 22,
+        };
+        card.Controls.Add(_updateStatusLabel);
+    }
+
+    // ---- Uninstall ----
+    // The install folder's own uninstall.bat does everything (removes the
+    // startup shortcut, reverts Task Manager/shell registry changes,
+    // deletes the install folder, pauses at the end) - this button just
+    // confirms, launches it elevated and detached, then exits so this
+    // process releases its own file lock before the script's rmdir runs.
+    private void OnUninstallClicked()
+    {
+        var confirm = MessageBox.Show(
+            "Uninstall StarkFi Rental Client? This removes the app and reverts security settings.",
+            "Uninstall", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
+        if (confirm != DialogResult.Yes) return;
+
+        var installFolder = SecurityToggles.GetInstallFolder();
+        var uninstallScript = Path.Combine(installFolder, "uninstall.bat");
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = uninstallScript,
+                UseShellExecute = true,
+                Verb = "runas",
+                WorkingDirectory = installFolder,
+            };
+            Process.Start(psi);
+        }
+        catch (Win32Exception)
+        {
+            // The user cancelled the UAC elevation prompt - do NOT exit the
+            // app, nothing was launched.
+            MessageBox.Show("Uninstall was cancelled.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Could not start the uninstaller: {ex.Message}", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        Application.Exit();
+    }
+
+    // ---- OTA self-update ----
+    // Mirrors the ESP8266 vendo firmware's own OTA pattern (esp8266/
+    // firmware/rj_pisowifi_esp8266/ota.cpp): check the server's published
+    // version, only proceed when it's numerically newer, download to a
+    // temp path, then hand off to a small helper batch script (elevated,
+    // since the install folder is typically under Program Files) that
+    // waits for this process to exit, copies the new exe over the
+    // installed one, relaunches it, and deletes itself.
+    private async Task OnUpdateClickedAsync()
+    {
+        string? serverVersion;
+        try
+        {
+            serverVersion = await _api.GetClientUpdateVersionAsync(_config.Mac, _config.DeviceSecret, _password);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Could not check for updates: {ex.Message}", "Update", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(serverVersion) || !ClientVersion.IsNewerVersion(serverVersion, ClientVersion.Current))
+        {
+            MessageBox.Show("Already on the latest version.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+
+        var confirm = MessageBox.Show(
+            $"Update to {serverVersion}? The app will restart.",
+            "Update", MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+        if (confirm != DialogResult.Yes) return;
+
+        try
+        {
+            var downloadPath = Path.Combine(Path.GetTempPath(), "StarkFiRentalClient.update.exe");
+            var downloaded = await _api.DownloadClientUpdateAsync(_config.Mac, _config.DeviceSecret, _password, downloadPath);
+            if (!downloaded)
+            {
+                MessageBox.Show("Could not download the update.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
+
+            var installFolder = SecurityToggles.GetInstallFolder();
+            var installedExePath = Path.Combine(installFolder, "StarkFiRentalClient.exe");
+            var scriptPath = Path.Combine(Path.GetTempPath(), "starkfi_update.bat");
+
+            var script =
+                "@echo off\r\n" +
+                "timeout /t 2 /nobreak >nul\r\n" +
+                $"copy /Y \"{downloadPath}\" \"{installedExePath}\"\r\n" +
+                $"start \"\" \"{installedExePath}\"\r\n" +
+                "del \"%~f0\"\r\n";
+            File.WriteAllText(scriptPath, script);
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = scriptPath,
+                UseShellExecute = true,
+                Verb = "runas",
+            };
+            Process.Start(psi);
+        }
+        catch (Win32Exception)
+        {
+            MessageBox.Show("Update was cancelled.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Could not apply the update: {ex.Message}", "Update", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        Application.Exit();
     }
 
     private async Task LoadSettingsAsync()

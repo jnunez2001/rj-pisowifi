@@ -1888,6 +1888,11 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('rental_schedule_before_close_time', '22:50');
   upsertIfMissing('rental_schedule_closed_time', '23:15');
   upsertIfMissing('rental_app_password', '');
+  // Windows Rental Client OTA self-update - empty string means "nothing
+  // published yet" (a fresh install must report no update available, not
+  // error), mirroring vendo_firmware_version's own default-to-unset
+  // convention above for the ESP8266 vendo firmware.
+  upsertIfMissing('rental_client_version', '');
 
   // rental_speed_timer_secs was stored from the start (default '600')
   // but never actually read anywhere - wiring it up now (GET /status's

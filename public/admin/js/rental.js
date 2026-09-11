@@ -474,6 +474,46 @@ async function saveRentalAppPassword() {
   }
 }
 
+// Publishes a new Windows Rental Client build for the client's own Admin
+// Panel "Update" button to pull down - mirrors uploadFirmware()'s FormData
+// pattern in public/admin/js/devices.js (ESP8266 vendo firmware upload),
+// just posting to the rental client's own admin route instead.
+async function uploadRentalClientUpdate() {
+  const fileInput = document.getElementById('rentalClientUpdateFile');
+  const version = document.getElementById('rentalClientUpdateVersion').value.trim();
+  const file = fileInput.files[0];
+
+  if (!version) {
+    alert('Enter the client version first');
+    return;
+  }
+  if (!file) {
+    alert('Select a .exe file first');
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append('client_exe', file);
+  formData.append('version', version);
+
+  try {
+    const res = await fetch('/api/admin/rental/client-update', {
+      method: 'POST',
+      headers: { password: authToken },
+      body: formData
+    });
+    const data = await res.json();
+    if (data.success) {
+      alert(data.message || 'Client update published');
+      fileInput.value = '';
+    } else {
+      alert(data.message || 'Upload failed');
+    }
+  } catch (e) {
+    alert('Upload error');
+  }
+}
+
 async function saveRentalAdminPanelPassword() {
   const current_password = document.getElementById('rentalAdminPanelPasswordCurrent').value;
   const new_password = document.getElementById('rentalAdminPanelPasswordNew').value;

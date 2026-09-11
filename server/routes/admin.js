@@ -76,6 +76,28 @@ const firmwareUpload = multer({
   }
 });
 
+// Windows Rental Client OTA self-update (.exe) storage - same reasoning
+// and env-var-override convention as firmwareDir above, and the exact
+// same fixed filename ('data/rental-client/latest.exe') that
+// server/routes/rental.js's device-facing download route serves from.
+const rentalClientDir = process.env.RENTAL_CLIENT_DIR || path.join(__dirname, '../../data/rental-client');
+try {
+  fs.mkdirSync(rentalClientDir, { recursive: true });
+} catch(e) {
+  console.warn('Warning: could not create rental client update directory:', e.message);
+}
+const rentalClientUpload = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, rentalClientDir),
+    filename: (req, file, cb) => cb(null, 'latest.exe'),
+  }),
+  limits: { fileSize: 150 * 1024 * 1024 }, // self-contained single-file publish is well under this
+  fileFilter: (req, file, cb) => {
+    if (path.extname(file.originalname).toLowerCase() === '.exe') cb(null, true);
+    else cb(new Error('Client update must be a .exe file'));
+  }
+});
+
 // Movies > Online's bulk TMDb-id import (a plain .txt list, one id per
 // line) - kept in memory only, never written to disk, since it's parsed
 // once and discarded (unlike the disk-backed uploads above, which are
@@ -3322,6 +3344,31 @@ router.post('/vendo/firmware/release', adminAuth, (req, res) => {
     console.log(`📦 Vendo firmware released to fleet: ${version}`);
     return res.json({ success: true, version });
   } catch (err) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// POST /api/admin/rental/client-update, push a new Windows Rental Client
+// build (dotnet publish's self-contained single-file .exe) for the client's
+// own Admin Panel "Update" button to pick up - real adminAuth (not the
+// device-scoped rental admin-panel password), since publishing a new
+// binary that gets copied over Program Files is a genuine admin action,
+// not something a kiosk PC's own narrower credential should be able to do.
+router.post('/rental/client-update', adminAuth, rentalClientUpload.single('client_exe'), (req, res) => {
+  try {
+    const { version } = req.body;
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No client .exe file uploaded' });
+    }
+    if (!version || !String(version).trim()) {
+      return res.status(400).json({ success: false, message: 'Version is required (must match ClientVersion.cs)' });
+    }
+    const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
+    upsert.run('rental_client_version', String(version).trim());
+    console.log(`📦 Rental client update published: ${version}`);
+    return res.json({ success: true, message: 'Client update uploaded. PCs will pick it up next time an operator clicks Update.' });
+  } catch (err) {
+    console.error('Rental client update upload error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

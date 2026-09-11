@@ -46,6 +46,15 @@ public class RedeemRate
     [JsonPropertyName("reward_seconds")] public int RewardSeconds { get; set; }
 }
 
+// POST /api/rental/admin-panel/client-version response - the OTA
+// self-update version check (server/routes/rental.js).
+public class ClientUpdateVersionResponse
+{
+    [JsonPropertyName("success")] public bool Success { get; set; }
+    [JsonPropertyName("message")] public string? Message { get; set; }
+    [JsonPropertyName("version")] public string? Version { get; set; }
+}
+
 // POST /api/rental/admin-panel/settings/read response - the Admin Panel
 // screen's read-only settings bundle (server/routes/rental.js).
 public class AdminPanelSettingsResponse
@@ -308,6 +317,37 @@ public class RentalApiClient
         };
         var res = await _http.SendAsync(request);
         return await res.Content.ReadFromJsonAsync<ApiResult>();
+    }
+
+    // --- OTA self-update (server/routes/rental.js's admin-panel/client-*
+    // routes) - the Windows client's own analog of the ESP8266 vendo
+    // firmware's version-check/download pair. Same requireAdminPanelAuth
+    // gate and body-credentials convention as every other admin-panel call
+    // above.
+
+    public async Task<string?> GetClientUpdateVersionAsync(string mac, string deviceSecret, string password)
+    {
+        var res = await _http.PostAsJsonAsync($"{_baseUrl}/api/rental/admin-panel/client-version", new { mac, device_secret = deviceSecret, password });
+        var body = await res.Content.ReadFromJsonAsync<ClientUpdateVersionResponse>();
+        return body?.Success == true ? body.Version : null;
+    }
+
+    // Streams the response body straight to disk rather than buffering the
+    // whole .exe in memory (ReadAsByteArrayAsync would hold the entire
+    // self-contained single-file publish in RAM at once).
+    public async Task<bool> DownloadClientUpdateAsync(string mac, string deviceSecret, string password, string destinationPath)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/api/rental/admin-panel/client-download")
+        {
+            Content = JsonContent.Create(new { mac, device_secret = deviceSecret, password })
+        };
+        using var res = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+        if (!res.IsSuccessStatusCode) return false;
+
+        await using var responseStream = await res.Content.ReadAsStreamAsync();
+        await using var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        await responseStream.CopyToAsync(fileStream);
+        return true;
     }
 
     private static string GetLocalIp()
