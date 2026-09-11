@@ -332,52 +332,6 @@ public class RentalApiClient
         return body?.Success == true ? body.Version : null;
     }
 
-    // Streams the response body straight to disk rather than buffering the
-    // whole .exe in memory (ReadAsByteArrayAsync would hold the entire
-    // self-contained single-file publish in RAM at once).
-    //
-    // Uses its own long-lived CancellationTokenSource instead of the
-    // shared _http client's blanket 8-second Timeout: a real self-
-    // contained single-file update .exe can be 50-150MB, far more than 8
-    // seconds needs on a typical LAN, but that 8s timeout is scoped to
-    // this one call only - every other call above keeps relying on the
-    // shared client's short timeout for its normal fast polling.
-    public async Task<bool> DownloadClientUpdateAsync(string mac, string deviceSecret, string password, string destinationPath)
-    {
-        using var request = new HttpRequestMessage(HttpMethod.Post, $"{_baseUrl}/api/rental/admin-panel/client-download")
-        {
-            Content = JsonContent.Create(new { mac, device_secret = deviceSecret, password })
-        };
-        using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        using var res = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
-        if (!res.IsSuccessStatusCode) return false;
-
-        var expectedLength = res.Content.Headers.ContentLength;
-
-        await using (var responseStream = await res.Content.ReadAsStreamAsync(cts.Token))
-        await using (var fileStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None))
-        {
-            await responseStream.CopyToAsync(fileStream, cts.Token);
-        }
-
-        // Basic integrity check - if the server reported a Content-Length,
-        // make sure what actually landed on disk matches before letting the
-        // caller treat this as a good download and apply it. Skipped (not
-        // treated as a failure) when the response has no Content-Length at
-        // all, since there's nothing to compare against.
-        if (expectedLength.HasValue)
-        {
-            var actualLength = new FileInfo(destinationPath).Length;
-            if (actualLength != expectedLength.Value)
-            {
-                try { File.Delete(destinationPath); } catch { /* best-effort cleanup of the truncated file */ }
-                throw new IOException($"Downloaded update was incomplete ({actualLength} of {expectedLength.Value} bytes) - not applying it.");
-            }
-        }
-
-        return true;
-    }
-
     private static string GetLocalIp()
     {
         try
