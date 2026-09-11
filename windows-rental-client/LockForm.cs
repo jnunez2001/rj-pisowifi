@@ -123,7 +123,10 @@ public class LockForm : Form
         BuildNoTimeView();
 
         FormClosing += (_, e) => { /* prevent Alt+F4 closing the lock while it's supposed to be showing */
-            if (Visible) e.Cancel = true;
+            // AppShutdown.AllowExit (Program.cs) lets Admin Panel's
+            // Uninstall/Update handlers actually close this process via
+            // Application.Exit() - see CafeHomeForm's matching guard.
+            if (Visible && !AppShutdown.AllowExit) e.Cancel = true;
         };
         Resize += (_, _) => { RecenterHomeView(); RepositionNoTimeView(); };
 

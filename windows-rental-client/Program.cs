@@ -2,6 +2,21 @@ using StarkFiRentalClient.UI;
 
 namespace StarkFiRentalClient;
 
+// Shared shutdown state, checked by CafeHomeForm's and LockForm's own
+// FormClosing cancel-guards (both cancel a close while their form is
+// visible, so Alt+F4 doesn't tear the form down under Program.cs's cached
+// reference - see those classes). Admin Panel's Uninstall/Update handlers
+// (Pages/AdminPanelPage.cs) need to actually exit the process via
+// Application.Exit() for a deliberate, user-confirmed shutdown; without
+// this flag that call silently does nothing because CafeHomeForm (or
+// LockForm) is still Visible underneath the modal Admin Panel dialog, so
+// the elevated uninstall/update script that runs next fights this
+// still-running process for the same files.
+public static class AppShutdown
+{
+    public static bool AllowExit;
+}
+
 public static class Program
 {
     private static LockForm _lockForm = null!;

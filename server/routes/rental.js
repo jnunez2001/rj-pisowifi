@@ -592,9 +592,28 @@ const rentalClientExePath = path.join(rentalClientDir, 'latest.exe');
 // string when nothing has ever been published (never an error) - a fresh
 // install with no update staged must read as "already current", exactly
 // like the vendo firmware's version-check falls back to "" when unset.
+// Rate-limited the same way /admin-panel/verify already is above (same
+// spamService, keyed by mac since these are device-scoped routes, not by
+// IP) - both were missing that gating even though they sit behind the
+// same requireAdminPanelAuth password check as every other admin-panel/*
+// route, on this same physically-exposed kiosk PC. Shares one bucket
+// ("admin-panel-client") across version-check and download, distinct from
+// verify's own bucket, since a legitimate update check-then-download is
+// one two-call flow, not two independent password guesses.
 router.post('/admin-panel/client-version', (req, res) => {
+  const mac = req.body?.mac;
+  const spamKey = `admin-panel-client:${mac}`;
+  const spamCheck = checkSpam(spamKey);
+  if (spamCheck.blocked) {
+    return res.status(429).json({ success: false, message: spamCheck.message });
+  }
+
   const auth = requireAdminPanelAuth(req);
-  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+  if (auth.error) {
+    recordAttempt(spamKey);
+    return res.status(auth.error).json({ success: false, message: auth.message });
+  }
+  clearAttempts(spamKey);
 
   const version = db.prepare("SELECT value FROM settings WHERE key = 'rental_client_version'").get()?.value || '';
   return res.json({ success: true, version });
@@ -606,8 +625,19 @@ router.post('/admin-panel/client-version', (req, res) => {
 // server/routes/admin.js - POST here (not GET) purely so credentials stay
 // in the body like every other admin-panel/* route in this file.
 router.post('/admin-panel/client-download', (req, res) => {
+  const mac = req.body?.mac;
+  const spamKey = `admin-panel-client:${mac}`;
+  const spamCheck = checkSpam(spamKey);
+  if (spamCheck.blocked) {
+    return res.status(429).json({ success: false, message: spamCheck.message });
+  }
+
   const auth = requireAdminPanelAuth(req);
-  if (auth.error) return res.status(auth.error).json({ success: false, message: auth.message });
+  if (auth.error) {
+    recordAttempt(spamKey);
+    return res.status(auth.error).json({ success: false, message: auth.message });
+  }
+  clearAttempts(spamKey);
 
   if (!fs.existsSync(rentalClientExePath)) {
     return res.status(404).json({ success: false, message: 'No client update uploaded yet' });

@@ -748,6 +748,12 @@ public class AdminPanelPage : UserControl
     // deletes the install folder, pauses at the end) - this button just
     // confirms, launches it elevated and detached, then exits so this
     // process releases its own file lock before the script's rmdir runs.
+    //
+    // The script is copied out to a temp path before launching it, rather
+    // than run directly from the install folder: uninstall.bat's own
+    // `rmdir /S /Q` targets that same folder, and a process's working
+    // directory sitting inside the folder it's deleting can make the
+    // rmdir fail (the directory is "in use" by the running script itself).
     private void OnUninstallClicked()
     {
         var confirm = MessageBox.Show(
@@ -756,24 +762,48 @@ public class AdminPanelPage : UserControl
         if (confirm != DialogResult.Yes) return;
 
         var installFolder = SecurityToggles.GetInstallFolder();
-        var uninstallScript = Path.Combine(installFolder, "uninstall.bat");
+        var sourceUninstallScript = Path.Combine(installFolder, "uninstall.bat");
+
+        if (!File.Exists(sourceUninstallScript))
+        {
+            MessageBox.Show("Could not find uninstall.bat - reinstall the app.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            return;
+        }
+
+        var tempDir = Path.GetTempPath();
+        var uninstallScript = Path.Combine(tempDir, "starkfi_uninstall.bat");
 
         try
         {
+            File.Copy(sourceUninstallScript, uninstallScript, overwrite: true);
+
             var psi = new ProcessStartInfo
             {
                 FileName = uninstallScript,
                 UseShellExecute = true,
                 Verb = "runas",
-                WorkingDirectory = installFolder,
+                WorkingDirectory = tempDir,
             };
             Process.Start(psi);
         }
-        catch (Win32Exception)
+        catch (Win32Exception ex)
         {
-            // The user cancelled the UAC elevation prompt - do NOT exit the
-            // app, nothing was launched.
-            MessageBox.Show("Uninstall was cancelled.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            // NativeErrorCode disambiguates a cancelled UAC prompt (1223)
+            // from a genuinely missing file (2, e.g. the copy above raced
+            // with something removing it) - only the former is the benign
+            // "user said no" case.
+            if (ex.NativeErrorCode == 1223)
+            {
+                MessageBox.Show("Uninstall was cancelled.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else if (ex.NativeErrorCode == 2)
+            {
+                MessageBox.Show("Could not find uninstall.bat - reinstall the app.", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+            else
+            {
+                MessageBox.Show($"Could not start the uninstaller: {ex.Message}", "Uninstall", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
             return;
         }
         catch (Exception ex)
@@ -782,6 +812,7 @@ public class AdminPanelPage : UserControl
             return;
         }
 
+        AppShutdown.AllowExit = true;
         Application.Exit();
     }
 
@@ -819,7 +850,25 @@ public class AdminPanelPage : UserControl
 
         try
         {
-            var downloadPath = Path.Combine(Path.GetTempPath(), "StarkFiRentalClient.update.exe");
+            // Downloaded exe and the batch helper both go under
+            // %ProgramData%\StarkFiRental\update (mirroring the
+            // install_path.txt marker convention in SecurityToggles),
+            // NOT %TEMP%. %TEMP% here would resolve to the current
+            // interactive user's own per-user temp folder - exactly the
+            // account the physically-present kiosk customer is using -
+            // leaving a multi-second window (the batch's own `timeout /t 2`
+            // plus the UAC prompt) to swap in a malicious exe/script before
+            // the elevated batch below runs it. %ProgramData% is, by
+            // default Windows ACLs, writable only by Administrators/SYSTEM
+            // and not by a standard interactive user, so this excludes the
+            // exact threat model the Security section's toggles exist for -
+            // see the final report for the caveat this relies on (the
+            // kiosk's own Windows account genuinely being non-admin, or UAC
+            // otherwise enforcing the split token).
+            var updateDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "StarkFiRental", "update");
+            Directory.CreateDirectory(updateDir);
+            var downloadPath = Path.Combine(updateDir, "StarkFiRentalClient.update.exe");
+
             var downloaded = await _api.DownloadClientUpdateAsync(_config.Mac, _config.DeviceSecret, _password, downloadPath);
             if (!downloaded)
             {
@@ -829,12 +878,28 @@ public class AdminPanelPage : UserControl
 
             var installFolder = SecurityToggles.GetInstallFolder();
             var installedExePath = Path.Combine(installFolder, "StarkFiRentalClient.exe");
-            var scriptPath = Path.Combine(Path.GetTempPath(), "starkfi_update.bat");
+            // Copied to a sibling name in the SAME folder as the installed
+            // exe first, then `move /Y`'d into place - closer to atomic
+            // than copying straight over a file that might still be
+            // mid-release by the OS (e.g. this process only just exited).
+            var stagingExePath = Path.Combine(installFolder, "StarkFiRentalClient.exe.new");
+            var scriptPath = Path.Combine(updateDir, "starkfi_update.bat");
 
             var script =
                 "@echo off\r\n" +
                 "timeout /t 2 /nobreak >nul\r\n" +
-                $"copy /Y \"{downloadPath}\" \"{installedExePath}\"\r\n" +
+                $"copy /Y \"{downloadPath}\" \"{stagingExePath}\"\r\n" +
+                "if errorlevel 1 (\r\n" +
+                "  echo Update failed\r\n" +
+                "  pause\r\n" +
+                "  exit /b 1\r\n" +
+                ")\r\n" +
+                $"move /Y \"{stagingExePath}\" \"{installedExePath}\"\r\n" +
+                "if errorlevel 1 (\r\n" +
+                "  echo Update failed\r\n" +
+                "  pause\r\n" +
+                "  exit /b 1\r\n" +
+                ")\r\n" +
                 $"start \"\" \"{installedExePath}\"\r\n" +
                 "del \"%~f0\"\r\n";
             File.WriteAllText(scriptPath, script);
@@ -847,9 +912,16 @@ public class AdminPanelPage : UserControl
             };
             Process.Start(psi);
         }
-        catch (Win32Exception)
+        catch (Win32Exception ex)
         {
-            MessageBox.Show("Update was cancelled.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            if (ex.NativeErrorCode == 1223)
+            {
+                MessageBox.Show("Update was cancelled.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+            else
+            {
+                MessageBox.Show($"Could not apply the update: {ex.Message}", "Update", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
             return;
         }
         catch (Exception ex)
@@ -858,6 +930,7 @@ public class AdminPanelPage : UserControl
             return;
         }
 
+        AppShutdown.AllowExit = true;
         Application.Exit();
     }
 

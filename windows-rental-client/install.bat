@@ -30,6 +30,7 @@ echo.
 echo Installing to "%INSTALL_DIR%" ...
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 copy /Y "%~dp0%EXE_NAME%" "%INSTALL_DIR%\%EXE_NAME%" >nul
+copy /Y "%~dp0uninstall.bat" "%INSTALL_DIR%\" >nul
 
 rem Remember exactly where this was installed, so uninstall.bat never has
 rem to guess or assume the default Program Files path - it just reads

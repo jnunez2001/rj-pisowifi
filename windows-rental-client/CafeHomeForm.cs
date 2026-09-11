@@ -121,7 +121,11 @@ public class CafeHomeForm : Form
         // dispose this Form outright (not just hide it), and Program.cs's
         // cached reference would throw ObjectDisposedException on its very
         // next Show()/Hide() call, crashing the whole client.
-        FormClosing += (_, e) => { if (Visible) e.Cancel = true; };
+        // AppShutdown.AllowExit (Program.cs) lets Admin Panel's Uninstall/
+        // Update handlers actually close this process via Application.Exit()
+        // - without it that call would silently do nothing while this form
+        // is still Visible underneath the modal Admin Panel dialog.
+        FormClosing += (_, e) => { if (Visible && !AppShutdown.AllowExit) e.Cancel = true; };
 
         Theme.Changed += () => { if (IsHandleCreated) BeginInvoke(ApplyTheme); };
         ApplyTheme();
