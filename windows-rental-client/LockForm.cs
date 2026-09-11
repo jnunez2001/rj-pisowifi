@@ -658,6 +658,15 @@ public class LockForm : Form
 
     public void ShowLock(StatusResponse status)
     {
+        // Captured before any of the below can change Visible, and used
+        // at the end to skip Activate() on a repeat poll - same fix as
+        // CafeHomeForm.ShowHome()'s: this method runs on every ~5s status
+        // poll while locked, and an unconditional Activate() would steal
+        // OS focus from anything on top of this TopMost form every single
+        // poll - including, concretely, the Admin Panel dialog opened via
+        // this same form's own Staff/Admin link while still locked.
+        var wasVisible = Visible;
+
         _pcPillLabel.Text = string.IsNullOrWhiteSpace(status.PcName) ? "PC" : status.PcName;
         // StatusResponse has no separate café-name field - only PcName.
         // Showing PcName on both the wordmark and the pill duplicated the
@@ -710,7 +719,7 @@ public class LockForm : Form
         WindowState = FormWindowState.Maximized;
         TopMost = true;
         RecenterHomeView();
-        Activate();
+        if (!wasVisible) Activate();
     }
 
     private async void LoadImageAsync(PictureBox box, string? url, Action? onLoaded = null)
