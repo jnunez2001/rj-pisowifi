@@ -309,6 +309,18 @@
           <button class="btn btn-primary" onclick="saveRentalAppPassword()">Save</button>
         </div>
       </div>
+
+      <div class="zf3-card">
+        <div class="rental-settings-title">Admin Panel Password</div>
+        <div style="color:var(--text-muted);font-size:12px;margin-bottom:10px;">
+          Separate password that unlocks the Windows client's own on-screen Admin Panel (server connection, security toggles, points tiers, etc.) directly at the PC. Deliberately NOT your real admin login - this is what gets typed on the physically-exposed kiosk machine, so it stays revocable and scoped to just that panel.
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <input type="password" id="rentalAdminPanelPasswordCurrent" placeholder="Current (leave blank if none set)" style="flex:1;min-width:180px;">
+          <input type="password" id="rentalAdminPanelPasswordNew" placeholder="New admin panel password" style="flex:1;min-width:180px;">
+          <button class="btn btn-primary" onclick="saveRentalAdminPanelPassword()">Save</button>
+        </div>
+      </div>
     </div>
 
     <div id="rentalPanelSysteminfo" class="rental-panel" style="display:none;"></div>

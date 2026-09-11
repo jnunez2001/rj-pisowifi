@@ -474,6 +474,19 @@ async function saveRentalAppPassword() {
   }
 }
 
+async function saveRentalAdminPanelPassword() {
+  const current_password = document.getElementById('rentalAdminPanelPasswordCurrent').value;
+  const new_password = document.getElementById('rentalAdminPanelPasswordNew').value;
+  const data = await apiCall('POST', '/api/admin/rental/admin-panel-password', { current_password, new_password });
+  if (data.success) {
+    alert('Admin panel password updated');
+    document.getElementById('rentalAdminPanelPasswordCurrent').value = '';
+    document.getElementById('rentalAdminPanelPasswordNew').value = '';
+  } else {
+    alert(data.message || 'Could not update admin panel password');
+  }
+}
+
 // Coinslot Purpose is stored per-vendo-device (vendos.coinslot_purpose),
 // same table/route the main admin's Devices page uses
 // (PATCH /api/admin/vendos/:id/coinslot-purpose) - this panel is just a
