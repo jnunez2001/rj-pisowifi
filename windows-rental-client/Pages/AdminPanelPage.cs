@@ -819,11 +819,24 @@ public class AdminPanelPage : UserControl
     // ---- OTA self-update ----
     // Mirrors the ESP8266 vendo firmware's own OTA pattern (esp8266/
     // firmware/rj_pisowifi_esp8266/ota.cpp): check the server's published
-    // version, only proceed when it's numerically newer, download to a
-    // temp path, then hand off to a small helper batch script (elevated,
-    // since the install folder is typically under Program Files) that
-    // waits for this process to exit, copies the new exe over the
+    // version, only proceed when it's numerically newer, then hand off to a
+    // small elevated PowerShell helper script that does EVERYTHING
+    // privilege-sensitive itself: downloads the new exe, copies it over the
     // installed one, relaunches it, and deletes itself.
+    //
+    // SECURITY: the download used to happen HERE, in this unprivileged
+    // process, before elevating a batch script to copy the file into place.
+    // That was a local-privilege-escalation hole: %ProgramData% (like
+    // %TEMP%) is writable by the standard kiosk customer account, so an
+    // unprivileged download-then-elevate sequence lets that same customer
+    // race in a malicious .exe/script during the gap between the write and
+    // the elevated process actually reading it, and have it run AS
+    // ADMINISTRATOR once the UAC prompt is accepted. An elevated process
+    // must never trust a file an unprivileged process wrote earlier -
+    // instead, the elevated script itself performs the HTTP download, so
+    // the only thing this unprivileged code writes before elevating is a
+    // small script (see the "residual risk" note in the final report for
+    // what that still leaves open).
     private async Task OnUpdateClickedAsync()
     {
         string? serverVersion;
@@ -850,63 +863,100 @@ public class AdminPanelPage : UserControl
 
         try
         {
-            // Downloaded exe and the batch helper both go under
+            // The helper script and the exe it downloads both go under
             // %ProgramData%\StarkFiRental\update (mirroring the
-            // install_path.txt marker convention in SecurityToggles),
-            // NOT %TEMP%. %TEMP% here would resolve to the current
-            // interactive user's own per-user temp folder - exactly the
-            // account the physically-present kiosk customer is using -
-            // leaving a multi-second window (the batch's own `timeout /t 2`
-            // plus the UAC prompt) to swap in a malicious exe/script before
-            // the elevated batch below runs it. %ProgramData% is, by
-            // default Windows ACLs, writable only by Administrators/SYSTEM
-            // and not by a standard interactive user, so this excludes the
-            // exact threat model the Security section's toggles exist for -
-            // see the final report for the caveat this relies on (the
-            // kiosk's own Windows account genuinely being non-admin, or UAC
-            // otherwise enforcing the split token).
+            // install_path.txt marker convention in SecurityToggles). Note
+            // this folder is NOT ACL-protected (writable by the standard
+            // kiosk account, same as %TEMP%) - that's fine now, since
+            // nothing untrusted is ever read back out of it by the elevated
+            // step; the exe it downloads is written by the ELEVATED script
+            // itself, straight from the server, never staged here first by
+            // this unprivileged process.
             var updateDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "StarkFiRental", "update");
             Directory.CreateDirectory(updateDir);
             var downloadPath = Path.Combine(updateDir, "StarkFiRentalClient.update.exe");
 
-            var downloaded = await _api.DownloadClientUpdateAsync(_config.Mac, _config.DeviceSecret, _password, downloadPath);
-            if (!downloaded)
-            {
-                MessageBox.Show("Could not download the update.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                return;
-            }
-
             var installFolder = SecurityToggles.GetInstallFolder();
             var installedExePath = Path.Combine(installFolder, "StarkFiRentalClient.exe");
             // Copied to a sibling name in the SAME folder as the installed
-            // exe first, then `move /Y`'d into place - closer to atomic
-            // than copying straight over a file that might still be
-            // mid-release by the OS (e.g. this process only just exited).
+            // exe first, then moved into place - closer to atomic than
+            // copying straight over a file that might still be mid-release
+            // by the OS (e.g. this process only just exited).
             var stagingExePath = Path.Combine(installFolder, "StarkFiRentalClient.exe.new");
-            var scriptPath = Path.Combine(updateDir, "starkfi_update.bat");
+            var scriptPath = Path.Combine(updateDir, "starkfi_update.ps1");
+            var downloadUrl = $"{_config.ServerUrl.TrimEnd('/')}/api/rental/admin-panel/client-download";
 
+            // PowerShell (not a .bat + curl.exe) so the mac/device_secret/
+            // password values - which this process already legitimately
+            // holds in memory to get this far, and which may contain
+            // arbitrary characters - can be embedded as single-quoted
+            // PowerShell string literals (no expansion, only a doubled `'`
+            // needed to escape) instead of as cmd.exe/batch tokens, where
+            // %, ^, &, |, ", <, > all have special meaning and safe
+            // escaping is much harder to get right. `-ExecutionPolicy
+            // Bypass` is passed on the command line so a locked-down
+            // machine-wide execution policy (Restricted is common on
+            // kiosk images) can't block this one invocation, without
+            // needing to change any policy setting.
             var script =
-                "@echo off\r\n" +
-                "timeout /t 2 /nobreak >nul\r\n" +
-                $"copy /Y \"{downloadPath}\" \"{stagingExePath}\"\r\n" +
-                "if errorlevel 1 (\r\n" +
-                "  echo Update failed\r\n" +
-                "  pause\r\n" +
-                "  exit /b 1\r\n" +
-                ")\r\n" +
-                $"move /Y \"{stagingExePath}\" \"{installedExePath}\"\r\n" +
-                "if errorlevel 1 (\r\n" +
-                "  echo Update failed\r\n" +
-                "  pause\r\n" +
-                "  exit /b 1\r\n" +
-                ")\r\n" +
-                $"start \"\" \"{installedExePath}\"\r\n" +
-                "del \"%~f0\"\r\n";
+                "$ErrorActionPreference = 'Stop'\r\n" +
+                // Give this process a moment to fully exit and release its
+                // file lock on the installed exe before anything below
+                // tries to overwrite it (mirrors the previous fix's
+                // `timeout /t 2`), before doing anything privileged.
+                "Start-Sleep -Seconds 2\r\n" +
+                "try {\r\n" +
+                $"  $body = @{{ mac = '{PsEscape(_config.Mac)}'; device_secret = '{PsEscape(_config.DeviceSecret)}'; password = '{PsEscape(_password)}' }} | ConvertTo-Json -Compress\r\n" +
+                $"  Invoke-WebRequest -Uri '{PsEscape(downloadUrl)}' -Method Post -ContentType 'application/json' -Body $body -OutFile '{PsEscape(downloadPath)}' -UseBasicParsing\r\n" +
+                "} catch {\r\n" +
+                "  Write-Host 'Update failed: could not download the update.'\r\n" +
+                "  Read-Host 'Press Enter to close'\r\n" +
+                "  exit 1\r\n" +
+                "}\r\n" +
+                "try {\r\n" +
+                $"  Copy-Item -Path '{PsEscape(downloadPath)}' -Destination '{PsEscape(stagingExePath)}' -Force\r\n" +
+                "} catch {\r\n" +
+                "  Write-Host 'Update failed: could not stage the update.'\r\n" +
+                "  Read-Host 'Press Enter to close'\r\n" +
+                "  exit 1\r\n" +
+                "}\r\n" +
+                "try {\r\n" +
+                $"  Move-Item -Path '{PsEscape(stagingExePath)}' -Destination '{PsEscape(installedExePath)}' -Force\r\n" +
+                "} catch {\r\n" +
+                "  Write-Host 'Update failed: could not install the update.'\r\n" +
+                "  Read-Host 'Press Enter to close'\r\n" +
+                "  exit 1\r\n" +
+                "}\r\n" +
+                $"Start-Process -FilePath '{PsEscape(installedExePath)}'\r\n" +
+                "Remove-Item -Path $MyInvocation.MyCommand.Path -Force\r\n";
             File.WriteAllText(scriptPath, script);
+
+            // Best-effort, near-zero-cost check that nothing already
+            // clobbered the script in the instant between writing it and
+            // launching it (this closes the sub-millisecond unprivileged-
+            // side race down to effectively nothing). It can NOT close the
+            // remaining window while the UAC consent prompt is on screen -
+            // that gap is bounded only by how long the person clicking
+            // "Yes" takes, and closing it fully would need an always-
+            // elevated helper service rather than a runas'd file, which is
+            // out of scope here. What this fix does remove is the much
+            // larger, GUARANTEED exposure the previous version had: the
+            // full download duration (a 50-150MB exe over LAN) plus its own
+            // 2-second timeout, both of which used to elapse BEFORE
+            // elevation was even requested, with a complete, directly-
+            // executable payload sitting in a writable folder the whole
+            // time. Now the only thing exposed pre-elevation is this small
+            // script, for a window bounded by the UAC prompt alone.
+            if (File.ReadAllText(scriptPath) != script)
+            {
+                MessageBox.Show("Could not verify the update helper script - try again.", "Update", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                return;
+            }
 
             var psi = new ProcessStartInfo
             {
-                FileName = scriptPath,
+                FileName = "powershell.exe",
+                Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\"",
                 UseShellExecute = true,
                 Verb = "runas",
             };
@@ -933,6 +983,11 @@ public class AdminPanelPage : UserControl
         AppShutdown.AllowExit = true;
         Application.Exit();
     }
+
+    // Escapes a value for embedding inside a single-quoted PowerShell
+    // string literal - single-quoted strings do no variable/expression
+    // expansion, so doubling an embedded `'` is the only escaping needed.
+    private static string PsEscape(string value) => value.Replace("'", "''");
 
     private async Task LoadSettingsAsync()
     {
