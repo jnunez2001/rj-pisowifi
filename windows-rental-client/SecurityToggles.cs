@@ -111,26 +111,71 @@ public static class SecurityToggles
     }
 
     // --- Protect install folder -----------------------------------------
-    // A conservative deny-write-only NTFS ACL rule for the standard
-    // "Users" (BuiltinUsersSid) group on the install folder. Denies only
-    // WriteData/Delete/DeleteSubdirectoriesAndFiles - Read/ReadAndExecute
-    // are never touched, so the running app (and anything else reading its
-    // files) keeps working normally either way. Modifying ACLs under
-    // Program Files requires elevation.
+    // Goal: the physically-present kiosk customer (an unprivileged, standard
+    // interactive user) must not be able to delete or overwrite the app's
+    // files, while the operator (an elevated Administrator) and the OS
+    // itself keep full access - so install.bat's upgrade `copy /Y` and
+    // uninstall.bat's `rmdir /S /Q` still work when run as administrator.
     //
-    // BUILTIN\Users transitively includes Authenticated Users/INTERACTIVE,
-    // so an elevated administrator's token still carries that SID - a bare
-    // Deny for Users would silently block install.bat's upgrade `copy /Y`
-    // and uninstall.bat's `rmdir` even when run elevated. To keep this safe
-    // for admins, an explicit Allow-FullControl ACE for
-    // BuiltinAdministratorsSid is always added/removed in lockstep with the
-    // Users Deny ACE below (Windows/.NET canonicalizes explicit ACEs with
-    // deny-before-allow regardless of the order they're added in, so this
-    // Allow rule is not shadowed by the Deny rule for the broader group).
-    private static readonly FileSystemRights ProtectDenyRights =
-        FileSystemRights.WriteData | FileSystemRights.Delete | FileSystemRights.DeleteSubdirectoriesAndFiles;
+    // This is done with ALLOW ACEs only - never a Deny ACE. A Deny ACE is
+    // the wrong tool here: the obvious "Deny write to BUILTIN\Users" also
+    // hits the operator, because an elevated administrator's token still
+    // carries the Users SID. Pairing that Deny with an explicit
+    // Allow-FullControl for Administrators does NOT rescue it either:
+    // Windows/.NET canonicalize a DACL on write by ordering explicit Deny
+    // ACEs ahead of explicit Allow ACEs, so the Deny is evaluated first for
+    // the admin's token and the later Allow is never reached for those
+    // bits. Access checks stop at the first matching ACE, and no ordering
+    // trick changes that while the two ACEs' trustees overlap.
+    //
+    // So instead of denying anybody, protection works by REMOVING the
+    // write/delete grants that the unprivileged groups have:
+    //   1. Inheritance is broken with the inherited rules copied down as
+    //      explicit rules (nothing legitimate is lost).
+    //   2. Every explicit Allow rule for Users / Everyone / Authenticated
+    //      Users has just its write/delete bits stripped - Read, Execute,
+    //      ListDirectory and Traverse are preserved, so the app still runs
+    //      and the customer can still read/launch it.
+    //   3. Explicit Allow(FullControl) is ensured for Administrators and
+    //      LocalSystem. With no competing Deny ACE in the DACL, this simply
+    //      works - the operator and the OS always retain full access.
+    // The pre-protection DACL is snapshotted to ProgramData first so that
+    // turning the toggle back off restores the real original ACL rather
+    // than a guessed approximation.
+    //
+    // Modifying ACLs under Program Files requires elevation.
+
+    // The bits stripped from unprivileged groups: everything that could
+    // modify, replace, create, delete or re-permission the folder and its
+    // contents. Read/Execute/List/Traverse/ReadPermissions are deliberately
+    // not in this set.
+    private static readonly FileSystemRights ProtectStrippedRights =
+        FileSystemRights.WriteData                  // == CreateFiles
+        | FileSystemRights.AppendData               // == CreateDirectories
+        | FileSystemRights.WriteAttributes
+        | FileSystemRights.WriteExtendedAttributes
+        | FileSystemRights.Delete
+        | FileSystemRights.DeleteSubdirectoriesAndFiles
+        | FileSystemRights.ChangePermissions
+        | FileSystemRights.TakeOwnership;
+
     private const InheritanceFlags ProtectInheritanceFlags = InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit;
     private const PropagationFlags ProtectPropagationFlags = PropagationFlags.None;
+
+    private static SecurityIdentifier UsersSid => new(WellKnownSidType.BuiltinUsersSid, null);
+    private static SecurityIdentifier EveryoneSid => new(WellKnownSidType.WorldSid, null);
+    private static SecurityIdentifier AuthenticatedUsersSid => new(WellKnownSidType.AuthenticatedUserSid, null);
+    private static SecurityIdentifier AdministratorsSid => new(WellKnownSidType.BuiltinAdministratorsSid, null);
+    private static SecurityIdentifier LocalSystemSid => new(WellKnownSidType.LocalSystemSid, null);
+
+    private static bool IsUnprivilegedTrustee(IdentityReference identity) =>
+        identity is SecurityIdentifier sid &&
+        (sid == UsersSid || sid == EveryoneSid || sid == AuthenticatedUsersSid);
+
+    // Snapshot of the folder's DACL as it was immediately before protection
+    // was first turned on, so turning it off restores exactly that.
+    private static readonly string AclBackupFile =
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "StarkFiRental", "install_folder_acl.sddl");
 
     // %ProgramData%\StarkFiRental\install_path.txt is the authoritative
     // install location, written by install.bat and read back by
@@ -174,24 +219,21 @@ public static class SecurityToggles
         try
         {
             if (!Directory.Exists(folder)) return null;
-            var info = new DirectoryInfo(folder);
-            var security = info.GetAccessControl(AccessControlSections.Access);
-            var usersSid = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-            // Match only the exact rights/inheritance this app itself writes,
-            // not any Deny-for-Users-with-WriteData ACE that could have been
-            // set by the operator through some other means.
-            foreach (FileSystemAccessRule rule in security.GetAccessRules(true, false, typeof(SecurityIdentifier)))
+            var security = new DirectoryInfo(folder).GetAccessControl(AccessControlSections.Access);
+
+            // Protection is "on" when both halves of the mechanism hold:
+            // inheritance is broken (so a parent folder can't hand the
+            // write back), and no rule of any kind still grants a
+            // write/delete bit to an unprivileged group.
+            if (!security.AreAccessRulesProtected) return false;
+
+            foreach (FileSystemAccessRule rule in security.GetAccessRules(true, true, typeof(SecurityIdentifier)))
             {
-                if (rule.AccessControlType == AccessControlType.Deny &&
-                    rule.IdentityReference is SecurityIdentifier sid && sid == usersSid &&
-                    rule.FileSystemRights == ProtectDenyRights &&
-                    rule.InheritanceFlags == ProtectInheritanceFlags &&
-                    rule.PropagationFlags == ProtectPropagationFlags)
-                {
-                    return true;
-                }
+                if (rule.AccessControlType != AccessControlType.Allow) continue;
+                if (!IsUnprivilegedTrustee(rule.IdentityReference)) continue;
+                if ((rule.FileSystemRights & ProtectStrippedRights) != 0) return false;
             }
-            return false;
+            return true;
         }
         catch
         {
@@ -206,28 +248,8 @@ public static class SecurityToggles
         {
             if (!Directory.Exists(folder)) return (false, $"Install folder not found: {folder}");
             var info = new DirectoryInfo(folder);
-            var security = info.GetAccessControl(AccessControlSections.Access);
-            var usersSid = new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid, null);
-            var adminsSid = new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null);
-            var denyRule = new FileSystemAccessRule(
-                usersSid, ProtectDenyRights,
-                ProtectInheritanceFlags, ProtectPropagationFlags,
-                AccessControlType.Deny);
-            var adminsAllowRule = new FileSystemAccessRule(
-                adminsSid, FileSystemRights.FullControl,
-                ProtectInheritanceFlags, ProtectPropagationFlags,
-                AccessControlType.Allow);
-            if (protect)
-            {
-                security.AddAccessRule(adminsAllowRule);
-                security.AddAccessRule(denyRule);
-            }
-            else
-            {
-                security.RemoveAccessRule(denyRule);
-                security.RemoveAccessRule(adminsAllowRule);
-            }
-            info.SetAccessControl(security);
+            if (protect) ApplyInstallFolderProtection(info);
+            else RemoveInstallFolderProtection(info);
             return (true, null);
         }
         catch (UnauthorizedAccessException)
@@ -237,6 +259,147 @@ public static class SecurityToggles
         catch (Exception ex)
         {
             return (false, $"Could not change folder protection: {ex.Message}");
+        }
+    }
+
+    private static void ApplyInstallFolderProtection(DirectoryInfo info)
+    {
+        var original = info.GetAccessControl(AccessControlSections.Access);
+        SaveAclBackup(original);
+
+        // Step 1: break inheritance, copying the currently inherited rules
+        // down as explicit rules so nothing legitimate (SYSTEM, TrustedInstaller,
+        // a service account, whatever the parent granted) is lost. Written
+        // out on its own so step 2 works from the real, freshly re-read
+        // on-disk DACL rather than from an in-memory prediction of it.
+        if (!original.AreAccessRulesProtected)
+        {
+            original.SetAccessRuleProtection(isProtected: true, preserveInheritance: true);
+            info.SetAccessControl(original);
+        }
+
+        // Step 2: strip the write/delete bits from every explicit Allow rule
+        // held by an unprivileged group, keeping their read/execute bits.
+        var security = info.GetAccessControl(AccessControlSections.Access);
+        var rules = security.GetAccessRules(true, false, typeof(SecurityIdentifier))
+            .Cast<FileSystemAccessRule>()
+            .ToList();
+
+        foreach (var rule in rules)
+        {
+            if (rule.AccessControlType != AccessControlType.Allow) continue;
+            if (!IsUnprivilegedTrustee(rule.IdentityReference)) continue;
+            if ((rule.FileSystemRights & ProtectStrippedRights) == 0) continue;
+
+            // RemoveAccessRuleSpecific matches on the exact identity, rights,
+            // flags and type - and this rule object came straight out of the
+            // DACL, so it always matches exactly that one ACE and nothing else.
+            security.RemoveAccessRuleSpecific(rule);
+
+            var remaining = rule.FileSystemRights & ~ProtectStrippedRights;
+            if (remaining != 0)
+            {
+                security.AddAccessRule(new FileSystemAccessRule(
+                    rule.IdentityReference, remaining,
+                    rule.InheritanceFlags, rule.PropagationFlags,
+                    AccessControlType.Allow));
+            }
+        }
+
+        // Step 3: guarantee the operator and the OS keep full access. Pure
+        // Allow rules, no Deny anywhere in this DACL, so there is nothing
+        // for them to be shadowed by.
+        security.AddAccessRule(new FileSystemAccessRule(
+            AdministratorsSid, FileSystemRights.FullControl,
+            ProtectInheritanceFlags, ProtectPropagationFlags, AccessControlType.Allow));
+        security.AddAccessRule(new FileSystemAccessRule(
+            LocalSystemSid, FileSystemRights.FullControl,
+            ProtectInheritanceFlags, ProtectPropagationFlags, AccessControlType.Allow));
+
+        info.SetAccessControl(security);
+    }
+
+    private static void RemoveInstallFolderProtection(DirectoryInfo info)
+    {
+        // Preferred path: put back the exact DACL that was in place before
+        // protection was turned on. Re-enabling inheritance on its own is
+        // not enough - the explicit copies made when inheritance was broken
+        // stay behind as explicit rules, so a stripped Users rule would keep
+        // sitting there next to the restored inherited one.
+        if (TryRestoreAclBackup(info)) return;
+
+        // Fallback for when the snapshot is missing (protection turned on by
+        // an older build, ProgramData wiped, and so on): re-enable
+        // inheritance, then remove only the explicit rules this feature is
+        // known to create, letting the parent's inherited rules take over
+        // again. Deliberately does not touch explicit rules it did not write.
+        var security = info.GetAccessControl(AccessControlSections.Access);
+        security.SetAccessRuleProtection(isProtected: false, preserveInheritance: true);
+        info.SetAccessControl(security);
+
+        security = info.GetAccessControl(AccessControlSections.Access);
+        var changed = false;
+        foreach (FileSystemAccessRule rule in security.GetAccessRules(true, false, typeof(SecurityIdentifier)))
+        {
+            if (rule.AccessControlType != AccessControlType.Allow) continue;
+
+            var isStrippedUnprivilegedCopy =
+                IsUnprivilegedTrustee(rule.IdentityReference) &&
+                (rule.FileSystemRights & ProtectStrippedRights) == 0;
+
+            var isOurFullControlGrant =
+                rule.IdentityReference is SecurityIdentifier sid &&
+                (sid == AdministratorsSid || sid == LocalSystemSid) &&
+                rule.FileSystemRights == FileSystemRights.FullControl &&
+                rule.InheritanceFlags == ProtectInheritanceFlags &&
+                rule.PropagationFlags == ProtectPropagationFlags;
+
+            if (!isStrippedUnprivilegedCopy && !isOurFullControlGrant) continue;
+
+            security.RemoveAccessRuleSpecific(rule);
+            changed = true;
+        }
+        if (changed) info.SetAccessControl(security);
+    }
+
+    private static void SaveAclBackup(DirectorySecurity original)
+    {
+        try
+        {
+            // Never overwrite an existing snapshot - protection may be
+            // re-applied over itself, and the first snapshot is the only one
+            // that reflects the genuine pre-protection state.
+            if (File.Exists(AclBackupFile)) return;
+            var dir = Path.GetDirectoryName(AclBackupFile);
+            if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+            File.WriteAllText(AclBackupFile, original.GetSecurityDescriptorSddlForm(AccessControlSections.Access));
+        }
+        catch
+        {
+            // A missing snapshot only costs us the exact-restore path on
+            // toggle-off (the fallback above still works), so this must never
+            // block protection itself from being applied.
+        }
+    }
+
+    private static bool TryRestoreAclBackup(DirectoryInfo info)
+    {
+        try
+        {
+            if (!File.Exists(AclBackupFile)) return false;
+            var sddl = File.ReadAllText(AclBackupFile).Trim();
+            if (string.IsNullOrWhiteSpace(sddl)) return false;
+
+            var restored = new DirectorySecurity();
+            restored.SetSecurityDescriptorSddlForm(sddl, AccessControlSections.Access);
+            info.SetAccessControl(restored);
+
+            try { File.Delete(AclBackupFile); } catch { /* stale snapshot is harmless */ }
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 }
