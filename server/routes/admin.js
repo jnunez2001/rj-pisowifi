@@ -547,7 +547,23 @@ router.post('/session/:code/addtime', adminAuth, async (req, res) => {
     }
 
     const newMinutes = Math.max(0, session.minutes_remaining + m);
-    const newExpiresAt = new Date(Date.now() + newMinutes * 60 * 1000).toISOString();
+
+    // Bug found live (self-flagged alert: "resumed with a time mismatch"):
+    // a paused session's minutes_remaining is frozen at pause time, and is
+    // only meant to move again once resumeSession() reconstructs it from
+    // expires_at - paused_at. Anchoring the new expires_at to Date.now()
+    // here - real wall-clock "now" - instead of the frozen paused_at moment
+    // baked in expires_at-minus-paused_at drift equal to however long the
+    // session had already been sitting paused before this grant ran,
+    // exactly the mismatch resumeSession() was seeing and self-correcting
+    // (toward the customer's benefit, but it should never have happened).
+    // Anchoring to paused_at when paused keeps expires_at - paused_at
+    // exactly equal to newMinutes, so resume reconstructs the same value
+    // this route just wrote, no correction needed.
+    const anchorTime = (session.is_paused && session.paused_at)
+      ? new Date(session.paused_at).getTime()
+      : Date.now();
+    const newExpiresAt = new Date(anchorTime + newMinutes * 60 * 1000).toISOString();
 
     // Keep hard_expires_at in sync (Bug: admin-added time could get silently
     // wiped, resumeSession() and GET /api/session/mac/:mac both force-expire
@@ -5680,7 +5696,13 @@ router.post('/reports/:id/approve-credit', adminAuth, async (req, res) => {
     }
 
     const newMinutes = session.minutes_remaining + minutes;
-    const newExpiresAt = new Date(Date.now() + newMinutes * 60 * 1000).toISOString();
+    // Same pause-anchoring fix as POST /session/:code/addtime - see that
+    // route's comment for the full explanation of the resume-mismatch bug
+    // this closes.
+    const anchorTime = (session.is_paused && session.paused_at)
+      ? new Date(session.paused_at).getTime()
+      : Date.now();
+    const newExpiresAt = new Date(anchorTime + newMinutes * 60 * 1000).toISOString();
     const currentHardExpires = new Date(session.hard_expires_at).getTime();
     const newHardExpiresAt = new Date(
       Math.max(currentHardExpires + minutes * 60 * 1000, new Date(newExpiresAt).getTime())
