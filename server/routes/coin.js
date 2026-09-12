@@ -532,7 +532,19 @@ router.post('/pending', async (req, res) => {
   // two calls the portal fires when Insert Coin is tapped (both run in
   // parallel - see portal.js's handleInsertCoin()), and it's the one
   // that actually opens the server-side pending-credit window.
-  if (require('../services/laneAccessService').isOpenLaneIp(requestIp)) {
+  //
+  // Bug found live: this ran unconditionally, including for pc_rental
+  // mode. The lane check exists to stop someone on an unpaid Home/staff
+  // lane from arming a customer WiFi coin credit meant for the gated
+  // lane - that reasoning doesn't apply to a rental PC, which has its
+  // own real authentication (registered mac + device_secret, see
+  // verifyMacBelongsToCaller just below) and can legitimately sit on
+  // whatever lane the café wired it into, gated or open. Any real café
+  // with rental PCs on a separate LAN/switch (not the guest WiFi) was
+  // getting every coin rejected here before the mac-ownership check
+  // (or the per-vendo Coinslot Purpose setting) ever ran.
+  if (mode !== 'pc_rental' && mode !== 'pc_rental_create_account'
+      && require('../services/laneAccessService').isOpenLaneIp(requestIp)) {
     return res.status(403).json({ success: false, message: 'Coin insertion is only available on the customer WiFi.' });
   }
 
