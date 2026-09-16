@@ -154,7 +154,19 @@ async function applyOutageCompensation(gapMs, sourceLabel) {
     // thing the sweep depends on - is preserved through an outage
     // exactly the same way it already needs to be preserved through a
     // pause (see resumeSession's matching fix).
-    const sessions = db.prepare('SELECT voucher_code, expires_at, hard_expires_at, regular_expires_at FROM sessions').all();
+    // Bug found live (self-flagged "resumed with a time mismatch" alert):
+    // this shifts expires_at for EVERY session, paused or not, but never
+    // touched paused_at - the same class of bug as the admin Add Time/
+    // Approve Credit fix above (see sessionService.js's resumeSession
+    // comment), just via a different path. A session paused during the
+    // outage got its expires_at pushed forward by the outage gap while
+    // paused_at stayed put, so expires_at - paused_at no longer matched
+    // the frozen minutes_remaining once resumed. Shifting paused_at by
+    // the same gapMs (only meaningful when is_paused=1; shiftIso passes
+    // a null paused_at through unchanged for everyone else) keeps that
+    // invariant intact through an outage the same way it's now kept
+    // through an admin credit.
+    const sessions = db.prepare('SELECT voucher_code, expires_at, hard_expires_at, regular_expires_at, paused_at FROM sessions').all();
     const sessionCount = sessions.length;
     if (sessionCount === 0) return;
 
@@ -173,7 +185,7 @@ async function applyOutageCompensation(gapMs, sourceLabel) {
     const shiftIso = (value) => (value ? new Date(parseSqliteDate(value).getTime() + gapMs).toISOString() : value);
     const update = db.prepare(`
       UPDATE sessions
-      SET expires_at = ?, hard_expires_at = ?, regular_expires_at = ?
+      SET expires_at = ?, hard_expires_at = ?, regular_expires_at = ?, paused_at = ?
       WHERE voucher_code = ?
     `);
     // Re-review also found the per-row loop replaced what used to be one
@@ -183,7 +195,7 @@ async function applyOutageCompensation(gapMs, sourceLabel) {
     // all-or-nothing guarantee the original single statement had.
     const applyAll = db.transaction((rows) => {
       for (const s of rows) {
-        update.run(shiftIso(s.expires_at), shiftIso(s.hard_expires_at), shiftIso(s.regular_expires_at), s.voucher_code);
+        update.run(shiftIso(s.expires_at), shiftIso(s.hard_expires_at), shiftIso(s.regular_expires_at), shiftIso(s.paused_at), s.voucher_code);
       }
     });
     applyAll(sessions);
