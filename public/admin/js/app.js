@@ -32,10 +32,78 @@ function makeClickableDivsKeyboardAccessible(root) {
 }
 
 // ===== AUTH =====
+// A saved device keeps a long-lived token in localStorage (issued by POST
+// /login when "Remember this device" is ticked) and trades it for a normal
+// session at startup, see trySilentLogin().
+const DEVICE_TOKEN_KEY = 'rj_admin_device_token';
+
+function getDeviceToken() {
+  try { return localStorage.getItem(DEVICE_TOKEN_KEY); } catch (e) { return null; }
+}
+function setDeviceToken(token) {
+  try { localStorage.setItem(DEVICE_TOKEN_KEY, token); } catch (e) { /* storage blocked: device just isn't saved */ }
+}
+function clearDeviceToken() {
+  try { localStorage.removeItem(DEVICE_TOKEN_KEY); } catch (e) { /* nothing to clear */ }
+}
+
+// Shared by password login and silent device login: store the session,
+// open the panel, and send the admin to Settings if the default password is
+// still in use.
+function startAdminSession(sessionToken, settingsData, username) {
+  authToken = sessionToken;
+  sessionStorage.setItem('rj_admin_token', sessionToken);
+  sessionStorage.setItem('rj_admin_user', username);
+
+  showAdmin();
+
+  // Bug: default admin123 password shipped with no forced-change flow.
+  // must_change_password is set on first install (or migrated from an
+  // unchanged default), send the admin straight to Settings to pick a
+  // real password instead of leaving it silently flagged in the DB.
+  if (settingsData?.settings?.must_change_password === '1') {
+    navigateTo('settings');
+    setTimeout(() => {
+      if (typeof showToast === 'function') {
+        showToast('Please set a new admin password before continuing.', 'error');
+      } else {
+        alert('Please set a new admin password before continuing.');
+      }
+    }, 300);
+  }
+}
+
+// Exchanges this browser's saved-device token for a session. Returns the
+// settings payload on success, or null (login screen should show).
+async function trySilentLogin() {
+  const deviceToken = getDeviceToken();
+  if (!deviceToken) return null;
+  try {
+    const res = await fetch(`${API}/api/admin/login/device`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_token: deviceToken }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      // 401 = the device was revoked or expired: forget it. Anything else
+      // (rate limited, server hiccup) keeps it for next time.
+      if (res.status === 401) clearDeviceToken();
+      return null;
+    }
+    const settingsRes = await fetch(`${API}/api/admin/settings`, { headers: { 'password': data.token } });
+    const settingsData = await settingsRes.json();
+    const username = settingsData.settings?.admin_username || 'admin';
+    return { token: data.token, settingsData, username };
+  } catch (e) {
+    return null;
+  }
+}
+
 async function doLogin() {
   const username = document.getElementById('loginUsername').value.trim();
   const password = document.getElementById('loginPassword').value;
-  const otpToken = document.getElementById('login2faToken').value.trim();
+  const remember = document.getElementById('loginRemember').checked;
 
   if (!username || !password) {
     showLoginError('Please enter username and password.');
@@ -43,25 +111,15 @@ async function doLogin() {
   }
 
   try {
-    // POST /login is the one place that checks a 2FA code (if the account
-    // has it enabled) and issues a session token - installs that never
-    // turn 2FA on get exactly the same behavior as before (password
-    // checked, token issued, used identically to how the raw password
-    // itself used to be sent on every request).
+    // POST /login checks the password and issues a session token, used
+    // exactly like the raw password itself used to be sent on every request.
     const loginRes = await fetch(`${API}/api/admin/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password, otp_token: otpToken || undefined }),
+      body: JSON.stringify({ password, remember_device: remember }),
     });
     const loginData = await loginRes.json();
 
-    if (loginData.requires2fa && !otpToken) {
-      // Correct password, 2FA is on, code not entered yet - reveal the
-      // field instead of failing outright.
-      document.getElementById('login2faGroup').style.display = 'block';
-      document.getElementById('login2faToken').focus();
-      return;
-    }
     if (!loginData.success) {
       if (loginRes.status === 429 && loginData.remaining) {
         showLoginRateLimitCountdown(loginData.remaining);
@@ -85,29 +143,75 @@ async function doLogin() {
       return;
     }
 
-    authToken = sessionToken;
-    sessionStorage.setItem('rj_admin_token', sessionToken);
-    sessionStorage.setItem('rj_admin_user', username);
+    if (loginData.device_token) setDeviceToken(loginData.device_token);
+    else clearDeviceToken();
 
-    showAdmin();
-
-    // Bug: default admin123 password shipped with no forced-change flow.
-    // must_change_password is set on first install (or migrated from an
-    // unchanged default), send the admin straight to Settings to pick a
-    // real password instead of leaving it silently flagged in the DB.
-    if (data.settings?.must_change_password === '1') {
-      navigateTo('settings');
-      setTimeout(() => {
-        if (typeof showToast === 'function') {
-          showToast('Please set a new admin password before continuing.', 'error');
-        } else {
-          alert('Please set a new admin password before continuing.');
-        }
-      }, 300);
-    }
+    startAdminSession(sessionToken, data, username);
   } catch(e) {
     showLoginError('Cannot connect to server.');
   }
+}
+
+// ===== FORGOT PASSWORD (recovery code) =====
+function showResetPanel() {
+  document.getElementById('loginPanel').style.display = 'none';
+  document.getElementById('resetDonePanel').style.display = 'none';
+  document.getElementById('loginNotice').style.display = 'none';
+  document.getElementById('resetPanel').style.display = 'block';
+  document.getElementById('resetMessage').style.display = 'none';
+  document.getElementById('resetCode').focus();
+}
+
+function showLoginPanel() {
+  document.getElementById('resetPanel').style.display = 'none';
+  document.getElementById('resetDonePanel').style.display = 'none';
+  document.getElementById('loginPanel').style.display = 'block';
+}
+
+function showResetMessage(msg) {
+  const el = document.getElementById('resetMessage');
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+async function doPasswordReset() {
+  const code = document.getElementById('resetCode').value.trim();
+  const newPassword = document.getElementById('resetNewPassword').value;
+  const confirmPassword = document.getElementById('resetConfirmPassword').value;
+
+  if (!code || !newPassword) { showResetMessage('Enter your recovery code and a new password.'); return; }
+  if (newPassword !== confirmPassword) { showResetMessage('The two passwords do not match.'); return; }
+
+  try {
+    const res = await fetch(`${API}/api/admin/password/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recovery_code: code, new_password: newPassword }),
+    });
+    const data = await res.json();
+    if (!data.success) {
+      showResetMessage(data.message || 'Could not reset the password.');
+      return;
+    }
+    // Every saved device was just revoked server-side.
+    clearDeviceToken();
+    document.getElementById('resetCode').value = '';
+    document.getElementById('resetNewPassword').value = '';
+    document.getElementById('resetConfirmPassword').value = '';
+    document.getElementById('resetNewCode').value = data.recovery_code;
+    document.getElementById('resetPanel').style.display = 'none';
+    document.getElementById('resetDonePanel').style.display = 'block';
+  } catch (e) {
+    showResetMessage('Cannot connect to server.');
+  }
+}
+
+function finishPasswordReset() {
+  document.getElementById('resetNewCode').value = '';
+  showLoginPanel();
+  const notice = document.getElementById('loginNotice');
+  notice.textContent = 'Password changed. Log in with your new password.';
+  notice.style.display = 'block';
 }
 
 let loginRateLimitInterval = null;
@@ -162,6 +266,16 @@ function togglePasswordView() {
 
 function doLogout() {
   if (!confirm('Are you sure you want to logout?')) return;
+  // Logging out on a saved device forgets it (revoked on the server too).
+  const deviceToken = getDeviceToken();
+  if (deviceToken) {
+    fetch(`${API}/api/admin/login/device/revoke`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_token: deviceToken }),
+    }).catch(() => {});
+    clearDeviceToken();
+  }
   sessionStorage.removeItem('rj_admin_token');
   authToken = null;
   stopSessionPolling();
@@ -332,7 +446,6 @@ const pageTitles = {
   logs: 'Logs',
   reports: 'Reports',
   movies: 'Movies',
-  sales: 'Sales Report',
   sessions: 'Active Sessions',
   vouchers: 'Vouchers',
   plans: 'Plans',
@@ -399,6 +512,14 @@ function refreshCurrentPage() {
 }
 
 async function navigateTo(page) {
+  // The standalone Sales Report page was folded into Analytics as a tab.
+  // Old links (e.g. the Dashboard's Recent Transactions "View All") still
+  // call navigateTo('sales'); send them to that tab.
+  if (page === 'sales') {
+    window.analyticsInitialTab = 'sales';
+    page = 'analytics';
+  }
+
   // Destroy previous page intervals before switching
   if (typeof destroyAbout === 'function') destroyAbout();
   if (typeof destroySessions === 'function') destroySessions();
@@ -449,7 +570,9 @@ async function navigateTo(page) {
   }
 
   try {
-    const res = await fetch(`pages/${page}.html`);
+    // no-cache = always revalidate (a cheap 304 when unchanged), so an update
+    // never leaves a stale page fragment paired with newer scripts.
+    const res = await fetch(`pages/${page}.html`, { cache: 'no-cache' });
     if (!res.ok) throw new Error('Page not found');
     const html = await res.text();
     content.innerHTML = html;
@@ -464,7 +587,6 @@ async function navigateTo(page) {
       'satellite-kiosks': () => typeof loadSatelliteKiosks === 'function' && loadSatelliteKiosks(),
       'coin-slot-gpio': () => typeof loadCoinSlotGpio === 'function' && loadCoinSlotGpio(),
       sessions: () => typeof loadSessions === 'function' && loadSessions(),
-      sales: () => typeof loadSales === 'function' && loadSales(),
       rates: () => typeof loadRates === 'function' && loadRates(),
       vouchers: () => typeof loadVouchersPage === 'function' && loadVouchersPage(),
       plans: () => typeof loadPlansPage === 'function' && loadPlansPage(),
@@ -564,8 +686,32 @@ async function updateSessionCount() {
 // password forever. Combined with the new admin-auth rate limit, that would
 // lock the real admin out of their own panel. Log back out to the login
 // screen instead of retrying.
+let silentReloginInFlight = false;
+
 function handleAuthFailure() {
   if (authToken === null) return; // already logged out, avoid repeat triggers
+  authToken = null;
+
+  // Sessions live in server memory (12h, or gone after a restart). A saved
+  // device signs straight back in instead of showing the login screen.
+  if (getDeviceToken() && !silentReloginInFlight) {
+    silentReloginInFlight = true;
+    trySilentLogin().then((result) => {
+      silentReloginInFlight = false;
+      if (result) {
+        sessionStorage.setItem('rj_admin_token', result.token);
+        sessionStorage.setItem('rj_admin_user', result.username);
+        location.reload();
+      } else {
+        showSessionExpiredLogin();
+      }
+    });
+    return;
+  }
+  showSessionExpiredLogin();
+}
+
+function showSessionExpiredLogin() {
   authToken = null;
   stopSessionPolling();
   // Also stop whichever page-specific poll interval is currently running
@@ -802,7 +948,7 @@ function initFieldHelp() {
 }
 
 // ===== INIT =====
-function init() {
+async function init() {
   initSidebarCollapse();
   initNavSectionCollapse();
   makeClickableDivsKeyboardAccessible(document);
@@ -821,7 +967,13 @@ function init() {
     authToken = savedToken;
     showAdmin();
   } else {
-    document.getElementById('loginScreen').style.display = 'block';
+    // No session in this tab: a saved device signs in without a password.
+    const silent = await trySilentLogin();
+    if (silent) {
+      startAdminSession(silent.token, silent.settingsData, silent.username);
+    } else {
+      document.getElementById('loginScreen').style.display = 'block';
+    }
   }
 
   initFieldHelp();

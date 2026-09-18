@@ -95,12 +95,14 @@ const db = require('../config/database');
 const { hashPassword, verifyPassword } = require('../utils/passwordHash');
 const { z, validateBody } = require('../utils/validation');
 const { encryptSecret, decryptSecret } = require('../utils/secretCrypto');
-const totpService = require('../services/totpService');
+const adminAuthService = require('../services/adminAuthService');
 const crypto = require('crypto');
 const { getActiveSessions, expireSession, pauseSession, resumeSession, sessionMinutesFromRealMs } = require('../services/sessionService');
 const { getRates } = require('../services/voucherService');
 const { checkSpam, recordAttempt, clearAttempts } = require('../services/spamService');
 const kioskService = require('../services/satelliteKioskService');
+const { getAnalyticsSummary, getSalesReport } = require('../services/analyticsService');
+const { resolveDateRanges } = require('../utils/dateRange');
 const os = require('os');
 const { exec, execSync, execFile } = require('child_process');
 
@@ -123,33 +125,35 @@ function getRealClientIp(req) {
   return raw;
 }
 
-// ===== 2FA SESSION TOKENS =====
-// Only relevant once admin_2fa_enabled is turned on (opt-in, off by
-// default - see Phase 9 of BETA_LAUNCH_PLAN.md). When 2FA is off, nothing
-// below is touched and adminAuth behaves exactly as it always has (raw
-// password on every request) - zero change, zero risk to what's already
-// tested. When 2FA is on, POST /login (below) is the one place that
-// checks the OTP code, then issues a short-lived session token; every
-// other request authenticates with that token instead of re-sending the
-// password+OTP on every single API call (which would break within 30s of
-// the OTP rotating, since the SPA makes many rapid successive requests).
-// In-memory only, same pattern as spamService's attempt tracking - a
-// restart simply requires logging in again, which is an acceptable
-// tradeoff for a login-session store, not a security gap.
-const sessionTokens = new Map();
+// ===== ADMIN SESSION TOKENS =====
+// POST /login (below) issues a short-lived session token, and the admin
+// panel sends it in the same header slot the raw password already uses (a
+// "sess_" prefix can never collide with a real password). In-memory only,
+// same pattern as spamService's attempt tracking - a restart simply means
+// signing in again (a saved device does that silently, see POST
+// /login/device), an acceptable tradeoff for a login-session store.
+//
+// Each token records the "sessions epoch" it was issued under
+// (adminAuthService.getSessionsEpoch). A password reset bumps the epoch in
+// the database, which signs every existing session out at once, even when
+// the reset was done from another process (scripts/reset-admin-password.js).
+const sessionTokens = new Map(); // token -> { expiresAt, epoch }
 const SESSION_TOKEN_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 
 function issueSessionToken() {
   const token = 'sess_' + crypto.randomBytes(32).toString('hex');
-  sessionTokens.set(token, Date.now() + SESSION_TOKEN_TTL_MS);
+  sessionTokens.set(token, {
+    expiresAt: Date.now() + SESSION_TOKEN_TTL_MS,
+    epoch: adminAuthService.getSessionsEpoch(db),
+  });
   return token;
 }
 
 function isValidSessionToken(token) {
   if (!token || !token.startsWith('sess_')) return false;
-  const expiresAt = sessionTokens.get(token);
-  if (!expiresAt) return false;
-  if (Date.now() > expiresAt) {
+  const entry = sessionTokens.get(token);
+  if (!entry) return false;
+  if (Date.now() > entry.expiresAt || entry.epoch !== adminAuthService.getSessionsEpoch(db)) {
     sessionTokens.delete(token);
     return false;
   }
@@ -204,12 +208,10 @@ function adminAuth(req, res, next) {
 
   const { password } = req.headers;
 
-  // A valid session token (issued by POST /login once 2FA passed) is
-  // accepted in the exact same header slot the raw password already uses
-  // - no new header needed, no frontend change required for installs that
-  // never enable 2FA. A "sess_" prefix can never collide with a real
-  // password (verifyPassword would just fail on it normally), so checking
-  // this first is safe either way.
+  // A valid session token (issued by POST /login) is accepted in the same
+  // header slot the raw password already uses. A "sess_" prefix can never
+  // collide with a real password (verifyPassword would just fail on it
+  // normally), so checking this first is safe either way.
   if (isValidSessionToken(password)) {
     clearAttempts(`admin-auth:${ip}`);
     return next();
@@ -229,23 +231,16 @@ function adminAuth(req, res, next) {
   }
   rememberVerified(password, settings.value);
 
-  // If 2FA is enabled, a raw password alone is no longer sufficient on its
-  // own for ANY request - it must come through POST /login (which checks
-  // the OTP too) and use the resulting session token instead. This closes
-  // the gap where enabling 2FA would otherwise only protect the login
-  // screen while every other endpoint still accepted the bare password.
-  const twoFaEnabled = db.prepare("SELECT value FROM settings WHERE key = 'admin_2fa_enabled'").get()?.value === '1';
-  if (twoFaEnabled) {
-    return res.status(401).json({ success: false, message: 'This account requires 2FA login. Use the login screen.', requires2fa: true });
-  }
-
   clearAttempts(`admin-auth:${ip}`);
   next();
 }
 
-// POST /api/admin/login - the only place an OTP code is ever checked.
+// POST /api/admin/login - checks the password and issues a session token.
 // Rate-limited the same way as adminAuth itself (same spamService key
 // namespace scoped by IP) so this doesn't open a second brute-force door.
+// { remember_device: true } also saves this browser for 30 days: the
+// response carries a device_token the browser keeps and later exchanges for
+// a session via POST /login/device, so it can skip the login screen.
 router.post('/login', (req, res) => {
   const ip = getRealClientIp(req);
   const spamCheck = checkSpam(`admin-auth:${ip}`);
@@ -253,32 +248,117 @@ router.post('/login', (req, res) => {
     return res.status(429).json({ success: false, message: spamCheck.message, remaining: spamCheck.remaining });
   }
 
-  const { password, otp_token } = req.body || {};
+  const { password, remember_device } = req.body || {};
   const settings = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get();
   if (!password || !settings || !verifyPassword(password, settings.value)) {
     recordAttempt(`admin-auth:${ip}`);
     return res.status(401).json({ success: false, message: 'Invalid username or password.' });
   }
 
-  const twoFaEnabled = db.prepare("SELECT value FROM settings WHERE key = 'admin_2fa_enabled'").get()?.value === '1';
-  if (twoFaEnabled) {
-    if (!otp_token) {
-      // Password was correct - tell the frontend to prompt for the code
-      // next, without yet revealing whether the eventual code will be
-      // right or wrong (that check happens below, still rate-limited).
-      return res.json({ success: false, requires2fa: true, message: '2FA code required.' });
-    }
-    const secretRow = db.prepare("SELECT value FROM settings WHERE key = 'admin_2fa_secret'").get();
-    const secret = secretRow && secretRow.value ? decryptSecret(secretRow.value) : '';
-    if (!secret || !totpService.verifyToken(secret, otp_token)) {
-      recordAttempt(`admin-auth:${ip}`);
-      return res.status(401).json({ success: false, requires2fa: true, message: 'Invalid 2FA code.' });
-    }
-  }
-
   clearAttempts(`admin-auth:${ip}`);
-  const token = issueSessionToken();
-  res.json({ success: true, token });
+  const out = { success: true, token: issueSessionToken() };
+  if (remember_device === true) {
+    const device = adminAuthService.createTrustedDevice(db, {
+      label: adminAuthService.describeUserAgent(req.headers['user-agent']),
+      ip,
+    });
+    out.device_token = device.token;
+  }
+  res.json(out);
+});
+
+// POST /api/admin/login/device { device_token } - signs a saved device in
+// without a password. Same rate limit as the password login, so a guessed
+// token gets no more tries than a guessed password would.
+router.post('/login/device', (req, res) => {
+  const ip = getRealClientIp(req);
+  const spamCheck = checkSpam(`admin-auth:${ip}`);
+  if (spamCheck.blocked) {
+    return res.status(429).json({ success: false, message: spamCheck.message, remaining: spamCheck.remaining });
+  }
+  const result = adminAuthService.exchangeDeviceToken(db, req.body && req.body.device_token);
+  if (!result.ok) {
+    recordAttempt(`admin-auth:${ip}`);
+    return res.status(401).json({ success: false, message: 'This device is no longer saved. Please log in.' });
+  }
+  clearAttempts(`admin-auth:${ip}`);
+  res.json({ success: true, token: issueSessionToken() });
+});
+
+// POST /api/admin/login/device/revoke { device_token } - logging out on a
+// saved device forgets it. Holding the token is the proof, no login needed.
+router.post('/login/device/revoke', (req, res) => {
+  adminAuthService.revokeDeviceByToken(db, req.body && req.body.device_token);
+  res.json({ success: true });
+});
+
+// ===== SAVED DEVICES + RECOVERY CODE + PASSWORD RESET =====
+
+// GET /api/admin/trusted-devices
+router.get('/trusted-devices', adminAuth, (req, res) => {
+  res.json({ success: true, devices: adminAuthService.listTrustedDevices(db) });
+});
+
+// DELETE /api/admin/trusted-devices/:id
+router.delete('/trusted-devices/:id', adminAuth, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ success: false, message: 'Invalid device id.' });
+  const removed = adminAuthService.revokeTrustedDevice(db, id);
+  res.json({ success: removed, message: removed ? undefined : 'Device not found.' });
+});
+
+// DELETE /api/admin/trusted-devices - revoke every saved device
+router.delete('/trusted-devices', adminAuth, (req, res) => {
+  res.json({ success: true, revoked: adminAuthService.revokeAllTrustedDevices(db) });
+});
+
+// GET /api/admin/recovery-code/status
+router.get('/recovery-code/status', adminAuth, (req, res) => {
+  res.json({ success: true, ...adminAuthService.getRecoveryCodeStatus(db) });
+});
+
+// POST /api/admin/recovery-code { password } - generates a new recovery
+// code (replacing any old one), returned exactly once. Asks for the current
+// password again since this is the key to resetting it.
+router.post('/recovery-code', adminAuth, (req, res) => {
+  const ip = getRealClientIp(req);
+  const key = `admin-recovery:${ip}`;
+  const spamCheck = checkSpam(key);
+  if (spamCheck.blocked) {
+    return res.status(429).json({ success: false, message: spamCheck.message, remaining: spamCheck.remaining });
+  }
+  const { password } = req.body || {};
+  const settings = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get();
+  if (!password || !settings || !verifyPassword(password, settings.value)) {
+    recordAttempt(key);
+    return res.status(401).json({ success: false, message: 'Incorrect password.' });
+  }
+  clearAttempts(key);
+  res.json({ success: true, code: adminAuthService.generateRecoveryCode(db) });
+});
+
+// POST /api/admin/password/reset { recovery_code, new_password } - the
+// login page's "Forgot password". No login needed; the recovery code is the
+// proof. Rate-limited per IP. On success every session and saved device is
+// signed out and a fresh recovery code is returned once.
+router.post('/password/reset', (req, res) => {
+  const ip = getRealClientIp(req);
+  const key = `admin-reset:${ip}`;
+  const spamCheck = checkSpam(key);
+  if (spamCheck.blocked) {
+    return res.status(429).json({ success: false, message: spamCheck.message, remaining: spamCheck.remaining });
+  }
+  const { recovery_code, new_password } = req.body || {};
+  const result = adminAuthService.resetPasswordWithRecoveryCode(db, recovery_code, new_password);
+  if (!result.ok) {
+    if (result.reason === 'bad_code') recordAttempt(key);
+    return res.status(result.reason === 'bad_code' ? 401 : 400).json({ success: false, message: result.message });
+  }
+  clearAttempts(key);
+  sessionTokens.clear();
+  verifiedPasswordCache.clear();
+  console.log('🔑 Admin password reset with recovery code');
+  res.json({ success: true, recovery_code: result.newRecoveryCode });
 });
 
 // GET /api/admin/sessions
@@ -946,164 +1026,16 @@ router.get('/cash-reconciliation', adminAuth, (req, res) => {
   }
 });
 
-// GET /api/admin/analytics/summary?days=7, the Analytics page's single
+// GET /api/admin/analytics/summary - the Analytics page's single
 // aggregation endpoint (one round trip, matching the design guide's
-// ===== USERS: GUESTS =====
-// GET /api/admin/users/guests?days=N - real guest (anonymous hotspot
-// customer) sessions, live + recently ended. This app has no customer
-// account system at all (see /users/accounts below), so "Guests" here
-// covers the entire real customer base - matches the actual product,
-// not a subset of it.
+// "prefer backend aggregation" rule rather than N separate widget calls).
 //
-// "Source" (Coin Vendo / Voucher / Free Access) comes from a real join
-// against `transactions` on voucher_code, the same linkage /sales
-// already relies on. No data-usage-in-bytes field is returned - this
-// app has no per-session byte counters, matching Live Sessions' own
-// scope note.
-router.get('/users/guests', adminAuth, (req, res) => {
-  try {
-    // days=0 means "today only" (date('now', '-0 days') = today's date) -
-    // the previous `parseInt(...) || 7` fallback treated an explicit 0 as
-    // falsy and silently widened it to 7, making "today only" impossible
-    // to request at all.
-    const parsedDays = parseInt(req.query.days, 10);
-    const days = Math.min(Math.max(Number.isFinite(parsedDays) ? parsedDays : 7, 0), 90);
-
-    // Bug found live: a plain LEFT JOIN to transactions fans out one row
-    // PER TRANSACTION on that voucher_code, not one row per session/guest -
-    // a customer who topped up more than once (e.g. inserted coins in two
-    // separate batches) showed up as several duplicate "different guest
-    // sessions" in this list, even though Live Sessions correctly showed
-    // just the one real session. Correlated subqueries pick a single
-    // representative transaction (the most recent, non-convert one) per
-    // voucher_code instead, so this is back to one row per actual session.
-    const active = db.prepare(`
-      SELECT s.voucher_code, s.mac_address, s.ip_address, s.minutes_remaining,
-        s.is_paused, s.created_at, s.hard_expires_at, s.redeemed_code,
-        (SELECT t.type FROM transactions t WHERE t.voucher_code = s.voucher_code
-          AND t.type != 'convert' AND t.type != 'convert_down' ORDER BY t.id DESC LIMIT 1) as source_type,
-        (SELECT t.coin_value FROM transactions t WHERE t.voucher_code = s.voucher_code
-          AND t.type != 'convert' AND t.type != 'convert_down' ORDER BY t.id DESC LIMIT 1) as coin_value
-      FROM sessions s
-      ORDER BY s.created_at DESC
-    `).all();
-
-    const ended = db.prepare(`
-      SELECT sh.voucher_code, sh.mac_address, sh.started_at, sh.ended_at, sh.duration_seconds,
-        (SELECT t.type FROM transactions t WHERE t.voucher_code = sh.voucher_code
-          AND t.type != 'convert' AND t.type != 'convert_down' ORDER BY t.id DESC LIMIT 1) as source_type,
-        (SELECT t.coin_value FROM transactions t WHERE t.voucher_code = sh.voucher_code
-          AND t.type != 'convert' AND t.type != 'convert_down' ORDER BY t.id DESC LIMIT 1) as coin_value
-      FROM session_history sh
-      WHERE date(sh.ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
-      ORDER BY sh.ended_at DESC LIMIT 100
-    `).all(days);
-
-    const kpiPeriod = db.prepare(`
-      SELECT COUNT(*) as sessions, SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as revenue
-      FROM transactions WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
-    `).get(days);
-
-    // Shows a real device name (e.g. "Joshs-iPhone") instead of a bare
-    // MAC where one's been observed - see
-    // networkDevicesService.getDisplayNames().
-    const displayNames = require('../services/networkDevicesService').getDisplayNames([
-      ...active.map((s) => s.mac_address), ...ended.map((s) => s.mac_address),
-    ]);
-
-    return res.json({
-      success: true,
-      active: active.map((s) => ({
-        voucher_code: s.voucher_code, mac_address: s.mac_address, ip_address: s.ip_address,
-        minutes_remaining: s.minutes_remaining, is_paused: s.is_paused, created_at: s.created_at,
-        hard_expires_at: s.hard_expires_at, redeemed_code: s.redeemed_code,
-        source_type: s.source_type, coin_value: s.coin_value,
-        display_name: displayNames.get(String(s.mac_address || '').toLowerCase()) || null,
-      })),
-      recent: ended.map((s) => ({
-        voucher_code: s.voucher_code, mac_address: s.mac_address, started_at: s.started_at,
-        ended_at: s.ended_at, duration_seconds: s.duration_seconds,
-        source_type: s.source_type, coin_value: s.coin_value,
-        display_name: displayNames.get(String(s.mac_address || '').toLowerCase()) || null,
-      })),
-      kpi: { totalSessionsPeriod: kpiPeriod.sessions || 0, totalRevenuePeriod: kpiPeriod.revenue || 0, activeNow: active.filter((s) => s.is_paused !== 1).length },
-    });
-  } catch (err) {
-    console.error('Users guests error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
-
-// ===== USERS: DEVICES =====
-// GET /api/admin/users/devices?days=N - real device list, aggregated
-// from every MAC address this box has ever actually seen across
-// transactions and session_history (the only two durable, permanent
-// records - `sessions` itself is deleted on expiry). No vendor/OS/device-
-// type field is returned - this app does no device fingerprinting, so
-// that would have to be invented. Friendly names come from the real
-// client_labels table (Network > Devices' existing "Name Your Devices"
-// feature) where an operator has set one.
-router.get('/users/devices', adminAuth, (req, res) => {
-  try {
-    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 1), 365);
-
-    const macRows = db.prepare(`
-      SELECT mac_address,
-        MIN(created_at) as first_seen,
-        MAX(created_at) as last_seen,
-        COUNT(*) as transaction_count
-      FROM transactions
-      WHERE mac_address IS NOT NULL AND mac_address != '' AND date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
-      GROUP BY mac_address
-    `).all(days);
-
-    const sessionCounts = db.prepare(`
-      SELECT mac_address, COUNT(*) as session_count, SUM(duration_seconds) as total_duration_seconds
-      FROM session_history
-      WHERE mac_address IS NOT NULL AND date(ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
-      GROUP BY mac_address
-    `).all(days);
-    const sessionCountByMac = new Map(sessionCounts.map((r) => [r.mac_address, r]));
-
-    const activeMacs = new Set(db.prepare('SELECT mac_address FROM sessions').all().map((r) => r.mac_address));
-    // Bug found live: client_labels normalizes mac_address to lowercase
-    // on write (see POST /network/client-labels), but transactions/
-    // session_history store whatever case the client sent - a label set
-    // through the existing "Name Your Devices" feature never matched up
-    // here because the lookup key case didn't match. Normalize both
-    // sides to lowercase for the join.
-    const labels = db.prepare('SELECT mac_address, label FROM client_labels').all();
-    const labelByMac = new Map(labels.map((r) => [r.mac_address.toLowerCase(), r.label]));
-    const trusted = new Set(db.prepare('SELECT mac_address FROM trusted_devices').all().map((r) => r.mac_address.toLowerCase()));
-    // Falls back to the device's own auto-captured DHCP hostname (e.g.
-    // "Joshs-iPhone") when no manual label has been set - same
-    // client_labels-wins-over-hostname precedence Network Devices already
-    // uses. See networkDevicesService.getDisplayNames().
-    const hostnames = require('../services/networkDevicesService').getDisplayNames(macRows.map((r) => r.mac_address));
-
-    const devices = macRows.map((r) => ({
-      mac_address: r.mac_address,
-      label: labelByMac.get(r.mac_address.toLowerCase()) || hostnames.get(r.mac_address.toLowerCase()) || null,
-      first_seen: r.first_seen,
-      last_seen: r.last_seen,
-      session_count: sessionCountByMac.get(r.mac_address)?.session_count || 0,
-      total_duration_seconds: sessionCountByMac.get(r.mac_address)?.total_duration_seconds || 0,
-      online: activeMacs.has(r.mac_address),
-      trusted: trusted.has(r.mac_address.toLowerCase()),
-    })).sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen));
-
-    return res.json({ success: true, devices });
-  } catch (err) {
-    console.error('Users devices error:', err);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-});
-
-// GET /api/admin/analytics/summary?days=7, the Analytics page's single
-// aggregation endpoint (one round trip, matching the design guide's
-// "prefer backend aggregation" rule rather than N separate widget
-// calls). Compares the selected period against the immediately prior
-// period of the same length, real data only.
+// Range: ?preset=today|last7|last30|last90|this_month|last_month, or
+// ?from=YYYY-MM-DD&to=YYYY-MM-DD, or legacy ?days=N. Compare (optional,
+// default "previous"): ?compare=none|previous|year|custom, with
+// compare_from/compare_to for custom. See server/utils/dateRange.js.
+// Real data only; the aggregation itself lives in
+// server/services/analyticsService.js.
 //
 // Deliberately does NOT include: data usage in GB (this app has no
 // per-session/per-client bandwidth-volume accounting, only live
@@ -1115,173 +1047,38 @@ router.get('/users/devices', adminAuth, (req, res) => {
 // that happens to be zero, which is misleading - they're omitted from
 // the response entirely instead, and the frontend does not render those
 // widgets as a result.
+function resolveAnalyticsRange(req, res) {
+  const today = db.prepare("SELECT date('now', 'localtime') as d").get().d;
+  const range = resolveDateRanges(req.query, today);
+  if (range.error) {
+    res.status(400).json({ success: false, message: range.error });
+    return null;
+  }
+  return range;
+}
+
 router.get('/analytics/summary', adminAuth, (req, res) => {
   try {
-    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 90);
-
-    // Bug found live: revenue must NOT be filtered by mac_address - coin-
-    // slot transactions legitimately have no MAC recorded (matching
-    // /sales' own todaySales query, which never filters on it either).
-    // Only the distinct-user COUNT needs that filter; an earlier version
-    // of this query applied it to revenue too and silently undercounted
-    // real coin revenue whenever a box had any MAC-less transactions.
-    const period = db.prepare(`
-      SELECT
-        SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as revenue,
-        COUNT(DISTINCT CASE WHEN mac_address IS NOT NULL THEN mac_address END) as users,
-        COUNT(*) as transactions
-      FROM transactions
-      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
-    `).get(days);
-
-    const prevPeriod = db.prepare(`
-      SELECT
-        SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as revenue,
-        COUNT(DISTINCT CASE WHEN mac_address IS NOT NULL THEN mac_address END) as users,
-        COUNT(*) as transactions
-      FROM transactions
-      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days') AND date(created_at, 'localtime') < date('now', 'localtime', '-' || ? || ' days')
-    `).get(days * 2, days);
-
-    const sessionsPeriod = db.prepare(`
-      SELECT COUNT(*) as sessions, AVG(duration_seconds) as avg_duration
-      FROM session_history WHERE date(ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
-    `).get(days);
-    const sessionsPrev = db.prepare(`
-      SELECT COUNT(*) as sessions, AVG(duration_seconds) as avg_duration
-      FROM session_history WHERE date(ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days') AND date(ended_at, 'localtime') < date('now', 'localtime', '-' || ? || ' days')
-    `).get(days * 2, days);
-
-    const pctChange = (curr, prev) => {
-      if (!prev) return curr ? 100 : 0;
-      return Math.round(((curr - prev) / prev) * 1000) / 10;
-    };
-    const metric = (curr, prev) => ({ value: curr || 0, previousValue: prev || 0, changePercent: pctChange(curr || 0, prev || 0) });
-
-    const revenue = period.revenue || 0;
-    const users = period.users || 0;
-    const avgRevenuePerUser = users > 0 ? Math.round((revenue / users) * 100) / 100 : 0;
-    const prevAvgRevenuePerUser = (prevPeriod.users || 0) > 0 ? Math.round(((prevPeriod.revenue || 0) / prevPeriod.users) * 100) / 100 : 0;
-
-    // Daily revenue+sessions series for the primary chart.
-    const revenueSeries = db.prepare(`
-      SELECT date(created_at, 'localtime') as date,
-        SUM(CASE WHEN type != 'free' THEN coin_value ELSE 0 END) as revenue,
-        COUNT(*) as sessions
-      FROM transactions
-      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
-      GROUP BY date(created_at, 'localtime') ORDER BY date ASC
-    `).all(days);
-
-    // Revenue breakdown by real transaction type.
-    const breakdownRows = db.prepare(`
-      SELECT type, SUM(coin_value) as amount
-      FROM transactions
-      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days') AND type != 'free'
-      GROUP BY type ORDER BY amount DESC
-    `).all(days);
-    const breakdownTotal = breakdownRows.reduce((sum, r) => sum + (r.amount || 0), 0);
-    const typeLabels = { coin: 'Coin Sales', voucher: 'Voucher Sales', promo: 'Promo Redemptions' };
-    const revenueBreakdown = breakdownRows.map((r) => ({
-      type: r.type,
-      label: typeLabels[r.type] || r.type,
-      amount: r.amount || 0,
-      percent: breakdownTotal > 0 ? Math.round(((r.amount || 0) / breakdownTotal) * 1000) / 10 : 0,
-    }));
-
-    // Sessions by hour-of-day (0-23), real session_history rows in period.
-    const hourRows = db.prepare(`
-      SELECT CAST(strftime('%H', started_at, 'localtime') as INTEGER) as hour, COUNT(*) as count
-      FROM session_history
-      WHERE started_at IS NOT NULL AND date(ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
-      GROUP BY hour
-    `).all(days);
-    const hourMap = new Map(hourRows.map((r) => [r.hour, r.count]));
-    const sessionsByHour = Array.from({ length: 24 }, (_, h) => ({ hour: h, count: hourMap.get(h) || 0 }));
-
-    // New vs returning + repeat users, same "first-ever-transaction-date"
-    // logic already proven in /sales, generalized to the selected period.
-    const firstSeenRows = db.prepare(`
-      SELECT mac_address, MIN(date(created_at, 'localtime')) as first_date
-      FROM transactions WHERE mac_address IS NOT NULL GROUP BY mac_address
-    `).all();
-    const firstSeenByMac = new Map(firstSeenRows.map((r) => [r.mac_address, r.first_date]));
-    const periodMacRows = db.prepare(`
-      SELECT mac_address, date(created_at, 'localtime') as tx_date, COUNT(*) as tx_count
-      FROM transactions
-      WHERE mac_address IS NOT NULL AND date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
-      GROUP BY mac_address, tx_date
-    `).all(days);
-    const macTxCounts = new Map();
-    let newSessions = 0;
-    let returningSessions = 0;
-    periodMacRows.forEach((r) => {
-      const isNew = firstSeenByMac.get(r.mac_address) === r.tx_date;
-      if (isNew) newSessions += r.tx_count; else returningSessions += r.tx_count;
-      macTxCounts.set(r.mac_address, (macTxCounts.get(r.mac_address) || 0) + r.tx_count);
-    });
-    const repeatUsers = Array.from(macTxCounts.values()).filter((c) => c > 1).length;
-
-    // Top spenders (real per-client revenue ranking) for the selected
-    // period - same substitution as the Dashboard's Top Spenders widget,
-    // for the same reason (no per-client GB usage tracked).
-    const topSpenders = db.prepare(`
-      SELECT mac_address, SUM(coin_value) as total, COUNT(*) as transaction_count
-      FROM transactions
-      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days') AND mac_address IS NOT NULL AND mac_address != ''
-      GROUP BY mac_address ORDER BY total DESC LIMIT 5
-    `).all(days);
-    const topSpenderDurations = db.prepare(`
-      SELECT mac_address, AVG(duration_seconds) as avg_duration, COUNT(*) as session_count
-      FROM session_history
-      WHERE date(ended_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days') AND mac_address IS NOT NULL
-      GROUP BY mac_address
-    `).all(days);
-    const durationByMac = new Map(topSpenderDurations.map((r) => [r.mac_address, r]));
-    const topUsers = topSpenders.map((s) => ({
-      mac_address: s.mac_address,
-      total: s.total,
-      transaction_count: s.transaction_count,
-      session_count: durationByMac.get(s.mac_address)?.session_count || 0,
-      avg_duration_seconds: Math.round(durationByMac.get(s.mac_address)?.avg_duration || 0),
-    }));
-
-    // What customers actually tap on the portal home screen, ranked -
-    // see server/routes/portal.js's POST /track. Real data only: an
-    // event type nobody's tapped yet simply doesn't appear, never a
-    // fabricated zero row.
-    const portalClicks = db.prepare(`
-      SELECT event_type, COUNT(*) as count
-      FROM portal_events
-      WHERE date(created_at, 'localtime') >= date('now', 'localtime', '-' || ? || ' days')
-      GROUP BY event_type
-      ORDER BY count DESC
-    `).all(days);
-
-    return res.json({
-      success: true,
-      period: { days },
-      kpi: {
-        revenue: metric(revenue, prevPeriod.revenue || 0),
-        sessions: metric(sessionsPeriod.sessions || 0, sessionsPrev.sessions || 0),
-        users: metric(users, prevPeriod.users || 0),
-        avgSessionDurationSeconds: metric(Math.round(sessionsPeriod.avg_duration || 0), Math.round(sessionsPrev.avg_duration || 0)),
-        avgRevenuePerUser: metric(avgRevenuePerUser, prevAvgRevenuePerUser),
-      },
-      revenueSeries,
-      revenueBreakdown,
-      sessionsByHour,
-      sessionAnalytics: {
-        newSessions,
-        returningSessions,
-        avgSessionDurationSeconds: Math.round(sessionsPeriod.avg_duration || 0),
-        repeatUsers,
-      },
-      topUsers,
-      portalClicks,
-    });
+    const range = resolveAnalyticsRange(req, res);
+    if (!range) return;
+    return res.json({ success: true, ...getAnalyticsSummary(db, range) });
   } catch (err) {
     console.error('Analytics summary error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// GET /api/admin/analytics/sales-report - the Sales Report tab: totals,
+// per-day revenue, and the transaction list for the selected range (same
+// range/compare params as /analytics/summary). Capped at 500 rows; use the
+// CSV export (/transactions/export?from&to) for the full list.
+router.get('/analytics/sales-report', adminAuth, (req, res) => {
+  try {
+    const range = resolveAnalyticsRange(req, res);
+    if (!range) return;
+    return res.json({ success: true, ...getSalesReport(db, range) });
+  } catch (err) {
+    console.error('Sales report error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });
@@ -1349,11 +1146,23 @@ router.get('/dashboard/visitors', adminAuth, async (req, res) => {
 // GET /api/admin/transactions/export, full transaction history for CSV
 // export. /sales' recent_transactions is capped at 20 for the dashboard
 // preview table; this returns everything for bookkeeping purposes.
+// Optional ?from=YYYY-MM-DD&to=YYYY-MM-DD limits it to that inclusive range
+// (the Sales Report tab's Export CSV); without them it's the full history.
 router.get('/transactions/export', adminAuth, (req, res) => {
   try {
-    const transactions = db.prepare(
-      'SELECT * FROM transactions ORDER BY created_at DESC'
-    ).all();
+    let transactions;
+    if (req.query.from || req.query.to) {
+      const today = db.prepare("SELECT date('now', 'localtime') as d").get().d;
+      const range = resolveDateRanges({ from: req.query.from, to: req.query.to, compare: 'none' }, today);
+      if (range.error) return res.status(400).json({ success: false, message: range.error });
+      transactions = db.prepare(
+        "SELECT * FROM transactions WHERE date(created_at, 'localtime') BETWEEN ? AND ? ORDER BY created_at DESC"
+      ).all(range.from, range.to);
+    } else {
+      transactions = db.prepare(
+        'SELECT * FROM transactions ORDER BY created_at DESC'
+      ).all();
+    }
     return res.json({ success: true, transactions });
   } catch (err) {
     console.error('Admin transactions export error:', err);
@@ -2293,6 +2102,9 @@ router.post('/settings', adminAuth, async (req, res) => {
         upsert.run('admin_password', hashPassword(String(value)));
         upsert.run('must_change_password', '0');
         verifiedPasswordCache.clear();
+        // A new password ends every saved-device login (the current session
+        // stays signed in).
+        adminAuthService.revokeAllTrustedDevices(db);
         continue;
       }
       if (key === 'mikrotik_pass' || key === 'openwrt_pass') {
@@ -3889,65 +3701,6 @@ router.post('/install-update', adminAuth, (req, res) => {
       });
     });
   }, 500);
-});
-
-// ===== 2FA MANAGEMENT (opt-in, off by default) =====
-// Single pending-secret slot, not per-session - matches this app's current
-// single-admin-account reality (no multi-staff accounts yet). A generated
-// secret is NOT saved to the database until POST /2fa/confirm proves the
-// admin actually scanned it and can produce a valid code - otherwise a
-// half-finished setup (secret generated, browser closed before scanning)
-// could lock the admin out with a 2FA flag pointing at a secret nobody
-// ever actually saved into their authenticator app.
-let pending2faSecret = null;
-
-// POST /api/admin/2fa/setup - generates a new secret, does not enable
-// anything yet.
-router.post('/2fa/setup', adminAuth, (req, res) => {
-  pending2faSecret = totpService.generateSecret();
-  const otpauthUrl = totpService.buildOtpAuthUrl(pending2faSecret, 'admin', 'StarkFi');
-  res.json({ success: true, secret: pending2faSecret, otpauth_url: otpauthUrl });
-});
-
-// POST /api/admin/2fa/confirm - proves the admin actually scanned the
-// secret above and can produce a valid code before it's saved/enabled.
-router.post('/2fa/confirm', adminAuth, (req, res) => {
-  const { token } = req.body || {};
-  if (!pending2faSecret) {
-    return res.status(400).json({ success: false, message: 'No pending 2FA setup - call /2fa/setup first.' });
-  }
-  if (!totpService.verifyToken(pending2faSecret, token)) {
-    return res.status(401).json({ success: false, message: 'That code doesn\'t match. Check your authenticator app and try again.' });
-  }
-  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-  upsert.run('admin_2fa_secret', encryptSecret(pending2faSecret));
-  upsert.run('admin_2fa_enabled', '1');
-  pending2faSecret = null;
-  console.log('🔐 Admin 2FA enabled');
-  res.json({ success: true, message: '2FA is now enabled.' });
-});
-
-// POST /api/admin/2fa/disable - requires the current password again as
-// confirmation (a security-lowering action, same "ask again" principle as
-// the withdrawal-confirmation design from the wallet security discussion),
-// even though the caller is already authenticated via adminAuth.
-router.post('/2fa/disable', adminAuth, (req, res) => {
-  const { password } = req.body || {};
-  const settings = db.prepare("SELECT value FROM settings WHERE key = 'admin_password'").get();
-  if (!password || !settings || !verifyPassword(password, settings.value)) {
-    return res.status(401).json({ success: false, message: 'Incorrect password.' });
-  }
-  const upsert = db.prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)');
-  upsert.run('admin_2fa_enabled', '0');
-  upsert.run('admin_2fa_secret', '');
-  console.log('🔓 Admin 2FA disabled');
-  res.json({ success: true, message: '2FA has been disabled.' });
-});
-
-// GET /api/admin/2fa/status
-router.get('/2fa/status', adminAuth, (req, res) => {
-  const enabled = db.prepare("SELECT value FROM settings WHERE key = 'admin_2fa_enabled'").get()?.value === '1';
-  res.json({ success: true, enabled });
 });
 
 // GET /api/admin/version
@@ -7295,7 +7048,7 @@ router.get('/alerts', adminAuth, async (req, res) => {
 
     try {
       const { getRecentAlertEvents } = require('../services/alertEventService');
-      getRecentAlertEvents(30).forEach((e) => {
+      getRecentAlertEvents(200).forEach((e) => {
         alerts.push({
           id: `event-${e.id}`,
           severity: e.severity,
@@ -7313,9 +7066,12 @@ router.get('/alerts', adminAuth, async (req, res) => {
       });
     } catch (e) {}
 
+    // Anything from before the admin last used "delete all" stays hidden
+    // from the bell (the watchdog log itself is left alone).
+    const clearedAt = require('../services/alertEventService').getAlertsClearedAt() || '1970-01-01 00:00:00';
     const recentWatchdog = db.prepare(
-      "SELECT status, issues_json, checked_at FROM watchdog_events WHERE status != 'ok' ORDER BY checked_at DESC LIMIT 5"
-    ).all();
+      "SELECT status, issues_json, checked_at FROM watchdog_events WHERE status != 'ok' AND checked_at > ? ORDER BY checked_at DESC LIMIT 5"
+    ).all(clearedAt);
     recentWatchdog.forEach((r) => {
       let issues = [];
       try { issues = JSON.parse(r.issues_json); } catch (e) {}
@@ -7363,6 +7119,21 @@ router.get('/alerts', adminAuth, async (req, res) => {
     return res.json({ success: true, alerts });
   } catch (err) {
     console.error('Alerts error:', err);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+});
+
+// DELETE /api/admin/alerts - the notification bell's trash button. Deletes
+// every stored alert. Checks that are recomputed live from current state
+// (WAN health, low disk space) can't be deleted; they reappear for as long
+// as the condition is still true.
+router.delete('/alerts', adminAuth, (req, res) => {
+  try {
+    const deleted = require('../services/alertEventService').clearAllAlertEvents();
+    console.log(`🗑️ Admin deleted all alerts (${deleted})`);
+    return res.json({ success: true, deleted });
+  } catch (err) {
+    console.error('Clear alerts error:', err);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 });

@@ -1673,10 +1673,6 @@ if (settingCount.count === 0) {
   // behavior is completely unchanged until this is explicitly changed.
   insertSetting.run('venue_type', 'piso_wifi');
 
-  // Admin login 2FA (TOTP) - opt-in, off by default.
-  insertSetting.run('admin_2fa_enabled', '0');
-  insertSetting.run('admin_2fa_secret', '');
-
   // Network mode ('standalone' = built-in nftables/tc, no external router needed)
   insertSetting.run('network_mode', 'standalone');
   insertSetting.run('mikrotik_ip', '');
@@ -1771,12 +1767,9 @@ db.prepare("UPDATE settings SET value = 'standalone' WHERE key = 'network_mode' 
   upsertIfMissing('isp_plan_mbps', '0');
   upsertIfMissing('server_lan_mac', '');
   upsertIfMissing('account_tier', 'free');
-  // Admin login 2FA (TOTP) - opt-in, off by default so nothing changes for
-  // anyone who doesn't turn it on. admin_2fa_secret is encrypted at rest
-  // the same way mikrotik_pass is (secretCrypto.js) - it's effectively a
-  // credential, same resale/misuse risk class.
-  upsertIfMissing('admin_2fa_enabled', '0');
-  upsertIfMissing('admin_2fa_secret', '');
+  // Admin login 2FA was removed. Drop the leftover flag and (encrypted)
+  // secret on installs that had it, so a stale credential isn't kept around.
+  db.prepare("DELETE FROM settings WHERE key IN ('admin_2fa_enabled', 'admin_2fa_secret')").run();
   upsertIfMissing('venue_type', 'piso_wifi');
   // Happy Hour promotion (Promos page) - a scheduled multiplier ("2x
   // time") on Regular coin purchases. Disabled by default so nothing
@@ -2330,7 +2323,7 @@ db.exec(`
   );
 
   -- RBAC foundation only - this app still authenticates via the single
-  -- admin_password setting (+ optional TOTP), nothing reads or enforces
+  -- admin_password setting, nothing reads or enforces
   -- this table yet. Exists so a future multi-user/site-scoped permissions
   -- page has a real table to build against instead of starting from
   -- nothing, per the sequencing note in the multi-tenant decision (data

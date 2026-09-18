@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="img/logo-icon.png">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="css/themes.css">
-  <link rel="stylesheet" href="css/admin.css">
+  <link rel="stylesheet" href="css/admin.css?v=5">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
@@ -93,6 +93,8 @@
         <span id="loginErrorMsg">Invalid password</span>
       </div>
 
+     <div id="loginPanel">
+
      <div class="form-group" style="text-align:left">
   <label class="form-label">Username</label>
   <input
@@ -128,25 +130,52 @@
   </div>
 </div>
 
-      <!-- Only shown after a correct password, when 2FA is enabled on this
-           account - hidden by default so accounts that never turn 2FA on
-           see no change at all. -->
-      <div class="form-group" id="login2faGroup" style="text-align:left;display:none;">
-        <label class="form-label">2FA Code</label>
-        <input
-          type="text"
-          id="login2faToken"
-          class="form-control"
-          placeholder="6-digit code from your authenticator app"
-          inputmode="numeric"
-          maxlength="6"
-          onkeypress="if(event.key==='Enter') doLogin()"
-        >
-      </div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-secondary);margin:0 0 16px;justify-content:center;cursor:pointer;">
+        <input type="checkbox" id="loginRemember"> Remember this device
+      </label>
 
       <button class="btn btn-primary" onclick="doLogin()" style="width:100%; justify-content:center; padding:12px;">
         <i class="fas fa-sign-in-alt"></i> Login
       </button>
+
+      <div style="text-align:center;margin-top:14px;">
+        <a href="#" onclick="showResetPanel(); return false;" style="font-size:13px;color:var(--text-muted);text-decoration:none;">Forgot password?</a>
+      </div>
+      </div><!-- /loginPanel -->
+
+      <div id="loginNotice" style="display:none;text-align:left;font-size:13px;color:var(--accent-green);margin-bottom:16px;"></div>
+
+      <div id="resetPanel" style="display:none;text-align:left;">
+        <div class="form-group" style="text-align:left">
+          <label class="form-label">Recovery Code</label>
+          <input type="text" id="resetCode" class="form-control" placeholder="XXXX-XXXX-XXXX-XXXX" autocomplete="off" spellcheck="false" style="font-family:monospace;letter-spacing:1px;text-transform:uppercase;" onkeypress="if(event.key==='Enter') doPasswordReset()">
+        </div>
+        <div class="form-group" style="text-align:left">
+          <label class="form-label">New Password</label>
+          <input type="password" id="resetNewPassword" class="form-control" placeholder="At least 8 characters" autocomplete="new-password" onkeypress="if(event.key==='Enter') doPasswordReset()">
+        </div>
+        <div class="form-group" style="text-align:left">
+          <label class="form-label">Confirm New Password</label>
+          <input type="password" id="resetConfirmPassword" class="form-control" placeholder="Repeat new password" autocomplete="new-password" onkeypress="if(event.key==='Enter') doPasswordReset()">
+        </div>
+        <div id="resetMessage" style="display:none;font-size:13px;color:var(--accent-red);margin-bottom:14px;"></div>
+        <button class="btn btn-primary" onclick="doPasswordReset()" style="width:100%; justify-content:center; padding:12px;">
+          <i class="fas fa-key"></i> Reset Password
+        </button>
+        <div style="text-align:center;margin-top:14px;">
+          <a href="#" onclick="showLoginPanel(); return false;" style="font-size:13px;color:var(--text-muted);text-decoration:none;">Back to login</a>
+        </div>
+      </div>
+
+      <div id="resetDonePanel" style="display:none;text-align:left;">
+        <div class="form-group" style="text-align:left">
+          <label class="form-label">New recovery code (shown once, save it now)</label>
+          <input type="text" id="resetNewCode" class="form-control" readonly style="font-family:monospace;letter-spacing:1px;font-size:15px;">
+        </div>
+        <button class="btn btn-primary" onclick="finishPasswordReset()" style="width:100%; justify-content:center; padding:12px;">
+          <i class="fas fa-sign-in-alt"></i> Continue to Login
+        </button>
+      </div>
     </div>
   </div>
 </div>
@@ -362,7 +391,12 @@
             <span class="notif-dot" id="notifDot" style="display:none;"></span>
           </button>
           <div class="notif-dropdown" id="notifDropdown" style="display:none;">
-            <div class="notif-dropdown-header">Alerts</div>
+            <div class="notif-dropdown-header" style="display:flex;align-items:center;justify-content:space-between;">
+              <span>Alerts</span>
+              <button class="header-icon-btn" onclick="deleteAllAlerts(event)" title="Delete all alerts" id="notifTrashBtn" style="padding:4px 8px;">
+                <i class="fas fa-trash-can"></i>
+              </button>
+            </div>
             <div class="notif-dropdown-body" id="notifDropdownBody">
               <div class="loading"><i class="fas fa-spinner fa-spin"></i></div>
             </div>
@@ -427,15 +461,15 @@
 
 <script src="js/comingSoon.js"></script>
 <script src="js/flyoutNav.js"></script>
-<script src="js/app.js"></script>
-<script src="js/dashboard.js?v=1"></script>
-<script src="js/analytics.js"></script>
+<script src="js/app.js?v=2"></script>
+<script src="js/dashboard.js?v=10"></script>
+<script src="js/analytics.js?v=2"></script>
 <script src="js/users.js?v=1"></script>
 <script src="js/hotspot-settings.js"></script>
 <script src="js/satellite-kiosks.js"></script>
 <script src="js/coin-slot-gpio.js"></script>
 <script src="js/sessions.js?v=1"></script>
-<script src="js/sales.js"></script>
+<script src="js/sales.js?v=2"></script>
 <script src="js/rates.js"></script>
 <script src="js/vouchers.js"></script>
 <script src="js/voucher-designer.js"></script>
@@ -444,7 +478,7 @@
 <script src="js/access-points.js"></script>
 <script src="js/network-devices.js"></script>
 <script src="js/promos.js"></script>
-<script src="js/settings.js"></script>
+<script src="js/settings.js?v=2"></script>
 <script src="js/network.js"></script>
 <script src="js/mikrotik-network-power.js"></script>
 <script src="js/bandwidth-profiles.js"></script>
@@ -461,6 +495,6 @@
 <script src="js/reports.js"></script>
 <script src="js/movies.js?v=5"></script>
 <script src="js/tv-shows.js?v=3"></script>
-<script src="js/notifications.js"></script>
+<script src="js/notifications.js?v=2"></script>
 </body>
 </html>

@@ -185,51 +185,38 @@
     </button>
   </div>
 
-  <!-- 2FA (TOTP) -->
+  <!-- Saved devices (browsers that skip the login screen) -->
   <div class="card">
     <div class="card-header">
       <div class="card-title">
-        <i class="fas fa-shield-halved" style="margin-right:8px;color:var(--accent-blue);"></i>Two-Factor Authentication
+        <i class="fas fa-laptop" style="margin-right:8px;color:var(--accent-blue);"></i>Saved Devices
       </div>
-      <span id="twoFaStatusLabel" style="font-size:12px;color:var(--text-muted);">Loading...</span>
+      <button class="btn btn-sm btn-secondary" onclick="revokeAllTrustedDevices()">Revoke All</button>
     </div>
-    <p style="font-size:13px;color:var(--text-muted);margin:0 0 12px;">
-      Adds a second code (from an authenticator app like Google Authenticator) on top of your password. Off by default - turn it on for real protection once this box handles real money.
-    </p>
+    <div id="trustedDevicesList"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
+  </div>
 
-    <div id="twoFaOffState">
-      <button class="btn btn-primary" onclick="start2faSetup()">
-        <i class="fas fa-qrcode"></i> Enable 2FA
-      </button>
+  <!-- Recovery code (used by "Forgot password" on the login screen) -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">
+        <i class="fas fa-life-ring" style="margin-right:8px;color:var(--accent-blue);"></i>Recovery Code
+      </div>
+      <span id="recoveryStatusLabel" style="font-size:12px;color:var(--text-muted);">Loading...</span>
     </div>
-
-    <div id="twoFaSetupState" style="display:none;">
-      <div class="form-group">
-        <label class="form-label">1. Add this to your authenticator app</label>
-        <p style="font-size:12px;color:var(--text-muted);margin:4px 0 8px;">Most apps let you type in a "setup key" manually instead of scanning a QR code - paste this in:</p>
-        <input type="text" id="twoFaSecretDisplay" class="form-control" readonly style="font-family:monospace;letter-spacing:1px;">
-      </div>
-      <div class="form-group">
-        <label class="form-label">2. Enter the 6-digit code it shows</label>
-        <input type="text" id="twoFaConfirmToken" class="form-control" placeholder="123456" inputmode="numeric" maxlength="6">
-      </div>
-      <button class="btn btn-primary" onclick="confirm2faSetup()">
-        <i class="fas fa-check"></i> Confirm and Enable
-      </button>
-      <button class="btn btn-secondary" onclick="cancel2faSetup()">Cancel</button>
+    <div class="form-group">
+      <label class="form-label">Current Password</label>
+      <input type="password" id="recoveryPassword" class="form-control" placeholder="Enter your password" autocomplete="current-password">
     </div>
-
-    <div id="twoFaOnState" style="display:none;">
-      <div style="background:var(--bg-primary);padding:10px 12px;border-radius:6px;font-size:12px;color:var(--text-muted);margin-bottom:12px;">
-        <i class="fas fa-check-circle" style="color:var(--accent-green);"></i> 2FA is enabled on this account.
+    <button class="btn btn-primary" onclick="generateRecoveryCode()">
+      <i class="fas fa-key"></i> <span id="recoveryBtnLabel">Generate Recovery Code</span>
+    </button>
+    <div id="recoveryCodeReveal" style="display:none;margin-top:16px;">
+      <label class="form-label">Your recovery code (shown once, save it now)</label>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="recoveryCodeValue" class="form-control" readonly style="font-family:monospace;letter-spacing:1px;font-size:15px;">
+        <button class="btn btn-secondary" onclick="copyRecoveryCode()"><i class="fas fa-copy"></i> Copy</button>
       </div>
-      <div class="form-group">
-        <label class="form-label">Current Password (required to disable)</label>
-        <input type="password" id="twoFaDisablePassword" class="form-control" placeholder="Enter your password">
-      </div>
-      <button class="btn btn-danger" onclick="disable2fa()">
-        <i class="fas fa-times"></i> Disable 2FA
-      </button>
     </div>
   </div>
 

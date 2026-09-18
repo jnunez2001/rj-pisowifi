@@ -20,28 +20,36 @@
 
 const db = require('../config/database');
 
-const MAX_EVENTS_KEPT = 500;
-
 function logAlertEvent(severity, code, title, detail = null) {
   try {
     db.prepare(
       'INSERT INTO alert_events (severity, code, title, detail) VALUES (?, ?, ?, ?)'
     ).run(severity, code, title, detail);
-
-    db.prepare(`
-      DELETE FROM alert_events WHERE id NOT IN (
-        SELECT id FROM alert_events ORDER BY id DESC LIMIT ?
-      )
-    `).run(MAX_EVENTS_KEPT);
+    // Alerts are never removed automatically (used to be trimmed to the
+    // newest 500 here); they stay until the admin deletes them with the
+    // trash button on the bell (clearAllAlertEvents below).
   } catch (e) {
     console.error('🔔 [AlertEvents] Failed to log alert event:', e.message);
   }
 }
 
-function getRecentAlertEvents(limit = 30) {
+function getRecentAlertEvents(limit = 200) {
   return db.prepare(
     'SELECT id, severity, code, title, detail, created_at FROM alert_events ORDER BY created_at DESC LIMIT ?'
   ).all(limit);
 }
 
-module.exports = { logAlertEvent, getRecentAlertEvents };
+// Manual "delete all" from the notification bell. Also records when it
+// happened so watchdog-derived alerts (which live in watchdog_events, a log
+// other pages still read) are hidden from the bell without deleting that log.
+function clearAllAlertEvents() {
+  const deleted = db.prepare('DELETE FROM alert_events').run().changes;
+  db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('alerts_cleared_at', datetime('now'))").run();
+  return deleted;
+}
+
+function getAlertsClearedAt() {
+  return db.prepare("SELECT value FROM settings WHERE key = 'alerts_cleared_at'").get()?.value || null;
+}
+
+module.exports = { logAlertEvent, getRecentAlertEvents, clearAllAlertEvents, getAlertsClearedAt };

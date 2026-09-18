@@ -3,15 +3,61 @@
     <div class="page-title">Analytics</div>
   </div>
   <div class="zf3-header-right">
-    <select id="analyticsRangeSelect" class="zf3-view-pill" style="border:1px solid var(--border-color);background:var(--bg-card);color:var(--text-primary);font-family:inherit;cursor:pointer;" onchange="loadAnalytics()">
-      <option value="7">Last 7 Days</option>
-      <option value="30">Last 30 Days</option>
-      <option value="90">Last 90 Days</option>
-    </select>
     <div class="zf3-icon-btn" onclick="loadAnalytics()" title="Refresh"><i class="fas fa-rotate-right"></i></div>
     <div class="zf3-icon-btn" onclick="exportAnalyticsCsv()" title="Export CSV"><i class="fas fa-download"></i></div>
   </div>
 </div>
+
+<div class="an-tabs">
+  <button class="an-tab active" id="anTabBtnOverview" onclick="switchAnalyticsTab('overview')">Overview</button>
+  <button class="an-tab" id="anTabBtnSales" onclick="switchAnalyticsTab('sales')">Sales Report</button>
+</div>
+
+<!-- DATE RANGE + COMPARE (shared by both tabs) -->
+<div class="card an-controls">
+  <div class="an-row">
+    <div class="an-field">
+      <label class="form-label">Date range</label>
+      <select id="anPreset" class="form-control" onchange="onAnalyticsPresetChange()">
+        <option value="today">Today</option>
+        <option value="last7" selected>Last 7 days</option>
+        <option value="last30">Last 30 days</option>
+        <option value="last90">Last 90 days</option>
+        <option value="this_month">This month</option>
+        <option value="last_month">Last month</option>
+        <option value="custom">Custom range</option>
+      </select>
+    </div>
+    <div class="an-field an-custom" id="anCustomRange" style="display:none;">
+      <label class="form-label">From</label>
+      <input type="date" id="anFrom" class="form-control" onchange="onAnalyticsCustomChange()">
+    </div>
+    <div class="an-field an-custom" id="anCustomRangeTo" style="display:none;">
+      <label class="form-label">To</label>
+      <input type="date" id="anTo" class="form-control" onchange="onAnalyticsCustomChange()">
+    </div>
+    <div class="an-field an-compare-toggle">
+      <label class="an-check"><input type="checkbox" id="anCompareOn" checked onchange="onAnalyticsCompareChange()"> Compare to</label>
+      <select id="anCompareMode" class="form-control" onchange="onAnalyticsCompareChange()">
+        <option value="previous" selected>Previous period</option>
+        <option value="year">Same period last year</option>
+        <option value="custom">Custom dates</option>
+      </select>
+    </div>
+    <div class="an-field an-custom" id="anCompareFromWrap" style="display:none;">
+      <label class="form-label">Compare from</label>
+      <input type="date" id="anCompareFrom" class="form-control" onchange="onAnalyticsCompareChange()">
+    </div>
+    <div class="an-field an-custom" id="anCompareToWrap" style="display:none;">
+      <label class="form-label">Compare to</label>
+      <input type="date" id="anCompareTo" class="form-control" onchange="onAnalyticsCompareChange()">
+    </div>
+  </div>
+  <div class="an-range-label" id="anRangeLabel"></div>
+  <div class="an-error" id="anRangeError" style="display:none;"></div>
+</div>
+
+<div id="anTabOverview">
 
 <!-- KPI CARDS -->
 <div class="zf3-stat-grid" style="grid-template-columns:repeat(5,1fr);">
@@ -20,8 +66,8 @@
       <div class="zf3-stat-label">Total Revenue</div>
       <i class="fas fa-wallet zf3-stat-icon"></i>
     </div>
-    <div class="zf3-stat-value" id="anRevenue">₱0</div>
-    <div class="zf3-stat-trend" id="anRevenueTrend">vs previous period</div>
+    <div class="zf3-stat-value" id="anRevenue">&#8369;0</div>
+    <div class="zf3-stat-trend" id="anRevenueTrend"></div>
   </div>
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
@@ -29,7 +75,7 @@
       <i class="fas fa-user-group zf3-stat-icon"></i>
     </div>
     <div class="zf3-stat-value" id="anSessions">0</div>
-    <div class="zf3-stat-trend" id="anSessionsTrend">vs previous period</div>
+    <div class="zf3-stat-trend" id="anSessionsTrend"></div>
   </div>
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
@@ -37,7 +83,7 @@
       <i class="fas fa-user zf3-stat-icon"></i>
     </div>
     <div class="zf3-stat-value" id="anUsers">0</div>
-    <div class="zf3-stat-trend" id="anUsersTrend">vs previous period</div>
+    <div class="zf3-stat-trend" id="anUsersTrend"></div>
   </div>
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
@@ -45,15 +91,15 @@
       <i class="fas fa-clock zf3-stat-icon"></i>
     </div>
     <div class="zf3-stat-value" id="anAvgDuration">0m</div>
-    <div class="zf3-stat-trend" id="anAvgDurationTrend">vs previous period</div>
+    <div class="zf3-stat-trend" id="anAvgDurationTrend"></div>
   </div>
   <div class="zf3-stat-card">
     <div class="zf3-stat-top">
       <div class="zf3-stat-label">Avg. Revenue / User</div>
       <i class="fas fa-money-bill zf3-stat-icon"></i>
     </div>
-    <div class="zf3-stat-value" id="anRevenuePerUser">₱0</div>
-    <div class="zf3-stat-trend" id="anRevenuePerUserTrend">vs previous period</div>
+    <div class="zf3-stat-value" id="anRevenuePerUser">&#8369;0</div>
+    <div class="zf3-stat-trend" id="anRevenuePerUserTrend"></div>
   </div>
 </div>
 
@@ -110,3 +156,144 @@
     <div id="anPortalClicks"><div class="loading"><i class="fas fa-spinner fa-spin"></i></div></div>
   </div>
 </div>
+
+</div><!-- /anTabOverview -->
+
+<!-- ===== SALES REPORT TAB (moved here from the old standalone Sales Report page) ===== -->
+<div id="anTabSales" style="display:none;">
+
+  <div class="stat-grid" style="margin-bottom:16px;">
+    <div class="stat-card">
+      <div class="stat-label">Revenue</div>
+      <div class="stat-value" id="salesRevenue">&#8369;0</div>
+      <div class="zf3-stat-trend" id="salesRevenueTrend"></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Transactions</div>
+      <div class="stat-value" id="salesTransactions">0</div>
+      <div class="zf3-stat-trend" id="salesTransactionsTrend"></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Time Sold</div>
+      <div class="stat-value" id="salesMinutes">0</div>
+      <div class="zf3-stat-trend" id="salesMinutesTrend"></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Free Claims</div>
+      <div class="stat-value" id="salesFreeClaims">0</div>
+      <div class="zf3-stat-trend" id="salesFreeClaimsTrend"></div>
+    </div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;align-items:start;">
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Revenue by Day</div>
+      </div>
+      <div style="position:relative;height:220px;">
+        <canvas id="salesChart"></canvas>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">Daily Breakdown</div>
+      </div>
+      <div id="dailyBreakdown" style="display:flex;flex-direction:column;gap:8px;max-height:220px;overflow-y:auto;"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Transaction History</div>
+        <div class="card-subtitle" id="salesTruncatedNote" style="display:none;"></div>
+      </div>
+    </div>
+    <div class="table-wrapper">
+      <table class="table-stack">
+        <thead>
+          <tr>
+            <th>Session ID</th>
+            <th>Amount</th>
+            <th>Time Added</th>
+            <th>Type</th>
+            <th>Date &amp; Time</th>
+          </tr>
+        </thead>
+        <tbody id="salesTable">
+          <tr><td colspan="5"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- CASH RECONCILIATION (own period fields; independent of the range above) -->
+  <div class="card" style="margin-top:16px;">
+    <div class="card-header">
+      <div>
+        <div class="card-title">Cash Reconciliation</div>
+        <div class="card-subtitle">Compare the coins you actually counted against what the system logged for the same period</div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">Period Start</label>
+        <input type="datetime-local" id="reconPeriodStart" class="form-control">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Period End</label>
+        <input type="datetime-local" id="reconPeriodEnd" class="form-control">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Physical Coins Counted (&#8369;)</label>
+        <input type="number" id="reconPhysicalAmount" class="form-control" min="0" step="0.01" placeholder="e.g. 250">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Notes (optional)</label>
+      <input type="text" id="reconNotes" class="form-control" placeholder="e.g. End of day count, Aug 20">
+    </div>
+    <button class="btn btn-primary" onclick="submitCashReconciliation()">
+      <i class="fas fa-calculator"></i> Compare &amp; Save
+    </button>
+
+    <div id="reconResult" style="display:none;margin-top:16px;padding:14px 16px;border-radius:10px;border:1px solid var(--border-color);background:var(--bg-card);">
+      <div style="display:flex;gap:24px;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:11px;color:var(--text-muted);font-weight:600;">System Logged</div>
+          <div style="font-size:20px;font-weight:700;color:var(--text-primary);" id="reconSystemAmount">&#8369;0</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text-muted);font-weight:600;">You Counted</div>
+          <div style="font-size:20px;font-weight:700;color:var(--text-primary);" id="reconPhysicalDisplay">&#8369;0</div>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--text-muted);font-weight:600;">Difference</div>
+          <div style="font-size:20px;font-weight:700;" id="reconDifference">&#8369;0</div>
+        </div>
+      </div>
+      <div style="font-size:13px;color:var(--text-secondary);margin-top:8px;" id="reconMessage"></div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <div class="card-title" style="margin-bottom:10px;">Recent Reconciliations</div>
+      <div class="table-wrapper">
+        <table class="table-stack">
+          <thead>
+            <tr>
+              <th>Period</th>
+              <th>System Logged</th>
+              <th>Physical Count</th>
+              <th>Difference</th>
+              <th>Notes</th>
+              <th>Saved</th>
+            </tr>
+          </thead>
+          <tbody id="reconHistoryTable">
+            <tr><td colspan="6"><div class="loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div><!-- /anTabSales -->

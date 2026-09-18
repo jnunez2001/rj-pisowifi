@@ -1,4 +1,10 @@
+// ===== SALES REPORT (a tab inside the Analytics page) =====
+// Uses the same date range + compare selector as the Overview tab
+// (anState / anBuildQuery in analytics.js). Data comes from
+// GET /api/admin/analytics/sales-report; the standalone Sales Report page
+// this used to drive has been retired.
 let salesChart = null;
+let salesRequestSeq = 0;
 
 function escapeSalesHtml(str) {
   const div = document.createElement('div');
@@ -6,118 +12,119 @@ function escapeSalesHtml(str) {
   return div.innerHTML;
 }
 
-async function loadSales() {
+function destroySalesChart() {
+  if (salesChart) { salesChart.destroy(); salesChart = null; }
+}
+
+async function loadSales(query) {
+  if (!query) {
+    const built = anBuildQuery();
+    if (built.error) return;
+    query = built.query;
+  }
+  const seq = ++salesRequestSeq;
   try {
-    const data = await apiCall('GET', '/api/admin/sales');
-    if (!data.success) return;
-
-    // Update stat cards
-    document.getElementById('salesTodayTotal').textContent =
-      `₱${(data.today.total_income || 0).toFixed(2)}`;
-    document.getElementById('salesTodayCount').textContent =
-      `${data.today.transactions || 0} transactions`;
-    document.getElementById('salesMinutes').textContent =
-      formatDurationShort(data.today.minutes_sold || 0);
-
-    const weekTotal = data.week.reduce((s, d) => s + (d.total || 0), 0);
-    document.getElementById('salesWeekTotal').textContent = `₱${weekTotal.toFixed(2)}`;
-    // Bug: this used to be weekTotal * 4, a rough guess, not real data.
-    // The server now computes an actual month-to-date total.
-    document.getElementById('salesMonthTotal').textContent = `₱${(data.month?.total_income || 0).toFixed(2)}`;
-
-    // Free claims card
-    const freeClaimsEl = document.getElementById('salesFreeClaims');
-    if (freeClaimsEl) {
-      freeClaimsEl.textContent = `${data.today.free_claims || 0} claims`;
+    const data = await apiCall('GET', `/api/admin/analytics/sales-report?${query}`);
+    if (seq !== salesRequestSeq) return; // a newer selection superseded this one
+    if (!data.success) {
+      if (typeof anShowError === 'function') anShowError(data.message || 'Could not load the sales report.');
+      return;
     }
-    const freeMinutesEl = document.getElementById('salesFreeMinutes');
-    if (freeMinutesEl) {
-      freeMinutesEl.textContent = `${Math.round(data.today.free_minutes || 0)} mins given`;
+    anApplyResolved(data.period, data.compare);
+    renderSalesCards(data.totals, data.compare);
+    buildSalesChart(data.daily);
+    buildDailyBreakdown(data.daily);
+    buildTransactionTable(data.transactions || []);
+
+    const note = document.getElementById('salesTruncatedNote');
+    if (note) {
+      if (data.truncated) {
+        note.textContent = `Showing the most recent ${data.transactionLimit} of ${data.transactionCount} transactions. Export CSV for the full list.`;
+        note.style.display = '';
+      } else {
+        note.style.display = 'none';
+      }
     }
-
-    // Build chart
-    buildSalesChart(data.week);
-
-    // Daily breakdown
-    buildDailyBreakdown(data.week);
-
-    // Transaction table
-    buildTransactionTable(data.recent_transactions || []);
 
     initReconciliationDefaults();
     loadReconciliationHistory();
-
-  } catch(e) {
+  } catch (e) {
     console.error('Sales error:', e);
+    if (seq === salesRequestSeq && typeof anShowError === 'function') anShowError('Could not load the sales report.');
   }
 }
 
-function buildSalesChart(weekData) {
+function renderSalesCards(totals, compare) {
+  document.getElementById('salesRevenue').textContent = `\u20B1${totals.revenue.value.toFixed(2)}`;
+  document.getElementById('salesRevenueTrend').innerHTML = trendHtml(totals.revenue.changePercent, compare);
+
+  document.getElementById('salesTransactions').textContent = totals.transactions.value;
+  document.getElementById('salesTransactionsTrend').innerHTML = trendHtml(totals.transactions.changePercent, compare);
+
+  document.getElementById('salesMinutes').textContent = formatDurationShort(totals.minutesSold.value || 0);
+  document.getElementById('salesMinutesTrend').innerHTML = trendHtml(totals.minutesSold.changePercent, compare);
+
+  document.getElementById('salesFreeClaims').textContent = totals.freeClaims.value;
+  document.getElementById('salesFreeClaimsTrend').innerHTML = trendHtml(totals.freeClaims.changePercent, compare);
+}
+
+function buildSalesChart(daily) {
   const canvas = document.getElementById('salesChart');
   if (!canvas) return;
-  if (salesChart) { salesChart.destroy(); salesChart = null; }
+  destroySalesChart();
 
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-  const textColor = isDark ? '#888' : '#999';
+  const textColor = isDark ? '#a7b0bd' : '#64748b';
   const gridColor = isDark ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
-
-  const labels = [...weekData].reverse().map(d =>
-    new Date(d.date).toLocaleDateString('en-PH', {
-      weekday: 'short', month: 'short', day: 'numeric'
-    })
-  );
-  const values = [...weekData].reverse().map(d => d.total || 0);
 
   salesChart = new Chart(canvas.getContext('2d'), {
     type: 'bar',
     data: {
-      labels,
+      labels: daily.map((d) => anFmtDate(d.date, false)),
       datasets: [{
-        label: 'Revenue (₱)',
-        data: values,
-        backgroundColor: 'rgba(26,156,99,0.7)',
-        borderColor: '#1a9c63',
-        borderWidth: 2,
-        borderRadius: 6
-      }]
+        label: 'Revenue (\u20B1)',
+        data: daily.map((d) => d.total || 0),
+        backgroundColor: '#2563eb',
+        borderRadius: 4,
+        maxBarThickness: 28,
+      }],
     },
     options: {
       responsive: true,
+      maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: c => `₱${c.parsed.y.toFixed(2)}` } }
+        tooltip: {
+          callbacks: {
+            title: (items) => (items.length ? anFmtDate(daily[items[0].dataIndex].date, true) : ''),
+            label: (c) => `\u20B1${c.parsed.y.toFixed(2)}`,
+          },
+        },
       },
       scales: {
-        x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-        y: {
-          grid: { color: gridColor },
-          ticks: { color: textColor, callback: v => `₱${v}` },
-          beginAtZero: true
-        }
-      }
-    }
+        x: { grid: { display: false }, ticks: { color: textColor, font: { size: 10 }, autoSkip: true, maxTicksLimit: 12 } },
+        y: { grid: { color: gridColor }, ticks: { color: textColor, callback: (v) => `\u20B1${v}` }, beginAtZero: true },
+      },
+    },
   });
 }
 
-function buildDailyBreakdown(weekData) {
+function buildDailyBreakdown(daily) {
   const el = document.getElementById('dailyBreakdown');
   if (!el) return;
 
-  const maxVal = Math.max(...weekData.map(d => d.total || 0), 1);
+  const maxVal = Math.max(...daily.map((d) => d.total || 0), 1);
 
-  el.innerHTML = [...weekData].reverse().map(d => {
+  el.innerHTML = [...daily].reverse().map((d) => {
     const pct = Math.round(((d.total || 0) / maxVal) * 100);
-    const date = new Date(d.date).toLocaleDateString('en-PH', {
-      weekday: 'short', month: 'short', day: 'numeric'
-    });
     return `
       <div style="display:flex;align-items:center;gap:10px;">
-        <div style="font-size:12px;color:var(--text-muted);width:100px;flex-shrink:0;">${date}</div>
+        <div style="font-size:12px;color:var(--text-muted);width:100px;flex-shrink:0;">${anFmtDate(d.date, false)}</div>
         <div style="flex:1;background:var(--bg-primary);border-radius:4px;height:8px;overflow:hidden;">
           <div style="width:${pct}%;background:var(--accent-green);height:100%;border-radius:4px;transition:width 0.5s;"></div>
         </div>
-        <div style="font-size:13px;font-weight:700;color:var(--text-primary);width:60px;text-align:right;">
-          ₱${(d.total || 0).toFixed(0)}
+        <div style="font-size:13px;font-weight:700;color:var(--text-primary);width:70px;text-align:right;">
+          \u20B1${(d.total || 0).toFixed(0)}
         </div>
       </div>`;
   }).join('');
@@ -131,45 +138,35 @@ function buildTransactionTable(transactions) {
     tbody.innerHTML = `
       <tr>
         <td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px;">
-          No transactions yet
+          No transactions in this range
         </td>
       </tr>`;
     return;
   }
 
-  tbody.innerHTML = transactions.map(t => {
-    // t.kiosk_name comes from /api/admin/sales' LEFT JOIN against
-    // satellite_kiosks (added for the Hotspot Dashboard's Revenue by
-    // Source) - shows the specific kiosk a coin credit came from instead
-    // of a generic "Coin" label once more than one source exists, same
-    // fix already applied there, kept consistent here.
-    let typeBadge = '';
-    if (t.type === 'coin') {
-      typeBadge = t.kiosk_name
-        ? `<span class="badge badge-blue">📡 ${escapeSalesHtml(t.kiosk_name)}</span>`
-        : '<span class="badge badge-blue">🪙 Main Kiosk</span>';
-    } else if (t.type === 'voucher') {
-      typeBadge = '<span class="badge badge-orange">🎟️ Voucher</span>';
-    } else if (t.type === 'promo') {
-      typeBadge = '<span class="badge badge-orange">🎫 Promo</span>';
-    } else if (t.type === 'free') {
-      typeBadge = '<span class="badge badge-purple">🎁 Free</span>';
-    }
+  tbody.innerHTML = transactions.map((t) => {
+    // t.kiosk_name comes from a LEFT JOIN against satellite_kiosks: shows
+    // the specific kiosk a coin credit came from instead of a generic
+    // label once more than one source exists.
+    let typeLabel;
+    if (t.type === 'coin') typeLabel = t.kiosk_name ? escapeSalesHtml(t.kiosk_name) : 'Main Kiosk';
+    else if (t.type === 'voucher') typeLabel = 'Voucher';
+    else if (t.type === 'promo') typeLabel = 'Promo';
+    else if (t.type === 'free') typeLabel = 'Free';
+    else typeLabel = escapeSalesHtml(t.type || '');
 
-    const coinValue = t.type === 'free'
+    const amount = t.type === 'free'
       ? '<span style="color:var(--text-muted);">--</span>'
-      : `<span class="badge badge-green">₱${t.coin_value}</span>`;
+      : `\u20B1${t.coin_value}`;
 
     return `
       <tr>
         <td data-label="Session ID">
-          <span style="font-family:monospace;font-size:13px;color:var(--accent-red);font-weight:700;">
-            ${t.voucher_code}
-          </span>
+          <span style="font-family:monospace;font-size:13px;font-weight:700;">${escapeSalesHtml(t.voucher_code)}</span>
         </td>
-        <td data-label="Amount">${coinValue}</td>
+        <td data-label="Amount">${amount}</td>
         <td data-label="Time Added" style="font-weight:600;">${formatSalesMins(t.minutes_added)}</td>
-        <td data-label="Type">${typeBadge}</td>
+        <td data-label="Type">${typeLabel}</td>
         <td data-label="Date & Time" style="font-size:13px;color:var(--text-muted);">
           ${new Date(t.created_at).toLocaleString()}
         </td>
@@ -184,35 +181,34 @@ function formatSalesMins(mins) {
   return `${Math.round(mins)} mins`;
 }
 
-// Improvement: the only way to get transaction data out of this system was
-// the full JSON backup (settings + rates + promos + everything else mixed
-// together), no quick way for an admin to open sales in Excel/Sheets for
-// bookkeeping. Exports the complete history (not just the 20-row preview).
 function csvEscape(value) {
   const str = String(value ?? '');
   return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
 }
 
+// Exports every transaction in the selected range (not just the rows shown
+// in the table, which is capped).
 async function exportTransactionsCsv() {
+  const range = anState.resolved;
+  if (!range) { showToast('Load the report first.', 'error'); return; }
   try {
-    const data = await apiCall('GET', '/api/admin/transactions/export');
-    if (!data.success) { showToast('Export failed.', 'error'); return; }
+    const data = await apiCall('GET', `/api/admin/transactions/export?from=${range.from}&to=${range.to}`);
+    if (!data.success) { showToast(data.message || 'Export failed.', 'error'); return; }
 
-    const rows = [['Voucher Code', 'Amount (₱)', 'Minutes Added', 'Type', 'Date & Time']];
-    data.transactions.forEach(t => {
+    const rows = [['Voucher Code', 'Amount (PHP)', 'Minutes Added', 'Type', 'Date & Time']];
+    data.transactions.forEach((t) => {
       rows.push([t.voucher_code, t.coin_value, t.minutes_added, t.type, t.created_at]);
     });
 
-    const csv = rows.map(row => row.map(csvEscape).join(',')).join('\r\n');
+    const csv = rows.map((row) => row.map(csvEscape).join(',')).join('\r\n');
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
-    const date = new Date().toISOString().split('T')[0];
     const a = document.createElement('a');
     a.href = url;
-    a.download = `rj-pisowifi-transactions-${date}.csv`;
+    a.download = `starkfi-transactions-${range.from}-to-${range.to}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-    showToast(`Exported ${data.transactions.length} transactions!`, 'success');
+    showToast(`Exported ${data.transactions.length} transactions.`, 'success');
   } catch (e) {
     showToast('Export error.', 'error');
   }

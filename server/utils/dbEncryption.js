@@ -1,8 +1,8 @@
 // ===== DATABASE ENCRYPTION AT REST (opt-in) =====
 // Real gap found in the Phase 8 privacy audit: anyone who copies the raw
 // .db file (or steals the SD card) can read session/transaction/voucher
-// history in plain text - only two individual fields (mikrotik_pass,
-// admin_2fa_secret, via secretCrypto.js) were ever encrypted, not the
+// history in plain text - only a few individual fields (router
+// credentials such as mikrotik_pass, via secretCrypto.js) were ever encrypted, not the
 // database itself.
 //
 // Deliberately OFF by default and never auto-applied to an existing

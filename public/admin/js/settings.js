@@ -88,7 +88,8 @@ async function loadSettings() {
     if (!data.success) return;
     const s = data.settings;
     loadScheduledBackups();
-    load2faStatus();
+    loadTrustedDevices();
+    loadRecoveryStatus();
 
     // Server IP Configuration
     currentNetworkMode = s.network_mode || 'standalone';
@@ -248,75 +249,117 @@ async function restoreSystem() {
 
 // Network Configuration (DHCP/Static IP) moved to network.js
 
-// ===== 2FA (TOTP) =====
-function show2faState(state) {
-  document.getElementById('twoFaOffState').style.display = state === 'off' ? 'block' : 'none';
-  document.getElementById('twoFaSetupState').style.display = state === 'setup' ? 'block' : 'none';
-  document.getElementById('twoFaOnState').style.display = state === 'on' ? 'block' : 'none';
+// ===== SAVED DEVICES + RECOVERY CODE =====
+function escapeSettingsText(str) {
+  const div = document.createElement('div');
+  div.textContent = str == null ? '' : String(str);
+  return div.innerHTML;
 }
 
-async function load2faStatus() {
+function formatDeviceTime(ms) {
+  return ms ? new Date(ms).toLocaleString() : '-';
+}
+
+async function loadTrustedDevices() {
+  const el = document.getElementById('trustedDevicesList');
+  if (!el) return;
   try {
-    const data = await apiCall('GET', '/api/admin/2fa/status');
-    const label = document.getElementById('twoFaStatusLabel');
-    if (data.success && data.enabled) {
-      label.textContent = 'Enabled';
+    const data = await apiCall('GET', '/api/admin/trusted-devices');
+    if (!data.success) { el.innerHTML = '<div style="font-size:13px;color:var(--text-muted);">Unavailable</div>'; return; }
+    if (!data.devices.length) {
+      el.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:8px 0;">No saved devices</div>';
+      return;
+    }
+    el.innerHTML = `
+      <div class="table-wrapper">
+        <table class="table-stack">
+          <thead><tr><th>Device</th><th>IP</th><th>Last Used</th><th>Expires</th><th></th></tr></thead>
+          <tbody>
+            ${data.devices.map((d) => `
+              <tr>
+                <td data-label="Device">${escapeSettingsText(d.label)}</td>
+                <td data-label="IP" style="font-family:monospace;font-size:12px;">${escapeSettingsText(d.ip_address)}</td>
+                <td data-label="Last Used" style="font-size:12px;color:var(--text-muted);">${formatDeviceTime(d.last_used_at)}</td>
+                <td data-label="Expires" style="font-size:12px;color:var(--text-muted);">${formatDeviceTime(d.expires_at)}</td>
+                <td><button class="btn btn-sm btn-danger" onclick="revokeTrustedDevice(${Number(d.id)})">Revoke</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
+  } catch (e) {
+    el.innerHTML = '<div style="font-size:13px;color:var(--text-muted);">Unavailable</div>';
+  }
+}
+
+async function revokeTrustedDevice(id) {
+  if (!confirm('Revoke this device? It will need the password to log in again.')) return;
+  try {
+    const data = await apiCall('DELETE', `/api/admin/trusted-devices/${id}`);
+    if (!data.success) { showToast(data.message || 'Could not revoke device.', 'error'); return; }
+    showToast('Device revoked.');
+    loadTrustedDevices();
+  } catch (e) {
+    showToast('Could not revoke device.', 'error');
+  }
+}
+
+async function revokeAllTrustedDevices() {
+  if (!confirm('Revoke every saved device? Each will need the password to log in again.')) return;
+  try {
+    const data = await apiCall('DELETE', '/api/admin/trusted-devices');
+    if (!data.success) { showToast('Could not revoke devices.', 'error'); return; }
+    showToast('All saved devices revoked.');
+    loadTrustedDevices();
+  } catch (e) {
+    showToast('Could not revoke devices.', 'error');
+  }
+}
+
+let recoveryCodeExists = false;
+
+async function loadRecoveryStatus() {
+  const label = document.getElementById('recoveryStatusLabel');
+  const btn = document.getElementById('recoveryBtnLabel');
+  if (!label) return;
+  try {
+    const data = await apiCall('GET', '/api/admin/recovery-code/status');
+    recoveryCodeExists = !!(data.success && data.exists);
+    if (recoveryCodeExists) {
+      label.textContent = data.createdAt ? `Created ${new Date(data.createdAt).toLocaleDateString()}` : 'Set up';
       label.style.color = 'var(--accent-green)';
-      show2faState('on');
+      btn.textContent = 'Generate New Recovery Code';
     } else {
-      label.textContent = 'Disabled';
-      label.style.color = 'var(--text-muted)';
-      show2faState('off');
+      label.textContent = 'Not set up';
+      label.style.color = 'var(--accent-orange)';
+      btn.textContent = 'Generate Recovery Code';
     }
   } catch (e) {
-    // Non-fatal - leave the off-state showing, matches other settings
-    // cards' quiet-failure pattern.
+    label.textContent = 'Unavailable';
   }
 }
 
-async function start2faSetup() {
-  try {
-    const data = await apiCall('POST', '/api/admin/2fa/setup');
-    if (!data.success) { showToast('Could not start 2FA setup.', 'error'); return; }
-    document.getElementById('twoFaSecretDisplay').value = data.secret;
-    document.getElementById('twoFaConfirmToken').value = '';
-    show2faState('setup');
-  } catch (e) {
-    showToast('Could not start 2FA setup.', 'error');
-  }
-}
-
-function cancel2faSetup() {
-  show2faState('off');
-}
-
-async function confirm2faSetup() {
-  const token = document.getElementById('twoFaConfirmToken').value.trim();
-  if (!/^\d{6}$/.test(token)) {
-    showToast('Enter the 6-digit code from your authenticator app.', 'error');
-    return;
-  }
-  try {
-    const data = await apiCall('POST', '/api/admin/2fa/confirm', { token });
-    if (!data.success) { showToast(data.message || 'That code doesn\'t match.', 'error'); return; }
-    showToast('2FA is now enabled!');
-    load2faStatus();
-  } catch (e) {
-    showToast('Could not confirm 2FA setup.', 'error');
-  }
-}
-
-async function disable2fa() {
-  const password = document.getElementById('twoFaDisablePassword').value;
+async function generateRecoveryCode() {
+  const password = document.getElementById('recoveryPassword').value;
   if (!password) { showToast('Enter your current password first.', 'error'); return; }
-  if (!confirm('Disable 2FA on this account? Anyone with just the password will be able to log in.')) return;
+  if (recoveryCodeExists && !confirm('This replaces your current recovery code. The old one will stop working.')) return;
   try {
-    const data = await apiCall('POST', '/api/admin/2fa/disable', { password });
-    if (!data.success) { showToast(data.message || 'Incorrect password.', 'error'); return; }
-    showToast('2FA disabled.');
-    document.getElementById('twoFaDisablePassword').value = '';
-    load2faStatus();
+    const data = await apiCall('POST', '/api/admin/recovery-code', { password });
+    if (!data.success) { showToast(data.message || 'Could not generate a recovery code.', 'error'); return; }
+    document.getElementById('recoveryPassword').value = '';
+    document.getElementById('recoveryCodeValue').value = data.code;
+    document.getElementById('recoveryCodeReveal').style.display = 'block';
+    loadRecoveryStatus();
   } catch (e) {
-    showToast('Could not disable 2FA.', 'error');
+    showToast('Could not generate a recovery code.', 'error');
+  }
+}
+
+function copyRecoveryCode() {
+  const input = document.getElementById('recoveryCodeValue');
+  input.select();
+  try {
+    navigator.clipboard.writeText(input.value).then(() => showToast('Recovery code copied.'), () => document.execCommand('copy'));
+  } catch (e) {
+    document.execCommand('copy');
   }
 }

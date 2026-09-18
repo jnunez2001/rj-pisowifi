@@ -122,6 +122,24 @@ async function fetchNotifAlerts() {
   }
 }
 
+// Trash button: manual delete-all. Stored alerts are never removed any
+// other way. (Live health checks such as WAN health or low disk space are
+// recomputed from current state, so they come back while still true.)
+async function deleteAllAlerts(evt) {
+  if (evt) evt.stopPropagation();
+  if (!notifAlertsCache.length) return;
+  if (!confirm('Delete all alerts? This cannot be undone.')) return;
+  try {
+    const data = await apiCall('DELETE', '/api/admin/alerts');
+    if (!data.success) { showToast(data.message || 'Could not delete alerts.', 'error'); return; }
+    await fetchNotifAlerts();
+    if (notifDropdownOpen) renderNotifDropdown();
+    showToast('Alerts deleted.', 'success');
+  } catch (e) {
+    showToast('Could not delete alerts.', 'error');
+  }
+}
+
 function toggleNotifDropdown(evt) {
   if (evt) evt.stopPropagation();
   const dropdown = document.getElementById('notifDropdown');
