@@ -678,6 +678,28 @@ async function pauseSession(voucherCode, reason = 'manual') {
   ).get(voucherCode);
 }
 
+// pauseSession() freezes minutes_remaining with Math.floor(), so it is a
+// whole number that can sit up to (just under) one minute BELOW the exact
+// figure implied by expires_at - paused_at (e.g. 170 vs 170.8). That gap is
+// normal rounding, not two records disagreeing. The tolerance used to be
+// 0.5 minutes, smaller than the rounding itself, so any pause landing more
+// than half a minute past a whole minute raised a false
+// "resumed with a time mismatch" alert (roughly half of all pauses). A real
+// disagreement (something changed one record without the other) is a
+// whole-minute-or-more difference, so anything beyond one minute plus a
+// sliver of clock jitter still counts.
+const RESUME_MISMATCH_TOLERANCE_MINUTES = 1.05;
+
+// Returns whether the two records genuinely disagree and the minutes to
+// resume with. On a real disagreement the customer gets the larger value.
+function evaluateResumeMismatch(minutesRemaining, impliedRemainingMinutes) {
+  const mismatch = Math.abs(impliedRemainingMinutes - minutesRemaining) > RESUME_MISMATCH_TOLERANCE_MINUTES;
+  return {
+    mismatch,
+    effectiveMinutesRemaining: mismatch ? Math.max(impliedRemainingMinutes, minutesRemaining) : minutesRemaining,
+  };
+}
+
 async function resumeSession(voucherCode) {
   const session = getSessionByVoucher(voucherCode);
   if (!session || session.is_paused === 0) return null;
@@ -704,10 +726,8 @@ async function resumeSession(voucherCode) {
   const impliedRemainingMinutes = session.paused_at
     ? Math.max(0, sessionMinutesFromRealMs(new Date(session.expires_at).getTime() - new Date(session.paused_at).getTime()))
     : session.minutes_remaining;
-  const RESUME_MISMATCH_TOLERANCE_MINUTES = 0.5; // sub-minute rounding slack, not a real disagreement
-  let effectiveMinutesRemaining = session.minutes_remaining;
-  if (Math.abs(impliedRemainingMinutes - session.minutes_remaining) > RESUME_MISMATCH_TOLERANCE_MINUTES) {
-    effectiveMinutesRemaining = Math.max(impliedRemainingMinutes, session.minutes_remaining);
+  const { mismatch, effectiveMinutesRemaining } = evaluateResumeMismatch(session.minutes_remaining, impliedRemainingMinutes);
+  if (mismatch) {
     console.error(`⚠️ Resume mismatch caught: ${voucherCode} had minutes_remaining=${session.minutes_remaining} but expires_at/paused_at implies ${impliedRemainingMinutes.toFixed(2)}. Using the larger value.`);
     require('./alertEventService').logAlertEvent(
       'warning',
@@ -1014,5 +1034,7 @@ module.exports = {
   reapplyBandwidth,
   reapplyDefaultBandwidthToActiveSessions,
   grantedMsForMinutes,
-  sessionMinutesFromRealMs
+  sessionMinutesFromRealMs,
+  evaluateResumeMismatch,
+  RESUME_MISMATCH_TOLERANCE_MINUTES
 };
